@@ -8,7 +8,7 @@ const WidgetRegistry = (function() {
   // === 16 组件元数据 ===
   var widgets = [
     // 工具类
-    { id:'W01', type:'timeline',      title:'时段时间线',   category:'tool',     tier:'slow',   defaultSize:{w:12,h:0.5}, dataPaths:[], priority:'P0' },
+    { id:'W01', type:'timeline',      title:'时段时间线',   category:'tool',     tier:'slow',   defaultSize:{w:12,h:2},  dataPaths:[], priority:'P0' },
     // 决策类
     { id:'W02', type:'style-detect',  title:'风格检测卡',   category:'decision', tier:'daily',  defaultSize:{w:4,h:4},   dataPaths:['style.总分','style.风格','style.连板占比','style.趋势占比','style.dim1_量能','style.dim2_连板生态','style.dim3_趋势'], priority:'P0' },
     { id:'W03', type:'position-calc', title:'三层仓位计',   category:'decision', tier:'realtime',defaultSize:{w:4,h:4},  dataPaths:['style.总仓位上限','style.连板占比','style.趋势占比','style.实际执行.连板实际','style.实际执行.趋势实际','style.实际执行.首笔上限','risk.熔断触发','risk.连亏天数'], priority:'P0' },

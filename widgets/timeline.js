@@ -1,4 +1,4 @@
-// widgets/timeline.js — W01 时段时间线
+// widgets/timeline.js — W01 时段时间线 (v2.1.1 C方案: 当前时段+倒计时+全天进度条)
 'use strict';
 
 class TimelineWidget extends YiMuWidget {
@@ -7,25 +7,131 @@ class TimelineWidget extends YiMuWidget {
     if (!body) return;
 
     var segments = [
-      {label:'竞价',start:545,end:570},{label:'W1追涨',start:570,end:600},
-      {label:'观察期',start:600,end:780},{label:'午盘复核',start:780,end:840},
-      {label:'W2低吸',start:840,end:885},{label:'闭窗',start:885,end:900}
+      {label:'竞价',    start:{h:9,m:5},  end:{h:9,m:30},  color:'#ffa726'},
+      {label:'W1追涨', start:{h:9,m:30}, end:{h:10,m:0},  color:'#ef5350'},
+      {label:'观察期',  start:{h:10,m:0}, end:{h:13,m:0},  color:'#5c9ce6'},
+      {label:'午盘复核',start:{h:13,m:0}, end:{h:14,m:0},  color:'#ab47bc'},
+      {label:'W2低吸', start:{h:14,m:0}, end:{h:14,m:45}, color:'#66bb6a'},
+      {label:'闭窗',    start:{h:14,m:45},end:{h:15,m:0},  color:'#9aa0a6'},
     ];
-    var nowHM = new Date().getHours()*60 + new Date().getMinutes();
 
-    var html = '<div class="timeline-bar">';
-    segments.forEach(function(s) {
-      var cls = nowHM < s.start ? 'future' : nowHM > s.end ? 'done' : 'active';
-      var pct = s.end <= s.start ? 0 : Math.min(100, Math.max(0, Math.round((nowHM - s.start)/(s.end - s.start)*100)));
-      html += '<div class="timeline-seg ' + cls + '" style="flex:' + (s.end-s.start) + '">' +
-        '<span>' + s.label + '</span>' +
-        (cls==='active'?'<div class="timeline-seg-fill" style="width:'+pct+'%"></div>':'') +
+    var now = new Date();
+    var nowHM = now.getHours() * 60 + now.getMinutes();
+    var nowH = now.getHours(), nowM = now.getMinutes(), nowS = now.getSeconds();
+
+    // 找到当前时段
+    var current = null, next = null;
+    var totalStart = 9*60+5;  // 9:05
+    var totalEnd = 15*60;     // 15:00
+    var totalDuration = totalEnd - totalStart;
+
+    for (var i = 0; i < segments.length; i++) {
+      var s = segments[i];
+      var sStart = s.start.h * 60 + s.start.m;
+      var sEnd = s.end.h * 60 + s.end.m;
+      if (nowHM >= sStart && nowHM < sEnd) {
+        current = { idx: i, start: sStart, end: sEnd, label: s.label, color: s.color };
+      }
+      if (!current && !next && nowHM < sStart) {
+        next = { idx: i, start: sStart, end: sEnd, label: s.label, color: s.color };
+      }
+    }
+
+    // 全天进度
+    var dayProgress = 0;
+    if (nowHM < totalStart) dayProgress = 0;
+    else if (nowHM >= totalEnd) dayProgress = 100;
+    else dayProgress = Math.round((nowHM - totalStart) / totalDuration * 100);
+
+    // 判断状态
+    var isWeekend = now.getDay() === 0 || now.getDay() === 6;
+    var isClosed = nowHM >= totalEnd || nowHM < totalStart;
+
+    var html = '';
+
+    if (isWeekend) {
+      // 周末
+      html += '<div style="display:flex;align-items:center;justify-content:space-between;height:100%">' +
+        '<div><div style="font-size:var(--fs-subtitle);font-weight:700;color:var(--text-disabled)">休市</div>' +
+        '<div style="font-size:var(--fs-label);color:var(--text-disabled)">周末</div></div>' +
+        '<div style="font-size:var(--fs-label);color:var(--text-disabled)">周一 9:05 开盘</div>' +
         '</div>';
-    });
-    html += '</div>';
+    } else if (isClosed && nowHM < totalStart) {
+      // 盘前
+      var minToOpen = totalStart - nowHM;
+      html += '<div style="display:flex;align-items:center;justify-content:space-between;height:100%">' +
+        '<div><div style="font-size:var(--fs-subtitle);font-weight:700;color:var(--warn)">盘前准备</div>' +
+        '<div style="font-size:var(--fs-label);color:var(--text-secondary)">距竞价 ' + Math.floor(minToOpen/60) + '时' + (minToOpen%60) + '分</div></div>' +
+        _progressBar(segments, 0, -1) +
+        '</div>';
+    } else if (current) {
+      // 当前在某个时段内
+      var remaining = current.end - nowHM;
+      var rmH = Math.floor(remaining / 60);
+      var rmM = remaining % 60;
+      var segProgress = Math.round((nowHM - current.start) / (current.end - current.start) * 100);
+      var rmStr = rmH > 0 ? rmH + '时' + rmM + '分' : rmM + '分钟';
+
+      html += '<div style="display:flex;align-items:center;justify-content:space-between;height:100%;gap:var(--sp-md)">' +
+        // 左侧：当前时段 + 倒计时
+        '<div style="min-width:140px">' +
+        '<div style="font-size:var(--fs-subtitle);font-weight:700;color:' + current.color + '">' + current.label + '</div>' +
+        '<div style="font-size:var(--fs-body)"><span style="color:var(--text-secondary)">剩余 </span><span style="font-weight:600;color:var(--text-primary)">' + rmStr + '</span></div>' +
+        '<div style="font-size:var(--fs-label);color:var(--text-disabled);margin-top:1px">' +
+          _fmtTime(current.start) + ' - ' + _fmtTime(current.end) +
+        '</div></div>' +
+        // 右侧：全天进度条
+        _progressBar(segments, current.idx, dayProgress) +
+        '</div>';
+    } else {
+      // 已闭市
+      html += '<div style="display:flex;align-items:center;justify-content:space-between;height:100%">' +
+        '<div><div style="font-size:var(--fs-subtitle);font-weight:700;color:var(--text-disabled)">已闭市</div>' +
+        '<div style="font-size:var(--fs-label);color:var(--text-disabled)">明日 9:05 开盘</div></div>' +
+        _progressBar(segments, -1, 100) +
+        '</div>';
+    }
+
     body.innerHTML = html;
     this.updateTimestamp();
   }
+}
+
+function _fmtTime(minutes) {
+  var h = Math.floor(minutes / 60);
+  var m = minutes % 60;
+  return h + ':' + (m < 10 ? '0' : '') + m;
+}
+
+function _progressBar(segments, activeIdx, dayPct) {
+  var html = '<div style="flex:1;min-width:200px">' +
+    '<div style="display:flex;height:8px;border-radius:4px;overflow:hidden;gap:1px;margin-bottom:4px">';
+
+  segments.forEach(function(s, i) {
+    var sDur = (s.end.h*60+s.end.m) - (s.start.h*60+s.start.m);
+    var cls = '';
+    if (i < activeIdx) cls = 'opacity:0.35';
+    else if (i === activeIdx) cls = 'opacity:1';
+    else cls = 'opacity:0.2';
+    html += '<div style="flex:' + sDur + ';background:' + s.color + ';' + cls + ';min-width:2px;border-radius:1px" title="' + s.label + ' ' + _fmtTime(s.start.h*60+s.start.m) + '-' + _fmtTime(s.end.h*60+s.end.m) + '"></div>';
+  });
+
+  html += '</div>';
+
+  // 标签
+  html += '<div style="display:flex;font-size:var(--fs-micro);color:var(--text-disabled)">';
+  segments.forEach(function(s, i) {
+    var sDur = (s.end.h*60+s.end.m) - (s.start.h*60+s.start.m);
+    var cls = i === activeIdx ? 'color:var(--text-primary);font-weight:600' : '';
+    html += '<div style="flex:' + sDur + ';text-align:center;min-width:0;overflow:hidden;white-space:nowrap;' + cls + '">' + s.label + '</div>';
+  });
+  html += '</div>';
+
+  // 进度百分比
+  html += '<div style="font-size:var(--fs-micro);color:var(--text-disabled);text-align:right;margin-top:2px">全天进度 ' + dayPct + '%</div>';
+
+  html += '</div>';
+  return html;
 }
 
 WidgetRegistry.register('W01', TimelineWidget);
