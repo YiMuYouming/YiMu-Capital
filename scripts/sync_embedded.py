@@ -10,9 +10,9 @@ import json, os, sys
 from datetime import datetime
 from pathlib import Path
 
-VAULT_DIR = Path(__file__).resolve().parent.parent
-SOURCE = VAULT_DIR / "live-dashboard/data/dashboard_data.json"
-TARGET = VAULT_DIR / "live-dashboard/data/embedded-data.js"
+ROOT_DIR = Path(__file__).resolve().parent.parent  # live-dashboard/
+SOURCE = ROOT_DIR / "data/dashboard_data.json"
+TARGET = ROOT_DIR / "data/embedded-data.js"
 
 def main():
     if not SOURCE.exists():

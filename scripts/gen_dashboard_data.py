@@ -27,6 +27,42 @@ def find_latest_review():
         md_files = sorted(REVIEW_DIR.glob("**/*.md"), reverse=True)
     return str(md_files[0]) if md_files else None
 
+def clean_value(val, field_name=""):
+    """清洗复盘笔记 frontmatter 中的注释和格式"""
+    if val is None:
+        return None
+    s = str(val).strip()
+
+    # 去掉括号内注释： "一般（涨停收益2.92%一般）" → "一般"
+    # 但保留像 "4板（福达合金）" 这种标签型字段
+    label_fields = {"最高板", "次高板", "连板梯队"}
+    if field_name not in label_fields:
+        s = re.sub(r'（[^）]*）', '', s)  # 中文括号
+        s = re.sub(r'\([^)]*\)', '', s)   # 英文括号
+
+    # 去掉百分号并转数字
+    if s.endswith('%'):
+        try:
+            return float(s.replace('%', ''))
+        except ValueError:
+            return s
+
+    # 纯数字字符串转数字
+    try:
+        if '.' in s:
+            return float(s)
+        return int(s)
+    except ValueError:
+        pass
+
+    # "X / Y" 格式取第一个数字: "126 / 98" → 126
+    m = re.match(r'^(\d+)\s*/\s*\d+', s)
+    if m:
+        return int(m.group(1))
+
+    return s.strip()
+
+
 def parse_frontmatter(filepath):
     """解析 YAML frontmatter（简单实现，不依赖 PyYAML）"""
     data = {}
@@ -220,7 +256,6 @@ def build_dashboard_data(review_path):
     if not style:
         style = {}
     style["实际执行"] = compute_style_execution(fm, style)
-    # 如果熔断或连亏覆盖了总仓位，同步更新
     if style["实际执行"]["总仓位上限"] != style.get("总仓位上限", 30):
         style["总仓位上限"] = style["实际执行"]["总仓位上限"]
 
@@ -233,29 +268,29 @@ def build_dashboard_data(review_path):
             "note": f"自动生成自 {os.path.basename(review_path)}"
         },
         "market": {
-            "上证指数": fm.get("上证指数", None),
-            "上证涨幅": fm.get("上证涨幅", None),
-            "市场量能": fm.get("市场量能", None),
-            "涨跌比": fm.get("涨跌比", None),
-            "涨停家数": fm.get("涨停家数", None),
-            "跌停家数": fm.get("跌停家数", None),
-            "炸板率": fm.get("炸板率", None),
-            "封板率": fm.get("封板率", None),
+            "上证指数": clean_value(fm.get("上证指数")),
+            "上证涨幅": clean_value(fm.get("上证涨幅")),
+            "市场量能": clean_value(fm.get("市场量能")),
+            "涨跌比": clean_value(fm.get("涨跌比")),
+            "涨停家数": clean_value(fm.get("涨停家数"), "涨停家数"),
+            "跌停家数": clean_value(fm.get("跌停家数")),
+            "炸板率": clean_value(fm.get("炸板率")),
+            "封板率": clean_value(fm.get("封板率")),
         },
         "sentiment": {
-            "情绪值": fm.get("情绪值", None),
-            "情绪区间": fm.get("情绪区间", None),
-            "昨日情绪": fm.get("昨日情绪", None),
-            "情绪变化": fm.get("情绪变化", None),
-            "赚钱效应": fm.get("赚钱效应", None),
-            "昨日涨停收益": fm.get("昨日涨停收益", None),
-            "昨日炸板收益": fm.get("昨日炸板收益", None),
-            "连板收益": fm.get("连板收益", None),
-            "连板风险值": fm.get("连板风险值", None),
-            "晋级率": fm.get("晋级率", None),
-            "最高板": fm.get("最高板", None),
-            "次高板": fm.get("次高板", None),
-            "连板梯队": fm.get("连板梯队", None),
+            "情绪值": clean_value(fm.get("情绪值")),
+            "情绪区间": clean_value(fm.get("情绪区间")),
+            "昨日情绪": clean_value(fm.get("昨日情绪")),
+            "情绪变化": clean_value(fm.get("情绪变化")),
+            "赚钱效应": clean_value(fm.get("赚钱效应")),
+            "昨日涨停收益": clean_value(fm.get("昨日涨停收益")),
+            "昨日炸板收益": clean_value(fm.get("昨日炸板收益")),
+            "连板收益": clean_value(fm.get("连板收益")),
+            "连板风险值": clean_value(fm.get("连板风险值")),
+            "晋级率": clean_value(fm.get("晋级率")),
+            "最高板": clean_value(fm.get("最高板"), "最高板"),
+            "次高板": clean_value(fm.get("次高板"), "次高板"),
+            "连板梯队": clean_value(fm.get("连板梯队"), "连板梯队"),
         },
         "style": style if style else {
             "总分": None, "风格": None, "连板占比": None, "趋势占比": None,
@@ -270,14 +305,14 @@ def build_dashboard_data(review_path):
             "周五": fm.get("weekday") == "周五",
         },
         "risk": {
-            "当日盈亏": fm.get("当日盈亏", 0),
-            "当日盈亏金额": fm.get("当日盈亏金额", 0),
-            "周累计回撤": fm.get("周累计回撤", 0),
-            "月累计回撤": fm.get("月累计回撤", 0),
-            "连亏天数": fm.get("连亏天数", 0),
-            "单日熔断线": fm.get("单日熔断线", -3),
-            "周回撤预警": fm.get("周回撤预警", 6),
-            "月回撤预警": fm.get("月回撤预警", 10),
+            "当日盈亏": clean_value(fm.get("当日盈亏", 0)),
+            "当日盈亏金额": clean_value(fm.get("当日盈亏金额", 0)),
+            "周累计回撤": clean_value(fm.get("周累计回撤", 0)),
+            "月累计回撤": clean_value(fm.get("月累计回撤", 0)),
+            "连亏天数": clean_value(fm.get("连亏天数", 0)),
+            "单日熔断线": clean_value(fm.get("单日熔断线", -3)),
+            "周回撤预警": clean_value(fm.get("周回撤预警", 6)),
+            "月回撤预警": clean_value(fm.get("月回撤预警", 10)),
             "熔断触发": fm.get("熔断触发", False),
             "周回撤触发": fm.get("周回撤触发", False),
         },
@@ -295,6 +330,19 @@ def build_dashboard_data(review_path):
             "盘中": {}
         }
     }
+
+    # 自动计算情绪区间
+    qx = data["sentiment"].get("情绪值")
+    if qx is not None and not data["sentiment"].get("情绪区间"):
+        try:
+            qx_num = float(qx) if not isinstance(qx, (int, float)) else qx
+            data["sentiment"]["情绪区间"] = (
+                "冰点" if qx_num < 20 else "低迷" if qx_num < 40 else
+                "主升" if qx_num < 60 else "强势" if qx_num < 80 else "高潮"
+            )
+        except (ValueError, TypeError):
+            pass
+
     return data
 
 def main():
