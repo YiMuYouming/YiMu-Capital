@@ -50,17 +50,15 @@ class W2CheckWidget extends YiMuWidget {
     }
 
     // ===== 下半部：实时观察 =====
-    var code1 = manual['W2观察1'] || '';
-    var code2 = manual['W2观察2'] || '';
+    var codes = [manual['W2观察1']||'', manual['W2观察2']||'', manual['W2观察3']||''];
 
     html += '<div style="display:flex;gap:var(--sp-sm);margin-bottom:var(--sp-sm)">' +
-      '<input type="text" id="w2_code1" placeholder="代码1" value="'+code1+'" style="flex:1;min-width:0;background:var(--bg-input);border:1px solid var(--border-light);color:var(--text-primary);padding:2px var(--sp-sm);border-radius:var(--radius-sm);font-size:var(--fs-body);font-family:var(--font-mono)">' +
-      '<input type="text" id="w2_code2" placeholder="代码2" value="'+code2+'" style="flex:1;min-width:0;background:var(--bg-input);border:1px solid var(--border-light);color:var(--text-primary);padding:2px var(--sp-sm);border-radius:var(--radius-sm);font-size:var(--fs-body);font-family:var(--font-mono)">' +
+      codes.map(function(c,i) { return '<input type="text" id="w2_code'+(i+1)+'" placeholder="代码'+(i+1)+'" value="'+c+'" style="flex:1;min-width:0;background:var(--bg-input);border:1px solid var(--border-light);color:var(--text-primary);padding:2px var(--sp-sm);border-radius:var(--radius-sm);font-size:var(--fs-body);font-family:var(--font-mono)">'; }).join('') +
       '<button id="w2_apply" style="background:var(--info);color:#fff;border:none;padding:2px var(--sp-sm);border-radius:var(--radius-sm);cursor:pointer;font-size:var(--fs-body);white-space:nowrap">确认</button>' +
       '</div>';
 
     var hasData = false;
-    [code1, code2].forEach(function(code) {
+    codes.forEach(function(code) {
       if (!code) return;
       var q = liveQ[code] || {};
       var poolItem = trendPool.find(function(p) { return p['代码'] === code; });
@@ -97,13 +95,15 @@ class W2CheckWidget extends YiMuWidget {
     var self = this;
     var btn = body.querySelector('#w2_apply');
     if (btn) btn.addEventListener('click', function() {
-      DataStore.manualData.set('W2观察1', body.querySelector('#w2_code1').value.trim());
-      DataStore.manualData.set('W2观察2', body.querySelector('#w2_code2').value.trim());
+      for (var i=1; i<=3; i++) {
+        DataStore.manualData.set('W2观察'+i, (body.querySelector('#w2_code'+i)||{}).value||'');
+      }
       self._renderBody();
     });
-    [body.querySelector('#w2_code1'), body.querySelector('#w2_code2')].forEach(function(el) {
+    for (var i=1; i<=3; i++) {
+      var el = body.querySelector('#w2_code'+i);
       if (el) el.addEventListener('keydown', function(e) { if (e.key==='Enter'&&btn) btn.click(); });
-    });
+    }
 
     this.updateTimestamp();
   }
