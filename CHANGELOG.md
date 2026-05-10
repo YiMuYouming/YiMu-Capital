@@ -1,6 +1,29 @@
 # 开发日志
 
-## 2026-05-10
+## 2026-05-10 全天
+
+### 组件调通 12/19
+- W01-W09, W14-W16, W19 全部完成
+- W15 合并 W17：四区统一（汇总+持仓+记录+清仓跟踪）
+- W08/W09 实时条件判定：读 live_quotes 自动 pass/fail/pending
+- W06 重构：上排大盘+情绪，下排方向+高标+锚定
+
+### 数据管线完整
+- gen_dashboard_data.py：支持 --watch 监控复盘笔记
+- poll_iwencai.py：全量SSOT代码提取，支持 --watch
+- bridge.py：HTTP桥接，W15记流水实时写JSON
+
+### 架构
+- 纯组件化：无预设，用户拖拽+导出导入
+- 启动：`python3 scripts/bridge.py 8088` → http://localhost:8088
+- file:// 离线 + HTTP 实时双模式
+
+### 待续
+- W10-W13, W17-W18 调通
+- AI Hook 主观判定
+- 稳米接入 --watch 管线
+
+---
 
 ### v2.1 — 纯组件化架构
 

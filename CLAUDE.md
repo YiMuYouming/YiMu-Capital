@@ -1,6 +1,7 @@
 # 弈沐资本数据看板 v2.1
 
-> 弈沐资本第一个自动化项目。纯组件化交易决策指挥台，双击 HTML 即开。
+> 弈沐资本第一个自动化项目。纯组件化交易决策指挥台。
+> 启动：`python3 scripts/bridge.py 8088` → Chrome `http://localhost:8088`
 
 ## 项目定位
 
@@ -104,19 +105,18 @@ sync_embedded.py →  embedded-data.js     (复盘后同步)
 | W18 锚定股状态 | ⏳ 待调 | |
 | W19 午盘复核 | ✅ 完成 | V反+双冰 |
 
-## 待办
+## 待办（明天继续）
 
 - [ ] W10-W13、W17-W18 调通样式和数据
-- [ ] W17 改为自助录入（+ 添加按钮 → 弹窗填表）
-- [ ] 实时条件判定补全（W08/W09 已做，剩余条件需要 AI）
+- [ ] 实时条件判定补全（W08/W09 已做，剩余条件需要 AI Hook）
 - [ ] 稳米接入：`gen_dashboard_data.py --watch` 盘中持续运行
 - [ ] `poll_iwencai.py` 盘中轮询配置 cron/launchd
-- [ ] 实盘数据验证：用 HTTP 方式打开 + 稳米管线跑通
-- [ ] AI Hook：5 分钟一次调 LLM 做主观判定（企稳确认/连板梯队）
+- [ ] 实盘数据验证：HTTP 方式 + 稳米管线跑通
 
 ## 会话上下文
 
-- 独立 Git 仓库：`live-dashboard/.git`，47 commits
+- 独立 Git 仓库：`live-dashboard/.git`，60+ commits
+- 启动命令：`python3 scripts/bridge.py 8088` → `http://localhost:8088`
 - PRD v2.0：`00_Capture/Planning/弈沐资本数据看板_PRD_v2.0.md`
 - PRD v1.0（含四方针审阅）：`00_Capture/Planning/弈沐资本数据看板_PRD_v1.0.md`
 - 复盘笔记：`复盘笔记/W19_第19周/2026_5_8_Friday_ReviewNote.md`（已加数据附录）
