@@ -40,7 +40,7 @@ class PositionsWidget extends YiMuWidget {
     var pv=0, pc=0; active.forEach(function(p){pv+=p['_mv']||0;pc+=Math.round((parseFloat(p['成本'])||0)*(parseFloat(p['数量'])||0));});
     var tp=pv-pc, tc=tp>0?'up':tp<0?'down':'', pp=pc>0?(tp/pc*100):0, af=ta-pv, pr=ta>0?Math.round(pv/ta*100):0;
 
-    if (ta>0) {
+    if (true) { // 始终显示，总资产未填时显示0
       html += '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:var(--sp-xs) var(--sp-sm);margin-bottom:var(--sp-md);padding:var(--sp-sm);background:var(--bg-base);border-radius:var(--radius-md);font-size:var(--fs-body)">'+
         '<div style="text-align:center"><div class="kpi-label">总资产</div><div style="font-family:var(--font-mono);font-size:var(--fs-subtitle);font-weight:700">'+ta.toLocaleString()+'</div></div>'+
         '<div style="text-align:center"><div class="kpi-label">持仓市值</div><div style="font-family:var(--font-mono);font-size:var(--fs-subtitle);font-weight:700">'+pv.toLocaleString()+'</div></div>'+
@@ -171,6 +171,7 @@ class PositionsWidget extends YiMuWidget {
     var sellSelect = o.querySelector('#f_sell_select'), qtyRow = o.querySelector('#f_qty_row'), winRow = o.querySelector('#f_win_row');
     var codeInput = o.querySelector('#f_code'), stockInput = o.querySelector('#f_stock');
     var priceInput = o.querySelector('#f_price'), qtyInput = o.querySelector('#f_qty');
+    var qtyLabel = qtyRow.querySelector('label');
 
     var isBuy = true;
     function toggle(buy) {
@@ -178,7 +179,8 @@ class PositionsWidget extends YiMuWidget {
       buyBtn.style.opacity = buy ? '1' : '0.4';
       sellBtn.style.opacity = buy ? '0.4' : '1';
       sellSelect.style.display = buy ? 'none' : '';
-      qtyRow.style.display = buy ? '' : 'none';
+      qtyRow.style.display = ''; // 买卖都显示数量
+      qtyLabel.textContent = buy ? '数量(股)' : '卖出数量';
       winRow.style.display = buy ? '' : 'none';
     }
     buyBtn.onclick = function(){toggle(true)};
@@ -203,7 +205,7 @@ class PositionsWidget extends YiMuWidget {
 
       // 记录流水
       var ops = []; try{ops=JSON.parse(DataStore.manualData.getAll()['_今日操作']||'[]')}catch(e){}
-      ops.push({'时间':g('f_time'),'动作':act,'标的':stock,'代码':code,'价格':price,'数量':isBuy?qty:'—','窗口':isBuy?g('f_win'):'—','原因':reason});
+      ops.push({'时间':g('f_time'),'动作':act,'标的':stock,'代码':code,'价格':price,'数量':qty,'窗口':isBuy?g('f_win'):'—','原因':reason});
       DataStore.manualData.set('_今日操作',JSON.stringify(ops));
 
       // 更新持仓
@@ -212,7 +214,17 @@ class PositionsWidget extends YiMuWidget {
 
       if (!isBuy) {
         var f = pos.find(function(p){return p['标的']===stock;});
-        if (f) { f['状态']='已清仓'; f['卖出价']=price; f['清仓原因']=reason; f['清仓日期']=new Date().toISOString().slice(0,10); }
+        if (f) {
+          var oldQty = parseInt(f['数量'])||0;
+          var sellQty = qty;
+          if (sellQty >= oldQty) {
+            // 全卖 → 移入清仓
+            f['状态']='已清仓'; f['卖出价']=price; f['清仓原因']=reason; f['清仓日期']=new Date().toISOString().slice(0,10);
+          } else {
+            // 部分卖出 → 减少数量
+            f['数量'] = oldQty - sellQty;
+          }
+        }
       } else {
         var e = pos.find(function(p){return p['标的']===stock;});
         if (e) { var oq=parseInt(e['数量'])||0, oc=parseFloat(e['成本'])||0, nq=oq+qty; e['数量']=nq; e['成本']=oq>0?Math.round(((oc*oq)+(price*qty))/nq*100)/100:price; e['现价']=price; e['代码']=code||e['代码']; }
