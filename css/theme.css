@@ -194,6 +194,8 @@ html,body{
   overflow:hidden;
   box-shadow:var(--shadow-card);
   transition:box-shadow .2s;
+  height:100%;
+  display:flex;flex-direction:column;
 }
 .grid-stack-item-content:hover{
   box-shadow:var(--shadow-elevated);

@@ -177,9 +177,13 @@ function _addWidgetToGrid(widgetId) {
     defaultSize: meta.defaultSize,
   });
 
-  // GridStack v12: HTML 字符串 + options 参数
-  var htmlStr = '<div class="grid-stack-item" gs-id="' + widgetId + '"><div class="grid-stack-item-content" id="content_' + widgetId + '"></div></div>';
-  grid.addWidget(htmlStr, { w: meta.defaultSize.w, h: meta.defaultSize.h, id: widgetId });
+  var el = document.createElement('div');
+  el.className = 'grid-stack-item';
+  el.setAttribute('gs-id', widgetId);
+  el.setAttribute('gs-w', meta.defaultSize.w);
+  el.setAttribute('gs-h', meta.defaultSize.h);
+  el.innerHTML = '<div class="grid-stack-item-content" id="content_' + widgetId + '"></div>';
+  grid.addWidget(el);
   widgetInstances[widgetId] = instance;
   requestAnimationFrame(function() {
     var contentEl = document.getElementById('content_' + widgetId);
@@ -189,10 +193,15 @@ function _addWidgetToGrid(widgetId) {
 
 function _addPlaceholderWidget(widgetId, meta) {
   var headerCls = meta.category==='decision'?'color-decision':meta.category==='data'?'color-data':meta.category==='risk'?'color-risk':'color-tool';
-  var phHtml = '<div class="grid-stack-item" gs-id="' + widgetId + '"><div class="grid-stack-item-content" id="content_' + widgetId + '">' +
+  var el = document.createElement('div');
+  el.className = 'grid-stack-item';
+  el.setAttribute('gs-id', widgetId);
+  el.setAttribute('gs-w', meta.defaultSize.w);
+  el.setAttribute('gs-h', meta.defaultSize.h);
+  el.innerHTML = '<div class="grid-stack-item-content" id="content_' + widgetId + '">' +
     '<div class="widget-header ' + headerCls + '"><span class="widget-title">' + meta.title + '</span></div>' +
-    '<div class="widget-body" style="display:flex;align-items:center;justify-content:center;color:var(--text-secondary)">组件加载中...</div></div></div>';
-  grid.addWidget(phHtml, { w: meta.defaultSize.w, h: meta.defaultSize.h, id: widgetId });
+    '<div class="widget-body" style="display:flex;align-items:center;justify-content:center;color:var(--text-secondary)">组件加载中...</div></div>';
+  grid.addWidget(el);
 }
 
 function _removeWidget(widgetId) {
@@ -412,8 +421,15 @@ function _loadSavedLayout() {
           var meta = WidgetRegistry.getMeta(id);
           if (!meta) return;
           var entry = WidgetRegistry.get(id);
-          var savedHtml = '<div class="grid-stack-item" gs-id="' + id + '"><div class="grid-stack-item-content" id="content_' + id + '"></div></div>';
-          grid.addWidget(savedHtml, { x: item.x||0, y: item.y||0, w: item.w||meta.defaultSize.w, h: item.h||meta.defaultSize.h, id: id });
+          var el = document.createElement('div');
+          el.className = 'grid-stack-item';
+          el.setAttribute('gs-id', id);
+          el.setAttribute('gs-w', item.w || meta.defaultSize.w);
+          el.setAttribute('gs-h', item.h || meta.defaultSize.h);
+          el.setAttribute('gs-x', item.x || 0);
+          el.setAttribute('gs-y', item.y || 0);
+          el.innerHTML = '<div class="grid-stack-item-content" id="content_' + id + '"></div>';
+          grid.addWidget(el);
           if (entry && entry.Class) {
             var instance = new entry.Class({
               id: meta.id, type: meta.type, title: meta.title,
