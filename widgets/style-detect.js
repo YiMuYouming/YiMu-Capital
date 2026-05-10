@@ -26,7 +26,7 @@ class StyleDetectWidget extends YiMuWidget {
       '<div style="width:'+lbPct+'%;background:var(--up)"></div>' +
       '<div style="width:'+trPct+'%;background:var(--down)"></div>' +
       '</div>' +
-      '<div style="display:flex;justify-content:space-between;font-size:var(--fs-label);color:var(--text-secondary);margin-bottom:var(--sp-sm)">' +
+      '<div style="display:flex;justify-content:space-between;font-size:var(--fs-body);color:var(--text-secondary);margin-bottom:var(--sp-sm)">' +
       '<span class="up">连板 '+lbPct+'%</span><span class="down">趋势 '+trPct+'%</span>' +
       '</div>';
 
@@ -39,9 +39,9 @@ class StyleDetectWidget extends YiMuWidget {
     dims.forEach(function(dim) {
       var pct = Math.min(100, Math.round(dim.val / dim.max * 100));
       html += '<div style="display:flex;align-items:center;gap:var(--sp-xs);margin-bottom:1px">' +
-        '<span style="font-size:var(--fs-label);text-transform:uppercase;letter-spacing:var(--ls-label);width:24px;color:var(--text-secondary)">'+dim.label+'</span>' +
+        '<span style="font-size:var(--fs-body);text-transform:uppercase;letter-spacing:var(--ls-label);width:28px;color:var(--text-secondary)">'+dim.label+'</span>' +
         '<div class="progress-bar" style="flex:1"><div class="progress-fill '+(dim.val>=dim.max*0.6?'good':'warn')+'" style="width:'+pct+'%"></div></div>' +
-        '<span style="font-family:var(--font-mono);font-size:var(--fs-label);width:22px;text-align:right">'+dim.val+'</span>' +
+        '<span style="font-family:var(--font-mono);font-size:var(--fs-body);width:26px;text-align:right">'+dim.val+'</span>' +
         '</div>';
     });
 
