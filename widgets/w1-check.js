@@ -30,10 +30,12 @@ class W1CheckWidget extends YiMuWidget {
       else if (c['状态'] !== 'pass') { allPass = false; }
       var icon = c['状态']==='pass'?'✅':c['状态']==='fail'?'❌':'⏳';
       var cls = c['状态']==='pass'?'pass':c['状态']==='fail'?'fail':'pending';
+      var verdict = c['判定']||'';
+      verdict = verdict.replace(/[✅❌⏳]+$/g, '').trim();
       html += '<div style="display:flex;align-items:center;gap:var(--sp-sm);padding:4px 0;font-size:var(--fs-body)">' +
         '<span style="width:20px">'+icon+'</span>' +
         '<span style="flex:1">'+c['指标']+'</span>' +
-        '<span style="color:var(--text-secondary)">'+c['判定']+'</span>' +
+        '<span style="color:var(--text-secondary)">'+verdict+'</span>' +
         '</div>';
     });
 
