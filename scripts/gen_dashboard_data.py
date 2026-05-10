@@ -70,18 +70,60 @@ def parse_frontmatter(filepath):
     return data
 
 def get_style_data():
-    """调用 style_detect.py 获取风格数据"""
+    """调用 style_detect.py 获取风格数据，映射为 dashboard 格式"""
     try:
         result = subprocess.run(
             ["python3", str(STYLE_DETECT), "--json"],
-            capture_output=True, text=True, timeout=30, cwd=str(VAULT_DIR)
+            capture_output=True, text=True, timeout=60, cwd=str(STYLE_DETECT.parent)
         )
-        if result.returncode == 0:
-            return json.loads(result.stdout)
-        print(f"[warn] style_detect.py returned {result.returncode}: {result.stderr}")
+        if result.returncode == 0 and result.stdout:
+            # style_detect --json 输出：先打印可读文本，最后一行是 JSON
+            # 取最后一个 { 开始的部分作为 JSON
+            raw = result.stdout.strip()
+            brace_idx = raw.rfind('\n{')
+            if brace_idx < 0:
+                brace_idx = raw.find('{')
+            if brace_idx >= 0:
+                sd = json.loads(raw[brace_idx:])
+                # 字段映射: style_detect → dashboard_data.json
+                return {
+                    "总分": sd.get("total"),
+                    "风格": sd.get("style"),
+                    "连板占比": _compute_lianban_pct(sd),
+                    "趋势占比": _compute_trend_pct(sd),
+                    "总仓位上限": _compute_total_cap(sd),
+                    "dim1_量能": (sd.get("dim1") or {}).get("score"),
+                    "dim2_连板生态": (sd.get("dim2") or {}).get("score"),
+                    "dim3_趋势": (sd.get("dim3") or {}).get("score"),
+                }
+        if result.returncode != 0:
+            print(f"[warn] style_detect.py returned {result.returncode}: {result.stderr[:200]}")
     except Exception as e:
         print(f"[warn] style_detect.py failed: {e}")
     return {}
+
+def _compute_lianban_pct(sd):
+    """根据风格判定计算连板占比"""
+    style = str(sd.get("style", ""))
+    total = sd.get("total", 50) or 50
+    if "连板" in style:
+        return 75 + min(25, int((total - 50) / 2))
+    elif "趋势" in style:
+        return max(0, 25 - int((50 - total) / 2))
+    else:  # 混合
+        return 50 + int((total - 50) / 2)
+
+def _compute_trend_pct(sd):
+    return 100 - _compute_lianban_pct(sd)
+
+def _compute_total_cap(sd):
+    """根据总分计算总仓位上限"""
+    total = sd.get("total", 50) or 50
+    if total >= 80: return 50
+    elif total >= 60: return 40
+    elif total >= 40: return 30
+    elif total >= 20: return 20
+    else: return 10
 
 def compute_style_execution(fm, style):
     """规则引擎：根据 trading-core.md 计算 style.实际执行
