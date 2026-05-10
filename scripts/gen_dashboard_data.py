@@ -155,7 +155,7 @@ def parse_appendix(filepath):
                 '梯队': '梯队', '龙头': '龙头', '状态': '状态'
             })
         elif '竞价5维' in title:
-            result['竞价'] = _parse_key_values(body)
+            result['竞价'] = _parse_auction(body)
         elif 'W1早盘确认' in title:
             result['早盘'] = _parse_key_values(body)
         elif 'W2盘中跟踪' in title:
@@ -199,6 +199,41 @@ def _parse_table(body, col_map):
             if row:
                 rows.append(row)
     return rows
+
+
+def _parse_auction(body):
+    """解析竞价5维：key=value + #### 子标题表格"""
+    result = {}
+    # 先按 #### 拆分
+    parts = re.split(r'\n####\s+', body)
+    # 第一部分是 key=value
+    result.update(_parse_key_values(parts[0]))
+    # 后续部分是子表格
+    for part in parts[1:]:
+        lines = part.strip().split('\n')
+        sub_title = lines[0].strip()
+        sub_body = '\n'.join(lines[1:])
+        if '大盘指数' in sub_title:
+            result['大盘指数'] = _parse_table(sub_body, {
+                '指数': '指数', '竞价涨幅': '竞价涨幅', '涨家': '涨家', '跌家': '跌家', '灯': '灯'
+            })
+        elif '市场情绪' in sub_title:
+            result['市场情绪'] = _parse_table(sub_body, {
+                '名称': '名称', '值': '值', '灯': '灯'
+            })
+        elif '高标竞价' in sub_title:
+            result['高标竞价'] = _parse_table(sub_body, {
+                '名称': '名称', '竞价': '竞价', '灯': '灯'
+            })
+        elif '方向锚定' in sub_title:
+            result['方向锚定'] = _parse_table(sub_body, {
+                '板块': '板块', '竞价': '竞价', '灯': '灯'
+            })
+        elif '锚定股竞价' in sub_title:
+            result['锚定股竞价'] = _parse_table(sub_body, {
+                '标的': '标的', '竞价': '竞价', '灯': '灯'
+            })
+    return result
 
 
 def _parse_key_values(body):
