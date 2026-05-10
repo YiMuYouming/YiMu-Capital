@@ -17,14 +17,27 @@ class W2CheckWidget extends YiMuWidget {
     // ===== 上半部：条件清单（复盘笔记） =====
     var checks = mid['W2出手条件'] || mid['条件列表'] || [];
     if (checks.length) {
-      var allPass = true, hasPending = false;
+      var passCount = 0, failCount = 0, pendingCount = 0;
+      checks.forEach(function(c) {
+        if (c['状态']==='pass') passCount++;
+        else if (c['状态']==='fail') failCount++;
+        else pendingCount++;
+      });
+      var allPass = failCount===0 && pendingCount===0;
+      var hasFail = failCount > 0;
+      var hasPending = pendingCount > 0;
+
+      // 动态标题
+      var statusText, statusColor;
+      if (allPass)      { statusText = '✅ '+passCount+'/'+checks.length+' 条件通过 — W2可吸'; statusColor = 'var(--down)'; }
+      else if (hasFail) { statusText = '❌ '+failCount+'项不满足 — W2关闭'; statusColor = 'var(--danger)'; }
+      else              { statusText = '⏳ '+passCount+'/'+checks.length+' 通过，'+pendingCount+'项待确认 — 等待企稳'; statusColor = 'var(--warn)'; }
+
       html += '<div style="padding:var(--sp-sm) var(--sp-md);margin-bottom:var(--sp-sm);background:var(--bg-base);border-radius:var(--radius-md)">' +
-        '<div style="font-size:var(--fs-subtitle);font-weight:700;color:var(--down);margin-bottom:var(--sp-xs)">'+(mid['当前状态']||'')+'</div>' +
+        '<div style="font-size:var(--fs-subtitle);font-weight:700;color:'+statusColor+';margin-bottom:var(--sp-xs)">'+statusText+'</div>' +
         '<div style="font-size:var(--fs-body);color:var(--text-secondary);margin-bottom:var(--sp-sm)">'+(mid['W2出手时机']||'')+'</div>';
 
       checks.forEach(function(c) {
-        if (c['状态']==='pending') { allPass=false; hasPending=true; }
-        else if (c['状态']!=='pass') { allPass=false; }
         var icon = c['状态']==='pass'?'✅':c['状态']==='fail'?'❌':'⏳';
         var verdict = (c['判定']||'').replace(/[✅❌⏳]+$/g,'').trim();
         html += '<div style="display:flex;align-items:center;gap:var(--sp-sm);padding:2px 0;font-size:var(--fs-body)">' +
@@ -33,8 +46,7 @@ class W2CheckWidget extends YiMuWidget {
           '<span style="color:var(--text-secondary)">'+verdict+'</span></div>';
       });
 
-      html += '<div style="margin-top:var(--sp-sm);text-align:center;font-size:var(--fs-subtitle);font-weight:700;color:var(--' +
-        (allPass?'down">✅ W2可吸':hasPending?'warn">⏳ 等待企稳':'danger">❌ W2关闭') + '</div></div>';
+      html += '</div>';
     }
 
     // ===== 下半部：实时观察 =====
