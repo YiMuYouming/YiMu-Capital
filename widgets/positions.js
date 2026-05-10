@@ -21,7 +21,6 @@ class PositionsWidget extends YiMuWidget {
         });
       }
     } catch(e) {}
-    console.log('W15 positions:', P.length, 'active:', P.filter(function(p){return (p['状态']||'').indexOf('清')<0;}).length, 'cleared:', P.filter(function(p){return (p['状态']||'').indexOf('清')>=0;}).length);
 
     // 今日操作
     var opsJson = manual['_今日操作'] || '[]';
