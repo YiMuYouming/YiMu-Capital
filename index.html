@@ -39,6 +39,19 @@
 body{opacity:0;transition:opacity .3s}
 body.ready{opacity:1}
 #loading{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);color:var(--text-secondary);font-family:var(--font-sans);font-size:var(--fs-body);z-index:9999}
+/* Widget Panel */
+.widget-panel-overlay{display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.6);z-index:2000;align-items:center;justify-content:center}
+.widget-panel-overlay.show{display:flex}
+.widget-panel{background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-lg);box-shadow:var(--shadow-modal);width:90%;max-width:640px;max-height:80vh;overflow:hidden;display:flex;flex-direction:column}
+.widget-panel-header{display:flex;align-items:center;justify-content:space-between;padding:var(--sp-md) var(--sp-lg);border-bottom:1px solid var(--border-light)}
+.widget-panel-body{overflow-y:auto;padding:var(--sp-md) var(--sp-lg)}
+.widget-panel-section{margin-bottom:var(--sp-md)}
+.widget-panel-section-title{font-size:var(--fs-label);text-transform:uppercase;letter-spacing:var(--ls-label);color:var(--text-disabled);margin-bottom:var(--sp-sm);padding-bottom:var(--sp-xs);border-bottom:1px solid var(--border-light)}
+.widget-panel-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:var(--sp-sm)}
+.widget-panel-item{padding:var(--sp-sm) var(--sp-md);background:var(--bg-base);border:1px solid var(--border-light);border-radius:var(--radius-md);cursor:pointer;transition:background .15s,border-color .15s;font-size:var(--fs-body)}
+.widget-panel-item:hover{background:var(--bg-hover);border-color:var(--info)}
+.widget-panel-item .item-title{font-weight:600;color:var(--text-primary)}
+.widget-panel-item .item-desc{font-size:var(--fs-label);color:var(--text-secondary);margin-top:2px}
 </style>
 </head>
 <body>
@@ -49,6 +62,7 @@ body.ready{opacity:1}
   <span class="topbar-brand">弈沐资本 · 数据看板 v2.0</span>
   <span class="conn-dot polling" id="connDot"></span>
   <span class="conn-text" id="connText">轮询</span>
+  <button class="widget-btn" id="addWidgetBtn" title="添加组件" style="background:var(--info);color:#fff;font-weight:600;padding:0 12px;border-radius:var(--radius-sm)">+ 添加组件</button>
   <span style="flex:1"></span>
   <button class="widget-btn" id="saveLayoutBtn" title="保存布局 (Ctrl+S)">保存</button>
   <button class="widget-btn" id="exportLayoutBtn" title="导出布局 JSON">导出</button>
@@ -61,6 +75,17 @@ body.ready{opacity:1}
 
 <!-- Context Menu -->
 <div class="context-menu" id="contextMenu"></div>
+
+<!-- Widget Panel -->
+<div class="widget-panel-overlay" id="widgetPanelOverlay">
+  <div class="widget-panel" id="widgetPanel">
+    <div class="widget-panel-header">
+      <span style="font-size:var(--fs-subtitle);font-weight:600">添加组件</span>
+      <button class="widget-btn" id="widgetPanelClose" style="font-size:18px">×</button>
+    </div>
+    <div class="widget-panel-body" id="widgetPanelBody"></div>
+  </div>
+</div>
 
 <!-- Toast -->
 <div class="toast" id="toast"></div>
@@ -226,9 +251,55 @@ document.addEventListener('click', function(e) {
   if (!menu.contains(e.target)) menu.classList.remove('show');
 });
 
-// 右键画板空白处
+// === Widget Panel (v2.1.1: 组件选择面板) ===
+function _showWidgetPanel() {
+  var overlay = document.getElementById('widgetPanelOverlay');
+  var body = document.getElementById('widgetPanelBody');
+  var cats = WidgetRegistry.listByCategory();
+  var catLabels = { decision: '决策类', data: '数据类', risk: '风控类', tool: '工具类' };
+  var catIcons = { decision: '🎯', data: '📊', risk: '💰', tool: '🔧' };
+
+  var html = '';
+  ['decision', 'risk', 'data', 'tool'].forEach(function(cat) {
+    html += '<div class="widget-panel-section">';
+    html += '<div class="widget-panel-section-title">' + (catIcons[cat]||'') + ' ' + catLabels[cat] + '</div>';
+    html += '<div class="widget-panel-grid">';
+    (cats[cat] || []).forEach(function(w) {
+      html += '<div class="widget-panel-item" data-widget="' + w.id + '">' +
+        '<div class="item-title">' + w.title + '</div>' +
+        '<div class="item-desc">' + w.defaultSize.w + '×' + w.defaultSize.h + ' · ' + w.id + '</div>' +
+        '</div>';
+    });
+    html += '</div></div>';
+  });
+
+  body.innerHTML = html;
+  overlay.classList.add('show');
+
+  // 点击添加
+  body.querySelectorAll('.widget-panel-item').forEach(function(item) {
+    item.addEventListener('click', function() {
+      var wid = item.dataset.widget;
+      _addWidgetToGrid(wid);
+      overlay.classList.remove('show');
+      showToast('已添加: ' + (WidgetRegistry.getMeta(wid)||{}).title);
+    });
+  });
+}
+
+document.getElementById('widgetPanelOverlay').addEventListener('click', function(e) {
+  if (e.target === this) this.classList.remove('show');
+});
+document.getElementById('widgetPanelClose').addEventListener('click', function() {
+  document.getElementById('widgetPanelOverlay').classList.remove('show');
+});
+
+// 顶栏按钮
+document.getElementById('addWidgetBtn').addEventListener('click', _showWidgetPanel);
+
+// 右键画板空白处（保留右键菜单作为快捷方式）
 document.addEventListener('contextmenu', function(e) {
-  if (e.target.closest('.grid-stack-item-content')) return; // 组件内部不触发
+  if (e.target.closest('.grid-stack-item-content')) return;
   e.preventDefault();
   _showContextMenu(e.clientX, e.clientY);
 });
