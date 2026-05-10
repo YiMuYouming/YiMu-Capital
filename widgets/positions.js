@@ -231,6 +231,7 @@ class PositionsWidget extends YiMuWidget {
         else { pos.push({'标的':stock,'代码':code,'成本':price,'现价':price,'数量':qty,'止损':'—','状态':'持有'}); }
       }
       DataStore.manualData.set('_positions',JSON.stringify(pos));
+      _bridgeSync(pos, ops);  // HTTP 模式下同步到 JSON 文件
       o.remove(); self._renderBody();
     };
     o.addEventListener('click',function(e){if(e.target===o)o.remove();});
@@ -238,5 +239,16 @@ class PositionsWidget extends YiMuWidget {
 }
 
 function _nowTime() { var d=new Date(); return d.getHours()+':'+String(d.getMinutes()).padStart(2,'0'); }
+
+function _bridgeSync(positions, ops) {
+  if (location.protocol === 'file:') return; // file:// 不适用
+  try {
+    fetch('/api/sync', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ positions: positions, '今日操作': ops })
+    }).catch(function(){});
+  } catch(e) {}
+}
 
 WidgetRegistry.register('W15', PositionsWidget);
