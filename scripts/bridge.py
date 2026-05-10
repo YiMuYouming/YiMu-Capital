@@ -62,9 +62,9 @@ class BridgeHandler(SimpleHTTPRequestHandler):
         self.end_headers()
 
     def log_message(self, format, *args):
-        # 过滤静态文件请求的日志噪音
-        if args[0].startswith('GET /api/') or args[0].startswith('POST /api/'):
-            print(f"  [{self.log_date_time_string()}] {args[0]}")
+        if args and hasattr(args[0], 'startswith'):
+            if args[0].startswith('GET /api/') or args[0].startswith('POST /api/'):
+                print(f"  [{self.log_date_time_string()}] {args[0]}")
 
 if __name__ == '__main__':
     port = int(sys.argv[1]) if len(sys.argv) > 1 else 8080
