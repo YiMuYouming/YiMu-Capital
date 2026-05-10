@@ -18,10 +18,10 @@
 import json, os, sys, time, subprocess
 from pathlib import Path
 
-VAULT_DIR = Path(__file__).resolve().parent.parent
-IWC_SCRIPT = Path.home() / "WorkBuddy/Tools/iwencai_query.py"  # 实际 iwencai 查询脚本路径
-OUTPUT_FILE = VAULT_DIR / "live-dashboard/data/dashboard_live.json"
-DASHBOARD_DATA = VAULT_DIR / "live-dashboard/data/dashboard_data.json"
+ROOT_DIR = Path(__file__).resolve().parent.parent  # live-dashboard/
+IWC_SCRIPT = Path.home() / "WorkBuddy/Tools/iwencai_query.py"
+OUTPUT_FILE = ROOT_DIR / "data/dashboard_live.json"
+DASHBOARD_DATA = ROOT_DIR / "data/dashboard_data.json"
 
 # 频率配置 (v2.0)
 TIER_INTERVALS = {
@@ -37,7 +37,7 @@ def run_iwencai(query, extra_args=None):
     if extra_args:
         cmd.extend(extra_args)
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=45, cwd=str(VAULT_DIR))
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=45, cwd=str(ROOT_DIR))
         if result.returncode == 0:
             return result.stdout.strip()
         else:
@@ -77,18 +77,59 @@ def fetch_live_sectors():
     return {"note": "live_sectors from iwencai", "last_fetch": time.strftime("%H:%M:%S")}
 
 def get_stock_codes_from_dashboard():
-    """从 dashboard_data.json 提取所有自选池标的代码"""
-    codes = []
+    """从 dashboard_data.json 提取所有涉及股票的代码（全量SSOT）"""
+    codes = set()
     try:
         with open(DASHBOARD_DATA) as f:
             data = json.load(f)
-        for pool_key in ["lianban_pool", "trend_pool"]:
-            for s in data.get(pool_key, []):
-                code = s.get("代码")
-                if code:
-                    codes.append(code)
-    except:
-        pass
+
+        # 持仓（活跃 + 清仓）
+        for p in data.get("positions", []):
+            code = p.get("代码")
+            if code and str(code).isdigit():
+                codes.add(str(code))
+
+        # 连板自选池
+        for s in data.get("lianban_pool", []):
+            code = s.get("代码")
+            if code and str(code).isdigit():
+                codes.add(str(code))
+
+        # 趋势自选池
+        for s in data.get("trend_pool", []):
+            code = s.get("代码")
+            if code and str(code).isdigit():
+                codes.add(str(code))
+
+        # 锚定股状态
+        for a in (data.get("decision", {}).get("锚定股状态") or []):
+            code = a.get("代码")
+            if code and str(code).isdigit():
+                codes.add(str(code))
+
+        # 今日操作
+        for o in (data.get("decision", {}).get("今日操作") or []):
+            code = o.get("代码")
+            if code and str(code).isdigit():
+                codes.add(str(code))
+
+        # 竞价5维-高标竞价和锚定股竞价（名字匹配到pool里的代码）
+        auction = data.get("decision", {}).get("竞价", {})
+        for item in (auction.get("高标竞价") or []) + (auction.get("锚定股竞价") or []):
+            name = item.get("名称", "")
+            # 尝试从 pool 中匹配
+            for pool in [data.get("lianban_pool", []), data.get("trend_pool", [])]:
+                for s in pool:
+                    if s.get("标的") and s["标的"] in name:
+                        code = s.get("代码")
+                        if code and str(code).isdigit():
+                            codes.add(str(code))
+
+    except Exception as e:
+        print(f"[warn] get_stock_codes: {e}", file=sys.stderr)
+
+    codes = sorted(codes)
+    print(f"[info] Found {len(codes)} stock codes: {', '.join(codes[:10])}{'...' if len(codes)>10 else ''}")
     return codes
 
 def build_live_data(tier="all"):
