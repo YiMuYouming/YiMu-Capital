@@ -21,7 +21,6 @@ class InputPanelWidget extends YiMuWidget {
 
     var fields = [
       {id:'总资产',type:'number',label:'总资产(万)'},
-      {id:'可用资金',type:'number',label:'可用资金(万)'},
       {id:'情绪值',type:'number',label:'情绪值(%)'},
       {id:'上涨',type:'number',label:'上涨家数'},
       {id:'下跌',type:'number',label:'下跌家数'},
@@ -87,7 +86,7 @@ class InputPanelWidget extends YiMuWidget {
   }
 
   _saveAndRefresh() {
-    var fields = ['总资产','可用资金','情绪值','上涨','下跌','涨停收益','连板收益','炸板收益','风险值','晋级率','封板率','涨停家数','跌停家数','赚钱效应','最高板','次高板','梯队'];
+    var fields = ['总资产','情绪值','上涨','下跌','涨停收益','连板收益','炸板收益','风险值','晋级率','封板率','涨停家数','跌停家数','赚钱效应','最高板','次高板','梯队'];
     fields.forEach(function(f) {
       var el = document.getElementById('in_'+f);
       if (el) DataStore.manualData.set(f, el.value);

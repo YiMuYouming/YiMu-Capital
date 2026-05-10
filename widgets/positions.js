@@ -20,24 +20,22 @@ class PositionsWidget extends YiMuWidget {
 
     var html = '';
 
-    // 汇总卡片（从报数面板读总资产/可用资金）
+    // 汇总卡片（只需要填总资产，其余自动算）
     var manual = DataStore.manualData.getAll();
     var totalAsset = parseFloat(manual['总资产']) || 0;        // 万元
-    var availFund = parseFloat(manual['可用资金']) || 0;       // 万元
     var totalAssetYuan = totalAsset * 10000;
-    var availFundYuan = availFund * 10000;
 
-    // 持仓总市值（简化：Σ现价，缺数量字段）
+    // 持仓总市值
     var positionValue = 0;
     var totalCost = 0;
     active.forEach(function(p) {
       positionValue += parseFloat(p['现价']) || 0;
       totalCost += parseFloat(p['成本']) || 0;
     });
+    var availFundYuan = totalAssetYuan - positionValue;        // 自动算
     var totalPnl = positionValue - totalCost;
     var pnlCls = totalPnl > 0 ? 'up' : totalPnl < 0 ? 'down' : '';
     var positionPct = totalAssetYuan > 0 ? Math.round(positionValue / totalAssetYuan * 100) : 0;
-    var realtimeAsset = availFundYuan + positionValue;
 
     if (totalAsset > 0) {
       html += '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:var(--sp-sm);margin-bottom:var(--sp-md);padding:var(--sp-sm);background:var(--bg-base);border-radius:var(--radius-md)">' +
@@ -46,7 +44,7 @@ class PositionsWidget extends YiMuWidget {
         '<div style="text-align:center"><div class="kpi-label">总盈亏</div><div style="font-family:var(--font-mono);font-size:var(--fs-subtitle);font-weight:700;color:var(--' + pnlCls + ')">' + (totalPnl >= 0 ? '+' : '') + totalPnl.toFixed(0) + '</div></div>' +
         '<div style="text-align:center"><div class="kpi-label">仓位</div><div style="font-family:var(--font-mono);font-size:var(--fs-subtitle);font-weight:700;color:' + (positionPct > 80 ? 'var(--danger)' : positionPct > 50 ? 'var(--warn)' : 'var(--info)') + '">' + positionPct + '%</div></div>' +
         '<div style="text-align:center"><div class="kpi-label">可用资金</div><div style="font-family:var(--font-mono);font-size:var(--fs-subtitle);font-weight:700">' + availFundYuan.toLocaleString() + '</div></div>' +
-        '<div style="text-align:center"><div class="kpi-label">实时总资产</div><div style="font-family:var(--font-mono);font-size:var(--fs-subtitle);font-weight:700;color:var(--info)">' + realtimeAsset.toLocaleString() + '</div></div>' +
+        '<div style="text-align:center"><div class="kpi-label">实时总资产</div><div style="font-family:var(--font-mono);font-size:var(--fs-subtitle);font-weight:700;color:var(--info)">' + totalAssetYuan.toLocaleString() + '</div></div>' +
         '</div>';
     }
 
