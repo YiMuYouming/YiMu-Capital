@@ -272,7 +272,7 @@ html,body{
 .widget-body{
   padding:var(--sp-sm);
   overflow:auto;
-  max-height:calc(100% - var(--widget-header-height));
+  flex:1;
   font-size:var(--fs-body);
 }
 
