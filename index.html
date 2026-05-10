@@ -533,7 +533,7 @@ function waitForGridStack() {
     // 尝试拉取实时数据（file:// 协议下会失败，降级到兜底数据）
     DataStore.fetchAll();
     // 每 5 分钟全量刷新
-    setInterval(function() { DataStore.fetchAll(); }, 300000);
+    setInterval(function() { DataStore.fetchAll(); }, 30000);
   } else {
     setTimeout(waitForGridStack, 100);
   }

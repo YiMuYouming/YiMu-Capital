@@ -527,11 +527,47 @@ def build_dashboard_data(review_path):
 
     return data
 
+def watch_mode(review_path, interval=10):
+    """监控复盘笔记文件变化，自动重跑管线"""
+    import time as time_mod
+    last_mtime = os.path.getmtime(review_path)
+    print(f"[watch] Monitoring {review_path} every {interval}s...")
+
+    while True:
+        time_mod.sleep(interval)
+        try:
+            mtime = os.path.getmtime(review_path)
+        except:
+            continue
+        if mtime == last_mtime:
+            continue
+        last_mtime = mtime
+        print(f"\n[{time_mod.strftime('%H:%M:%S')}] File changed, regenerating...")
+        try:
+            data = build_dashboard_data(review_path)
+            OUTPUT_FILE.parent.mkdir(parents=True, exist_ok=True)
+            with open(OUTPUT_FILE, 'w', encoding='utf-8') as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+            print(f"  → {len(json.dumps(data, ensure_ascii=False))} bytes written")
+        except Exception as e:
+            print(f"  [ERROR] {e}")
+
+
 def main():
+    import argparse
+    parser = argparse.ArgumentParser(description="复盘笔记 → dashboard_data.json")
+    parser.add_argument("--watch", action="store_true", help="监控模式，文件变化自动重跑")
+    parser.add_argument("--interval", type=int, default=10, help="监控间隔(秒)，默认10")
+    args = parser.parse_args()
+
     review_path = find_latest_review()
     if not review_path:
         print("[ERROR] No review note found in", str(REVIEW_DIR))
         sys.exit(1)
+
+    if args.watch:
+        watch_mode(review_path, args.interval)
+        return
 
     print(f"[info] Source: {review_path}")
     data = build_dashboard_data(review_path)
