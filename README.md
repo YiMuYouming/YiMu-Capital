@@ -1,8 +1,15 @@
-# 弈沐资本数据看板 v2.0
+# 弈沐资本数据看板 v2.1
 
 ## 打开方式
 
-双击 `index.html`，Chrome 浏览器直接打开。
+```bash
+cd ~/Documents/YouMingVault/10_⚡Now/01_💰弈沐资本/live-dashboard
+python3 scripts/bridge.py 8088
+```
+
+然后 Chrome 打开 **http://localhost:8088**（收藏到书签栏）。
+
+> 离线调试用：双击 `index.html`（file:// 协议，记流水不能自动写 JSON）。
 
 ## 依赖
 
