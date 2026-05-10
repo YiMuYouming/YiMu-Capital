@@ -13,3 +13,4 @@ Thumbs.db
 *~
 *.bak
 *.bak_*
+__pycache__/

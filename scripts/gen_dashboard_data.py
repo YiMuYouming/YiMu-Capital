@@ -34,8 +34,9 @@ def clean_value(val, field_name=""):
     s = str(val).strip()
 
     # 去掉括号内注释： "一般（涨停收益2.92%一般）" → "一般"
-    # 但保留像 "4板（福达合金）" 这种标签型字段
-    label_fields = {"最高板", "次高板", "连板梯队"}
+    # 但保留标签型字段的括号内容
+    label_fields = {"最高板", "次高板", "连板梯队", "高潮保护", "动作", "状态", "结论", "当前状态", "W2出手时机"}
+    string_fields = {"代码", "标的", "板块", "方向", "角色", "操作", "买点", "梯队", "龙头", "备注", "止损", "清仓原因", "原因", "影响", "灯", "指标", "判定", "时间", "价格"}
     if field_name not in label_fields:
         s = re.sub(r'（[^）]*）', '', s)  # 中文括号
         s = re.sub(r'\([^)]*\)', '', s)   # 英文括号
@@ -47,18 +48,20 @@ def clean_value(val, field_name=""):
         except ValueError:
             return s
 
-    # 纯数字字符串转数字
-    try:
-        if '.' in s:
-            return float(s)
-        return int(s)
-    except ValueError:
-        pass
+    # 纯数字字符串转数字（string_fields 不转换）
+    if field_name not in string_fields:
+        try:
+            if '.' in s:
+                return float(s)
+            return int(s)
+        except ValueError:
+            pass
 
     # "X / Y" 格式取第一个数字: "126 / 98" → 126
-    m = re.match(r'^(\d+)\s*/\s*\d+', s)
-    if m:
-        return int(m.group(1))
+    if field_name not in string_fields:
+        m = re.match(r'^(\d+)\s*/\s*\d+', s)
+        if m:
+            return int(m.group(1))
 
     return s.strip()
 
@@ -104,6 +107,143 @@ def parse_frontmatter(filepath):
             except: pass
             data[key] = val
     return data
+
+def parse_appendix(filepath):
+    """解析复盘笔记末尾的「## 数据附录」章节，返回结构化数据"""
+    try:
+        with open(filepath) as f:
+            content = f.read()
+    except:
+        return {}
+
+    # 找到数据附录章节
+    m = re.search(r'##\s*数据附录\s*\n(.*)', content, re.DOTALL)
+    if not m:
+        return {}
+    appendix = m.group(1)
+
+    result = {}
+
+    # 按 ### 标题分节
+    sections = re.split(r'\n###\s+', appendix)
+    for section in sections:
+        if not section.strip():
+            continue
+        lines = section.strip().split('\n')
+        title = lines[0].strip()
+        body = '\n'.join(lines[1:]).strip()
+
+        if '持仓明细' in title:
+            result['positions'] = _parse_positions(body)
+        elif '连板自选池' in title:
+            result['lianban_pool'] = _parse_table(body, {
+                '标的': '标的', '代码': '代码', '板块': '板块',
+                '角色': '角色', '操作': '操作', '涨幅': '涨幅',
+                '收盘价': '收盘价', 'MA5': 'MA5', '量比': '量比',
+                '换手': '换手', '备注': '备注'
+            })
+        elif '趋势自选池' in title:
+            result['trend_pool'] = _parse_table(body, {
+                '标的': '标的', '代码': '代码', '板块': '板块',
+                '角色': '角色', '操作': '操作', '买点': '买点',
+                '涨幅': '涨幅', '收盘价': '收盘价', 'MA5': 'MA5',
+                'MA20': 'MA20', '量比': '量比', '换手': '换手', '备注': '备注'
+            })
+        elif '板块状态' in title:
+            result['sectors'] = _parse_table(body, {
+                '板块': '板块', '类型': '类型', '涨停数': '涨停数',
+                '梯队': '梯队', '龙头': '龙头', '状态': '状态'
+            })
+        elif '竞价5维' in title:
+            result['竞价'] = _parse_key_values(body)
+        elif 'W1早盘确认' in title:
+            result['早盘'] = _parse_key_values(body)
+        elif 'W2盘中跟踪' in title:
+            result['盘中'] = _parse_key_values(body)
+        elif '今日操作' in title:
+            result['今日操作'] = _parse_table(body, {
+                '时间': '时间', '动作': '动作', '标的': '标的',
+                '价格': '价格', '盈亏': '盈亏', '原因': '原因'
+            })
+        elif '锚定股状态' in title:
+            result['锚定股状态'] = _parse_table(body, {
+                '标的': '标的', '状态': '状态', '影响': '影响', '灯': '灯'
+            })
+
+    return result
+
+
+def _parse_table(body, col_map):
+    """解析 Markdown 表格，返回 list[dict]"""
+    lines = body.strip().split('\n')
+    rows = []
+    header = None
+
+    for line in lines:
+        line = line.strip()
+        if not line or not line.startswith('|'):
+            continue
+        if '---' in line:  # 分隔行，跳过
+            continue
+        cells = [c.strip() for c in line.split('|')[1:-1]]
+        if header is None:
+            header = cells
+        else:
+            row = {}
+            for i, cell in enumerate(cells):
+                if i < len(header) and header[i] in col_map:
+                    key = col_map[header[i]]
+                    val = clean_value(cell, key)
+                    if val is not None and val != '—' and val != '':
+                        row[key] = val
+            if row:
+                rows.append(row)
+    return rows
+
+
+def _parse_key_values(body):
+    """解析 key=value 行和 指标N=label|desc|status 行"""
+    result = {}
+    checks = []
+    lines = body.strip().split('\n')
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+        # 指标行: 指标N=label|desc|status
+        m = re.match(r'指标\d+=(.+)\|(.+)\|(.+)', line)
+        if m:
+            checks.append({
+                '指标': m.group(1),
+                '判定': m.group(2),
+                '状态': m.group(3)
+            })
+            continue
+        # 普通 key=value
+        m = re.match(r'(.+?)=(.+)', line)
+        if m:
+            result[m.group(1)] = clean_value(m.group(2), m.group(1))
+    if checks:
+        # 根据标题判断是 W2出手条件 还是 方向确认
+        result['条件列表'] = checks
+    return result
+
+
+def _parse_positions(body):
+    """解析持仓表格，区分活跃和已清仓"""
+    rows = _parse_table(body, {
+        '标的': '标的', '代码': '代码', '方向': '方向',
+        '成本': '成本', '现价': '现价', '浮盈%': '浮盈',
+        '止损': '止损', '状态': '状态'
+    })
+    # 补充已清仓的字段
+    for r in rows:
+        if '清仓' in str(r.get('状态', '')):
+            if '——' not in str(r.get('现价', '')):
+                r['卖出价'] = r.pop('现价', None)
+                r['清仓原因'] = r.get('备注', '')
+    return rows
+
 
 def get_style_data():
     """调用 style_detect.py 获取风格数据，映射为 dashboard 格式"""
@@ -248,6 +388,7 @@ def build_dashboard_data(review_path):
     """组装完整的 dashboard_data.json"""
     fm = parse_frontmatter(review_path)
     style = get_style_data()
+    appendix = parse_appendix(review_path)
 
     raw_date = fm.get("date", datetime.now().strftime("%Y-%m-%d"))
     date_str = str(raw_date) if not isinstance(raw_date, str) else raw_date
@@ -316,18 +457,20 @@ def build_dashboard_data(review_path):
             "熔断触发": fm.get("熔断触发", False),
             "周回撤触发": fm.get("周回撤触发", False),
         },
-        "positions": [],
-        "lianban_pool": [],
-        "trend_pool": [],
-        "sectors": [],
+        "positions": appendix.get("positions", []),
+        "lianban_pool": appendix.get("lianban_pool", []),
+        "trend_pool": appendix.get("trend_pool", []),
+        "sectors": appendix.get("sectors", []),
         "上证15min": [],
         "live_index": {},
         "live_sectors": {},
         "live_quotes": {},
         "decision": {
-            "竞价": {},
-            "早盘": {},
-            "盘中": {}
+            "竞价": appendix.get("竞价", {}),
+            "早盘": appendix.get("早盘", {}),
+            "盘中": appendix.get("盘中", {}),
+            "今日操作": appendix.get("今日操作", []),
+            "锚定股状态": appendix.get("锚定股状态", []),
         }
     }
 
