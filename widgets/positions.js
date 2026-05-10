@@ -8,7 +8,7 @@ class PositionsWidget extends YiMuWidget {
     var manual = DataStore.manualData.getAll();
     var liveQ = (data && data.live_quotes) || {};
 
-    // === 数据 ===
+    // === 持仓（manualData 优先，附录兜底）===
     var P = JSON.parse(JSON.stringify((data && data.positions) || []));
     try {
       var mp = JSON.parse(manual['_positions'] || 'null');
@@ -18,9 +18,9 @@ class PositionsWidget extends YiMuWidget {
       });
     } catch(e) {}
 
+    // 今日操作——只看 manualData，不自动加载附录
     var ops = [];
     try { ops = JSON.parse(manual['_今日操作'] || '[]'); } catch(e) {}
-    if (!ops.length) ops = (data && data.decision && data.decision['今日操作']) || [];
 
     var active = [], cleared = [];
     P.forEach(function(p) {
@@ -52,8 +52,7 @@ class PositionsWidget extends YiMuWidget {
     }
 
     // ===== 持仓 =====
-    html += '<div style="display:flex;align-items:center;gap:var(--sp-sm);margin-bottom:var(--sp-xs)">'+
-      '<span style="font-size:var(--fs-body);font-weight:600">持仓</span></div>';
+    html += '<div style="font-size:var(--fs-body);font-weight:600;margin-bottom:var(--sp-xs)">持仓</div>';
     if (active.length) {
       html += '<table class="data-table"><thead><tr><th>标的</th><th>市值</th><th>数量</th><th>现价</th><th>成本</th><th>盈亏</th><th>盈亏%</th><th>止损</th></tr></thead><tbody>';
       active.forEach(function(p) {
@@ -70,7 +69,7 @@ class PositionsWidget extends YiMuWidget {
       html += '</tbody></table>';
     } else { html += '<div style="padding:var(--sp-sm);text-align:center;color:var(--text-disabled);font-size:var(--fs-body)">空仓</div>'; }
 
-    // ===== 今日记录（简化：只记流水，不记涨跌）=====
+    // ===== 今日记录 =====
     html += '<div style="display:flex;align-items:center;gap:var(--sp-sm);margin-top:var(--sp-md);margin-bottom:var(--sp-xs)">'+
       '<span style="font-size:var(--fs-body);font-weight:600">今日记录</span>'+
       '<button id="w15_add" style="background:var(--info);color:#fff;border:none;padding:2px 10px;border-radius:var(--radius-sm);cursor:pointer;font-size:var(--fs-body);font-family:var(--font-sans)">记流水</button></div>';
@@ -80,7 +79,7 @@ class PositionsWidget extends YiMuWidget {
       ops.forEach(function(o, i) {
         var act=o['动作']||'—', isBuy=act.indexOf('买入')>=0||act.indexOf('追')>=0;
         html += '<tr><td style="font-size:var(--fs-body)">'+(o['时间']||'—')+'</td>'+
-          '<td><span class="tag" style="font-size:var(--fs-body);background:var(--'+(isBuy?'up-bg':'danger-bg')+');color:var(--'+(isBuy?'up':'danger')+')">'+act+'</span></td>'+
+          '<td><span class="tag" style="font-size:var(--fs-body);background:var(--'+(isBuy?'up-bg':'down-bg')+');color:var(--'+(isBuy?'up':'down')+')">'+act+'</span></td>'+
           '<td style="font-size:var(--fs-body);font-weight:600">'+(o['标的']||'—')+'</td>'+
           '<td style="font-size:var(--fs-body);font-family:var(--font-mono)">'+(o['价格']||'—')+'</td>'+
           '<td style="font-size:var(--fs-body);font-family:var(--font-mono)">'+(o['数量']||'—')+'</td>'+
@@ -89,6 +88,8 @@ class PositionsWidget extends YiMuWidget {
           '<td><button class="w15_del" data-idx="'+i+'" style="background:none;border:none;color:var(--danger);cursor:pointer;font-size:var(--fs-body)">×</button></td></tr>';
       });
       html += '</tbody></table>';
+    } else {
+      html += '<div style="padding:var(--sp-sm);text-align:center;color:var(--text-disabled);font-size:var(--fs-body)">今日无操作</div>';
     }
 
     // ===== 清仓跟踪 =====
@@ -101,14 +102,14 @@ class PositionsWidget extends YiMuWidget {
         tracked.forEach(function(p) {
           var sp=parseFloat(p['卖出价']||p['现价'])||0, cp=parseFloat(p['成本'])||0;
           var lq=liveQ[(p['代码']||'')]||{}, cur=parseFloat(lq['最新价']||p['最新价']||p['现价'])||0;
-          var pl=cp>0?((sp-cp)/cp*100):0, pc=pl>0?'up':'down';
-          var ap=sp>0?((cur-sp)/sp*100):0, ac=ap>0?'up':'down';
+          var pl=cp>0?((sp-cp)/cp*100):0, pcls=pl>0?'up':'down';
+          var ap=sp>0?((cur-sp)/sp*100):0, acls=ap>0?'up':'down';
           html += '<tr><td style="font-size:var(--fs-body);font-weight:600">'+(p['标的']||'—')+'</td>'+
             '<td style="font-size:var(--fs-body);font-family:var(--font-mono)">'+(cp||'—')+'</td>'+
             '<td style="font-size:var(--fs-body);font-family:var(--font-mono)">'+(sp||'—')+'</td>'+
-            '<td class="'+pc+'" style="font-size:var(--fs-body);font-family:var(--font-mono);font-weight:600">'+(pl>=0?'+':'')+pl.toFixed(2)+'%</td>'+
+            '<td class="'+pcls+'" style="font-size:var(--fs-body);font-family:var(--font-mono);font-weight:600">'+(pl>=0?'+':'')+pl.toFixed(2)+'%</td>'+
             '<td style="font-size:var(--fs-body);font-family:var(--font-mono)">'+(cur>0?cur:'—')+'</td>'+
-            '<td class="'+ac+'" style="font-size:var(--fs-body);font-family:var(--font-mono);font-weight:600">'+(ap>=0?'+':'')+ap.toFixed(2)+'%</td>'+
+            '<td class="'+acls+'" style="font-size:var(--fs-body);font-family:var(--font-mono);font-weight:600">'+(ap>=0?'+':'')+ap.toFixed(2)+'%</td>'+
             '<td style="font-size:var(--fs-body);color:var(--text-secondary);max-width:100px;white-space:normal">'+(p['清仓原因']||'')+'</td></tr>';
         });
         html += '</tbody></table>';
@@ -116,14 +117,14 @@ class PositionsWidget extends YiMuWidget {
     }
 
     body.innerHTML = html;
-    this._bindEvents();
+    this._bindEvents(active);
     this.updateTimestamp();
   }
 
-  _bindEvents() {
+  _bindEvents(active) {
     var self = this;
     var btn = this.getBody().querySelector('#w15_add');
-    if (btn) btn.onclick = function() { self._showForm(); };
+    if (btn) btn.onclick = function() { self._showForm(active); };
 
     this.getBody().querySelectorAll('.w15_del').forEach(function(b) {
       b.onclick = function() {
@@ -135,16 +136,21 @@ class PositionsWidget extends YiMuWidget {
     });
   }
 
-  _showForm() {
+  _showForm(active) {
     var self = this;
     var o = document.createElement('div');
     o.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.6);z-index:3000;display:flex;align-items:center;justify-content:center';
+
+    // 卖出下拉选项
+    var sellOpts = active.map(function(p){return '<option value="'+p['标的']+'" data-code="'+(p['代码']||'')+'" data-price="'+(p['现价']||'')+'" data-qty="'+(p['数量']||0)+'">'+p['标的']+' ('+(p['代码']||'')+')</option>';}).join('');
+
     o.innerHTML = '<div style="background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-lg);padding:var(--sp-lg);width:90%;max-width:400px">'+
       '<div style="font-size:var(--fs-subtitle);font-weight:700;margin-bottom:var(--sp-md)">记流水</div>'+
       '<div style="display:flex;gap:var(--sp-sm);margin-bottom:var(--sp-md)">'+
-        '<button id="f_buy" style="flex:1;padding:var(--sp-sm);border:none;border-radius:var(--radius-sm);cursor:pointer;font-size:var(--fs-body);font-weight:600;background:var(--up-bg);color:var(--up)" onclick="this.style.opacity=1;document.getElementById(\'f_sell\').style.opacity=\'0.4\';document.getElementById(\'f_qty_row\').style.display=\'\';document.getElementById(\'f_win_row\').style.display=\'\'">买入</button>'+
-        '<button id="f_sell" style="flex:1;padding:var(--sp-sm);border:none;border-radius:var(--radius-sm);cursor:pointer;font-size:var(--fs-body);font-weight:600;background:var(--danger-bg);color:var(--danger);opacity:0.4" onclick="this.style.opacity=1;document.getElementById(\'f_buy\').style.opacity=\'0.4\';document.getElementById(\'f_qty_row\').style.display=\'none\';document.getElementById(\'f_win_row\').style.display=\'none\'">卖出</button>'+
+        '<button id="f_buy" style="flex:1;padding:var(--sp-sm);border:none;border-radius:var(--radius-sm);cursor:pointer;font-size:var(--fs-body);font-weight:600;background:var(--up-bg);color:var(--up)">买入</button>'+
+        '<button id="f_sell" style="flex:1;padding:var(--sp-sm);border:none;border-radius:var(--radius-sm);cursor:pointer;font-size:var(--fs-body);font-weight:600;background:var(--down-bg);color:var(--down);opacity:0.4">卖出</button>'+
       '</div>'+
+      '<div id="f_sell_select" style="display:none;margin-bottom:var(--sp-sm)"><div class="input-group"><label>选择持仓</label><select id="f_sel_stock" style="width:100%"><option value="">— 选择 —</option>'+sellOpts+'</select></div></div>'+
       '<div style="display:grid;grid-template-columns:1fr 1fr;gap:var(--sp-sm)">'+
         '<div class="input-group"><label>股票代码</label><input id="f_code" style="width:100%"></div>'+
         '<div class="input-group"><label>时间</label><input id="f_time" value="'+_nowTime()+'" style="width:100%"></div>'+
@@ -160,11 +166,38 @@ class PositionsWidget extends YiMuWidget {
       '</div></div>';
     document.body.appendChild(o);
 
+    // 买入/卖出切换
+    var buyBtn = o.querySelector('#f_buy'), sellBtn = o.querySelector('#f_sell');
+    var sellSelect = o.querySelector('#f_sell_select'), qtyRow = o.querySelector('#f_qty_row'), winRow = o.querySelector('#f_win_row');
+    var codeInput = o.querySelector('#f_code'), stockInput = o.querySelector('#f_stock');
+    var priceInput = o.querySelector('#f_price'), qtyInput = o.querySelector('#f_qty');
+
+    var isBuy = true;
+    function toggle(buy) {
+      isBuy = buy;
+      buyBtn.style.opacity = buy ? '1' : '0.4';
+      sellBtn.style.opacity = buy ? '0.4' : '1';
+      sellSelect.style.display = buy ? 'none' : '';
+      qtyRow.style.display = buy ? '' : 'none';
+      winRow.style.display = buy ? '' : 'none';
+    }
+    buyBtn.onclick = function(){toggle(true)};
+    sellBtn.onclick = function(){toggle(false)};
+
+    // 卖出选择持仓 → 自动填入
+    o.querySelector('#f_sel_stock').onchange = function() {
+      var opt = this.selectedOptions[0];
+      if (!opt || !opt.value) return;
+      stockInput.value = opt.value;
+      codeInput.value = opt.dataset.code || '';
+      priceInput.value = opt.dataset.price || '';
+      qtyInput.value = opt.dataset.qty || '';
+    };
+
     o.querySelector('#f_cancel').onclick = function() { o.remove(); };
     o.querySelector('#f_save').onclick = function() {
       var g = function(id) { return (o.querySelector('#'+id)||{}).value || ''; };
-      var isBuy = o.querySelector('#f_buy').style.opacity !== '0.4';
-      var price = parseFloat(g('f_price'))||0, qty = parseInt(g('f_qty'))||0;
+      var price = parseFloat(g('f_price'))||0, qty = isBuy ? (parseInt(g('f_qty'))||0) : (parseInt(g('f_qty'))||0);
       var stock = g('f_stock'), code = g('f_code'), reason = g('f_reason');
       var act = isBuy ? (g('f_win')==='W1'?'W1追涨':'W2买入') : '卖出';
 
