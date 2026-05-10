@@ -181,8 +181,8 @@ function _addWidgetToGrid(widgetId) {
   var el = document.createElement('div');
   el.className = 'grid-stack-item';
   el.setAttribute('gs-id', widgetId);
-  el.setAttribute('gs-w', meta.defaultSize.w);
-  el.setAttribute('gs-h', meta.defaultSize.h);
+  el.setAttribute('data-gs-width', meta.defaultSize.w);
+  el.setAttribute('data-gs-height', meta.defaultSize.h);
   el.innerHTML = '<div class="grid-stack-item-content" id="content_' + widgetId + '"></div>';
   grid.addWidget(el);
   widgetInstances[widgetId] = instance;
@@ -198,8 +198,8 @@ function _addPlaceholderWidget(widgetId, meta) {
   var el = document.createElement('div');
   el.className = 'grid-stack-item';
   el.setAttribute('gs-id', widgetId);
-  el.setAttribute('gs-w', meta.defaultSize.w);
-  el.setAttribute('gs-h', meta.defaultSize.h);
+  el.setAttribute('data-gs-width', meta.defaultSize.w);
+  el.setAttribute('data-gs-height', meta.defaultSize.h);
   el.innerHTML = '<div class="grid-stack-item-content" id="content_' + widgetId + '">' +
     '<div class="widget-header ' + (meta.category==='decision'?'color-decision':meta.category==='data'?'color-data':meta.category==='risk'?'color-risk':'color-tool') + '">' +
     '<span class="widget-title">' + meta.title + '</span></div>' +
@@ -429,8 +429,8 @@ function _loadSavedLayout() {
           var el = document.createElement('div');
           el.className = 'grid-stack-item';
           el.setAttribute('gs-id', id);
-          el.setAttribute('gs-w', item.w || meta.defaultSize.w);
-          el.setAttribute('gs-h', item.h || meta.defaultSize.h);
+          el.setAttribute('data-gs-width', item.w || meta.defaultSize.w);
+          el.setAttribute('data-gs-height', item.h || meta.defaultSize.h);
           el.setAttribute('gs-x', item.x || 0);
           el.setAttribute('gs-y', item.y || 0);
           el.innerHTML = '<div class="grid-stack-item-content" id="content_' + id + '"></div>';
