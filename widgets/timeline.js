@@ -128,6 +128,14 @@ class TimelineWidget extends YiMuWidget {
 
     body.innerHTML = html;
     this.updateTimestamp();
+
+    // 每 30 秒自刷新（倒计时需要高频更新），首次挂载时启动
+    if (!this._hasTimer) {
+      this._hasTimer = true;
+      var self = this;
+      var tid = setInterval(function() { if (!isDragging) self._renderBody(); }, 30000);
+      this._timers.push(tid);
+    }
   }
 }
 
