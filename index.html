@@ -404,8 +404,9 @@ document.addEventListener('keydown', function(e) {
 DataStore.onConnChange(function(status) {
   var dot = document.getElementById('connDot');
   var txt = document.getElementById('connText');
-  if (dot) dot.className = 'conn-dot ' + status;
-  if (txt) txt.textContent = status === 'live' ? '实时' : status === 'polling' ? '轮询' : '断开';
+  var isFile = location.protocol === 'file:';
+  if (dot) dot.className = 'conn-dot ' + (isFile ? 'polling' : status);
+  if (txt) txt.textContent = isFile ? '本地' : status === 'live' ? '实时' : status === 'polling' ? '轮询' : '断开';
 });
 
 // === Toast ===
