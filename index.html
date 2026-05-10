@@ -127,18 +127,22 @@ function _addWidgetToGrid(widgetId) {
     defaultSize: meta.defaultSize,
   });
 
-  // GridStack v12: addWidget() takes config object (not HTMLElement)
+  // GridStack v12: addWidget() with config object
   grid.addWidget({
     id: widgetId,
     w: meta.defaultSize.w,
     h: meta.defaultSize.h,
-    content: '<div id="content_' + widgetId + '"></div>'
+    content: '<div class="grid-stack-item-content" id="content_' + widgetId + '"></div>'
   });
-  var placedEl = document.querySelector('[gs-id="' + widgetId + '"]');
-  widgetInstances[widgetId] = instance;
-  if (placedEl) {
-    instance.mount(placedEl.querySelector('.grid-stack-item-content'));
-  }
+  // GridStack 异步创建 DOM，用 requestAnimationFrame 等一帧
+  var self = { widgetId: widgetId, instance: instance };
+  requestAnimationFrame(function() {
+    widgetInstances[widgetId] = instance;
+    var el = document.getElementById('content_' + widgetId);
+    if (el) {
+      instance.mount(el);
+    }
+  });
 }
 
 function _addPlaceholderWidget(widgetId, meta) {
@@ -236,37 +240,43 @@ function _autoSaveLayout() {
     localStorage.setItem(STORAGE_KEYS.layout, JSON.stringify(layout));
   } catch(e) {}
 }
-
 function _loadSavedLayout() {
+  // v2.1: 清除旧格式布局，逐个 addWidget 恢复
   try {
     var saved = localStorage.getItem(STORAGE_KEYS.layout);
     if (saved) {
       var layout = JSON.parse(saved);
-      grid.load(layout);
-      // 为每个已保存的 widget 创建实例
-      layout.forEach(function(item) {
-        var id = item.id;
-        var entry = WidgetRegistry.get(id);
-        var meta = WidgetRegistry.getMeta(id);
-        if (entry && entry.Class && meta) {
-          var instance = new entry.Class({
-            id: meta.id, type: meta.type, title: meta.title,
-            category: meta.category, tier: meta.tier,
-            dataPaths: meta.dataPaths, defaultSize: meta.defaultSize,
+      if (Array.isArray(layout) && layout.length && layout[0].id) {
+        layout.forEach(function(item) {
+          var id = item.id;
+          var meta = WidgetRegistry.getMeta(id);
+          if (!meta) return;
+          var entry = WidgetRegistry.get(id);
+          grid.addWidget({
+            id: id,
+            x: item.x || 0, y: item.y || 0,
+            w: item.w || meta.defaultSize.w,
+            h: item.h || meta.defaultSize.h,
+            content: '<div class="grid-stack-item-content" id="content_' + id + '"></div>'
           });
-          widgetInstances[id] = instance;
-          var contentEl = document.getElementById('content_' + id);
-          if (contentEl) instance.mount(contentEl);
-        }
-      });
-      return;
+          if (entry && entry.Class) {
+            var instance = new entry.Class({
+              id: meta.id, type: meta.type, title: meta.title,
+              category: meta.category, tier: meta.tier,
+              dataPaths: meta.dataPaths, defaultSize: meta.defaultSize,
+            });
+            widgetInstances[id] = instance;
+            instance.mount(document.getElementById('content_' + id));
+          }
+        });
+        return;
+      }
     }
   } catch(e) {}
-  // v2.1: 无保存布局 → 空白画布
+  // 清除旧布局，空白画布
+  try { localStorage.removeItem(STORAGE_KEYS.layout); } catch(e) {}
   showToast('右键画布添加组件，拖拽摆放后 Ctrl+S 保存');
 }
-
-// 导出/导入
 function exportLayout() {
   var layout = grid.save(false);
   var json = JSON.stringify({ version: '1.0', exported: new Date().toISOString(), widgets: layout }, null, 2);
