@@ -127,20 +127,19 @@ function _addWidgetToGrid(widgetId) {
     defaultSize: meta.defaultSize,
   });
 
-  // GridStack v12: addWidget() with config object
-  grid.addWidget({
-    id: widgetId,
-    w: meta.defaultSize.w,
-    h: meta.defaultSize.h,
-    content: '<div class="grid-stack-item-content" id="content_' + widgetId + '"></div>'
-  });
-  // GridStack 异步创建 DOM，用 requestAnimationFrame 等一帧
-  var self = { widgetId: widgetId, instance: instance };
+  // GridStack v12: 先创建 DOM 元素再 addWidget
+  var el = document.createElement('div');
+  el.className = 'grid-stack-item';
+  el.setAttribute('gs-id', widgetId);
+  el.setAttribute('gs-w', meta.defaultSize.w);
+  el.setAttribute('gs-h', meta.defaultSize.h);
+  el.innerHTML = '<div class="grid-stack-item-content" id="content_' + widgetId + '"></div>';
+  grid.addWidget(el);
+  widgetInstances[widgetId] = instance;
   requestAnimationFrame(function() {
-    widgetInstances[widgetId] = instance;
-    var el = document.getElementById('content_' + widgetId);
-    if (el) {
-      instance.mount(el);
+    var contentEl = document.getElementById('content_' + widgetId);
+    if (contentEl) {
+      instance.mount(contentEl);
     }
   });
 }
@@ -252,13 +251,15 @@ function _loadSavedLayout() {
           var meta = WidgetRegistry.getMeta(id);
           if (!meta) return;
           var entry = WidgetRegistry.get(id);
-          grid.addWidget({
-            id: id,
-            x: item.x || 0, y: item.y || 0,
-            w: item.w || meta.defaultSize.w,
-            h: item.h || meta.defaultSize.h,
-            content: '<div class="grid-stack-item-content" id="content_' + id + '"></div>'
-          });
+          var el = document.createElement('div');
+          el.className = 'grid-stack-item';
+          el.setAttribute('gs-id', id);
+          el.setAttribute('gs-w', item.w || meta.defaultSize.w);
+          el.setAttribute('gs-h', item.h || meta.defaultSize.h);
+          el.setAttribute('gs-x', item.x || 0);
+          el.setAttribute('gs-y', item.y || 0);
+          el.innerHTML = '<div class="grid-stack-item-content" id="content_' + id + '"></div>';
+          grid.addWidget(el);
           if (entry && entry.Class) {
             var instance = new entry.Class({
               id: meta.id, type: meta.type, title: meta.title,
