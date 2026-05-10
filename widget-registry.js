@@ -31,6 +31,7 @@ const WidgetRegistry = (function() {
     // 决策类（v2.1 新增）
     { id:'W17', type:'today-ops',     title:'今日操作',     category:'decision', tier:'manual', defaultSize:{w:6,h:3}, dataPaths:['decision.今日操作'], priority:'P1' },
     { id:'W18', type:'anchor-stocks', title:'锚定股状态',   category:'decision', tier:'manual', defaultSize:{w:6,h:3}, dataPaths:['decision.锚定股状态'], priority:'P1' },
+    { id:'W19', type:'midday-review',title:'午盘复核',     category:'decision', tier:'manual', defaultSize:{w:4,h:4}, dataPaths:['decision.盘中'], priority:'P1' },
   ];
 
   // 注册组件 class
