@@ -51,8 +51,10 @@ class PositionCalcWidget extends YiMuWidget {
       '<span class="layer-reason">首笔上限: ' + firstLimit + '%</span>' +
       '</div>';
 
-    // Actual capital
-    var totalCapital = 1000000;
+    // 从报数面板读总资产（万元），默认 100 万
+    var manual = DataStore.manualData.getAll();
+    var totalAsset = parseFloat(manual['总资产']) || 100; // 万元
+    var totalCapital = totalAsset * 10000; // 转为元
     var lbMoney = blocked ? 0 : Math.round(totalCapital * totalCap / 100 * lbActual / 100);
     var trMoney = blocked ? 0 : Math.round(totalCapital * totalCap / 100 * trActual / 100);
     var sumMoney = lbMoney + trMoney;
