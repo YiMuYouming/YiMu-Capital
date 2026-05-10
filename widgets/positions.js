@@ -8,11 +8,20 @@ class PositionsWidget extends YiMuWidget {
     var manual = DataStore.manualData.getAll();
     var liveQ = (data && data.live_quotes) || {};
 
-    // 持仓数据：优先 manualData._positions，fallback 附录
-    var posJson = manual['_positions'] || '';
-    var P = [];
-    try { P = JSON.parse(posJson); } catch(e) {}
-    if (!P || !P.length) { P = JSON.parse(JSON.stringify((data && data.positions) || [])); }
+    // 持仓数据：合并 manualData._positions + 附录数据
+    var P = JSON.parse(JSON.stringify((data && data.positions) || []));
+    try {
+      var manualP = JSON.parse(manual['_positions'] || 'null');
+      if (manualP && manualP.length) {
+        // 合并：manualP 覆盖同名标的
+        manualP.forEach(function(mp) {
+          var idx = P.findIndex(function(p) { return p['标的'] === mp['标的']; });
+          if (idx >= 0) { P[idx] = mp; }
+          else { P.push(mp); }
+        });
+      }
+    } catch(e) {}
+    console.log('W15 positions:', P.length, 'active:', P.filter(function(p){return (p['状态']||'').indexOf('清')<0;}).length, 'cleared:', P.filter(function(p){return (p['状态']||'').indexOf('清')>=0;}).length);
 
     // 今日操作
     var opsJson = manual['_今日操作'] || '[]';
