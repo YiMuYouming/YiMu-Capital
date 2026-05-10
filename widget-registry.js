@@ -25,7 +25,7 @@ const WidgetRegistry = (function() {
     { id:'W13', type:'trend-pool',    title:'趋势自选池',   category:'data',     tier:'tick',   defaultSize:{w:12,h:4}, dataPaths:['trend_pool','live_quotes'], priority:'P1' },
     // 风控类
     { id:'W14', type:'risk-panel',    title:'账户风控',     category:'risk',     tier:'realtime',defaultSize:{w:4,h:4}, dataPaths:['risk.当日盈亏','risk.当日盈亏金额','risk.周累计回撤','risk.月累计回撤','risk.连亏天数','risk.熔断触发','risk.周回撤触发'], priority:'P0' },
-    { id:'W15', type:'positions',     title:'持仓明细',     category:'risk',     tier:'realtime',defaultSize:{w:4,h:3}, dataPaths:['positions'], priority:'P0' },
+    { id:'W15', type:'positions',     title:'持仓+操作+清仓', category:'risk',     tier:'realtime',defaultSize:{w:6,h:6}, dataPaths:['positions','decision.今日操作','live_quotes'], priority:'P0' },
     // 工具类
     { id:'W16', type:'input-panel',   title:'报数面板',     category:'tool',     tier:'manual', defaultSize:{w:12,h:2}, dataPaths:[], priority:'P1' },
     // 决策类（v2.1 新增）
