@@ -463,6 +463,7 @@ def build_dashboard_data(review_path):
             "最高板": clean_value(fm.get("最高板"), "最高板"),
             "次高板": clean_value(fm.get("次高板"), "次高板"),
             "连板梯队": clean_value(fm.get("连板梯队"), "连板梯队"),
+            "竞价情绪值": clean_value(fm.get("竞价情绪值")) or clean_value(fm.get("情绪值")),
         },
         "style": style if style else {
             "总分": None, "风格": None, "连板占比": None, "趋势占比": None,
