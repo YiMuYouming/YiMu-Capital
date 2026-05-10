@@ -24,7 +24,7 @@ class W2CheckWidget extends YiMuWidget {
     html += '<div style="padding:var(--sp-sm);margin-bottom:var(--sp-sm);background:var(--info-bg);border-radius:var(--radius-sm);font-size:var(--fs-body);color:var(--info)">' +
       (mid['W2出手时机']||'—') + '</div>';
 
-    var checks = mid['W2出手条件'] || [];
+    var checks = mid['W2出手条件'] || mid['条件列表'] || [];
     html += '<div class="check-list">';
     checks.forEach(function(c) {
       if (c['状态'] === 'pending') { allPass = false; hasPending = true; }

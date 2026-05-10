@@ -15,7 +15,7 @@ class W1CheckWidget extends YiMuWidget {
 
     var allPass = true;
     var hasFail = false;
-    var checks = morning['方向确认'] || [];
+    var checks = morning['方向确认'] || morning['条件列表'] || [];
 
     var html = '';
 
