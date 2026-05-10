@@ -17,12 +17,15 @@ class PositionsWidget extends YiMuWidget {
       }
     });
 
-    // 自动计算：市值 = 现价 × 数量, 盈亏 = (现价 − 成本) × 数量
+    // 自动计算
     active.forEach(function(p) {
-      var qty = parseFloat(p['数量']) || 1;
-      p['_市值'] = Math.round((parseFloat(p['现价']) || 0) * qty);
-      p['_持仓'] = Math.round((parseFloat(p['成本']) || 0) * qty);
-      p['_盈亏'] = Math.round(((parseFloat(p['现价']) || 0) - (parseFloat(p['成本']) || 0)) * qty);
+      var qty = parseFloat(p['数量']) || 0;
+      var price = parseFloat(p['现价']) || 0;
+      var cost = parseFloat(p['成本']) || 0;
+      p['_市值'] = Math.round(price * qty);
+      p['_持仓'] = qty;  // 持仓 = 股数
+      p['_盈亏'] = Math.round((price - cost) * qty);
+      p['_盈亏pct'] = cost > 0 ? ((price - cost) / cost * 100) : 0;
     });
 
     var html = '';
@@ -33,7 +36,10 @@ class PositionsWidget extends YiMuWidget {
     var totalAsset = totalAssetWan * 10000;
 
     var posValue = 0, posCost = 0;
-    active.forEach(function(p) { posValue += p['_市值'] || 0; posCost += p['_持仓'] || 0; });
+    active.forEach(function(p) {
+      posValue += p['_市值'] || 0;
+      posCost += Math.round((parseFloat(p['成本']) || 0) * (parseFloat(p['数量']) || 0));
+    });
     var totalPnl = posValue - posCost;
     var pnlCls = totalPnl > 0 ? 'up' : totalPnl < 0 ? 'down' : '';
     var pnlPct = posCost > 0 ? (totalPnl / posCost * 100) : 0;
@@ -61,17 +67,17 @@ class PositionsWidget extends YiMuWidget {
     // 活跃持仓表格
     if (active.length) {
       html += '<table class="data-table"><thead><tr>' +
-        '<th>标的</th><th>市值</th><th>持仓</th><th>盈亏</th><th>现价</th><th>成本</th><th>止损</th><th>状态</th>' +
+        '<th>标的</th><th>市值</th><th>持仓</th><th>盈亏</th><th>盈亏%</th><th>现价</th><th>成本</th><th>止损</th><th>状态</th>' +
         '</tr></thead><tbody>';
       active.forEach(function(p) {
         var pnlC = (p['_盈亏']||0) > 0 ? 'up' : (p['_盈亏']||0) < 0 ? 'down' : '';
-        var fp = parseFloat(p['浮盈']) || 0;
-        var fpC = fp > 0 ? 'up' : fp < 0 ? 'down' : '';
+        var pctC = (p['_盈亏pct']||0) > 0 ? 'up' : (p['_盈亏pct']||0) < 0 ? 'down' : '';
         html += '<tr>' +
           '<td><strong>'+(p['标的']||'—')+'</strong> <span style="font-size:var(--fs-label);color:var(--text-disabled)">'+(p['代码']||'')+'</span></td>' +
           '<td style="font-weight:600">'+(p['_市值']||0).toLocaleString()+'</td>' +
-          '<td style="color:var(--text-secondary)">'+(p['_持仓']||0).toLocaleString()+'</td>' +
+          '<td>'+(p['_持仓']||0).toLocaleString()+'</td>' +
           '<td class="'+pnlC+'" style="font-weight:600">'+(p['_盈亏']>=0?'+':'')+(p['_盈亏']||0).toLocaleString()+'</td>' +
+          '<td class="'+pctC+'">'+(p['_盈亏pct']>=0?'+':'')+(p['_盈亏pct']||0).toFixed(2)+'%</td>' +
           '<td>'+(p['现价']||'—')+'</td>' +
           '<td style="color:var(--text-secondary)">'+(p['成本']||'—')+'</td>' +
           '<td>'+(p['止损']||'—')+'</td>' +
