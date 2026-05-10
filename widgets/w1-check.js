@@ -32,7 +32,7 @@ class W1CheckWidget extends YiMuWidget {
       var cls = c['状态']==='pass'?'pass':c['状态']==='fail'?'fail':'pending';
       html += '<div style="display:flex;align-items:center;gap:var(--sp-sm);padding:4px 0;font-size:var(--fs-body)">' +
         '<span style="width:20px">'+icon+'</span>' +
-        '<span style="flex:1;font-weight:600">'+c['指标']+'</span>' +
+        '<span style="flex:1">'+c['指标']+'</span>' +
         '<span style="color:var(--text-secondary)">'+c['判定']+'</span>' +
         '</div>';
     });
