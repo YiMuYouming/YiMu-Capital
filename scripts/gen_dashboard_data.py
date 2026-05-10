@@ -245,13 +245,20 @@ def _parse_key_values(body):
         line = line.strip()
         if not line:
             continue
-        # 指标行: 指标N=label|desc|status
+        # 指标行（新格式）: 指标N=label|code|desc|status
+        m = re.match(r'指标\d+=([^|]+)\|([^|]+)\|([^|]+)\|([a-z]+)', line)
+        if m:
+            checks.append({
+                '指标': m.group(1), '代码': m.group(2).strip(),
+                '判定': m.group(3), '状态': m.group(4)
+            })
+            continue
+        # 指标行（旧格式兼容）: 指标N=label|desc|status
         m = re.match(r'指标\d+=(.+)\|(.+)\|(.+)', line)
         if m:
             checks.append({
-                '指标': m.group(1),
-                '判定': m.group(2),
-                '状态': m.group(3)
+                '指标': m.group(1), '代码': '',
+                '判定': m.group(2), '状态': m.group(3)
             })
             continue
         # 普通 key=value
