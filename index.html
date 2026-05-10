@@ -162,7 +162,7 @@ function _removeWidget(widgetId) {
   if (instance) { instance.unmount(); delete widgetInstances[widgetId]; }
   var el = document.querySelector('[gs-id="' + widgetId + '"]');
   if (el) {
-    grid.removeWidget(el, false);
+    grid.removeWidget(el, true, false);
     // 5 秒撤销 toast
     var removedMeta = WidgetRegistry.getMeta(widgetId);
     showToast('已删除 ' + (removedMeta?removedMeta.title:widgetId) + '（5秒内可撤销）');
