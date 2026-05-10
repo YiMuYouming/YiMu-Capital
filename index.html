@@ -47,16 +47,10 @@ body.ready{opacity:1}
   <span class="topbar-brand">弈沐资本 · 数据看板 v2.0</span>
   <span class="conn-dot polling" id="connDot"></span>
   <span class="conn-text" id="connText">轮询</span>
-  <select class="topbar-preset-select" id="presetSelect">
-    <option value="">— 预设布局 —</option>
-    <option value="pre-market">盘前准备</option>
-    <option value="w1-chase">W1 追涨</option>
-    <option value="w2-dip">W2 低吸</option>
-    <option value="closing-review">收盘复盘</option>
-  </select>
-  <button class="widget-btn" id="saveLayoutBtn" title="保存布局 (Ctrl+S)" style="margin-left:auto">保存</button>
-  <button class="widget-btn" id="exportLayoutBtn" title="导出布局">导出</button>
-  <button class="widget-btn" id="importLayoutBtn" title="导入布局">导入</button>
+  <span style="flex:1"></span>
+  <button class="widget-btn" id="saveLayoutBtn" title="保存布局 (Ctrl+S)">保存</button>
+  <button class="widget-btn" id="exportLayoutBtn" title="导出布局 JSON">导出</button>
+  <button class="widget-btn" id="importLayoutBtn" title="导入布局 JSON">导入</button>
   <input type="file" id="importFileInput" accept=".json" style="display:none">
 </header>
 
@@ -235,54 +229,6 @@ document.addEventListener('contextmenu', function(e) {
 });
 
 // === Presets (v2.0: 内联嵌入，避免 file:// CORS) ===
-var INLINE_PRESETS = {
-  'pre-market': {"version":"1.0","name":"pre-market","label":"盘前准备","widgets":[{"id":"W01","gs":{"w":12,"h":1,"x":0,"y":0}},{"id":"W02","gs":{"w":4,"h":4,"x":0,"y":1}},{"id":"W14","gs":{"w":4,"h":4,"x":4,"y":1}},{"id":"W03","gs":{"w":4,"h":4,"x":8,"y":1}},{"id":"W06","gs":{"w":12,"h":5,"x":0,"y":5}},{"id":"W04","gs":{"w":6,"h":3,"x":0,"y":10}},{"id":"W05","gs":{"w":6,"h":4,"x":6,"y":10}}]},
-  'w1-chase': {"version":"1.0","name":"w1-chase","label":"W1 追涨","widgets":[{"id":"W01","gs":{"w":12,"h":1,"x":0,"y":0}},{"id":"W06","gs":{"w":8,"h":5,"x":0,"y":1}},{"id":"W07","gs":{"w":3,"h":2,"x":8,"y":1}},{"id":"W08","gs":{"w":4,"h":3,"x":8,"y":3}},{"id":"W14","gs":{"w":4,"h":4,"x":8,"y":6}},{"id":"W12","gs":{"w":12,"h":4,"x":0,"y":6}},{"id":"W05","gs":{"w":6,"h":3,"x":0,"y":10}},{"id":"W04","gs":{"w":6,"h":3,"x":6,"y":10}}]},
-  'w2-dip': {"version":"1.0","name":"w2-dip","label":"W2 低吸","widgets":[{"id":"W01","gs":{"w":12,"h":1,"x":0,"y":0}},{"id":"W11","gs":{"w":8,"h":3,"x":0,"y":1}},{"id":"W09","gs":{"w":4,"h":5,"x":8,"y":1}},{"id":"W02","gs":{"w":4,"h":2,"x":8,"y":6}},{"id":"W14","gs":{"w":4,"h":4,"x":8,"y":8}},{"id":"W13","gs":{"w":12,"h":4,"x":0,"y":4}},{"id":"W10","gs":{"w":6,"h":4,"x":0,"y":8}},{"id":"W04","gs":{"w":6,"h":3,"x":6,"y":8}}]},
-  'closing-review': {"version":"1.0","name":"closing-review","label":"收盘复盘","widgets":[{"id":"W05","gs":{"w":6,"h":4,"x":0,"y":0}},{"id":"W10","gs":{"w":6,"h":4,"x":6,"y":0}},{"id":"W12","gs":{"w":6,"h":4,"x":0,"y":4}},{"id":"W13","gs":{"w":6,"h":4,"x":6,"y":4}},{"id":"W14","gs":{"w":4,"h":4,"x":0,"y":8}},{"id":"W15","gs":{"w":4,"h":4,"x":4,"y":8}},{"id":"W16","gs":{"w":12,"h":2,"x":0,"y":12}}]}
-};
-
-function loadPreset(name) {
-  var preset = INLINE_PRESETS[name];
-  if (!preset) return;
-
-  // 清空画板
-  Object.keys(widgetInstances).forEach(function(id) {
-    if (widgetInstances[id]) widgetInstances[id].unmount();
-  });
-  grid.removeAll(false);
-  widgetInstances = {};
-
-  // 加载预设布局
-  activePreset = name;
-  (preset.widgets || []).forEach(function(w) {
-    var meta = WidgetRegistry.getMeta(w.id);
-    if (!meta) return;
-    if (!w.gs) w.gs = { w: meta.defaultSize.w, h: meta.defaultSize.h, x: 0, y: 0 };
-    var el = document.createElement('div');
-    el.className = 'grid-stack-item';
-    el.setAttribute('gs-id', w.id);
-    el.setAttribute('gs-w', w.gs.w);
-    el.setAttribute('gs-h', w.gs.h);
-    el.setAttribute('gs-x', w.gs.x || 0);
-    el.setAttribute('gs-y', w.gs.y || 0);
-    el.innerHTML = '<div class="grid-stack-item-content" id="content_' + w.id + '"></div>';
-    grid.makeWidget(el);
-
-    var entry = WidgetRegistry.get(w.id);
-    if (entry && entry.Class) {
-      var instance = new entry.Class({
-        id: meta.id, type: meta.type, title: meta.title,
-        category: meta.category, tier: meta.tier,
-        dataPaths: meta.dataPaths, defaultSize: meta.defaultSize,
-      });
-      widgetInstances[w.id] = instance;
-      instance.mount(document.getElementById('content_' + w.id));
-    }
-  });
-  showToast('已切换：' + (preset.label || name));
-}
-
 // === Layout Persistence ===
 function _autoSaveLayout() {
   try {
@@ -316,8 +262,8 @@ function _loadSavedLayout() {
       return;
     }
   } catch(e) {}
-  // 无保存布局 → 加载盘前预设
-  loadPreset('pre-market');
+  // v2.1: 无保存布局 → 空白画布
+  showToast('右键画布添加组件，拖拽摆放后 Ctrl+S 保存');
 }
 
 // 导出/导入
@@ -361,10 +307,6 @@ document.addEventListener('keydown', function(e) {
     var w16 = document.getElementById('content_W16');
     if (w16) w16.scrollIntoView({ behavior: 'smooth' });
   }
-  if (e.key === '1') { e.preventDefault(); loadPreset('pre-market'); }
-  if (e.key === '2') { e.preventDefault(); loadPreset('w1-chase'); }
-  if (e.key === '3') { e.preventDefault(); loadPreset('w2-dip'); }
-  if (e.key === '4') { e.preventDefault(); loadPreset('closing-review'); }
   if ((e.ctrlKey || e.metaKey) && e.key === 's') { e.preventDefault(); _autoSaveLayout(); showToast('已保存'); }
   if ((e.ctrlKey || e.metaKey) && e.key === 'z') { e.preventDefault(); _undoRemoveWidget(); }
   if (e.key === 'a' || e.key === 'A') {
@@ -392,10 +334,7 @@ function showToast(msg) {
   t._timeout = setTimeout(function() { t.className = 'toast'; }, 1800);
 }
 
-// === Event bindings ===
-document.getElementById('presetSelect').addEventListener('change', function() {
-  if (this.value) loadPreset(this.value);
-});
+// === Event bindings ===// v2.1: preset select removed
 document.getElementById('saveLayoutBtn').addEventListener('click', function() { _autoSaveLayout(); showToast('已保存'); });
 document.getElementById('exportLayoutBtn').addEventListener('click', exportLayout);
 document.getElementById('importLayoutBtn').addEventListener('click', function() {
