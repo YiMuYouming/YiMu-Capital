@@ -501,9 +501,9 @@ html,body{
   padding:var(--sp-sm);
   border-bottom:1px solid var(--border-light);
 }
-.layer-label{font-size:var(--fs-label);text-transform:uppercase;letter-spacing:var(--ls-label);color:var(--text-secondary);width:48px}
+.layer-label{font-size:var(--fs-body);text-transform:uppercase;letter-spacing:var(--ls-label);color:var(--text-secondary);width:52px}
 .layer-value{font-family:var(--font-mono);font-size:var(--fs-subtitle);font-weight:600}
-.layer-reason{font-size:var(--fs-label);color:var(--text-secondary);flex:1}
+.layer-reason{font-size:var(--fs-body);color:var(--text-secondary);flex:1}
 .layer-blocked{opacity:.35}
 
 /* ===== Fullscreen ===== */

@@ -37,16 +37,12 @@ class PositionCalcWidget extends YiMuWidget {
       '</div>';
 
     // Layer 2
-    var lbBlocked = !blocked && lbActual < lbPct;
-    var trCapped = trActual < trPct;
     html += '<div class="layer-row' + (blocked?' layer-blocked':'') + '">' +
       '<span class="layer-label">第二层</span>' +
       '<span class="layer-value up">' + (blocked?'0%':lbActual+'%') + '</span>' +
       '<span class="layer-value down" style="margin-left:var(--sp-sm)">' + (blocked?'0%':trActual+'%') + '</span>' +
-      '<span class="layer-reason">连板 | 趋势' +
-      (lbBlocked ? ' <span style="color:var(--danger);font-size:var(--fs-label)">（' + execReason + '）</span>' : '') +
-      (trCapped ? ' <span style="color:var(--warn);font-size:var(--fs-label)">（' + execReason2 + '）</span>' : '') +
-      '</span></div>';
+      '<span class="layer-reason">连板 | 趋势</span>' +
+      '</div>';
 
     // Layer 3
     html += '<div class="layer-row' + (blocked?' layer-blocked':'') + '">' +
@@ -56,13 +52,23 @@ class PositionCalcWidget extends YiMuWidget {
       '</div>';
 
     // Actual capital
-    var totalCapital = 1000000; // placeholder
+    var totalCapital = 1000000;
     var actualMoney = blocked ? 0 : Math.round(totalCapital * totalCap / 100 * Math.max(lbActual, trActual) / 100);
     html += '<div style="margin-top:var(--sp-sm);padding:var(--sp-sm);background:var(--bg-base);border-radius:var(--radius-sm);text-align:center">' +
-      '<span style="font-size:var(--fs-label);color:var(--text-secondary)">实际可用</span><br>' +
+      '<span style="font-size:var(--fs-body);color:var(--text-secondary)">实际可用</span><br>' +
       '<span style="font-family:var(--font-mono);font-size:var(--fs-kpi);font-weight:700;color:' + (blocked?'var(--danger)':'var(--info)') + '">' +
       (blocked?'—':actualMoney.toLocaleString()) + '</span>' +
       '</div>';
+
+    // 备注：硬卡/熔断/周五原因
+    var notes = [];
+    if (execReason) notes.push(execReason);
+    if (execReason2) notes.push(execReason2);
+    if (notes.length) {
+      html += '<div style="margin-top:var(--sp-xs);padding:var(--sp-xs) var(--sp-sm);font-size:var(--fs-body);color:var(--text-secondary);line-height:1.5">' +
+        '<span style="color:var(--text-disabled)">备注：</span>' + notes.join('；') +
+        '</div>';
+    }
 
     body.innerHTML = html;
     this.updateTimestamp();
