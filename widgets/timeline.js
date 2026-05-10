@@ -15,9 +15,17 @@ class TimelineWidget extends YiMuWidget {
       {label:'闭窗',    start:{h:14,m:45},end:{h:15,m:0},  color:'#9aa0a6'},
     ];
 
+    // 调试模式：URL 加 ?time=10:00 模拟任意时间
+    var debugMatch = location.search.match(/[?&]time=(\d{1,2}):(\d{2})/);
     var now = new Date();
-    var nowHM = now.getHours() * 60 + now.getMinutes();
-    var nowH = now.getHours(), nowM = now.getMinutes(), nowS = now.getSeconds();
+    var nowH, nowM;
+    if (debugMatch) {
+      nowH = parseInt(debugMatch[1]); nowM = parseInt(debugMatch[2]);
+      now.setHours(nowH, nowM, 0, 0);
+    } else {
+      nowH = now.getHours(); nowM = now.getMinutes();
+    }
+    var nowHM = nowH * 60 + nowM;
 
     // 找到当前时段
     var current = null, next = null;
