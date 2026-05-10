@@ -27,7 +27,7 @@ class Auction5DWidget extends YiMuWidget {
     var isBull = auction['结论'].indexOf('偏多') >= 0;
     html += '<div style="padding:var(--sp-sm) var(--sp-md);margin-bottom:var(--sp-md);background:var(--bg-base);border-radius:var(--radius-md);border-left:3px solid '+(isBull?'var(--up)':'var(--warn)')+'">' +
       '<div style="display:flex;align-items:baseline;gap:var(--sp-md)">' +
-        '<span style="font-size:var(--fs-hero);font-weight:700;color:'+(isBull?'var(--up)':'var(--warn)')+'">'+auction['结论']+'</span>' +
+        '<span style="font-size:var(--fs-subtitle);font-weight:700;color:'+(isBull?'var(--up)':'var(--warn)')+'">'+auction['结论']+'</span>' +
         '<span style="font-size:var(--fs-body);color:var(--text-secondary)">高潮保护: '+auction['高潮保护']+'</span>' +
       '</div>' +
       '<div style="margin-top:var(--sp-xs);font-size:var(--fs-body);color:var(--info)">▶ '+(auction['动作']||'')+'</div>' +
@@ -40,12 +40,11 @@ class Auction5DWidget extends YiMuWidget {
     html += '<div style="background:var(--bg-base);border-radius:var(--radius-md);padding:var(--sp-sm) var(--sp-md)">' +
       '<div style="font-size:var(--fs-body);font-weight:600;color:var(--text-primary);margin-bottom:var(--sp-sm);padding-bottom:var(--sp-xs);border-bottom:1px solid var(--border-light)">大盘指数</div>';
     (auction['大盘指数']||[]).forEach(function(idx) {
-      html += '<div style="display:flex;align-items:center;justify-content:space-between;padding:3px 0;font-size:var(--fs-body)">' +
+      html += '<div style="display:flex;align-items:center;gap:var(--sp-sm);padding:3px 0;font-size:var(--fs-body)">' +
         '<span>'+dot(idx['灯'])+' <strong>'+idx['指数']+'</strong></span>' +
         '<span style="font-family:var(--font-mono);font-weight:600;color:var(--'+chgCls(idx['竞价涨幅'])+')">'+idx['竞价涨幅']+'</span>' +
-        '</div>' +
-        '<div style="font-size:var(--fs-body);color:var(--text-secondary);margin-bottom:4px;padding-left:18px">' +
-        '涨 <span style="color:var(--up);font-weight:600">'+(idx['涨家']||'—')+'</span> / 跌 <span style="color:var(--down);font-weight:600">'+(idx['跌家']||'—')+'</span></div>';
+        '<span style="font-size:var(--fs-body);color:var(--text-secondary)">涨 <span style="color:var(--up);font-weight:600">'+(idx['涨家']||'—')+'</span> 跌 <span style="color:var(--down);font-weight:600">'+(idx['跌家']||'—')+'</span></span>' +
+        '</div>';
     });
     html += '</div>';
 
