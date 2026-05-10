@@ -1,5 +1,63 @@
-// widgets/today-ops.js — W17 今日操作（自助录入+自动计算）
+// widgets/today-ops.js — W17 今日操作（自助录入+自动计算+同步持仓）
 'use strict';
+
+function _syncPosition(entry) {
+  // 从 manualData 或 DataStore 读取现有持仓
+  var manual = DataStore.manualData.getAll();
+  var posJson = manual['_positions'] || '[]';
+  var positions = [];
+  try { positions = JSON.parse(posJson); } catch(e) { positions = []; }
+  // 如果 manualData 没有，从 DataStore.merged 初始化
+  if (!positions.length) {
+    var merged = DataStore.merged || {};
+    (merged.positions || []).forEach(function(p) {
+      var s = p['状态'] || '';
+      if (s.indexOf('清仓') < 0 && s.indexOf('卖出') < 0) {
+        positions.push({
+          '标的': p['标的'], '代码': p['代码']||'', '方向': p['方向']||'',
+          '成本': p['成本'], '现价': p['现价'], '数量': p['数量']||0,
+          '止损': p['止损']||'—', '状态': '持有'
+        });
+      }
+    });
+  }
+
+  var act = entry['动作'] || '';
+  var stock = entry['标的'] || '';
+  var price = parseFloat(entry['价格']) || 0;
+  var qty = parseInt(entry['数量']) || 0;
+
+  if (act.indexOf('清仓') >= 0 || act.indexOf('卖出') >= 0) {
+    // 卖出/清仓：标记持仓
+    var found = positions.find(function(p) { return p['标的'] === stock; });
+    if (found) {
+      found['状态'] = '已清仓';
+      found['卖出价'] = price;
+      found['清仓原因'] = entry['原因'] || '';
+    }
+  } else {
+    // 买入/追涨：新增或合并持仓
+    var exist = positions.find(function(p) { return p['标的'] === stock; });
+    if (exist) {
+      // 合并：加权平均成本
+      var oldQty = parseInt(exist['数量']) || 0;
+      var oldCost = parseFloat(exist['成本']) || 0;
+      var newQty = oldQty + qty;
+      var newCost = oldQty > 0 ? ((oldCost * oldQty) + (price * qty)) / newQty : price;
+      exist['数量'] = newQty;
+      exist['成本'] = Math.round(newCost * 100) / 100;
+      exist['现价'] = price;
+    } else {
+      positions.push({
+        '标的': stock, '代码': '', '方向': '',
+        '成本': price, '现价': price, '数量': qty,
+        '止损': '—', '状态': '持有'
+      });
+    }
+  }
+
+  DataStore.manualData.set('_positions', JSON.stringify(positions));
+}
 
 class TodayOpsWidget extends YiMuWidget {
   render(data) {
@@ -136,6 +194,8 @@ class TodayOpsWidget extends YiMuWidget {
       };
       ops.push(entry);
       DataStore.manualData.set('_今日操作', JSON.stringify(ops));
+      // 同步更新 W15 持仓
+      _syncPosition(entry);
       overlay.remove();
       self._renderBody();
     };

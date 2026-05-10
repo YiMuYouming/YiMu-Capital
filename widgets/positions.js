@@ -5,7 +5,17 @@ class PositionsWidget extends YiMuWidget {
   render(data) {
     var body = this.getBody();
     if (!body) return;
-    var P = (data && data.positions) || [];
+
+    // 优先读 manualData._positions（W17 同步写入），fallback 到附录数据
+    var manual = DataStore.manualData.getAll();
+    var posJson = manual['_positions'] || '';
+    var P = [];
+    if (posJson) {
+      try { P = JSON.parse(posJson); } catch(e) {}
+    }
+    if (!P.length) {
+      P = (data && data.positions) || [];
+    }
 
     var active = [], cleared = [];
     P.forEach(function(p) {
@@ -30,8 +40,7 @@ class PositionsWidget extends YiMuWidget {
 
     var html = '';
 
-    // 汇总卡片
-    var manual = DataStore.manualData.getAll();
+    // 汇总卡片（复用上面已声明的 manual）
     var totalAssetWan = parseFloat(manual['总资产']) || 0;
     var totalAsset = totalAssetWan * 10000;
 
