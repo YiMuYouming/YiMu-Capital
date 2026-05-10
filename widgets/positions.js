@@ -87,21 +87,50 @@ class PositionsWidget extends YiMuWidget {
       html += '</tbody></table>';
     }
 
-    // 清仓记录
+    // 清仓记录（追踪一周）
     if (cleared.length) {
-      html += '<div style="margin-top:var(--sp-md);padding-top:var(--sp-sm);border-top:1px solid var(--border-light)">' +
-        '<div class="kpi-label" style="margin-bottom:var(--sp-sm)">清仓记录</div>';
-      cleared.forEach(function(p) {
-        var pl = parseFloat(p['盈亏']) || 0;
-        var plCls = pl > 0 ? 'up' : pl < 0 ? 'down' : '';
-        html += '<div style="padding:var(--sp-sm);margin-bottom:var(--sp-xs);background:var(--bg-base);border-radius:var(--radius-sm);font-size:var(--fs-body)">' +
-          '<strong>'+(p['标的']||'')+'</strong> <span class="tag" style="background:var(--danger-bg);color:var(--danger)">'+(p['状态']||'已清')+'</span> ' +
-          '<span style="color:var(--text-secondary)">成本 '+(p['成本']||'—')+' → 卖出 '+(p['卖出价']||'—')+'</span> ' +
-          '<span class="'+plCls+'" style="font-weight:600">'+(pl!==0?(pl>0?'+':'')+pl.toFixed(2)+'%':'0.00%')+'</span>' +
-          (p['清仓原因']?'<div style="color:var(--text-secondary);font-size:var(--fs-label);margin-top:2px">'+p['清仓原因']+'</div>':'') +
-          '</div>';
+      var now = new Date();
+      var tracked = cleared.filter(function(p) {
+        var d = p['清仓日期'];
+        if (!d) return true;  // 无日期则始终显示
+        try {
+          var sold = new Date(d);
+          return (now - sold) / (1000*60*60*24) <= 7;
+        } catch(e) { return true; }
       });
-      html += '</div>';
+
+      if (tracked.length) {
+        html += '<div style="margin-top:var(--sp-md);padding-top:var(--sp-sm);border-top:1px solid var(--border-light)">' +
+          '<div class="kpi-label" style="margin-bottom:var(--sp-sm)">清仓记录（7日内）</div>';
+        html += '<table class="data-table"><thead><tr>' +
+          '<th>标的</th><th>成本</th><th>卖出价</th><th>盈亏%</th><th>现价</th><th>卖出后涨跌</th><th>原因</th>' +
+          '</tr></thead><tbody>';
+
+        tracked.forEach(function(p) {
+          var sellPrice = parseFloat(p['卖出价']) || 0;
+          var costPrice = parseFloat(p['成本']) || 0;
+          var curPrice = parseFloat(p['最新价'] || p['现价']) || 0;
+          var plPct = parseFloat(p['浮盈'] || p['盈亏']) || 0;
+          var plCls = plPct > 0 ? 'up' : plPct < 0 ? 'down' : '';
+          // 卖出后涨跌幅 = (现价 - 卖出价) / 卖出价
+          var afterPct = sellPrice > 0 ? ((curPrice - sellPrice) / sellPrice * 100) : 0;
+          var afterCls = afterPct > 0 ? 'up' : afterPct < 0 ? 'down' : '';
+          // 现价从 live_quotes 取
+          var liveQ = (data && data.live_quotes && data.live_quotes[p['代码']]) || {};
+          var displayPrice = liveQ['最新价'] || curPrice || '—';
+
+          html += '<tr>' +
+            '<td><strong>'+(p['标的']||'—')+'</strong> <span style="font-size:var(--fs-label);color:var(--text-disabled)">'+(p['代码']||'')+'</span></td>' +
+            '<td>'+(costPrice||'—')+'</td>' +
+            '<td>'+(sellPrice||'—')+'</td>' +
+            '<td class="'+plCls+'" style="font-weight:600">'+(plPct>=0?'+':'')+plPct.toFixed(2)+'%</td>' +
+            '<td>'+(curPrice > 0 ? curPrice : '—')+'</td>' +
+            '<td class="'+afterCls+'" style="font-weight:600">'+(afterPct>=0?'+':'')+afterPct.toFixed(2)+'%</td>' +
+            '<td style="font-size:var(--fs-label);color:var(--text-secondary);max-width:100px;white-space:normal">'+(p['清仓原因']||'')+'</td>' +
+            '</tr>';
+        });
+        html += '</tbody></table></div>';
+      }
     }
 
     body.innerHTML = html;
