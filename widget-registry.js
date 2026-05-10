@@ -15,7 +15,7 @@ const WidgetRegistry = (function() {
     { id:'W06', type:'auction-5d',    title:'竞价5维面板',  category:'decision', tier:'manual', defaultSize:{w:8,h:5},  dataPaths:['decision.竞价','sentiment.竞价情绪值'], priority:'P1' },
     { id:'W07', type:'climax-guard',  title:'高潮保护',     category:'decision', tier:'manual', defaultSize:{w:3,h:2},  dataPaths:['sentiment.竞价情绪值'], priority:'P1' },
     { id:'W08', type:'w1-check',      title:'W1早盘确认',   category:'decision', tier:'manual', defaultSize:{w:4,h:3},  dataPaths:['decision.早盘'], priority:'P1' },
-    { id:'W09', type:'w2-check',      title:'W2实时观察',   category:'decision',tier:'tick',   defaultSize:{w:4,h:5},  dataPaths:['trend_pool','live_quotes'], priority:'P1' },
+    { id:'W09', type:'w2-check',      title:'W2实时观察',   category:'decision',tier:'tick',   defaultSize:{w:4,h:5},  dataPaths:['decision.盘中','trend_pool','live_quotes'], priority:'P1' },
     // 数据类
     { id:'W04', type:'market-overview',title:'市场全景',    category:'data',     tier:'tick',   defaultSize:{w:6,h:3},  dataPaths:['live_index','market.涨跌比','market.涨停家数','market.跌停家数'], priority:'P0' },
     { id:'W05', type:'sentiment-dash',title:'情绪仪表盘',   category:'data',     tier:'manual', defaultSize:{w:6,h:4},  dataPaths:['sentiment.情绪值','sentiment.情绪区间','sentiment.上涨家数','sentiment.下跌家数','sentiment.昨日涨停收益','sentiment.连板收益','sentiment.昨日炸板收益','sentiment.连板风险值','sentiment.晋级率','market.封板率','sentiment.赚钱效应','sentiment.最高板','sentiment.连板梯队'], priority:'P0' },
