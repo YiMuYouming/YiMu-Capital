@@ -237,17 +237,17 @@ document.addEventListener('contextmenu', function(e) {
 function _autoSaveLayout() {
   try {
     var layout = grid.save(false);
-    localStorage.setItem(STORAGE_KEYS.layout, JSON.stringify(layout));
+    localStorage.setItem(STORAGE_KEYS.layout, JSON.stringify({v:'2.1', items:layout}));
   } catch(e) {}
 }
 function _loadSavedLayout() {
-  // v2.1: 清除旧格式布局，逐个 addWidget 恢复
+  // v2.1: 只加载 v2.1 格式布局 {v:'2.1', items:[...]}
   try {
     var saved = localStorage.getItem(STORAGE_KEYS.layout);
     if (saved) {
-      var layout = JSON.parse(saved);
-      if (Array.isArray(layout) && layout.length && layout[0].id) {
-        layout.forEach(function(item) {
+      var data = JSON.parse(saved);
+      if (data.v === '2.1' && Array.isArray(data.items) && data.items.length) {
+        data.items.forEach(function(item) {
           var id = item.id;
           var meta = WidgetRegistry.getMeta(id);
           if (!meta) return;
@@ -273,7 +273,7 @@ function _loadSavedLayout() {
       }
     }
   } catch(e) {}
-  // 清除旧布局，空白画布
+  // 旧格式或不兼容 → 清除，空白画布
   try { localStorage.removeItem(STORAGE_KEYS.layout); } catch(e) {}
   showToast('右键画布添加组件，拖拽摆放后 Ctrl+S 保存');
 }

@@ -6,7 +6,7 @@
 const STORAGE_KEYS = {
   inputs: 'dash_inputs',        // 报数面板 15 字段
   panelOpen: 'dash_panel_open', // 报数面板折叠状态
-  layout: 'dash_layout',        // 画板布局 JSON
+  layout: 'dash_layout_v2',    // 画板布局 JSON (v2.1 新 key)
 };
 
 const DataStore = (function() {
