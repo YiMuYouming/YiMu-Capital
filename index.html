@@ -134,6 +134,14 @@ function initGrid() {
 var widgetInstances = {};
 
 function _addWidgetToGrid(widgetId) {
+  // 去重：已有同 ID 组件则聚焦并提示
+  if (widgetInstances[widgetId]) {
+    var exist = document.querySelector('[gs-id="' + widgetId + '"]');
+    if (exist) exist.scrollIntoView({ behavior: 'smooth' });
+    showToast((WidgetRegistry.getMeta(widgetId)||{}).title + ' 已在画布中');
+    return;
+  }
+
   var meta = WidgetRegistry.getMeta(widgetId);
   if (!meta) return;
 
