@@ -31,7 +31,8 @@ class Auction5DWidget extends YiMuWidget {
     // Col 1: 大盘指数
     html += '<div><div class="kpi-label" style="text-align:left">大盘指数</div>';
     (auction['大盘指数']||[]).forEach(function(idx) {
-      html += '<div style="font-size:var(--fs-body);padding:1px 0"><span>'+idx['指数']+'</span> <span class="'+light(idx['灯'])+'">'+idx['竞价涨幅']+'</span></div>';
+      html += '<div style="font-size:var(--fs-body);padding:1px 0"><span>'+idx['指数']+'</span> <span class="'+light(idx['灯'])+'">'+idx['竞价涨幅']+'</span>' +
+        '<br><span style="font-size:var(--fs-micro)">涨<span style="color:var(--up)">'+(idx['涨家']||'—')+'</span> 跌<span style="color:var(--down)">'+(idx['跌家']||'—')+'</span></span></div>';
     });
     html += '</div>';
 

@@ -28,6 +28,9 @@ const WidgetRegistry = (function() {
     { id:'W15', type:'positions',     title:'持仓明细',     category:'risk',     tier:'realtime',defaultSize:{w:4,h:3}, dataPaths:['positions'], priority:'P0' },
     // 工具类
     { id:'W16', type:'input-panel',   title:'报数面板',     category:'tool',     tier:'manual', defaultSize:{w:12,h:2}, dataPaths:[], priority:'P1' },
+    // 决策类（v2.1 新增）
+    { id:'W17', type:'today-ops',     title:'今日操作',     category:'decision', tier:'manual', defaultSize:{w:6,h:3}, dataPaths:['decision.今日操作'], priority:'P1' },
+    { id:'W18', type:'anchor-stocks', title:'锚定股状态',   category:'decision', tier:'manual', defaultSize:{w:6,h:3}, dataPaths:['decision.锚定股状态'], priority:'P1' },
   ];
 
   // 注册组件 class

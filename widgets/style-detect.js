@@ -50,9 +50,12 @@ class StyleDetectWidget extends YiMuWidget {
 
     // Hard block warning
     var exec = ST['实际执行'] || {};
-    if (exec['原因']) {
-      html += '<div style="margin-top:var(--sp-sm);padding:var(--sp-sm);background:var(--danger-bg);border-radius:var(--radius-sm);font-size:var(--fs-label);color:var(--danger)">' +
-        '⚠️ ' + exec['原因'] + '</div>';
+    if (exec['原因'] || exec['原因2']) {
+      html += '<div style="margin-top:var(--sp-sm);padding:var(--sp-sm) var(--sp-md);background:var(--danger-bg);border:1px solid var(--danger);border-radius:var(--radius-sm);font-size:var(--fs-body)">' +
+        '<div style="color:var(--danger);font-weight:700;margin-bottom:2px">⚠️ 硬卡/熔断</div>' +
+        '<div style="color:var(--danger)">' + (exec['原因']||'') + '</div>' +
+        (exec['原因2'] ? '<div style="color:var(--danger);margin-top:2px;font-size:var(--fs-label)">' + exec['原因2'] + '</div>' : '') +
+        '</div>';
     }
 
     body.innerHTML = html;
