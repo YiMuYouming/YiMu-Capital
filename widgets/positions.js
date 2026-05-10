@@ -11,8 +11,8 @@ class PositionsWidget extends YiMuWidget {
     // 持仓数据：优先 manualData._positions，fallback 附录
     var posJson = manual['_positions'] || '';
     var P = [];
-    if (posJson) { try { P = JSON.parse(posJson); } catch(e) {} }
-    if (!P.length) { P = (data && data.positions) || []; }
+    try { P = JSON.parse(posJson); } catch(e) {}
+    if (!P || !P.length) { P = JSON.parse(JSON.stringify((data && data.positions) || [])); }
 
     // 今日操作
     var opsJson = manual['_今日操作'] || '[]';
