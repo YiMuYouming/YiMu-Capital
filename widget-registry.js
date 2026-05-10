@@ -14,7 +14,7 @@ const WidgetRegistry = (function() {
     { id:'W03', type:'position-calc', title:'三层仓位计',   category:'decision', tier:'realtime',defaultSize:{w:4,h:4},  dataPaths:['style.总仓位上限','style.连板占比','style.趋势占比','style.实际执行.连板实际','style.实际执行.趋势实际','style.实际执行.首笔上限','risk.熔断触发','risk.连亏天数'], priority:'P0' },
     { id:'W06', type:'auction-5d',    title:'竞价5维面板',  category:'decision', tier:'manual', defaultSize:{w:8,h:5},  dataPaths:['decision.竞价','sentiment.竞价情绪值'], priority:'P1' },
     { id:'W07', type:'climax-guard',  title:'高潮保护',     category:'decision', tier:'manual', defaultSize:{w:3,h:2},  dataPaths:['sentiment.竞价情绪值'], priority:'P1' },
-    { id:'W08', type:'w1-check',      title:'W1早盘确认',   category:'decision', tier:'manual', defaultSize:{w:4,h:3},  dataPaths:['decision.早盘'], priority:'P1' },
+    { id:'W08', type:'w1-check',      title:'W1早盘确认',   category:'decision', tier:'tick',   defaultSize:{w:4,h:5},  dataPaths:['decision.早盘','lianban_pool','live_quotes'], priority:'P1' },
     { id:'W09', type:'w2-check',      title:'W2实时观察',   category:'decision',tier:'tick',   defaultSize:{w:4,h:5},  dataPaths:['decision.盘中','trend_pool','live_quotes'], priority:'P1' },
     // 数据类
     { id:'W04', type:'market-overview',title:'市场全景',    category:'data',     tier:'tick',   defaultSize:{w:6,h:3},  dataPaths:['live_index','market.涨跌比','market.涨停家数','market.跌停家数'], priority:'P0' },

@@ -48,7 +48,61 @@ class W1CheckWidget extends YiMuWidget {
 
     html += '</div>';
 
+    // ===== 下半部：实时观察 =====
+    var manual = DataStore.manualData.getAll();
+    var liveQ = (data && data.live_quotes) || {};
+    var lianbanPool = (data && data.lianban_pool) || [];
+    var code1 = manual['W1观察1'] || '';
+    var code2 = manual['W1观察2'] || '';
+
+    html += '<div style="display:flex;gap:var(--sp-sm);margin-bottom:var(--sp-sm)">' +
+      '<input type="text" id="w1_code1" placeholder="代码1" value="'+code1+'" style="flex:1;min-width:0;background:var(--bg-input);border:1px solid var(--border-light);color:var(--text-primary);padding:2px var(--sp-sm);border-radius:var(--radius-sm);font-size:var(--fs-body);font-family:var(--font-mono)">' +
+      '<input type="text" id="w1_code2" placeholder="代码2" value="'+code2+'" style="flex:1;min-width:0;background:var(--bg-input);border:1px solid var(--border-light);color:var(--text-primary);padding:2px var(--sp-sm);border-radius:var(--radius-sm);font-size:var(--fs-body);font-family:var(--font-mono)">' +
+      '<button id="w1_apply" style="background:var(--info);color:#fff;border:none;padding:2px var(--sp-sm);border-radius:var(--radius-sm);cursor:pointer;font-size:var(--fs-body);white-space:nowrap">确认</button>' +
+      '</div>';
+
+    var hasData = false;
+    [code1, code2].forEach(function(code) {
+      if (!code) return;
+      var q = liveQ[code] || {};
+      var poolItem = lianbanPool.find(function(p) { return p['代码'] === code; });
+      var name = (poolItem||{})['标的'] || code;
+      var curPrice = parseFloat(q['最新价']) || parseFloat((poolItem||{})['最新价']) || parseFloat((poolItem||{})['收盘价']) || 0;
+      var chg = q['涨幅'] || (poolItem||{})['涨幅'] || '—';
+      var chgNum = parseFloat(String(chg).replace('%','').replace('+',''));
+      var chgCls = isNaN(chgNum) ? '' : chgNum>0?'up':chgNum<0?'down':'';
+
+      hasData = true;
+      html += '<div style="padding:var(--sp-sm);background:var(--bg-base);border-radius:var(--radius-md);border-left:3px solid var(--up);margin-bottom:var(--sp-sm)">' +
+        '<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:4px">' +
+          '<span style="font-size:var(--fs-subtitle);font-weight:700">'+name+'</span>' +
+          '<span style="font-size:var(--fs-label);color:var(--text-disabled);font-family:var(--font-mono)">'+code+'</span></div>' +
+        '<div style="display:grid;grid-template-columns:1fr 1fr;gap:2px var(--sp-md);font-size:var(--fs-body)">' +
+          '<div style="display:flex;justify-content:space-between"><span style="color:var(--text-secondary)">现价</span><span style="font-family:var(--font-mono);font-weight:600;color:var(--'+chgCls+')">'+(curPrice||'—')+'</span></div>' +
+          '<div style="display:flex;justify-content:space-between"><span style="color:var(--text-secondary)">涨幅</span><span style="font-family:var(--font-mono);font-weight:600;color:var(--'+chgCls+')">'+chg+'</span></div>' +
+          '<div style="display:flex;justify-content:space-between"><span style="color:var(--text-secondary)">量比</span><span style="font-family:var(--font-mono);font-weight:600">'+(q['量比']||(poolItem||{})['量比']||'—')+'</span></div>' +
+          '<div style="display:flex;justify-content:space-between"><span style="color:var(--text-secondary)">换手</span><span style="font-family:var(--font-mono);font-weight:600">'+(q['换手']||(poolItem||{})['换手']||'—')+'</span></div>' +
+        '</div></div>';
+    });
+
+    if (!hasData) {
+      html += '<div style="padding:var(--sp-sm);text-align:center;color:var(--text-disabled);font-size:var(--fs-body)">输入代码后点确认</div>';
+    }
+
     body.innerHTML = html;
+
+    // 事件
+    var self = this;
+    var btn = body.querySelector('#w1_apply');
+    if (btn) btn.addEventListener('click', function() {
+      DataStore.manualData.set('W1观察1', body.querySelector('#w1_code1').value.trim());
+      DataStore.manualData.set('W1观察2', body.querySelector('#w1_code2').value.trim());
+      self._renderBody();
+    });
+    [body.querySelector('#w1_code1'), body.querySelector('#w1_code2')].forEach(function(el) {
+      if (el) el.addEventListener('keydown', function(e) { if (e.key==='Enter'&&btn) btn.click(); });
+    });
+
     this.updateTimestamp();
   }
 }
