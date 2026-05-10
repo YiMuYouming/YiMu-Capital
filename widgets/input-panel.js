@@ -1,0 +1,110 @@
+// widgets/input-panel.js — W16 报数面板 (v2.0: DOM→DataStore.manualData)
+'use strict';
+
+class InputPanelWidget extends YiMuWidget {
+  constructor(config) {
+    super(config);
+    this._panelOpen = true;
+    try { this._panelOpen = localStorage.getItem(STORAGE_KEYS.panelOpen) !== '0'; } catch(e) {}
+  }
+
+  mount(container) {
+    super.mount(container);
+    // 恢复折叠状态
+    var body = this.getBody();
+    if (body && !this._panelOpen) body.style.display = 'none';
+  }
+
+  render(data) {
+    var body = this.getBody();
+    if (!body) return;
+
+    var fields = [
+      {id:'情绪值',type:'number',label:'情绪值(%)'},
+      {id:'上涨',type:'number',label:'上涨家数'},
+      {id:'下跌',type:'number',label:'下跌家数'},
+      {id:'涨停收益',type:'text',label:'涨停收益(%)'},
+      {id:'连板收益',type:'text',label:'连板收益(%)'},
+      {id:'炸板收益',type:'text',label:'炸板收益(%)'},
+      {id:'风险值',type:'text',label:'连板风险值'},
+      {id:'晋级率',type:'text',label:'晋级率(%)'},
+      {id:'封板率',type:'text',label:'封板率(%)'},
+      {id:'涨停家数',type:'number',label:'涨停家数'},
+      {id:'跌停家数',type:'number',label:'跌停家数'},
+      {id:'赚钱效应',type:'select',label:'赚钱效应',opts:['','好','一般','差']},
+      {id:'最高板',type:'text',label:'最高板'},
+      {id:'次高板',type:'text',label:'次高板'},
+      {id:'梯队',type:'text',label:'连板梯队'},
+    ];
+
+    var manual = DataStore.manualData.getAll();
+
+    var html = '<div class="input-grid">';
+    fields.forEach(function(f) {
+      html += '<div class="input-group"><label for="in_'+f.id+'">'+f.label+'</label>';
+      if (f.type === 'select') {
+        html += '<select id="in_'+f.id+'">';
+        (f.opts||[]).forEach(function(o) {
+          html += '<option value="'+o+'"'+(String(manual[f.id]||'')===o?' selected':'')+'>'+o+'</option>';
+        });
+        html += '</select>';
+      } else {
+        html += '<input type="'+f.type+'" id="in_'+f.id+'" value="'+(manual[f.id]||'')+'">';
+      }
+      html += '</div>';
+    });
+    html += '</div>';
+
+    html += '<div style="margin-top:var(--sp-sm);display:flex;align-items:center;gap:var(--sp-md)">' +
+      '<button class="input-refresh" id="btnRefresh">刷新数据</button>' +
+      '<span style="font-size:var(--fs-label);color:var(--text-secondary)" id="lastUpdate">—</span>' +
+      '</div>';
+
+    body.innerHTML = html;
+
+    // Bind events
+    var self = this;
+    var refreshBtn = body.querySelector('#btnRefresh');
+    if (refreshBtn) {
+      refreshBtn.addEventListener('click', function() { self._saveAndRefresh(); });
+    }
+
+    fields.forEach(function(f) {
+      var el = body.querySelector('#in_'+f.id);
+      if (el) {
+        el.addEventListener('change', function() {
+          DataStore.manualData.set(f.id, el.value);
+        });
+        el.addEventListener('input', function() {
+          DataStore.manualData.set(f.id, el.value);
+        });
+      }
+    });
+
+    this.updateTimestamp();
+  }
+
+  _saveAndRefresh() {
+    var fields = ['情绪值','上涨','下跌','涨停收益','连板收益','炸板收益','风险值','晋级率','封板率','涨停家数','跌停家数','赚钱效应','最高板','次高板','梯队'];
+    fields.forEach(function(f) {
+      var el = document.getElementById('in_'+f);
+      if (el) DataStore.manualData.set(f, el.value);
+    });
+
+    DataStore.merge();
+    DataStore.notifyAll();
+
+    var ts = document.getElementById('lastUpdate');
+    if (ts) ts.textContent = '✓ 已更新 ' + new Date().toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
+  }
+
+  _togglePanel() {
+    var body = this.getBody();
+    if (!body) return;
+    this._panelOpen = !this._panelOpen;
+    body.style.display = this._panelOpen ? '' : 'none';
+    try { localStorage.setItem(STORAGE_KEYS.panelOpen, this._panelOpen?'1':'0'); } catch(e) {}
+  }
+}
+
+WidgetRegistry.register('W16', InputPanelWidget);

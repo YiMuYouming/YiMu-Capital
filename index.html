@@ -1,0 +1,429 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>弈沐资本 · 数据看板 v2.0</title>
+<link rel="icon" href="assets/logo.svg" type="image/svg+xml">
+<!-- GridStack.js v12.x CDN (版本锁定) -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/gridstack@12.0.0/dist/gridstack.min.css">
+<!-- 内部样式 -->
+<link rel="stylesheet" href="css/theme.css">
+<!-- 兜底数据 -->
+<script src="data/embedded-data.js"></script>
+<!-- 核心模块 -->
+<script src="store.js"></script>
+<script src="widget-base.js"></script>
+<script src="widget-registry.js"></script>
+<!-- 16 Widget 组件 -->
+<script src="widgets/timeline.js"></script>
+<script src="widgets/style-detect.js"></script>
+<script src="widgets/position-calc.js"></script>
+<script src="widgets/market-overview.js"></script>
+<script src="widgets/sentiment-dash.js"></script>
+<script src="widgets/auction-5d.js"></script>
+<script src="widgets/climax-guard.js"></script>
+<script src="widgets/w1-check.js"></script>
+<script src="widgets/w2-check.js"></script>
+<script src="widgets/sector-heat.js"></script>
+<script src="widgets/volume-bars.js"></script>
+<script src="widgets/lianban-pool.js"></script>
+<script src="widgets/trend-pool.js"></script>
+<script src="widgets/risk-panel.js"></script>
+<script src="widgets/positions.js"></script>
+<script src="widgets/input-panel.js"></script>
+<style>
+/* Inline critical styles for initial load */
+body{opacity:0;transition:opacity .3s}
+body.ready{opacity:1}
+#loading{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);color:var(--text-secondary);font-family:var(--font-sans);font-size:var(--fs-body);z-index:9999}
+</style>
+</head>
+<body>
+<div id="loading">正在加载布局引擎...</div>
+
+<!-- Top Bar -->
+<header class="topbar" id="topbar" style="display:none">
+  <span class="topbar-brand">弈沐资本 · 数据看板 v2.0</span>
+  <span class="conn-dot polling" id="connDot"></span>
+  <span class="conn-text" id="connText">轮询</span>
+  <select class="topbar-preset-select" id="presetSelect">
+    <option value="">— 预设布局 —</option>
+    <option value="pre-market">盘前准备</option>
+    <option value="w1-chase">W1 追涨</option>
+    <option value="w2-dip">W2 低吸</option>
+    <option value="closing-review">收盘复盘</option>
+  </select>
+  <button class="widget-btn" id="saveLayoutBtn" title="保存布局 (Ctrl+S)" style="margin-left:auto">保存</button>
+  <button class="widget-btn" id="exportLayoutBtn" title="导出布局">导出</button>
+  <button class="widget-btn" id="importLayoutBtn" title="导入布局">导入</button>
+  <input type="file" id="importFileInput" accept=".json" style="display:none">
+</header>
+
+<!-- GridStack Container -->
+<div class="grid-stack" id="grid"></div>
+
+<!-- Context Menu -->
+<div class="context-menu" id="contextMenu"></div>
+
+<!-- Toast -->
+<div class="toast" id="toast"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/gridstack@12.0.0/dist/gridstack-all.min.js"></script>
+<script>
+'use strict';
+
+// === GridStack Init ===
+var grid = null;
+var activePreset = null;
+
+function initGrid() {
+  grid = GridStack.init({
+    column: 12,
+    cellHeight: 60,
+    margin: 6,
+    float: true,
+    animate: false,
+    handle: '.widget-header',
+    removable: true,
+    removeTimeout: 100,
+    acceptWidgets: true,
+    dragIn: '.newWidget',
+    dragInOptions: { revert: 'invalid', scroll: false, appendTo: 'body', helper: 'clone' },
+    disableOneColumnMode: true,
+    minRow: 1,
+    maxRow: 100,
+  });
+
+  // 事件监听
+  grid.on('dragstart', function() { isDragging = true; });
+  grid.on('dragstop', function() { isDragging = false; DataStore.notifyAll(); });
+  grid.on('resizestop', function(e, el) { _onWidgetResize(el); });
+  grid.on('change', function() { _autoSaveLayout(); });
+
+  // 从 localStorage 恢复布局
+  _loadSavedLayout();
+
+  document.getElementById('loading').style.display = 'none';
+  document.getElementById('topbar').style.display = '';
+  document.body.classList.add('ready');
+}
+
+// === Widget 实例管理 ===
+var widgetInstances = {};
+
+function _addWidgetToGrid(widgetId) {
+  var meta = WidgetRegistry.getMeta(widgetId);
+  if (!meta) return;
+
+  var entry = WidgetRegistry.get(widgetId);
+  if (!entry || !entry.Class) {
+    console.warn('Widget ' + widgetId + ' not registered yet. Loading placeholder.');
+    _addPlaceholderWidget(widgetId, meta);
+    return;
+  }
+
+  var instance = new entry.Class({
+    id: meta.id,
+    type: meta.type,
+    title: meta.title,
+    category: meta.category,
+    tier: meta.tier,
+    dataPaths: meta.dataPaths,
+    defaultSize: meta.defaultSize,
+  });
+
+  // GridStack v12: addWidget() takes config object (not HTMLElement)
+  grid.addWidget({
+    id: widgetId,
+    w: meta.defaultSize.w,
+    h: meta.defaultSize.h,
+    content: '<div id="content_' + widgetId + '"></div>'
+  });
+  var placedEl = document.querySelector('[gs-id="' + widgetId + '"]');
+  widgetInstances[widgetId] = instance;
+  if (placedEl) {
+    instance.mount(placedEl.querySelector('.grid-stack-item-content'));
+  }
+}
+
+function _addPlaceholderWidget(widgetId, meta) {
+  var el = document.createElement('div');
+  el.className = 'grid-stack-item';
+  el.setAttribute('gs-id', widgetId);
+  el.setAttribute('gs-w', meta.defaultSize.w);
+  el.setAttribute('gs-h', meta.defaultSize.h);
+  el.innerHTML = '<div class="grid-stack-item-content" id="content_' + widgetId + '">' +
+    '<div class="widget-header ' + (meta.category==='decision'?'color-decision':meta.category==='data'?'color-data':meta.category==='risk'?'color-risk':'color-tool') + '">' +
+    '<span class="widget-title">' + meta.title + '</span></div>' +
+    '<div class="widget-body" style="display:flex;align-items:center;justify-content:center;color:var(--text-secondary)">组件加载中...</div></div>';
+  grid.makeWidget(el);
+}
+
+function _removeWidget(widgetId) {
+  var instance = widgetInstances[widgetId];
+  if (instance) { instance.unmount(); delete widgetInstances[widgetId]; }
+  var el = document.querySelector('[gs-id="' + widgetId + '"]');
+  if (el) {
+    grid.removeWidget(el, false);
+    // 5 秒撤销 toast
+    var removedMeta = WidgetRegistry.getMeta(widgetId);
+    showToast('已删除 ' + (removedMeta?removedMeta.title:widgetId) + '（5秒内可撤销）');
+    window._undoRemove = { widgetId: widgetId, meta: removedMeta, timer: setTimeout(function() { window._undoRemove = null; }, 5000) };
+  }
+}
+
+function _undoRemoveWidget() {
+  if (!window._undoRemove) return;
+  var item = window._undoRemove;
+  clearTimeout(item.timer);
+  window._undoRemove = null;
+  _addWidgetToGrid(item.widgetId);
+  showToast('已恢复 ' + item.meta.title);
+}
+// 暴露给 widget-base.js
+window._removeWidget = _removeWidget;
+
+function _onWidgetResize(el) {
+  var id = el.getAttribute('gs-id');
+  var instance = widgetInstances[id];
+  if (instance) {
+    var w = parseInt(el.getAttribute('gs-w'));
+    var h = parseInt(el.getAttribute('gs-h'));
+    instance.resize(w, h);
+  }
+}
+
+// === Context Menu ===
+function _showContextMenu(x, y) {
+  var menu = document.getElementById('contextMenu');
+  var cats = WidgetRegistry.listByCategory();
+  var catLabels = { decision: '决策类', data: '数据类', risk: '风控类', tool: '工具类' };
+
+  var html = '';
+  ['decision', 'risk', 'data', 'tool'].forEach(function(cat) {
+    html += '<div class="context-menu-section">' + catLabels[cat] + '</div>';
+    (cats[cat] || []).forEach(function(w) {
+      html += '<div class="context-menu-item" data-widget="' + w.id + '">' + w.title + '</div>';
+    });
+  });
+
+  menu.innerHTML = html;
+  menu.style.left = x + 'px';
+  menu.style.top = y + 'px';
+  menu.classList.add('show');
+
+  menu.querySelectorAll('.context-menu-item').forEach(function(item) {
+    item.addEventListener('click', function() {
+      var wid = item.dataset.widget;
+      _addWidgetToGrid(wid);
+      menu.classList.remove('show');
+    });
+  });
+}
+
+document.addEventListener('click', function(e) {
+  var menu = document.getElementById('contextMenu');
+  if (!menu.contains(e.target)) menu.classList.remove('show');
+});
+
+// 右键画板空白处
+document.addEventListener('contextmenu', function(e) {
+  if (e.target.closest('.grid-stack-item-content')) return; // 组件内部不触发
+  e.preventDefault();
+  _showContextMenu(e.clientX, e.clientY);
+});
+
+// === Presets (v2.0: 内联嵌入，避免 file:// CORS) ===
+var INLINE_PRESETS = {
+  'pre-market': {"version":"1.0","name":"pre-market","label":"盘前准备","widgets":[{"id":"W01","gs":{"w":12,"h":1,"x":0,"y":0}},{"id":"W02","gs":{"w":4,"h":4,"x":0,"y":1}},{"id":"W14","gs":{"w":4,"h":4,"x":4,"y":1}},{"id":"W03","gs":{"w":4,"h":4,"x":8,"y":1}},{"id":"W06","gs":{"w":12,"h":5,"x":0,"y":5}},{"id":"W04","gs":{"w":6,"h":3,"x":0,"y":10}},{"id":"W05","gs":{"w":6,"h":4,"x":6,"y":10}}]},
+  'w1-chase': {"version":"1.0","name":"w1-chase","label":"W1 追涨","widgets":[{"id":"W01","gs":{"w":12,"h":1,"x":0,"y":0}},{"id":"W06","gs":{"w":8,"h":5,"x":0,"y":1}},{"id":"W07","gs":{"w":3,"h":2,"x":8,"y":1}},{"id":"W08","gs":{"w":4,"h":3,"x":8,"y":3}},{"id":"W14","gs":{"w":4,"h":4,"x":8,"y":6}},{"id":"W12","gs":{"w":12,"h":4,"x":0,"y":6}},{"id":"W05","gs":{"w":6,"h":3,"x":0,"y":10}},{"id":"W04","gs":{"w":6,"h":3,"x":6,"y":10}}]},
+  'w2-dip': {"version":"1.0","name":"w2-dip","label":"W2 低吸","widgets":[{"id":"W01","gs":{"w":12,"h":1,"x":0,"y":0}},{"id":"W11","gs":{"w":8,"h":3,"x":0,"y":1}},{"id":"W09","gs":{"w":4,"h":5,"x":8,"y":1}},{"id":"W02","gs":{"w":4,"h":2,"x":8,"y":6}},{"id":"W14","gs":{"w":4,"h":4,"x":8,"y":8}},{"id":"W13","gs":{"w":12,"h":4,"x":0,"y":4}},{"id":"W10","gs":{"w":6,"h":4,"x":0,"y":8}},{"id":"W04","gs":{"w":6,"h":3,"x":6,"y":8}}]},
+  'closing-review': {"version":"1.0","name":"closing-review","label":"收盘复盘","widgets":[{"id":"W05","gs":{"w":6,"h":4,"x":0,"y":0}},{"id":"W10","gs":{"w":6,"h":4,"x":6,"y":0}},{"id":"W12","gs":{"w":6,"h":4,"x":0,"y":4}},{"id":"W13","gs":{"w":6,"h":4,"x":6,"y":4}},{"id":"W14","gs":{"w":4,"h":4,"x":0,"y":8}},{"id":"W15","gs":{"w":4,"h":4,"x":4,"y":8}},{"id":"W16","gs":{"w":12,"h":2,"x":0,"y":12}}]}
+};
+
+function loadPreset(name) {
+  var preset = INLINE_PRESETS[name];
+  if (!preset) return;
+
+  // 清空画板
+  Object.keys(widgetInstances).forEach(function(id) {
+    if (widgetInstances[id]) widgetInstances[id].unmount();
+  });
+  grid.removeAll(false);
+  widgetInstances = {};
+
+  // 加载预设布局
+  activePreset = name;
+  (preset.widgets || []).forEach(function(w) {
+    var meta = WidgetRegistry.getMeta(w.id);
+    if (!meta) return;
+    if (!w.gs) w.gs = { w: meta.defaultSize.w, h: meta.defaultSize.h, x: 0, y: 0 };
+    var el = document.createElement('div');
+    el.className = 'grid-stack-item';
+    el.setAttribute('gs-id', w.id);
+    el.setAttribute('gs-w', w.gs.w);
+    el.setAttribute('gs-h', w.gs.h);
+    el.setAttribute('gs-x', w.gs.x || 0);
+    el.setAttribute('gs-y', w.gs.y || 0);
+    el.innerHTML = '<div class="grid-stack-item-content" id="content_' + w.id + '"></div>';
+    grid.makeWidget(el);
+
+    var entry = WidgetRegistry.get(w.id);
+    if (entry && entry.Class) {
+      var instance = new entry.Class({
+        id: meta.id, type: meta.type, title: meta.title,
+        category: meta.category, tier: meta.tier,
+        dataPaths: meta.dataPaths, defaultSize: meta.defaultSize,
+      });
+      widgetInstances[w.id] = instance;
+      instance.mount(document.getElementById('content_' + w.id));
+    }
+  });
+  showToast('已切换：' + (preset.label || name));
+}
+
+// === Layout Persistence ===
+function _autoSaveLayout() {
+  try {
+    var layout = grid.save(false);
+    localStorage.setItem(STORAGE_KEYS.layout, JSON.stringify(layout));
+  } catch(e) {}
+}
+
+function _loadSavedLayout() {
+  try {
+    var saved = localStorage.getItem(STORAGE_KEYS.layout);
+    if (saved) {
+      var layout = JSON.parse(saved);
+      grid.load(layout);
+      // 为每个已保存的 widget 创建实例
+      layout.forEach(function(item) {
+        var id = item.id;
+        var entry = WidgetRegistry.get(id);
+        var meta = WidgetRegistry.getMeta(id);
+        if (entry && entry.Class && meta) {
+          var instance = new entry.Class({
+            id: meta.id, type: meta.type, title: meta.title,
+            category: meta.category, tier: meta.tier,
+            dataPaths: meta.dataPaths, defaultSize: meta.defaultSize,
+          });
+          widgetInstances[id] = instance;
+          var contentEl = document.getElementById('content_' + id);
+          if (contentEl) instance.mount(contentEl);
+        }
+      });
+      return;
+    }
+  } catch(e) {}
+  // 无保存布局 → 加载盘前预设
+  loadPreset('pre-market');
+}
+
+// 导出/导入
+function exportLayout() {
+  var layout = grid.save(false);
+  var json = JSON.stringify({ version: '1.0', exported: new Date().toISOString(), widgets: layout }, null, 2);
+  var blob = new Blob([json], { type: 'application/json' });
+  var a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'dashboard-layout-' + new Date().toISOString().slice(0,10) + '.json';
+  a.click();
+  showToast('布局已导出');
+}
+
+function importLayout(file) {
+  var reader = new FileReader();
+  reader.onload = function(e) {
+    try {
+      var data = JSON.parse(e.target.result);
+      (data.widgets || data || []).forEach(function(item) {
+        var id = item.id; if (!id) return;
+        if (!widgetInstances[id]) _addWidgetToGrid(id);
+      });
+      showToast('布局已导入');
+    } catch(err) { showToast('导入失败：格式错误'); }
+  };
+  reader.readAsText(file);
+}
+
+// === Keyboard Shortcuts ===
+document.addEventListener('keydown', function(e) {
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT' || e.target.tagName === 'TEXTAREA') return;
+
+  if (e.key === 'r' || e.key === 'R') {
+    e.preventDefault();
+    Object.values(widgetInstances).forEach(function(inst) { inst.refresh(); });
+    showToast('已刷新');
+  }
+  if (e.key === 'p' || e.key === 'P') {
+    e.preventDefault();
+    var w16 = document.getElementById('content_W16');
+    if (w16) w16.scrollIntoView({ behavior: 'smooth' });
+  }
+  if (e.key === '1') { e.preventDefault(); loadPreset('pre-market'); }
+  if (e.key === '2') { e.preventDefault(); loadPreset('w1-chase'); }
+  if (e.key === '3') { e.preventDefault(); loadPreset('w2-dip'); }
+  if (e.key === '4') { e.preventDefault(); loadPreset('closing-review'); }
+  if ((e.ctrlKey || e.metaKey) && e.key === 's') { e.preventDefault(); _autoSaveLayout(); showToast('已保存'); }
+  if ((e.ctrlKey || e.metaKey) && e.key === 'z') { e.preventDefault(); _undoRemoveWidget(); }
+  if (e.key === 'a' || e.key === 'A') {
+    e.preventDefault();
+    var rect = document.body.getBoundingClientRect();
+    _showContextMenu(rect.left + 100, rect.top + 100);
+  }
+});
+
+// === Connection Status ===
+DataStore.onConnChange(function(status) {
+  var dot = document.getElementById('connDot');
+  var txt = document.getElementById('connText');
+  if (dot) dot.className = 'conn-dot ' + status;
+  if (txt) txt.textContent = status === 'live' ? '实时' : status === 'polling' ? '轮询' : '断开';
+});
+
+// === Toast ===
+function showToast(msg) {
+  var t = document.getElementById('toast');
+  if (!t) return;
+  t.textContent = msg;
+  t.className = 'toast show';
+  clearTimeout(t._timeout);
+  t._timeout = setTimeout(function() { t.className = 'toast'; }, 1800);
+}
+
+// === Event bindings ===
+document.getElementById('presetSelect').addEventListener('change', function() {
+  if (this.value) loadPreset(this.value);
+});
+document.getElementById('saveLayoutBtn').addEventListener('click', function() { _autoSaveLayout(); showToast('已保存'); });
+document.getElementById('exportLayoutBtn').addEventListener('click', exportLayout);
+document.getElementById('importLayoutBtn').addEventListener('click', function() {
+  document.getElementById('importFileInput').click();
+});
+document.getElementById('importFileInput').addEventListener('change', function() {
+  if (this.files[0]) importLayout(this.files[0]);
+});
+
+// === Init ===
+// Wait for GridStack CDN
+function waitForGridStack() {
+  if (typeof GridStack !== 'undefined') {
+    // 加载 manualData
+    DataStore.manualData.load();
+    // 立即用兜底数据初始化，避免白屏
+    DataStore.init();
+    // 初始化组件注册（widget 脚本已加载时自动注册见各 widget 文件末尾）
+    initGrid();
+    // 尝试拉取实时数据（file:// 协议下会失败，降级到兜底数据）
+    DataStore.fetchAll();
+    // 每 5 分钟全量刷新
+    setInterval(function() { DataStore.fetchAll(); }, 300000);
+  } else {
+    setTimeout(waitForGridStack, 100);
+  }
+}
+waitForGridStack();
+</script>
+</body>
+</html>
