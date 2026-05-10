@@ -43,8 +43,15 @@ class TimelineWidget extends YiMuWidget {
     else if (nowHM >= totalEnd) dayProgress = 100;
     else dayProgress = Math.round((nowHM - totalStart) / totalDuration * 100);
 
-    // 判断状态
-    var isWeekend = now.getDay() === 0 || now.getDay() === 6;
+    // 判断状态——优先读数据中的 weekday，调试时模拟场景
+    var meta = (data && data.meta) || {};
+    var weekday = meta['weekday'] || '';
+    var isWeekend = weekday === '周六' || weekday === '周日';
+    // 无数据时用系统时间判断
+    if (!weekday) {
+      var sysDay = now.getDay();
+      isWeekend = sysDay === 0 || sysDay === 6;
+    }
     var isClosed = nowHM >= totalEnd || nowHM < totalStart;
 
     var html = '';
