@@ -15,6 +15,8 @@ class PositionCalcWidget extends YiMuWidget {
     var lbActual = exec['连板实际'] != null ? exec['连板实际'] : lbPct;
     var trActual = exec['趋势实际'] != null ? exec['趋势实际'] : trPct;
     var firstLimit = exec['首笔上限'] || '—';
+    var execReason = exec['原因'] || '';
+    var execReason2 = exec['原因2'] || '';
 
     var meltdown = R['熔断触发'];
     var loseStreak = R['连亏天数'] || 0;
@@ -35,12 +37,16 @@ class PositionCalcWidget extends YiMuWidget {
       '</div>';
 
     // Layer 2
+    var lbBlocked = !blocked && lbActual < lbPct;
+    var trCapped = trActual < trPct;
     html += '<div class="layer-row' + (blocked?' layer-blocked':'') + '">' +
       '<span class="layer-label">第二层</span>' +
       '<span class="layer-value up">' + (blocked?'0%':lbActual+'%') + '</span>' +
       '<span class="layer-value down" style="margin-left:var(--sp-sm)">' + (blocked?'0%':trActual+'%') + '</span>' +
-      '<span class="layer-reason">连板 | 趋势</span>' +
-      '</div>';
+      '<span class="layer-reason">连板 | 趋势' +
+      (lbBlocked ? ' <span style="color:var(--danger);font-size:var(--fs-label)">（' + execReason + '）</span>' : '') +
+      (trCapped ? ' <span style="color:var(--warn);font-size:var(--fs-label)">（' + execReason2 + '）</span>' : '') +
+      '</span></div>';
 
     // Layer 3
     html += '<div class="layer-row' + (blocked?' layer-blocked':'') + '">' +
