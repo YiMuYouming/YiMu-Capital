@@ -13,7 +13,7 @@ class LianbanPoolWidget extends YiMuWidget {
     }
 
     var cols = ['标的','板块','角色','操作','涨幅','最新价','量比','换手','MA5','备注'];
-    var keys = ['标的','板块','角色','操作','涨幅','最新价','量比','换手','5日线','备注'];
+    var keys = ['标的','板块','角色','操作','涨幅','最新价','量比','换手','MA5','备注'];
 
     var html = '<table class="data-table"><thead><tr>';
     cols.forEach(function(c) { html += '<th>'+c+'</th>'; });

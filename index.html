@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>弈沐资本 · 数据看板 v2.0</title>
-<link rel="icon" href="assets/logo.svg" type="image/svg+xml">
+<link rel="icon" href="assets/logo.png" type="image/png">
 <!-- GridStack.js v12.x CDN (版本锁定) -->
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/gridstack@12.0.0/dist/gridstack.min.css">
 <!-- 内部样式 -->
@@ -60,6 +60,7 @@ body.ready{opacity:1}
 
 <!-- Top Bar -->
 <header class="topbar" id="topbar" style="display:none">
+  <img src="assets/logo.png" alt="弈沐" style="height:28px;width:auto;margin-right:var(--sp-sm)">
   <span class="topbar-brand">弈沐资本 · 数据看板 v2.0</span>
   <span class="conn-dot polling" id="connDot"></span>
   <span class="conn-text" id="connText">轮询</span>
@@ -530,10 +531,10 @@ function waitForGridStack() {
     DataStore.init();
     // 初始化组件注册（widget 脚本已加载时自动注册见各 widget 文件末尾）
     initGrid();
-    // 尝试拉取实时数据（file:// 协议下会失败，降级到兜底数据）
+    // 尝试拉取基线数据（file:// 协议下会失败，降级到兜底数据）
     DataStore.fetchAll();
-    // 每 5 分钟全量刷新
-    setInterval(function() { DataStore.fetchAll(); }, 30000);
+    // 2026-05-11：iwencai 管线已停用，不再定时全量刷新
+    // setInterval(function() { DataStore.fetchAll(); }, 30000);
   } else {
     setTimeout(waitForGridStack, 100);
   }

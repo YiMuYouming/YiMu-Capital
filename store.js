@@ -18,11 +18,11 @@ const DataStore = (function() {
   var initialBase = null;      // baseData 首次加载快照（昨日收盘基线）
   var fallback = (typeof EMBEDDED_DATA !== 'undefined') ? EMBEDDED_DATA : null;  // 兜底数据
 
-  // === 刷新层级（v2.0 下调频率，防 iwencai 限流）===
+  // === 刷新层级（v2.0 多源实时：PyTDX + 东方财富 + easyquotation）===
   var tiers = {
-    tick:    { interval: 30000,  sources: ['live_index', 'live_quotes'], label: '30秒' },
-    fast:    { interval: 60000,  sources: ['live_sectors'],               label: '60秒' },
-    slow:    { interval: 300000, sources: ['上证15min', 'market'],        label: '5分钟' },
+    tick:    { interval: 5000,   sources: ['live_index', 'live_quotes'], label: '5秒' },
+    fast:    { interval: 30000,  sources: ['live_sectors'],               label: '30秒' },
+    slow:    { interval: null,   sources: ['上证15min', 'market'],        label: '已停用' },
     manual:  { interval: null,   sources: ['sentiment', 'decision'],      label: '手工' },
     daily:   { interval: null,   sources: ['style', 'sectors', 'lianban_pool', 'trend_pool'], label: '每日' },
   };
@@ -167,8 +167,11 @@ const DataStore = (function() {
       if (tdVal) { d.sentiment = d.sentiment || {}; d.sentiment['连板梯队'] = tdVal; }
     }
 
-    // Step 3: liveData 覆盖（实时报价）
+    // Step 3: liveData 覆盖（实时报价 + 15min量价 + 板块）
     if (liveData) {
+      ['上证15min','深证15min','创业15min'].forEach(function(k) {
+        if (liveData[k] && liveData[k].length) d[k] = liveData[k];
+      });
       if (liveData.live_index) {
         d.live_index = d.live_index || {};
         for (var k in liveData.live_index) { d.live_index[k] = liveData.live_index[k]; }
@@ -182,10 +185,10 @@ const DataStore = (function() {
           (pool || []).forEach(function(s) {
             var q = liveData.live_quotes[s['代码']];
             if (q) {
-              if (q['最新价'] != null) { s['最新价'] = q['最新价']; s['收盘价'] = q['最新价']; }
-              if (q['涨幅'] != null) s['涨幅'] = q['涨幅'];
-              if (q['量比'] != null) s['量比'] = q['量比'];
-              if (q['换手'] != null) s['换手'] = q['换手'];
+              if (q['最新价'] != null && q['最新价'] !== '—') { s['最新价'] = q['最新价']; s['收盘价'] = q['最新价']; }
+              if (q['涨幅'] != null && q['涨幅'] !== '—') s['涨幅'] = q['涨幅'];
+              if (q['量比'] != null && q['量比'] !== '—') s['量比'] = q['量比'];
+              if (q['换手'] != null && q['换手'] !== '—') s['换手'] = q['换手'];
             }
           });
         });
@@ -196,14 +199,14 @@ const DataStore = (function() {
     return d;
   }
 
-  // === 刷新数据 ===
+  // === 刷新数据（v2.0 多源实时管线）===
   function refresh(tier) {
-    if (tier === 'manual' || tier === 'daily') return; // 手工/每日不自动刷新
+    if (tier === 'manual' || tier === 'daily' || tier === 'slow') return;
 
     connectionStatus = 'polling';
     notifyConnListeners();
 
-    if (tier === 'tick' || tier === 'fast' || tier === 'slow') {
+    if (tier === 'tick' || tier === 'fast') {
       adapter.fetchLive().then(function(live) {
         if (live) {
           liveData = live;
@@ -215,7 +218,7 @@ const DataStore = (function() {
       }).catch(function() {
         connectionStatus = 'dead';
         if (!baseData && fallback) {
-                  setMerged(deepClone(fallback));
+          setMerged(deepClone(fallback));
           notifyAll();
         }
         notifyConnListeners();
@@ -253,7 +256,6 @@ const DataStore = (function() {
     }).catch(function(err) {
       // file:// 协议下 fetch 必然失败，静默降级
       connectionStatus = 'dead';
-      // 兜底：用 EMBEDDED_DATA
       if (!baseData && fallback) {
                 setMerged(deepClone(fallback));
         notifyAll();
@@ -350,9 +352,9 @@ const DataStore = (function() {
         'sentiment.情绪值':      { source: '同花顺APP→手工录入 / 涨跌家数反推', freq: '盘中随录', owner: '弈沐哥' },
         'sentiment.竞价情绪值':   { source: '同花顺APP→手工录入', freq: '9:25', owner: '弈沐哥' },
         'market.封板率':         { source: '同花顺APP→手工录入', freq: '盘中随录', owner: '弈沐哥' },
-        'live_index.上证指数':   { source: 'iwencai Q1 → poll_iwencai.py', freq: '30s', owner: '稳米脚本' },
-        'live_sectors':         { source: 'iwencai Q4 → poll_iwencai.py', freq: '60s', owner: '稳米脚本' },
-        'live_quotes':          { source: 'iwencai Q4 → poll_iwencai.py', freq: '15s', owner: '稳米脚本' },
+        'live_index.*':          { source: 'PyTDX → poll_live.py', freq: '5s', owner: 'poll_live.py' },
+        'live_sectors.*':       { source: '东方财富HTTP（境外IP受限）→ 回退Layer 1基线', freq: '30s / 每日', owner: 'poll_live.py / 复盘笔记' },
+        'live_quotes.*':        { source: 'PyTDX → poll_live.py', freq: '5s', owner: 'poll_live.py' },
       };
       return map[path] || { source: '—', freq: '—', owner: '—' };
     },

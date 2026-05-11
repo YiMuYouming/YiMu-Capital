@@ -117,7 +117,7 @@ def parse_appendix(filepath):
         return {}
 
     # 找到数据附录章节
-    m = re.search(r'##\s*数据附录\s*\n(.*)', content, re.DOTALL)
+    m = re.search(r'##\s*数据附录.*?\n(.*)', content, re.DOTALL)
     if not m:
         return {}
     appendix = m.group(1)
@@ -194,7 +194,7 @@ def _parse_table(body, col_map):
                 if i < len(header) and header[i] in col_map:
                     key = col_map[header[i]]
                     val = clean_value(cell, key)
-                    if val is not None and val != '—' and val != '':
+                    if val is not None and val != '—' and val != '' and val != '待填' and val != '待定':
                         row[key] = val
             if row:
                 rows.append(row)
@@ -245,12 +245,21 @@ def _parse_key_values(body):
         line = line.strip()
         if not line:
             continue
-        # 指标行（新格式）: 指标N=label|code|desc|status
-        m = re.match(r'指标\d+=([^|]+)\|([^|]+)\|([^|]+)\|([a-z]+)', line)
+        # 指标行: 指标N=label|desc|status 或 指标N=label|code|desc|status
+        m = re.match(r'指标\d+=([^|]+)\|([^|]+)\|([a-z]+)', line)
         if m:
+            # 3段格式: label|desc|status
             checks.append({
-                '指标': m.group(1), '代码': m.group(2).strip(),
-                '判定': m.group(3), '状态': m.group(4)
+                '指标': m.group(1), '代码': '',
+                '判定': m.group(2), '状态': m.group(3)
+            })
+        else:
+            m = re.match(r'指标\d+=([^|]+)\|([^|]+)\|([^|]+)\|([a-z]+)', line)
+            if m:
+                # 4段格式: label|code|desc|status
+                checks.append({
+                    '指标': m.group(1), '代码': m.group(2).strip(),
+                    '判定': m.group(3), '状态': m.group(4)
             })
             continue
         # 指标行（旧格式兼容）: 指标N=label|desc|status

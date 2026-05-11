@@ -20,7 +20,7 @@ const WidgetRegistry = (function() {
     { id:'W04', type:'market-overview',title:'市场全景',    category:'data',     tier:'tick',   defaultSize:{w:6,h:3},  dataPaths:['live_index','market.涨跌比','market.涨停家数','market.跌停家数'], priority:'P0' },
     { id:'W05', type:'sentiment-dash',title:'情绪仪表盘',   category:'data',     tier:'manual', defaultSize:{w:6,h:4},  dataPaths:['sentiment.情绪值','sentiment.情绪区间','sentiment.上涨家数','sentiment.下跌家数','sentiment.昨日涨停收益','sentiment.连板收益','sentiment.昨日炸板收益','sentiment.连板风险值','sentiment.晋级率','market.封板率','sentiment.赚钱效应','sentiment.最高板','sentiment.连板梯队'], priority:'P0' },
     { id:'W10', type:'sector-heat',   title:'板块热力图',   category:'data',     tier:'fast',   defaultSize:{w:6,h:5},  dataPaths:['sectors','live_sectors'], priority:'P1' },
-    { id:'W11', type:'volume-bars',   title:'上证15min量价', category:'data',     tier:'slow',   defaultSize:{w:8,h:3},  dataPaths:['上证15min'], priority:'P1' },
+    { id:'W11', type:'volume-bars',   title:'15min量价图', category:'data',     tier:'slow',   defaultSize:{w:10,h:6}, dataPaths:['上证15min','深证15min','创业15min'], priority:'P1' },
     { id:'W12', type:'lianban-pool',  title:'连板自选池',   category:'data',     tier:'tick',   defaultSize:{w:12,h:4}, dataPaths:['lianban_pool','live_quotes'], priority:'P1' },
     { id:'W13', type:'trend-pool',    title:'趋势自选池',   category:'data',     tier:'tick',   defaultSize:{w:12,h:4}, dataPaths:['trend_pool','live_quotes'], priority:'P1' },
     // 风控类

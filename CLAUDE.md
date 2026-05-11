@@ -66,9 +66,12 @@ gen_dashboard_data.py
   ├─ 解析数据附录 → positions/pools/sectors/decision
   └─ → dashboard_data.json
 
-poll_iwencai.py  →  dashboard_live.json  (30s 轮询)
-sync_embedded.py →  embedded-data.js     (复盘后同步)
-```
+2026-05-11: 实时数据管线 v2.0 上线
+  poll_live.py (NEW) → dashboard_live.json  (PyTDX TCP, 5s个股+指数)
+  poll_iwencai.py → 盘后复盘查询 (--review: 热榜/龙虎榜/连板生态)
+  store.js tick(5s)+fast(30s) 已恢复
+  已知限制: 东方财富板块API境外IP受限(rc=102), 板块实时数据回退Layer 1基线
+  详细计划: docs/plans/2026-05-11-实时数据管线v2.md
 
 ## 开发原则
 
