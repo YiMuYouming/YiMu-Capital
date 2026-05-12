@@ -9,14 +9,32 @@ class PositionsWidget extends YiMuWidget {
     var liveQ = (data && data.live_quotes) || {};
 
     // === 持仓（manualData 优先，附录兜底）===
-    var P = JSON.parse(JSON.stringify((data && data.positions) || []));
+    var basePos = JSON.parse(JSON.stringify((data && data.positions) || []));
+    // 确保基线持仓有默认数量（复盘笔记可能不填）
+    basePos.forEach(function(p) { if (!p['数量']) p['数量'] = 0; });
+
+    var P = basePos;
     try {
       var mp = JSON.parse(manual['_positions'] || 'null');
-      if (mp && mp.length) mp.forEach(function(m) {
-        var idx = P.findIndex(function(p) { return p['标的'] === m['标的']; });
-        if (idx >= 0) P[idx] = m; else P.push(m);
-      });
+      if (mp && mp.length) {
+        // 只合并买入/修改过的持仓，纯 baseline 不覆盖
+        var merged = false;
+        mp.forEach(function(m) {
+          var idx = P.findIndex(function(p) { return p['标的'] === m['标的']; });
+          if (idx >= 0) { P[idx] = m; merged = true; }
+          else { P.push(m); merged = true; }
+        });
+        // 如果 manual 里一条都没改过（全是从旧 session 来的），只用 baseline
+        if (!merged) P = basePos;
+      }
     } catch(e) {}
+
+    // 注入实时现价
+    P.forEach(function(p) {
+      var q = liveQ[p['代码']] || {};
+      var livePrice = parseFloat(q['最新价']) || 0;
+      if (livePrice > 0) p['现价'] = livePrice;
+    });
 
     // 今日操作——只看 manualData，不自动加载附录
     var ops = [];
@@ -36,20 +54,24 @@ class PositionsWidget extends YiMuWidget {
     var html = '';
 
     // ===== 汇总卡片 =====
-    var tw = parseFloat(manual['总资产'])||0, ta = tw*10000;
+    var ta = parseFloat(manual['总资产'])||0;
     var pv=0, pc=0; active.forEach(function(p){pv+=p['_mv']||0;pc+=Math.round((parseFloat(p['成本'])||0)*(parseFloat(p['数量'])||0));});
-    var tp=pv-pc, tc=tp>0?'up':tp<0?'down':'', pp=pc>0?(tp/pc*100):0, af=ta-pv, pr=ta>0?Math.round(pv/ta*100):0;
+    var tpCalc=pv-pc; // 计算盈亏（未扣费）
+    // 实际值优先：W16 可录「总盈亏」「可用资金」覆盖计算值
+    var tp = (manual['总盈亏']!=null) ? parseFloat(manual['总盈亏']) : tpCalc;
+    var af = (manual['可用资金']!=null) ? parseFloat(manual['可用资金']) : ta-pv;
+    // 用实际盈亏反推仓位成本
+    var actualCost = pc + (tp - tpCalc); // 实际成本=计算成本+费用差
+    var tc=tp>0?'up':tp<0?'down':'', pp=pc>0?(tp/pc*100):0, pr=ta>0?Math.round(pv/ta*100):0;
 
-    if (true) { // 始终显示，总资产未填时显示0
-      html += '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:var(--sp-xs) var(--sp-sm);margin-bottom:var(--sp-md);padding:var(--sp-sm);background:var(--bg-base);border-radius:var(--radius-md);font-size:var(--fs-body)">'+
-        '<div style="text-align:center"><div class="kpi-label">总资产</div><div style="font-family:var(--font-mono);font-size:var(--fs-subtitle);font-weight:700">'+ta.toLocaleString()+'</div></div>'+
-        '<div style="text-align:center"><div class="kpi-label">持仓市值</div><div style="font-family:var(--font-mono);font-size:var(--fs-subtitle);font-weight:700">'+pv.toLocaleString()+'</div></div>'+
-        '<div style="text-align:center"><div class="kpi-label">总盈亏</div><div style="font-family:var(--font-mono);font-size:var(--fs-subtitle);font-weight:700;color:var(--'+tc+')">'+(tp>=0?'+':'')+tp.toLocaleString()+'</div></div>'+
-        '<div style="text-align:center"><div class="kpi-label">总盈亏%</div><div style="font-family:var(--font-mono);font-size:var(--fs-subtitle);font-weight:700;color:var(--'+tc+')">'+(pp>=0?'+':'')+pp.toFixed(2)+'%</div></div>'+
-        '<div style="text-align:center"><div class="kpi-label">可用资金</div><div style="font-family:var(--font-mono);font-size:var(--fs-subtitle);font-weight:700">'+af.toLocaleString()+'</div></div>'+
-        '<div style="text-align:center"><div class="kpi-label">仓位</div><div style="font-family:var(--font-mono);font-size:var(--fs-subtitle);font-weight:700;color:'+(pr>80?'var(--danger)':pr>50?'var(--warn)':'var(--info)')+'">'+pr+'%</div></div>'+
-        '</div>';
-    }
+    html += '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:var(--sp-xs) var(--sp-sm);margin-bottom:var(--sp-md);padding:var(--sp-sm);background:var(--bg-base);border-radius:var(--radius-md);font-size:var(--fs-body)">'+
+      '<div style="text-align:center"><div class="kpi-label">总资产</div><div style="font-family:var(--font-mono);font-size:var(--fs-subtitle);font-weight:700">'+ta.toLocaleString()+'</div></div>'+
+      '<div style="text-align:center"><div class="kpi-label">持仓市值</div><div style="font-family:var(--font-mono);font-size:var(--fs-subtitle);font-weight:700">'+pv.toLocaleString()+'</div></div>'+
+      '<div style="text-align:center"><div class="kpi-label">总盈亏</div><div style="font-family:var(--font-mono);font-size:var(--fs-subtitle);font-weight:700;color:var(--'+tc+')">'+(tp>=0?'+':'')+tp.toFixed(2)+'</div>'+(tp!==tpCalc?'<div style=\"font-size:10px;color:var(--text-disabled)\">计算'+(tpCalc>=0?'+':'')+tpCalc+'</div>':'')+'</div>'+
+      '<div style="text-align:center"><div class="kpi-label">总盈亏%</div><div style="font-family:var(--font-mono);font-size:var(--fs-subtitle);font-weight:700;color:var(--'+tc+')">'+(pp>=0?'+':'')+pp.toFixed(2)+'%</div></div>'+
+      '<div style="text-align:center"><div class="kpi-label">可用资金</div><div style="font-family:var(--font-mono);font-size:var(--fs-subtitle);font-weight:700">'+af.toLocaleString()+'</div></div>'+
+      '<div style="text-align:center"><div class="kpi-label">仓位</div><div style="font-family:var(--font-mono);font-size:var(--fs-subtitle);font-weight:700;color:'+(pr>80?'var(--danger)':pr>50?'var(--warn)':'var(--info)')+'">'+pr+'%</div></div>'+
+      '</div>';
 
     // ===== 持仓 =====
     html += '<div style="font-size:var(--fs-body);font-weight:600;margin-bottom:var(--sp-xs)">持仓</div>';

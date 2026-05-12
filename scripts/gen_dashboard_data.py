@@ -282,7 +282,7 @@ def _parse_key_values(body):
 
 
 def _parse_positions(body):
-    """解析持仓表格，区分活跃和已清仓"""
+    """解析持仓表格，过滤空行"""
     rows = _parse_table(body, {
         '标的': '标的', '代码': '代码', '方向': '方向',
         '数量': '数量', '成本': '成本', '现价': '现价',
@@ -290,7 +290,7 @@ def _parse_positions(body):
         '止损': '止损', '状态': '状态',
         '清仓日期': '清仓日期', '清仓原因': '清仓原因'
     })
-    return rows
+    return [r for r in rows if r.get('标的') and r.get('标的') != '...']
 
 
 def get_style_data():
@@ -343,9 +343,9 @@ def _compute_trend_pct(sd):
 def _compute_total_cap(sd):
     """根据总分计算总仓位上限"""
     total = sd.get("total", 50) or 50
-    if total >= 80: return 50
-    elif total >= 60: return 40
-    elif total >= 40: return 30
+    if total >= 80: return 60
+    elif total >= 60: return 50
+    elif total >= 40: return 40
     elif total >= 20: return 20
     else: return 10
 
@@ -355,9 +355,9 @@ def compute_style_execution(fm, style):
     判定优先级（从高到低）：
     1. 熔断触发 → 仓位归零
     2. 连亏 ≥ 2 天 → 强制空仓
-    3. 晋级率 < 30% → 连板硬卡，连板实际=0
-    4. 周五 → 趋势占比上限 15%
-    5. 无强支线 → 仓位从严
+    3. 周五 → 趋势占比上限 15%
+    4. 无强支线 → 仓位从严
+    （晋级率判定交给 dashboard W08 实时规则引擎，gen 只传分数不阻断）
     """
     reasons = []
     reason2s = []
@@ -396,12 +396,7 @@ def compute_style_execution(fm, style):
         first_limit = 0
         reasons.append(f"连亏{lose_streak}天≥2天，强制空仓")
 
-    # 规则 3: 晋级率硬卡
-    if not meltdown and lose_streak < 2 and jjl < 30:
-        lb_actual = 0
-        tr_actual = 100
-        reasons.append(f"晋级率{jjl}%<30%连板硬卡")
-
+    # 规则 3: 晋级率分层判定（交给 dashboard W08 实时判定，gen 只传分数不硬卡）
     # 规则 4: 周五
     if is_friday and tr_actual > 15:
         tr_actual = min(tr_actual, 15)

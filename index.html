@@ -319,7 +319,9 @@ function _showInputPanel() {
   var manual = DataStore.manualData.getAll();
 
   var fields = [
-    {id:'总资产',type:'number',label:'总资产(万)'},
+    {id:'总资产',type:'number',label:'总资产(元)'},
+    {id:'可用资金',type:'number',label:'可用资金(元)'},
+    {id:'总盈亏',type:'number',label:'总盈亏(元)'},
     {id:'情绪值',type:'number',label:'情绪值(%)'},
     {id:'上涨',type:'number',label:'上涨家数'},
     {id:'下跌',type:'number',label:'下跌家数'},
@@ -334,7 +336,13 @@ function _showInputPanel() {
     {id:'赚钱效应',type:'select',label:'赚钱效应',opts:['','好','一般','差']},
     {id:'最高板',type:'text',label:'最高板'},
     {id:'次高板',type:'text',label:'次高板'},
-    {id:'梯队',type:'text',label:'连板梯队'}
+    {id:'梯队',type:'text',label:'连板梯队'},
+    {id:'W1观察1',type:'text',label:'W1观察1'},
+    {id:'W1观察2',type:'text',label:'W1观察2'},
+    {id:'W1观察3',type:'text',label:'W1观察3'},
+    {id:'W2观察1',type:'text',label:'W2观察1'},
+    {id:'W2观察2',type:'text',label:'W2观察2'},
+    {id:'W2观察3',type:'text',label:'W2观察3'}
   ];
 
   var html = '<div style="display:grid;grid-template-columns:repeat(5,1fr);gap:var(--sp-sm)">';
