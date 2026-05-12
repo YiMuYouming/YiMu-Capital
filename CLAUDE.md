@@ -83,6 +83,7 @@ gen_dashboard_data.py
 6. **字号标准**：结果 15px（`--fs-subtitle`），正文 12px（`--fs-body`），标签 10px（`--fs-label`）
 7. **红涨绿跌**：`--up` 仅用于方向数字，`--info/warn/danger` 用于状态判定
 8. **CSS 优先**：布局/适配用 CSS 解决，不让 JS 抢 CSS 的活
+9. **随时提交**：每个逻辑节点完成后提交（组件调通/bug修复/功能完成），不堆到收工时一次性提交。commit message 写清楚做了什么
 
 ## 调通状态
 

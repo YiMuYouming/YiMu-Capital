@@ -103,7 +103,9 @@ const DataStore = (function() {
     if (manualData) {
       if (manualData['情绪值']) {
         d.sentiment = d.sentiment || {};
-        d.sentiment['情绪值'] = parseFloat(manualData['情绪值']) || d.sentiment['情绪值'];
+        var sv = parseFloat(manualData['情绪值']) || d.sentiment['情绪值'];
+        d.sentiment['情绪值'] = sv;
+        d.sentiment['情绪区间'] = sv < 20 ? '冰点' : sv < 40 ? '低迷' : sv < 60 ? '主升' : sv < 80 ? '强势' : '高潮';
       }
       // 涨跌家数 → 反推情绪值
       var up = parseInt(manualData['上涨']) || 0;
@@ -180,7 +182,17 @@ const DataStore = (function() {
         d.live_sectors = d.live_sectors || {};
         for (var k in liveData.live_sectors) { d.live_sectors[k] = liveData.live_sectors[k]; }
       }
+      if (liveData.live_breadth) {
+        d.live_breadth = d.live_breadth || {};
+        for (var k in liveData.live_breadth) { d.live_breadth[k] = liveData.live_breadth[k]; }
+      }
+      if (liveData.yesterday_baseline) {
+        d.yesterday_baseline = d.yesterday_baseline || {};
+        for (var k in liveData.yesterday_baseline) { d.yesterday_baseline[k] = liveData.yesterday_baseline[k]; }
+      }
       if (liveData.live_quotes) {
+        d.live_quotes = d.live_quotes || {};
+        for (var c in liveData.live_quotes) { d.live_quotes[c] = liveData.live_quotes[c]; }
         [d.lianban_pool, d.trend_pool].forEach(function(pool) {
           (pool || []).forEach(function(s) {
             var q = liveData.live_quotes[s['代码']];

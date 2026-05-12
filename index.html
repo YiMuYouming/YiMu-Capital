@@ -533,8 +533,7 @@ function waitForGridStack() {
     initGrid();
     // 尝试拉取基线数据（file:// 协议下会失败，降级到兜底数据）
     DataStore.fetchAll();
-    // 2026-05-11：iwencai 管线已停用，不再定时全量刷新
-    // setInterval(function() { DataStore.fetchAll(); }, 30000);
+    // v2.0 PyTDX 实时管线：每个 tick 组件自带 5s 定时器刷新
   } else {
     setTimeout(waitForGridStack, 100);
   }

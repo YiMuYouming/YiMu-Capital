@@ -97,7 +97,7 @@ class VolumeBarsWidget extends YiMuWidget {
       if(last){
         var dw=last.chg>0?'涨':(last.chg<0?'跌':'平');
         var amtYi=(last.amount||0)/1e8;
-        var yesterdayAmt=amtYi/Math.max(0.01,(last.volRatio||1));
+        var yesterdayAmt=(last.yesterdayAmt||0)/1e8;
         var amtDiff=amtYi-yesterdayAmt;
         var vsign=amtDiff>=0?'+':'';
         var vcolor=amtDiff>=0?'var(--up)':'var(--down)';

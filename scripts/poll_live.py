@@ -45,14 +45,102 @@ _EM_SECTORS_CACHE_TIME = 0
 
 # TDX 板块指数代码映射（复盘笔记名称 → 88xxxx）
 _TDX_SECTOR_CODE_MAP = {
-    "机器人": "880905",
+    # === 涨停日志出现板块 → TDX概念板块代码 ===
+    # 科技/算力
+    "算力": "880565",
+    "算力租赁": "880565",
+    "算力产业链": "880565",
+    "东数西算": "880565",
+    "算力/光通信/PCB": "880565",  # 取主方向
+    "算力/半导体产业链": "880565",
+    "算力/半导体": "880565",
+    # 光通信/CPO
     "光通信": "880619",
+    "CPO/光通信": "880619",
+    "光通信/CPO": "880619",
+    "光通信/光纤": "880619",
+    # 半导体
     "半导体": "880491",
+    "半导体产业链": "880491",
+    "半导体封装": "880491",
+    "半导体/存储": "880491",
+    "存储芯片": "880589",
+    "电子特气": "880491",
+    # PCB
     "PCB": "880542",
+    "PCB链": "880542",
+    "PCB链/铜箔": "880542",
+    "PCB/电子": "880542",
+    # 机器人
+    "机器人": "880905",
+    # 电力
+    "电力": "880582",
+    "电力/算电": "880582",
+    "电力/燃气轮机": "880582",
+    "电力/燃气": "880582",
+    "电力/电缆": "880582",
+    "电力改革": "880582",
+    # 新能源
     "锂电": "880534",
-    "航天/军工": "880490",  # 国防军工
-    # TODO: 算力租赁、电力 待查代码
+    "锂电池": "880534",
+    "电池": "880534",
+    "光伏": "880544",
+    "风电": "880543",
+    "储能": "880573",
+    "氢能": "880574",
+    # 航天/军工
+    "航天": "880490",
+    "航天/军工": "880490",
+    "国防军工": "880490",
+    "商业航天": "880490",
+    "航天/光伏": "880490",  # 取航天方向
+    # AI/软件
+    "人工智能": "880569",
+    "AI": "880569",
+    "AI应用": "880569",
+    "ChatGPT": "880569",
+    "数据要素": "880567",
+    "信创": "880568",
+    "数字经济": "880567",
+    # 消费/医药
+    "医药": "880400",
+    "大消费": "880375",
+    # 化工/材料
+    "化工": "880324",
+    "化工/新材料": "880324",
+    # 有色/稀土
+    "有色金属": "880535",
+    "有色/钨/稀土": "880535",
+    "稀土永磁": "880335",
+    # 环保/水利
+    "环保/水利": "880453",
+    "环保": "880453",
+    # 汽车
+    "汽车零部件": "880452",
+    # 地产
+    "地产产业链": "880482",
+    # 建筑
+    "建筑/装饰": "880596",
+    # 液冷
+    "液冷": "880570",
+    "液冷服务器": "880570",
+    # 其他
+    "光电/LED": "880549",
+    "低空经济": "880905",
+    # 以下为无对应TDX板块的纯主题概念，跳过查询：
+    # "业绩增长", "并购重组", "华为合作", "其他概念"
 }
+
+def _resolve_tdx_sector(name):
+    """解析板块名称 → TDX代码，支持别名"""
+    if not name:
+        return None
+    if name in _TDX_SECTOR_CODE_MAP:
+        return _TDX_SECTOR_CODE_MAP[name]
+    for key, code in _TDX_SECTOR_CODE_MAP.items():
+        if key in name or name in key:
+            return code
+    return None
 
 # PyTDX 连接缓存
 _tdx_api = None
@@ -260,6 +348,163 @@ def _decode_turnover(row, code):
     return None
 
 
+def _get_market_vol_ratio():
+    """全市场量比 = 今日累计量 / 昨日同时段累计量（上证15min数据）"""
+    global _15MIN_YESTERDAY
+    if '000001' not in _15MIN_YESTERDAY:
+        _load_yesterday_15min('000001', 1)
+    yest_data = _15MIN_YESTERDAY.get('000001', {})
+    if not yest_data:
+        return None
+    api = _get_tdx_api()
+    if not api:
+        return None
+    try:
+        bars = api.get_index_bars(1, 1, '000001', 0, 20)
+        if not bars:
+            return None
+        today_str = datetime.now().strftime("%Y-%m-%d")
+        now = datetime.now()
+        current_min = now.hour * 60 + now.minute
+        today_vol = 0
+        yest_vol = 0
+        for b in bars:
+            dt = b.get("datetime", "")
+            if today_str in dt:
+                time_key = dt.split(" ")[-1][:5] if " " in dt else dt[-5:]
+                slot_end = int(time_key.split(":")[0]) * 60 + int(time_key.split(":")[1])
+                if current_min >= slot_end:
+                    today_vol += b.get("vol", 0)
+                    yv = yest_data.get(time_key, {})
+                    yest_vol += yv.get("vol", b.get("vol", 0)) if isinstance(yv, dict) else (yv if isinstance(yv, (int, float)) else b.get("vol", 0))
+        if yest_vol > 0 and today_vol > 0:
+            return round(today_vol / yest_vol, 2)
+    except Exception:
+        pass
+    return None
+
+
+def _get_cum_yesterday_amt():
+    """昨日同时段累计成交额（上证+深证，从15min缓存推算）"""
+    total = 0
+    now = datetime.now()
+    current_min = now.hour * 60 + now.minute
+    for code in ['000001', '399001']:
+        slots = _15MIN_YESTERDAY_AMT_BY_SLOT.get(code, {})
+        for time_key, amt in slots.items():
+            parts = time_key.split(':')
+            slot_end = int(parts[0]) * 60 + int(parts[1])
+            if current_min >= slot_end:
+                total += amt
+    return total
+
+
+def _get_up_down_count():
+    """沪深合计涨跌家数（上证+深证最新15min K线）"""
+    api = _get_tdx_api()
+    if not api:
+        return None
+    today_str = datetime.now().strftime("%Y-%m-%d")
+    total_up, total_dn = 0, 0
+    queries = [(1, '000001'), (0, '399001')]  # 上证, 深证
+    for mkt, code in queries:
+        try:
+            bars = api.get_index_bars(1, mkt, code, 0, 2)
+            if not bars:
+                continue
+            for b in reversed(bars):
+                if today_str in b.get("datetime", ""):
+                    total_up += b.get("up_count", 0)
+                    total_dn += b.get("down_count", 0)
+                    break
+        except Exception:
+            pass
+    if total_up > 0 or total_dn > 0:
+        return (total_up, total_dn)
+    return None
+
+
+# ========== 全市场涨跌分布 ==========
+
+_A_SHARE_CODES = None  # 缓存A股代码列表
+
+def _get_a_share_codes():
+    """生成A股代码列表 [(market, code), ...]"""
+    global _A_SHARE_CODES
+    if _A_SHARE_CODES:
+        return _A_SHARE_CODES
+    codes = []
+    # 上海主板 + 科创板
+    for prefix, start, end in [('60', 600000, 606000), ('688', 688000, 689000)]:
+        for i in range(start, end):
+            codes.append((1, str(i)))
+    # 深圳主板 + 中小板 + 创业板
+    for i in range(1, 4000):
+        codes.append((0, f'{i:06d}'))
+    for i in range(300000, 302000):
+        codes.append((0, str(i)))
+    _A_SHARE_CODES = codes
+    return codes
+
+
+def fetch_breadth():
+    """全市场涨跌分布 → {label: count}，约 2-3s，供 30s 轮询"""
+    api = _get_tdx_api()
+    if not api:
+        return None
+    all_codes = _get_a_share_codes()
+    batch_size = 200
+    cats = {'涨停': 0, '>7%': 0, '5~7%': 0, '3~5%': 0, '0~3%': 0,
+            '-0~-3%': 0, '-3~-5%': 0, '-5~-7%': 0, '<-7%': 0, '跌停': 0}
+    total_valid = 0
+    errors = 0
+
+    for i in range(0, len(all_codes), batch_size):
+        batch = all_codes[i:i + batch_size]
+        try:
+            raw = api.get_security_quotes(batch)
+        except Exception:
+            errors += 1
+            if errors > 5:
+                break  # 连续错误过多，放弃本轮
+            continue
+        errors = 0
+        if not raw:
+            continue
+        for r in raw:
+            price = r.get('price', 0)
+            last_close = r.get('last_close', 0)
+            if not price or not last_close:
+                continue
+            pct = round((price - last_close) / last_close * 100, 2)
+            total_valid += 1
+            if pct >= 9.9:
+                cats['涨停'] += 1
+            elif pct > 7:
+                cats['>7%'] += 1
+            elif pct > 5:
+                cats['5~7%'] += 1
+            elif pct > 3:
+                cats['3~5%'] += 1
+            elif pct >= 0:
+                cats['0~3%'] += 1
+            elif pct >= -3:
+                cats['-0~-3%'] += 1
+            elif pct >= -5:
+                cats['-3~-5%'] += 1
+            elif pct >= -7:
+                cats['-5~-7%'] += 1
+            elif pct > -9.9:
+                cats['<-7%'] += 1
+            else:
+                cats['跌停'] += 1
+
+    if total_valid == 0:
+        return None
+    cats['_total'] = total_valid
+    return cats
+
+
 def fetch_index_pytdx():
     """PyTDX 三大指数查询 → live_index"""
     api = _get_tdx_api()
@@ -297,15 +542,78 @@ def fetch_index_pytdx():
         result[name] = price
         result[f"{name}涨幅"] = f"{pct:+.2f}%"
         result[f"{name}成交额"] = _format_amount(amount)
+        # 振幅 = (最高-最低)/昨收
+        high = row.get("high", 0)
+        low = row.get("low", 0)
+        if high and low and last_close:
+            amp = round((high - low) / last_close * 100, 2)
+            result[f"{name}振幅"] = f"{amp:.2f}%"
 
     # 成交额 = 上证 + 深证（不含创业板，创业板是深证子集，会重复计数）
     total_amt = sum(
         row.get("amount", 0) for row in raw if row.get("code", "") in ("000001", "399001")
     )
     result["成交额"] = _format_amount(total_amt)
-    result["成交额差"] = "—"
+
+    # 成交额差 = 今日累计 vs 昨日同时段累计（从15min缓存推算）
+    cum_yest = _get_cum_yesterday_amt()
+    if cum_yest > 0 and total_amt > 0:
+        diff = (total_amt - cum_yest) / 1e8
+        result["成交额差"] = f"{diff:+.0f}亿" if abs(diff) < 10000 else f"{diff/10000:+.2f}万亿"
+    else:
+        result["成交额差"] = "—"
+
+    # 涨跌家数（从最新15min K线）
+    ud = _get_up_down_count()
+    if ud:
+        result["上涨家数"] = ud[0]
+        result["下跌家数"] = ud[1]
+
+    # 全市场量比（上证15min累计量/昨日同时段）
+    vr = _get_market_vol_ratio()
+    if vr is not None:
+        result["量比"] = vr
 
     return result
+
+
+def _get_yesterday_baseline():
+    """昨日收盘基线：三大指数涨跌幅+成交量+涨跌家数（从TDX日线）"""
+    api = _get_tdx_api()
+    if not api:
+        return None
+    idx_list = [(1, '000001', '上证'), (0, '399001', '深证'), (0, '399006', '创业')]
+    today_str = datetime.now().strftime("%Y-%m-%d")
+    result = {}
+    for mkt, code, name in idx_list:
+        try:
+            bars = api.get_index_bars(9, mkt, code, 0, 4)
+            if not bars or len(bars) < 2:
+                continue
+            yesterday = None
+            prev = None
+            for b in reversed(bars):
+                dt = b.get("datetime", "")
+                if today_str in dt:
+                    continue
+                if yesterday is None:
+                    yesterday = b
+                elif prev is None:
+                    prev = b
+                    break
+            if not yesterday:
+                continue
+            close = yesterday.get("close", 0)
+            prev_close = prev.get("close", close) if prev else close
+            pct = round((close - prev_close) / prev_close * 100, 2) if prev_close else 0
+            result[f"{name}昨收"] = close
+            result[f"{name}昨涨幅"] = f"{pct:+.2f}%"
+            result[f"{name}昨成交额"] = _format_amount(yesterday.get("amount", 0))
+            result[f"{name}昨上涨"] = yesterday.get("up_count", 0)
+            result[f"{name}昨下跌"] = yesterday.get("down_count", 0)
+        except Exception:
+            pass
+    return result if result else None
 
 
 def _format_amount(amt):
@@ -484,8 +792,8 @@ def get_sector_names():
 
 # ========== 15min 量价（上证/深证/创业）==========
 
-_15MIN_YESTERDAY = {}  # {index_code: {time_key: vol}} 昨日缓存
-_YESTERDAY_DAILY_AMT = {}  # {index_code: amount} 昨日全日成交额
+_15MIN_YESTERDAY = {}  # {index_code: {time_key: {vol, amount}}} 昨日15min缓存
+_15MIN_YESTERDAY_AMT_BY_SLOT = {}  # {index_code: {time_key: amount}} 昨日各时段成交额（供前端卡）
 _15MIN_INDEXES = {
     "上证15min": ("000001", 1),
     "深证15min": ("399001", 0),
@@ -494,7 +802,7 @@ _15MIN_INDEXES = {
 
 
 def _load_yesterday_15min(code, market):
-    """加载昨日15min K线，缓存成交量"""
+    """加载昨日15min K线，缓存成交量和成交额"""
     api = _get_tdx_api()
     if not api:
         return
@@ -504,6 +812,7 @@ def _load_yesterday_15min(code, market):
             return
         today_str = datetime.now().strftime("%Y-%m-%d")
         yesterday_bars = {}
+        yesterday_amt = {}
         for b in bars:
             dt = b.get("datetime", "")
             if today_str not in dt and dt:
@@ -511,34 +820,15 @@ def _load_yesterday_15min(code, market):
                 date_part = dt.split(" ")[0] if " " in dt else dt[:10]
                 if date_part not in yesterday_bars:
                     yesterday_bars[date_part] = {}
-                yesterday_bars[date_part][time_key] = b.get("vol", 0)
+                    yesterday_amt[date_part] = {}
+                yesterday_bars[date_part][time_key] = {"vol": b.get("vol", 0), "amount": b.get("amount", 0)}
+                yesterday_amt[date_part][time_key] = b.get("amount", 0)
         if yesterday_bars:
             latest_date = sorted(yesterday_bars.keys())[-1]
             _15MIN_YESTERDAY[code] = yesterday_bars[latest_date]
+            _15MIN_YESTERDAY_AMT_BY_SLOT[code] = yesterday_amt[latest_date]
     except Exception:
         pass
-
-
-def _get_yesterday_daily_amt(code, market):
-    """取昨日日线成交额（一次缓存）"""
-    global _YESTERDAY_DAILY_AMT
-    if code in _YESTERDAY_DAILY_AMT:
-        return _YESTERDAY_DAILY_AMT[code]
-    api = _get_tdx_api()
-    if not api:
-        return 0
-    try:
-        bars = api.get_index_bars(9, market, code, 0, 5)
-        today_str = datetime.now().strftime("%Y-%m-%d")
-        for b in reversed(bars):
-            dt = b.get("datetime", "")
-            if today_str not in dt and dt:
-                amt = b.get("amount", 0)
-                _YESTERDAY_DAILY_AMT[code] = amt
-                return amt
-    except Exception:
-        pass
-    return 0
 
 
 def fetch_15min_bars(code, market, cache_key):
@@ -559,6 +849,7 @@ def fetch_15min_bars(code, market, cache_key):
         return []
 
     yesterday = _15MIN_YESTERDAY.get(code, {})
+    yesterday_amt_slots = _15MIN_YESTERDAY_AMT_BY_SLOT.get(code, {})
     today_str = datetime.now().strftime("%Y-%m-%d")
     now = datetime.now()
     current_min = now.hour * 60 + now.minute
@@ -575,7 +866,9 @@ def fetch_15min_bars(code, market, cache_key):
         close_p = b.get("close", 0)
         vol = b.get("vol", 0)
         chg = round((close_p - open_p) / open_p * 100, 2) if open_p else 0
-        yesterday_vol = yesterday.get(time_key, vol)
+        ydata = yesterday.get(time_key, {})
+        yesterday_vol = ydata.get("vol", vol) if isinstance(ydata, dict) else ydata
+        yesterday_amt = ydata.get("amount", 0) if isinstance(ydata, dict) else 0
         vol_ratio = round(vol / yesterday_vol, 2) if yesterday_vol > 0 else 1.0
         result.append({
             "t": time_key,
@@ -583,17 +876,24 @@ def fetch_15min_bars(code, market, cache_key):
             "vol": vol,
             "volRatio": vol_ratio,
             "amount": b.get("amount", 0),
+            "yesterdayAmt": yesterday_amt,
         })
 
     # 追加累计汇总
     if result:
         cum_amount = sum(r["amount"] for r in result)
-        # 用昨日vol比例估算昨日累计成交额
+        # 量比：今日累计vol / 昨日同时段累计vol
         total_vol = sum(r["vol"] for r in result)
-        total_yv = sum(yesterday.get(r["t"], r["vol"]) for r in result)
+        total_yv = 0
+        for r in result:
+            yv = yesterday.get(r["t"], {})
+            total_yv += yv.get("vol", r["vol"]) if isinstance(yv, dict) else (yv if isinstance(yv, (int, float)) else r["vol"])
         cum_ratio = round(total_vol / total_yv, 2) if total_yv > 0 else 1.0
-        # 昨日全日成交额从日线直接获取
-        cum_yesterday_amt = _get_yesterday_daily_amt(code, market)
+        # 昨日同时段累计成交额（与今日同口径）
+        cum_yesterday_amt = 0
+        for r in result:
+            ya = yesterday_amt_slots.get(r["t"], 0)
+            cum_yesterday_amt += ya
         result.append({
             "t": "累计",
             "chg": 0,
@@ -622,7 +922,7 @@ def fetch_sectors_tdx(sector_names):
     code_to_name = {}
     tdx_codes = []
     for name in sector_names:
-        tdx_code = _TDX_SECTOR_CODE_MAP.get(name)
+        tdx_code = _resolve_tdx_sector(name)
         if tdx_code:
             tdx_codes.append((1, tdx_code))
             code_to_name[tdx_code] = name
@@ -663,12 +963,15 @@ def fetch_sectors_tdx(sector_names):
 # ========== 数据组装 ==========
 
 _last_sectors_cache = {}  # 板块数据缓存，非刷新轮次复用
+_last_yesterday_baseline = {}  # 昨日基线缓存，仅30s刷新一次
 
 def build_live_data(codes, skip_sectors=False):
     """组装完整 live 数据"""
-    global _tdx_using_fallback, _tdx_fail_count, _last_sectors_cache
+    global _tdx_using_fallback, _tdx_fail_count, _last_sectors_cache, _last_yesterday_baseline
 
     data = {"live_sectors": _last_sectors_cache}  # 默认复用上次板块数据
+    if _last_yesterday_baseline:
+        data["yesterday_baseline"] = _last_yesterday_baseline  # 非刷新轮次复用缓存
 
     # 个股 + 指数
     if _tdx_fail_count >= 3 and not _tdx_using_fallback:
@@ -708,6 +1011,17 @@ def build_live_data(codes, skip_sectors=False):
             if result:
                 data["live_sectors"] = result
                 _last_sectors_cache = result  # 更新缓存
+
+        # 昨日收盘基线（与板块同频，30s）
+        yest_base = _get_yesterday_baseline()
+        if yest_base:
+            data["yesterday_baseline"] = yest_base
+            _last_yesterday_baseline = yest_base  # 更新缓存
+
+        # 全市场涨跌分布（与板块同频，30s）
+        breadth = fetch_breadth()
+        if breadth:
+            data["live_breadth"] = breadth
 
     data["meta"] = {
         "fetched": datetime.now().strftime("%Y-%m-%dT%H:%M:%S+08:00"),
