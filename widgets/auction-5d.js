@@ -1,106 +1,228 @@
-// widgets/auction-5d.js — W06 竞价5维面板
+// widgets/auction-5d.js — W06 竞价5维面板 v3.0 (竞价快照 + SSOT情绪指标)
 'use strict';
 
 class Auction5DWidget extends YiMuWidget {
+  constructor(config) {
+    super(config);
+    this._snapshot = null;
+  }
+
   render(data) {
     var body = this.getBody();
     if (!body) return;
-    var d = (data && data.decision) || {};
-    var auction = d['竞价'] || {};
 
-    if (!auction['结论']) {
-      body.innerHTML = '<div style="padding:var(--sp-lg);text-align:center;color:var(--text-disabled)">竞价数据未录入</div>';
+    var snap = this._snapshot;
+    var sent = (snap && snap['情绪指标']) || {};  // 9:25 实时 THS 数据
+    var sty = (data && data.style) || {};
+    var mkt = (data && data.market) || {};
+
+    // 首次加载：异步获取竞价快照
+    if (!snap) {
+      this._loadSnapshot(body);
+      this._renderPlaceholder(body, sent, sty, mkt);
       return;
     }
 
-    var lightMap = {green:'info',orange:'warn',red:'danger'};
-    function dot(lamp) { return lamp==='green'?'🔵':lamp==='red'?'🔴':'🟠'; }
-    function cls(lamp) { return lightMap[lamp]||'warn'; }
-    function chgCls(v) {
-      var n = parseFloat(String(v).replace('%',''));
-      return isNaN(n) ? '' : n>0?'up':'down';
+    // 合并渲染
+    this._renderFull(body, snap, sent, sty, mkt);
+  }
+
+  _loadSnapshot(body) {
+    var self = this;
+    fetch('data/auction_snapshot.json?t=' + Date.now())
+      .then(function(r) { return r.ok ? r.json() : null; })
+      .then(function(snap) {
+        if (snap && snap['指数竞价']) {
+          self._snapshot = snap;
+          self._renderBody();
+        }
+      })
+      .catch(function() {});
+  }
+
+  _renderPlaceholder(body, sent, sty, mkt) {
+    var html = '<div style="font-size:var(--fs-label);color:var(--text-disabled);text-align:center;padding:var(--sp-md)">加载竞价数据...</div>';
+    if (sent['情绪值'] != null) {
+      html += this._renderSentiment(sent, sty, mkt);
     }
+    body.innerHTML = html;
+    this.updateTimestamp();
+  }
+
+  _renderFull(body, snap, sent, sty, mkt) {
+    var lights = snap['信号灯'] || {};
+    var overall = lights['综合'] || {};
+    var lightColors = {green:'var(--info)', orange:'var(--warn)', red:'var(--danger)'};
+    var lightDots = {green:'🟢', orange:'🟠', red:'🔴'};
+    var lightBg = {green:'rgba(59,130,246,0.06)', orange:'rgba(255,149,0,0.05)', red:'rgba(255,59,48,0.05)'};
 
     var html = '';
 
-    // === 顶部结论条 ===
-    var isBull = auction['结论'].indexOf('偏多') >= 0;
-    html += '<div style="padding:var(--sp-sm) var(--sp-md);margin-bottom:var(--sp-md);background:var(--bg-base);border-radius:var(--radius-md);border-left:3px solid '+(isBull?'var(--up)':'var(--warn)')+'">' +
-      '<div style="display:flex;align-items:baseline;gap:var(--sp-md)">' +
-        '<span style="font-size:var(--fs-subtitle);font-weight:700;color:'+(isBull?'var(--up)':'var(--warn)')+'">'+auction['结论']+'</span>' +
-        '<span style="font-size:var(--fs-body);color:var(--text-secondary)">高潮保护: '+auction['高潮保护']+'</span>' +
-      '</div>' +
-      '<div style="margin-top:var(--sp-xs);font-size:var(--fs-body);color:var(--info)">▶ '+(auction['动作']||'')+'</div>' +
+    // === 顶部综合条 ===
+    var oc = overall['灯'] || 'orange';
+    html += '<div style="display:flex;align-items:center;gap:var(--sp-sm);padding:var(--sp-xs) var(--sp-md);margin-bottom:var(--sp-sm);background:'+(lightBg[oc]||lightBg.orange)+';border-radius:var(--radius-md);border-left:3px solid '+(lightColors[oc]||lightColors.orange)+'">' +
+      '<span style="font-size:16px">'+(lightDots[oc]||'🟠')+'</span>' +
+      '<span style="font-weight:700;font-size:var(--fs-subtitle);color:'+(lightColors[oc]||lightColors.orange)+'">'+(overall['label']||'—')+'</span>' +
+      '<span style="font-size:var(--fs-body);color:var(--text-secondary)">强势'+(snap['竞价强势家数']||0)+'只</span>' +
+      '<span style="font-size:var(--fs-body);color:var(--text-secondary)">涨'+(snap['涨跌家数']['上涨']||0)+'/跌'+(snap['涨跌家数']['下跌']||0)+'</span>' +
+      '<span style="margin-left:auto;font-size:var(--fs-label);color:var(--text-disabled)">'+(snap['time']||'')+'</span>' +
       '</div>';
 
-    // === 上排：大盘 + 情绪 ===
-    html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:var(--sp-md);margin-bottom:var(--sp-md)">';
+    // === 上排：指数 | 情绪(宽,两列内排) ===
+    html += '<div style="display:grid;grid-template-columns:1fr 1.8fr;gap:var(--sp-sm);margin-bottom:var(--sp-sm)">';
 
-    // 大盘指数
-    html += '<div style="background:var(--bg-base);border-radius:var(--radius-md);padding:var(--sp-sm) var(--sp-md)">' +
-      '<div style="font-size:var(--fs-body);font-weight:600;color:var(--text-primary);margin-bottom:var(--sp-sm);padding-bottom:var(--sp-xs);border-bottom:1px solid var(--border-light)">大盘指数</div>';
-    (auction['大盘指数']||[]).forEach(function(idx) {
-      html += '<div style="display:flex;align-items:center;gap:var(--sp-sm);padding:3px 0;font-size:var(--fs-body)">' +
-        '<span>'+dot(idx['灯'])+' <strong>'+idx['指数']+'</strong></span>' +
-        '<span style="font-family:var(--font-mono);font-weight:600;color:var(--'+chgCls(idx['竞价涨幅'])+')">'+idx['竞价涨幅']+'</span>' +
-        '<span style="font-size:var(--fs-body);color:var(--text-secondary)">涨 <span style="color:var(--up);font-weight:600">'+(idx['涨家']||'—')+'</span> 跌 <span style="color:var(--down);font-weight:600">'+(idx['跌家']||'—')+'</span></span>' +
-        '</div>';
+    html += this._card('指数竞价', function() {
+      var h = '';
+      (snap['指数竞价']||[]).forEach(function(idx) {
+        var chg = idx['竞价涨幅'] || 0;
+        var cls = chg >= 0 ? 'up' : 'down';
+        var sign = chg >= 0 ? '+' : '';
+        h += '<div style="display:flex;justify-content:space-between;padding:2px 0;font-size:var(--fs-body)">' +
+          '<span style="font-weight:600">' + idx['名称'] + '</span>' +
+          '<span class="' + cls + '" style="font-family:var(--font-mono);font-weight:600">' + sign + chg.toFixed(2) + '%</span></div>';
+      });
+      var ud = snap['涨跌家数'] || {};
+      h += '<div style="margin-top:var(--sp-xs);padding-top:var(--sp-xs);border-top:1px solid var(--border-light);font-size:var(--fs-body)">' +
+        '<span style="color:var(--text-disabled)">涨跌比 </span>' +
+        '<span style="font-weight:600;color:var(--up)">'+(ud['上涨']||0)+'</span>/' +
+        '<span style="font-weight:600;color:var(--down)">'+(ud['下跌']||0)+'</span>' +
+        '<span style="color:var(--text-disabled);margin-left:var(--sp-xs)">('+(ud['涨跌比']||'—')+')</span></div>';
+      return h;
+    }());
+
+    html += this._renderSentiment(sent, sty, mkt);
+    html += '</div>';
+
+    // === 下排：高标 | 自选 ===
+    html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:var(--sp-sm);margin-bottom:var(--sp-sm)">';
+
+    html += this._card('高标竞价', function() {
+      var h = '';
+      var highs = snap['高标竞价'] || [];
+      highs.slice(0, 8).forEach(function(hi) {
+        var chg = hi['竞价涨幅'] || 0;
+        var cls = chg >= 5 ? 'up' : chg >= 0 ? '' : 'down';
+        var sign = chg >= 0 ? '+' : '';
+        var anomaly = hi['异动'] || '';
+        var aCls = anomaly.indexOf('砸盘')>=0 ? 'down' : anomaly.indexOf('抢筹')>=0 ? 'up' : '';
+        h += '<div style="display:flex;align-items:center;gap:2px;padding:1px 0;font-size:var(--fs-body)">' +
+          '<span style="font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0">'+hi['名称']+'</span>' +
+          '<span style="font-size:9px;color:var(--text-disabled);flex-shrink:0">'+hi['板数']+'板</span>' +
+          '<span class="'+cls+'" style="font-family:var(--font-mono);font-weight:600;margin-left:auto;flex-shrink:0;font-size:var(--fs-body)">'+sign+chg.toFixed(1)+'%</span>' +
+          (anomaly?'<span class="'+aCls+'" style="font-size:8px;flex-shrink:0">'+anomaly.substring(0,4)+'</span>':'') +
+          '</div>';
+      });
+      return h;
+    }());
+
+    html += this._card('自选池', function() {
+      var h = '';
+      var pools = snap['自选池竞价'] || [];
+      pools.forEach(function(s) {
+        var chg = s['竞价涨幅'] || 0;
+        var cls = chg >= 3 ? 'up' : chg <= -3 ? 'down' : '';
+        var sign = chg >= 0 ? '+' : '';
+        var src = s['来源'] || '';
+        var srcCls = src==='连板'?'up':src==='趋势'?'down':'info';
+        h += '<div style="display:flex;align-items:center;gap:2px;padding:1px 0;font-size:var(--fs-body)">' +
+          '<span style="font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0">'+s['名称']+'</span>' +
+          (src?'<span style="font-size:8px;padding:0 3px;border-radius:2px;background:var(--'+srcCls+');color:#fff;flex-shrink:0">'+src+'</span>':'') +
+          '<span class="'+cls+'" style="font-family:var(--font-mono);font-weight:600;margin-left:auto;flex-shrink:0;font-size:var(--fs-body)">'+sign+chg.toFixed(2)+'%</span>' +
+          '</div>';
+      });
+      return h;
+    }());
+
+    html += '</div>';
+
+    html += '</div>'; // end grid
+
+    // === 信号灯 + 板块竞价 ===
+    html += '<div style="display:flex;gap:var(--sp-sm);align-items:center;flex-wrap:wrap;font-size:var(--fs-body)">';
+    ['涨跌','强势','高标'].forEach(function(k) {
+      var l = lights[k] || {};
+      var c = l['灯'] || 'orange';
+      html += '<span style="padding:1px 6px;border-radius:3px;background:'+(lightBg[c]||'')+';color:'+(lightColors[c]||'')+'">'+(lightDots[c]||'')+' '+k+':'+(l['label']||'—')+'</span>';
     });
-    html += '</div>';
-
-    // 市场情绪
-    html += '<div style="background:var(--bg-base);border-radius:var(--radius-md);padding:var(--sp-sm) var(--sp-md)">' +
-      '<div style="font-size:var(--fs-body);font-weight:600;color:var(--text-primary);margin-bottom:var(--sp-sm);padding-bottom:var(--sp-xs);border-bottom:1px solid var(--border-light)">市场情绪</div>';
-    (auction['市场情绪']||[]).forEach(function(s) {
-      html += '<div style="display:flex;align-items:center;justify-content:space-between;padding:3px 0;font-size:var(--fs-body)">' +
-        '<span>'+dot(s['灯'])+' '+s['名称']+'</span>' +
-        '<span style="font-family:var(--font-mono);font-weight:600;color:var(--'+cls(s['灯'])+')">'+s['值']+'</span>' +
-        '</div>';
+    var sectors = snap['板块竞价'] || [];
+    sectors.forEach(function(sec) {
+      var chg = sec['竞价涨幅'] || 0;
+      var cls = chg >= 0 ? 'up' : 'down';
+      var sign = chg >= 0 ? '+' : '';
+      html += '<span style="font-size:var(--fs-body);padding:0 6px;background:var(--bg-hover);border-radius:3px">' +
+        '<span style="font-weight:600">'+sec['板块']+'</span> ' +
+        '<span class="'+cls+'" style="font-family:var(--font-mono)">'+sign+chg.toFixed(2)+'%</span></span>';
     });
-    html += '</div>';
-
-    html += '</div>';
-
-    // === 下排：方向锚定 / 高标竞价 / 锚定股竞价 ===
-    html += '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:var(--sp-md)">';
-
-    // 方向锚定
-    html += '<div style="background:var(--bg-base);border-radius:var(--radius-md);padding:var(--sp-sm) var(--sp-md)">' +
-      '<div style="font-size:var(--fs-body);font-weight:600;color:var(--text-primary);margin-bottom:var(--sp-sm);padding-bottom:var(--sp-xs);border-bottom:1px solid var(--border-light)">方向锚定</div>';
-    (auction['方向锚定']||[]).forEach(function(fx) {
-      html += '<div style="padding:3px 0;font-size:var(--fs-body)">' +
-        '<div style="display:flex;align-items:center;justify-content:space-between">' +
-        '<span>'+dot(fx['灯'])+' <strong>'+fx['板块']+'</strong></span>' +
-        '<span style="font-size:var(--fs-label);color:var(--text-secondary)">'+fx['竞价']+'</span></div></div>';
-    });
-    html += '</div>';
-
-    // 高标竞价
-    html += '<div style="background:var(--bg-base);border-radius:var(--radius-md);padding:var(--sp-sm) var(--sp-md)">' +
-      '<div style="font-size:var(--fs-body);font-weight:600;color:var(--text-primary);margin-bottom:var(--sp-sm);padding-bottom:var(--sp-xs);border-bottom:1px solid var(--border-light)">高标竞价</div>';
-    (auction['高标竞价']||[]).forEach(function(g) {
-      html += '<div style="display:flex;align-items:center;justify-content:space-between;padding:3px 0;font-size:var(--fs-body)">' +
-        '<span>'+dot(g['灯'])+' <strong>'+g['名称']+'</strong></span>' +
-        '<span style="font-family:var(--font-mono);font-weight:600;color:var(--'+chgCls(g['竞价'])+')">'+g['竞价']+'</span>' +
-        '</div>';
-    });
-    html += '</div>';
-
-    // 锚定股竞价
-    html += '<div style="background:var(--bg-base);border-radius:var(--radius-md);padding:var(--sp-sm) var(--sp-md)">' +
-      '<div style="font-size:var(--fs-body);font-weight:600;color:var(--text-primary);margin-bottom:var(--sp-sm);padding-bottom:var(--sp-xs);border-bottom:1px solid var(--border-light)">锚定股竞价</div>';
-    (auction['锚定股竞价']||[]).forEach(function(mao) {
-      html += '<div style="display:flex;align-items:center;justify-content:space-between;padding:3px 0;font-size:var(--fs-body)">' +
-        '<span>'+dot(mao['灯'])+' <strong>'+mao['标的']+'</strong></span>' +
-        '<span style="font-family:var(--font-mono);font-weight:600;color:var(--'+chgCls(mao['竞价'])+')">'+mao['竞价']+'</span>' +
-        '</div>';
-    });
-    html += '</div>';
-
     html += '</div>';
 
     body.innerHTML = html;
     this.updateTimestamp();
+  }
+
+  // === 情绪指标卡片 (SSOT from 复盘笔记) ===
+  _renderSentiment(sent, sty, mkt) {
+    function kv(label, value, cls) {
+      if (value == null || value === '') return '';
+      return '<div style="display:flex;justify-content:space-between;gap:var(--sp-xs)">' +
+        '<span style="color:var(--text-secondary);white-space:nowrap">'+label+'</span>' +
+        '<span class="'+(cls||'')+'" style="font-family:var(--font-mono);font-weight:600;text-align:right">'+value+'</span></div>';
+    }
+    function pctV(label, val) {
+      if (val == null) return '';
+      var num = parseFloat(String(val).replace('%','').replace('（',''));
+      var cls = isNaN(num) ? '' : num >= 2 ? 'up' : num >= 0 ? '' : 'down';
+      return kv(label, val+'%', cls);
+    }
+    function cleanBoard(s) {
+      if (!s) return '';
+      var m = String(s).match(/^(\d+)/);
+      return m ? m[1]+'板' : s;
+    }
+
+    var h = '<div style="background:var(--bg-base);border-radius:var(--radius-md);padding:var(--sp-xs) var(--sp-sm)">' +
+      '<div style="font-size:var(--fs-label);font-weight:600;color:var(--text-primary);margin-bottom:var(--sp-xs);padding-bottom:2px;border-bottom:1px solid var(--border-light)">情绪指标 9:25</div>';
+
+    h += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:2px var(--sp-md);font-size:var(--fs-body)">';
+
+    // 左列
+    var left = '';
+
+    var qx = sent['情绪值'];
+    if (qx != null) {
+      var qxNum = parseFloat(String(qx).replace('%',''));
+      var qxLabel = qxNum < 20 ? '冰点' : qxNum < 40 ? '低迷' : qxNum < 60 ? '主升' : qxNum < 80 ? '强势' : '高潮';
+      var qxCls = qxNum >= 40 && qxNum <= 60 ? 'up' : qxNum >= 20 && qxNum < 40 ? 'warn' : '';
+      left += kv('情绪值', qx+'% '+qxLabel, qxCls);
+    }
+    if (sent['赚钱效应']) left += kv('赚钱效应', sent['赚钱效应']);
+    left += pctV('涨停收益', sent['昨日涨停收益']||sent['涨停收益']);
+    left += pctV('连板收益', sent['昨日连板收益']||sent['连板收益']);
+
+    // 右列
+    var right = '';
+    right += pctV('炸板收益', sent['昨日炸板收益']);
+
+    var risk = sent['连板风险值'];
+    if (risk != null) {
+      var riskNum = parseFloat(String(risk));
+      var riskCls = !isNaN(riskNum) ? (riskNum < 0.5 ? 'up' : riskNum < 1 ? '' : 'down') : '';
+      right += kv('连板风险值', risk, riskCls);
+    }
+
+    var maxB = sent['最高板'];
+    if (maxB) right += kv('最高板', cleanBoard(maxB));
+
+    h += '<div>' + left + '</div>';
+    h += '<div>' + right + '</div>';
+    h += '</div>';
+    h += '</div>';
+    return h;
+  }
+
+  _card(title, body) {
+    return '<div style="background:var(--bg-base);border-radius:var(--radius-md);padding:var(--sp-xs) var(--sp-sm)">' +
+      '<div style="font-size:var(--fs-label);font-weight:600;color:var(--text-primary);margin-bottom:var(--sp-xs);padding-bottom:2px;border-bottom:1px solid var(--border-light)">'+title+'</div>' +
+      body + '</div>';
   }
 }
 

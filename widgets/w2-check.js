@@ -1,306 +1,236 @@
-// widgets/w2-check.js — W09 W2尾盘确认 (v3.0 规则引擎·低吸三策略+弱回踩)
+// widgets/w2-check.js — W09 W2实时评估 v5.0 (60分钟MA10核心锚点 + 强势/普通分类)
 'use strict';
 
 class W2CheckWidget extends YiMuWidget {
   render(data) {
     var body = this.getBody();
     if (!body) return;
+    var nodes = (data && data.sentiment_nodes) || {};
     var S = (data && data.sentiment) || {};
-    var M = (data && data.market) || {};
     var li = (data && data.live_index) || {};
     var liveQ = (data && data.live_quotes) || {};
-    var lbPoolAll = (data && data.lianban_pool) || [];
-    var trPoolAll = (data && data.trend_pool) || [];
-    // 按窗口过滤：W2只显示标记为W2的（向后兼容：无窗口标记的也显示）
-    var lbPool = lbPoolAll.filter(function(s){ var w=s['窗口']||''; return !w||w==='W2'; });
-    var trPool = trPoolAll.filter(function(s){ var w=s['窗口']||''; return !w||w==='W2'; });
-    var sectors = (data && data.sectors) || [];
+    var trPool = (data && data.trend_pool) || [];
+    var lbPool = (data && data.lianban_pool) || [];
 
-    var initBase = DataStore.getInitialBase();
-    var closeS = (initBase && initBase.sentiment) || {};
+    var NODE_ORDER = ['竞价','早盘','午盘','尾盘','收盘'];
+    var _placeholder = function(v) {
+      if (!v) return true;
+      v = String(v);
+      if (v === '—' || v === '%' || v === '亿' || v === '操作' || v === '板') return true;
+      if (v.indexOf('点位') >= 0 || v.indexOf('(%)') >= 0) return true;
+      if (/^(好|一般|差)(\/(好|一般|差))+$/.test(v)) return true;
+      if (/^(完整|断层)(\/(完整|断层))+$/.test(v)) return true;
+      if (/^(竞价|早盘|午盘|尾盘|收盘)$/.test(v)) return true;
+      return false;
+    };
+    // 逐指标从最新节点往前找第一个有效值
+    function latestVal(key, fallback) {
+      for (var i = NODE_ORDER.length-1; i >= 0; i--) {
+        var v = (nodes[NODE_ORDER[i]] || {})[key];
+        if (v != null && !_placeholder(v)) return {val: v, node: NODE_ORDER[i]};
+      }
+      return {val: fallback, node: '基线'};
+    }
 
     var now = new Date();
-    var weekday = now.getDay();
-    var isFriday = weekday === 5;
     var hour = now.getHours(), min = now.getMinutes();
     var inW2 = (hour === 14 && min >= 0 && min <= 50);
-    var w2Phase = inW2 ? (min < 30 ? '核心时段(14:00-14:30)' : '确认段(14:30-14:50)') : '';
+    var w2Label = inW2 ? (min < 30 ? '14:00-14:30 核心' : '14:30-14:50 确认') : '非W2';
 
-    // ===== 数值提取 =====
-    var qx = parseFloat(S['情绪值']) || 0;
-    var yestQx = parseFloat(closeS['情绪值']) || 0;
-    var ztProfit = parseFloat(String(S['昨日涨停收益']||'0').replace('%','').replace('+','')) || 0;
-    var fbRate = parseFloat(String(M['炸板率']||'0').replace('%','')) || 0;
-    var ztCount = parseInt(M['涨停家数']) || 0;
-    var szChg = parseFloat(String(li['上证指数涨幅']||'0').replace('%','').replace('+','')) || 0;
+    function p(v) { return parseFloat(String(v).replace('%','').replace('+','')) || 0; }
+
+    // === 市场条件（逐指标独立取最新值）===
+    var qxR = latestVal('情绪', S['情绪值']);
+    var ztR = latestVal('涨停收益', S['昨日涨停收益']);
+    var pfR = latestVal('赚钱效应', S['赚钱效应']);
+    var qx = p(qxR.val); var ztProfit = p(ztR.val); var profitSrc = pfR.val;
     var zone = qx < 20 ? '冰点' : qx < 40 ? '低迷' : qx < 60 ? '主升' : qx < 80 ? '强势' : '高潮';
-    var isDb = qx < 20 && yestQx < 20;
+    var srcTag = '📋' + (qxR.node === ztR.node ? qxR.node : qxR.node + '/' + ztR.node);
 
-    // ===== 一、共用窗口 =====
-    var sharedItems = [];
-    // 时间
-    sharedItems.push({ok: inW2, label: '时间窗口',
-      detail: inW2 ? '14:00-14:50 '+w2Phase : '当前非W2时段', hard: true});
-    // 周五 → W2正常开
-    sharedItems.push({ok: true, label: '周五',
-      detail: isFriday ? 'W2正常（低吸仓位小）' : '非周五', hard: false});
-    // 双冰 → W2可开但门槛提高
-    sharedItems.push({ok: true, label: '双冰',
-      detail: isDb ? 'W2可开·门槛涨停≥10' : '无双冰', hard: false});
-    // 高潮保护
-    var climaxOk = qx < 90;
-    sharedItems.push({ok: climaxOk, label: '高潮保护',
-      detail: qx >= 90 ? '全关' : qx >= 85 ? '降半仓' : '正常', hard: qx >= 90});
+    var mktItems = [
+      {label:'情绪', val:qx+'% '+zone, ok:qx>=20, rule:'≥20%', src:srcTag},
+      {label:'涨停收益', val:ztProfit.toFixed(1)+'%', ok:ztProfit>=2, rule:'≥2%', src:srcTag},
+      {label:'赚钱效应', val:profitSrc||'—', ok:profitSrc==='好'||profitSrc==='较好', rule:'好/较好', src:srcTag},
+      {label:'涨跌', val:'涨'+(li['上涨家数']||'—')+' 跌'+(li['下跌家数']||'—'), ok:true, rule:'', src:'⚡'},
+      {label:'上证', val:li['上证指数涨幅']||'—', ok:true, rule:'', src:'⚡'},
+    ];
+    var mktOk = mktItems.filter(function(x){return !x.ok;}).length === 0;
 
-    var sharedAllOk = sharedItems.filter(function(x){return x.hard;}).every(function(x){return x.ok;});
-
-    // ===== 二、连板 W2 =====
-    // 三个子策略
-    var lbStrategies = [];
-    // 龙头首阴：最高板首次断板+非放量+跟风封板+回踩5日线
-    var topBoardName = String(S['最高板']||'');
-    var topLeader = lbPool.find(function(s){return s['标的']===topBoardName;}) || {};
-    var tlCode = topLeader['代码'] || '';
-    var tlQ = liveQ[tlCode] || {};
-    var tlChg = parseFloat(String(tlQ['涨幅']||topLeader['涨幅']||'0').replace('%','').replace('+','')) || 0;
-    var tlVr = parseFloat(tlQ['量比']||topLeader['量比']) || 0;
-    var lbFollowCount = 0;
-    lbPool.forEach(function(s){
-      var q = liveQ[s['代码']] || {};
-      var c = parseFloat(String(q['涨幅']||s['涨幅']||'0').replace('%','').replace('+','')) || 0;
-      if (c > 3) lbFollowCount++;
-    });
-    var firstBreak = tlChg < 0 && tlVr < 1.5; // 断板收阴+非放量崩盘
-    var hasFollow = lbFollowCount >= 1;
-    lbStrategies.push({
-      name: '龙头首阴', ok: firstBreak && hasFollow,
-      detail: tlChg.toFixed(1)+'%'+(firstBreak?' 首阴':'')+(hasFollow?' 跟风'+lbFollowCount+'只':' 无跟风×'),
-      pos: '10%', stop: '-5%'
-    });
-
-    // 分歧转一致：炸板率30-40%+核心标的回踩5日线不破+14:30后有放量回拉
-    var diverge = fbRate >= 30 && fbRate <= 40;
-    var dipOk = false; // 需要更细的分时数据，先标记
-    lbStrategies.push({
-      name: '分歧转一致', ok: diverge,
-      detail: '炸板率'+(fbRate||'—')+'%'+((diverge&&fbRate)?' 分歧':'')+' 待确认',
-      pos: '10%', stop: '-5%'
-    });
-
-    // 双冰试错：双冰+合力3/3+标的限龙头/中军
-    var dbTryOk = isDb; // 简化：双冰时开放，实际需合力3/3
-    lbStrategies.push({
-      name: '双冰试错', ok: dbTryOk,
-      detail: isDb ? '双冰W2试错·止损-3%' : '无双冰',
-      pos: '10%', stop: '-3%'
-    });
-
-    // 方向确认（W2门槛：双冰时涨停≥10）
-    var lbSectors = [];
-    sectors.forEach(function(sec) {
-      var name = sec['板块'] || '';
-      var type = sec['类型'] || '';
-      if (type.indexOf('退潮') >= 0) return;
-      var ztThreshold = isDb ? 10 : 8;
-      var ztCnt = parseInt(sec['涨停数']) || 0;
-      var ztOk = ztCnt >= ztThreshold;
-
-      var leader = sec['龙头'] || '';
-      var leaderCode = '';
-      lbPool.forEach(function(s){if(s['标的']===leader||leader.indexOf(s['标的'])>=0)leaderCode=s['代码']||'';});
-      var lq = liveQ[leaderCode] || {};
-      var ldrChg = parseFloat(String(lq['涨幅']||'0').replace('%','').replace('+','')) || 0;
-      var ldrOk = ldrChg >= 9.5;
-
-      var followCount = 0;
-      lbPool.forEach(function(s){
-        if(s['板块']===name||(s['板块']||'').indexOf(name)>=0){
-          var fq=liveQ[s['代码']]||{};var fc=parseFloat(String(fq['涨幅']||s['涨幅']||'0').replace('%','').replace('+',''))||0;
-          if(fc>3)followCount++;
-        }
-      });
-      var followOk = followCount >= 3;
-
-      var midOk = false;
-      trPool.forEach(function(s){
-        if(s['板块']===name||(s['板块']||'').indexOf(name)>=0){
-          var mq=liveQ[s['代码']]||{};var mc=parseFloat(String(mq['涨幅']||s['涨幅']||'0').replace('%','').replace('+',''))||0;
-          if(mc>0)midOk=true;
-        }
-      });
-
-      var score = (ldrOk?1:0)+(followOk?1:0)+(ztOk?1:0)+(midOk?1:0);
-      lbSectors.push({
-        name:name, score:score, doable:score>=3,
-        detail:'龙头'+(ldrOk?'✅':'❌')+' 跟风'+followCount+'只 集中'+ztCnt+'/'+ztThreshold+(ztOk?'✅':'❌')+' 中军'+(midOk?'✅':'❌')
-      });
-    });
-
-    // ===== 三、趋势 W2 弱回踩（深回踩，区别于W1强回踩）=====
-    var trendBySector = {};
+    // === 个股实时评估 ===
+    var trendEvals = [];
     trPool.forEach(function(s) {
       var code = s['代码'] || '';
       var q = liveQ[code] || {};
-      var price = parseFloat(q['最新价']) || parseFloat(s['收盘价']||s['最新价']) || 0;
-      var ma5 = parseFloat(s['MA5']) || 0;
-      var ma20 = parseFloat(s['MA20']) || 0;
-      var volRatio = parseFloat(q['量比']||s['量比']) || 1;
-      var chg = parseFloat(String(q['涨幅']||s['涨幅']||'0').replace('%','').replace('+','')) || 0;
-      if (!price || !ma5) return;
-      var dist5 = (price - ma5) / ma5 * 100;
-      var dist20 = ma20 ? (price - ma20) / ma20 * 100 : 999;
-      // W2弱回踩 ≠ W1强回踩：聚焦深回踩（接近10/20日线）或弱势缩量
-      var nearMA20 = ma20 && dist20 <= 0 && dist20 >= -3; // 接近或跌破20日线
-      var deepPull = dist5 <= -1 && dist5 >= -5; // 深回踩到5日线下方1-5%
-      var nearBuyZone = nearMA20 || deepPull;
-      var shrinking = volRatio < 0.8;
-      var notCrashing = chg > -5;
-      var qualify = nearBuyZone && shrinking && notCrashing;
+      var price = parseFloat(q['最新价']) || 0;
+      if (!price) return;
 
-      var status, sc;
-      if (qualify)      { status = '🟢 可吸'; sc = 'var(--down)'; }
-      else if (nearBuyZone) { status = '🟡 等缩量'; sc = 'var(--warn)'; }
-      else if (shrinking && notCrashing) { status = '⏳ 等深回踩'; sc = 'var(--text-secondary)'; }
-      else              { status = '—'; sc = 'var(--text-disabled)'; }
+      var ma5_d = q['MA5_d'];           // 日线MA5（方向/强弱参考）
+      var ma10_d = q['MA10_d'];         // 日线MA10
+      var ma20_d = q['MA20_d'];         // 日线MA20
+      var ma10_60m = q['MA10_60m'];     // 60分钟MA10（核心回踩锚点）
+      var dir60 = q['MA10_60m_dir'] || '—';
+      var volRatio = parseFloat(q['量比']) || 1;
+      var chg = p(q['涨幅']);
 
-      var sector = s['板块'] || '其他';
-      var bigS = (sectors.find(function(sec){return sec['板块']===sector;})||{}).板块;
-      if (!bigS) { var idx = sector.indexOf('/'); bigS = idx >= 0 ? sector.substring(0, idx) : sector; }
-      if (!trendBySector[bigS]) trendBySector[bigS] = [];
-      trendBySector[bigS].push({
-        name:s['标的'],code:code,status:status,sc:sc,qualify:qualify,
-        nearBuyZone:nearBuyZone,shrinking:shrinking,notCrashing:notCrashing,deepPull:deepPull,nearMA20:nearMA20,
-        dist5:dist5.toFixed(1),volRatio:volRatio.toFixed(2),chg:chg.toFixed(1)
+      var anchor = ma10_60m;
+      var dist = anchor ? ((price - anchor) / anchor * 100) : 999;
+
+      // 日线多头排列（方向/强弱）
+      var dailyAlign = ma5_d && ma10_d && ma20_d && ma5_d > ma10_d && ma10_d > ma20_d;
+
+      var conditions = [];
+
+      // 1. 60分钟MA10回踩（核心）：方向向上 + 距MA10在-1%~+0.5%
+      var dirUp = dir60 === '向上';
+      var near60m = dirUp && dist >= -1 && dist <= 0.5;
+      conditions.push({ok: near60m, label: '60mMA10↑回踩',
+        detail: dir60+' 距'+(dist>=0?'+':'')+dist.toFixed(1)+'%'});
+
+      // 2. 日线多头（方向/强弱参考，不硬卡但条件不足时示警）
+      conditions.push({ok: dailyAlign, label: '日线多头',
+        detail: dailyAlign ? 'MA5>MA10>MA20' : '排列不佳'});
+
+      // 3. 缩量：量比<0.8
+      var shrink = volRatio < 0.8;
+      conditions.push({ok: shrink, label: '缩量',
+        detail: '量比'+volRatio.toFixed(2)+'<0.8'});
+
+      // 4. 未大跌：涨幅>-5%
+      var notCrash = chg > -5;
+      conditions.push({ok: notCrash, label: '未大跌',
+        detail: (chg>=0?'+':'')+chg.toFixed(1)+'%'});
+
+      // 5. 龙头存活
+      var sec = s['板块'] || '';
+      var leaderAlive = false;
+      trPool.forEach(function(ts) {
+        if (ts === s) return;
+        if ((ts['板块']||'').indexOf(sec.split('/')[0])>=0 || sec.indexOf((ts['板块']||'').split('/')[0])>=0) {
+          if (p((liveQ[ts['代码']]||{})['涨幅']) > 0) leaderAlive = true;
+        }
+      });
+      conditions.push({ok: leaderAlive, label: '龙头活', detail: leaderAlive?'✓':'—'});
+
+      var met = conditions.filter(function(c){return c.ok;}).length;
+      var total = conditions.length;
+
+      // 核心条件：60分钟MA10回踩 + 缩量 + 未大跌 = 3个硬条件
+      var hardMet = (near60m?1:0) + (shrink?1:0) + (notCrash?1:0);
+
+      var signal, signalCls;
+      if (hardMet >= 3 && leaderAlive) { signal = '🟢 买入'; signalCls = 'var(--down)'; }
+      else if (hardMet >= 2)           { signal = '🟡 接近'; signalCls = 'var(--warn)'; }
+      else                             { signal = '—'; signalCls = 'var(--text-disabled)'; }
+
+      trendEvals.push({
+        name:s['标的'], code:code,
+        price:price, anchor:ma10_60m,
+        dist:dist, dir60:dir60, volRatio:volRatio, chg:chg,
+        ma5_d:ma5_d, conditions:conditions, met:met, total:total,
+        hardMet:hardMet, signal:signal, signalCls:signalCls
       });
     });
-    var allTrendEvals = [];
-    Object.keys(trendBySector).forEach(function(k){allTrendEvals=allTrendEvals.concat(trendBySector[k]);});
-    var trBuy = allTrendEvals.filter(function(t){return t.qualify;}).length;
-    var trWaitShrink = allTrendEvals.filter(function(t){return t.nearBuyZone&&!t.shrinking&&t.notCrashing;}).length;
-    var trWaitPull = allTrendEvals.filter(function(t){return !t.nearBuyZone&&t.shrinking&&t.notCrashing;}).length;
 
-    // V反检测
-    var vRev = (yestQx < 30 && yestQx > 0) && qx >= 60 && ztProfit >= 2;
-    var vRevOpen = vRev && !isFriday;
+    trendEvals.sort(function(a,b){ return b.met - a.met || a.dist - b.dist; });
 
-    // ===== 渲染 =====
-    function itemHtml(items) {
-      var h = '';
-      items.forEach(function(x) {
-        var icon = x.ok ? '✅' : '❌';
-        var c = x.ok ? 'var(--up)' : 'var(--danger)';
-        if (x.hard === false && !x.ok) { icon = '⚠️'; c = 'var(--warn)'; }
-        h += '<span style="font-size:12px;white-space:nowrap"><span style="color:'+c+'">'+icon+'</span> '+
-          x.label+' <span style="color:var(--text-secondary);font-size:11px">'+x.detail+'</span></span>';
-      });
-      return h;
-    }
-
+    // === 渲染 ===
     var html = '';
 
-    // ===== 一、共用窗口 =====
-    var sharedVerdict = sharedAllOk ? (inW2 ? '✅ W2开启' : '⏳ 等待14:00') : '❌ W2关闭';
-    var sharedColor = sharedAllOk ? (inW2 ? 'var(--up)' : 'var(--text-secondary)') : 'var(--danger)';
-    html += '<div style="padding:var(--sp-sm) var(--sp-md);margin-bottom:var(--sp-md);background:var(--bg-base);border-radius:var(--radius-md);border-left:4px solid '+sharedColor+'">'+
-      '<div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:var(--sp-xs)">'+
-        '<span style="font-size:15px;font-weight:700;color:'+sharedColor+'">'+sharedVerdict+'</span>'+
-        '<span style="font-size:11px;color:var(--text-secondary)">情绪'+qx+'% '+zone+' | 上证'+li['上证指数涨幅']+' | 涨停'+ztCount+'家'+
-          (vRevOpen?' | 🔥V反开放':'')+'</span>'+
-      '</div>'+
-      '<div style="display:flex;flex-wrap:wrap;gap:4px 16px">'+itemHtml(sharedItems)+'</div>'+
-      (vRevOpen ? '<div style="font-size:12px;color:var(--special);margin-top:var(--sp-xs);font-weight:600">🔥 V反信号：昨冰'+yestQx+'%→今'+qx+'% 赚钱效应'+ztProfit.toFixed(1)+'%≥2% 仓位上限40%(×0.5半仓)→约10-14%</div>' : '')+
-      '</div>';
+    var topColor = inW2 ? (mktOk ? 'var(--down)' : 'var(--warn)') : 'var(--text-disabled)';
+    html += '<div style="display:flex;align-items:center;gap:var(--sp-sm);padding:var(--sp-xs) var(--sp-md);margin-bottom:var(--sp-sm);background:var(--bg-base);border-radius:var(--radius-md);border-left:3px solid '+topColor+'">'+
+      '<span style="font-weight:700;color:'+topColor+'">'+(inW2?'✅ W2 '+w2Label:'⏳ '+w2Label)+'</span>'+
+      '<span style="margin-left:auto;font-size:var(--fs-body);color:var(--text-secondary)">'+srcTag+' + ⚡实时</span></div>';
 
-    // ===== 左右双栏 =====
-    html += '<div style="display:flex;gap:var(--sp-md)">';
+    // 市场条件
+    html += '<div style="display:flex;flex-wrap:wrap;gap:4px 12px;padding:var(--sp-xs) var(--sp-sm);margin-bottom:var(--sp-sm);background:var(--bg-base);border-radius:var(--radius-sm);font-size:var(--fs-body)">'+
+      '<span style="color:var(--text-disabled);font-weight:600;margin-right:4px">市场</span>';
+    mktItems.forEach(function(item) {
+      var valHtml;
+      if (item.label === '涨跌') {
+        var parts = String(item.val).split(' ');
+        valHtml = parts.map(function(p) {
+          if (p.indexOf('涨')===0) return '<span class="up" style="font-weight:600">'+p+'</span>';
+          if (p.indexOf('跌')===0) return '<span class="down" style="font-weight:600">'+p+'</span>';
+          return p;
+        }).join(' ');
+      } else {
+        valHtml = '<b>'+item.val+'</b>';
+      }
+      html += '<span style="white-space:nowrap">'+
+        '<span style="color:'+(item.ok?'var(--up)':'var(--danger)')+'">'+(item.ok?'✅':'❌')+'</span> '+
+        item.label+' '+valHtml+
+        (item.rule ? '<span style="font-size:8px;color:var(--text-disabled)"> ('+item.rule+')</span>' : '')+
+        '<span style="font-size:8px;color:var(--text-disabled);margin-left:1px">'+item.src+'</span></span>';
+    });
+    html += '</div>';
 
-    // 左：连板 W2
-    html += '<div style="flex:1;min-width:0">';
-    var lbVerdict = sharedAllOk ? '低吸博弈' : '—';
-    html += '<div style="padding:var(--sp-sm) var(--sp-md);margin-bottom:var(--sp-sm);background:var(--bg-base);border-radius:var(--radius-md);border-left:4px solid var(--warn)">'+
-      '<div style="font-size:14px;font-weight:700;color:var(--warn);margin-bottom:var(--sp-xs)">连板 W2 '+lbVerdict+'</div>'+
-      '<div style="font-size:11px;color:var(--text-secondary);margin-bottom:var(--sp-sm)">逆向博弈·低吸不追高。企稳三阶段(止跌→横住→拐头)全部完成才出手</div>';
+    // 趋势 W2 表
+    html += '<div style="font-size:var(--fs-label);font-weight:600;margin-bottom:2px">趋势 W2 弱回踩</div>';
+    html += '<div style="font-size:10px;color:var(--text-secondary);margin-bottom:var(--sp-sm)">'+
+      '核心:60分钟MA10回踩(方向↑,距MA10≤1%) + 缩量(量比<0.8) + 未大跌(>-5%) | 日线多头=方向参考</div>';
 
-    // 三个子策略
-    html += '<div style="font-size:12px;color:var(--text-secondary);margin-bottom:2px">子策略：</div>';
-    lbStrategies.forEach(function(s) {
-      var c = s.ok ? 'var(--up)' : 'var(--text-disabled)';
-      html += '<div style="font-size:11px;padding:1px 0;color:'+c+'">'+
-        (s.ok?'🟢':'—')+' <strong>'+s.name+'</strong> '+s.detail+' | 仓位'+s.pos+' 止损'+s.stop+'</div>';
+    html += '<table style="width:100%;border-collapse:collapse;font-size:var(--fs-body)">';
+    html += '<thead><tr style="border-bottom:1px solid var(--border)">'+
+      '<th style="text-align:left;padding:2px 4px;color:var(--text-disabled);font-weight:400">标的</th>'+
+      '<th style="text-align:right;padding:2px 4px;color:var(--text-disabled);font-weight:400">现价</th>'+
+      '<th style="text-align:right;padding:2px 4px;color:var(--text-disabled);font-weight:400">MA10(60m)</th>'+
+      '<th style="text-align:right;padding:2px 4px;color:var(--text-disabled);font-weight:400">距</th>'+
+      '<th style="text-align:center;padding:2px 2px;color:var(--text-disabled);font-weight:400;font-size:10px">方向</th>'+
+      '<th style="text-align:right;padding:2px 4px;color:var(--text-disabled);font-weight:400">量比</th>'+
+      '<th style="text-align:right;padding:2px 4px;color:var(--text-disabled);font-weight:400">涨跌</th>'+
+      '<th style="text-align:center;padding:2px 4px;color:var(--text-disabled);font-weight:400">条件</th>'+
+      '<th style="text-align:center;padding:2px 4px;color:var(--text-disabled);font-weight:400">信号</th>'+
+      '</tr></thead><tbody>';
+
+    trendEvals.forEach(function(t) {
+      var distStr = (Math.abs(t.dist) < 100) ? (t.dist>=0?'+':'')+t.dist.toFixed(1)+'%' : '—';
+      var distCls = t.dist >= -1 && t.dist <= 0.5 ? 'down' : t.dist < -3 ? 'up' : '';
+      var dirCls = t.dir60==='向上'?'up':t.dir60==='向下'?'down':'';
+      var chgCls = t.chg>0?'up':'down';
+
+      html += '<tr style="border-bottom:1px solid var(--border-light)">'+
+        '<td style="padding:2px 4px"><b>'+t.name+'</b><span style="font-size:9px;color:var(--text-disabled)"> '+t.code+'</span></td>'+
+        '<td style="text-align:right;padding:2px 4px;font-family:var(--font-mono)">'+t.price.toFixed(2)+'</td>'+
+        '<td style="text-align:right;padding:2px 4px;font-family:var(--font-mono);font-size:10px;color:var(--text-disabled)">'+(t.anchor?t.anchor.toFixed(2):'—')+'</td>'+
+        '<td style="text-align:right;padding:2px 4px;font-family:var(--font-mono);color:var(--'+distCls+');font-weight:600">'+distStr+'</td>'+
+        '<td style="text-align:center;padding:2px 2px;font-family:var(--font-mono);font-size:10px;color:var(--'+dirCls+')">'+t.dir60+'</td>'+
+        '<td style="text-align:right;padding:2px 4px;font-family:var(--font-mono);color:'+(t.volRatio<0.8?'var(--down)':'')+'">'+t.volRatio.toFixed(2)+'</td>'+
+        '<td style="text-align:right;padding:2px 4px;font-family:var(--font-mono);color:var(--'+chgCls+')">'+(t.chg>=0?'+':'')+t.chg.toFixed(1)+'%</td>'+
+        '<td style="text-align:center;padding:2px 2px;font-size:12px">'+
+          t.conditions.map(function(c){return '<span title="'+c.label+':'+c.detail+'">'+(c.ok?'🟢':'🔴')+'</span>';}).join('')+
+          '<span style="font-size:9px;color:var(--text-secondary)"> '+t.hardMet+'/3</span></td>'+
+        '<td style="text-align:center;padding:2px 4px;font-weight:700;color:'+t.signalCls+';white-space:nowrap">'+t.signal+'</td></tr>';
+
+      if (t.hardMet >= 2) {
+        var stopPrice = t.dist <= 0 ? (t.price*0.93).toFixed(1)+'(-7%)' : (t.price*0.95).toFixed(1)+'(-5%)';
+        html += '<tr><td colspan="10" style="padding:1px 4px 3px 16px;font-size:10px">'+
+          t.conditions.map(function(c){return '<span style="margin-right:8px">'+(c.ok?'🟢':'🔴')+' '+c.label+':'+c.detail+'</span>';}).join('')+
+          '<span style="color:var(--down);font-weight:700"> → 止损'+stopPrice+' 仓位20%</span></td></tr>';
+      }
     });
 
-    // 方向确认 + 板块个股
-    if (lbSectors.length > 0) {
-      html += '<div style="font-size:12px;color:var(--text-secondary);margin-top:var(--sp-sm);margin-bottom:2px">方向确认 + 候选（需≥3/4'+(isDb?'·双冰≥10只涨停':'')+'）：</div>';
-      lbSectors.forEach(function(v) {
-        var c = v.doable ? 'var(--up)' : 'var(--text-disabled)';
-        html += '<div style="font-size:11px;padding:1px 0;color:'+c+';margin-bottom:1px">'+
-          (v.doable?'✅':'—')+' <strong>'+v.name+'</strong> '+v.score+'/4</div>';
-        // 该板块连板池个股
-        var stocks = lbPool.filter(function(p){return p['板块']===v.name||(p['板块']||'').indexOf(v.name)>=0;});
-        stocks.forEach(function(p) {
-          var q = liveQ[p['代码']] || {};
-          var chg = parseFloat(String(q['涨幅']||p['涨幅']||'0').replace('%','').replace('+','')) || 0;
-          var vr = parseFloat(q['量比']||p['量比']) || 0;
-          var lowBuy = chg < 0 && vr < 1.2; // 低吸条件：收跌+不放量
-          var tag = lowBuy ? '🟢低吸' : (chg < 0 ? '🟡观察' : '—');
-          var tc = lowBuy ? 'var(--down)' : 'var(--text-disabled)';
-          html += '<div style="font-size:10px;padding:1px 0 1px 16px;display:flex;justify-content:space-between;color:var(--text-secondary)">'+
-            '<span><span style="color:'+tc+'">'+tag+'</span> '+p['标的']+' <span style="color:var(--text-disabled)">'+p['代码']+'</span></span>'+
-            '<span>'+chg.toFixed(1)+'% 量比'+vr.toFixed(1)+'</span></div>';
-        });
-      });
+    html += '</tbody></table>';
+
+    if (trendEvals.length === 0) {
+      html += '<div style="text-align:center;padding:var(--sp-md);color:var(--text-disabled)">趋势池无数据</div>';
     }
 
-    // 企稳三阶段提示
-    html += '<div style="font-size:11px;color:var(--text-disabled);margin-top:var(--sp-sm);padding-top:var(--sp-xs);border-top:1px solid var(--border-light)">'+
-      '⚠️ 所有W2低吸必须过企稳三阶段：<br>止跌(不创新低)→横住(窄幅)→拐头(阳线+温和放量)</div>';
-    html += '</div></div>'; // 左栏
-
-    // 右：趋势 W2
-    html += '<div style="flex:1;min-width:0">';
-    html += '<div style="padding:var(--sp-sm) var(--sp-md);margin-bottom:var(--sp-sm);background:var(--bg-base);border-radius:var(--radius-md);border-left:4px solid var(--info)">'+
-      '<div style="font-size:14px;font-weight:700;color:var(--info);margin-bottom:var(--sp-xs)">趋势 W2 弱回踩</div>'+
-      '<div style="font-size:11px;color:var(--text-secondary);margin-bottom:var(--sp-sm)">弱回踩≠W1强回踩。聚焦深回踩(近10/20日线或跌破5日线1-5%)+全天缩量+尾盘企稳。不追高·不等W1·回踩即买</div>';
-
-    Object.keys(trendBySector).sort().forEach(function(sectorName) {
-      var stocks = trendBySector[sectorName];
-      var buyCnt = stocks.filter(function(t){return t.qualify;}).length;
-      var scColor = buyCnt > 0 ? 'var(--up)' : 'var(--text-secondary)';
-      html += '<div style="font-size:12px;font-weight:600;color:'+scColor+';margin-top:2px;padding-top:2px;border-top:1px solid var(--border-light)">'+
-        sectorName+' (低吸'+buyCnt+'只)</div>';
-      stocks.forEach(function(t) {
-        function cond(ok,label,val,unit){
-          var c=ok?'var(--up)':'var(--text-disabled)';
-          return '<span style="color:'+c+';white-space:nowrap">'+(ok?'✅':'❌')+' '+label+' <b>'+val+'</b>'+unit+'</span>';
-        }
-        var d=(t.dist5.charAt(0)==='-'?'':'+')+t.dist5;
-        // W2特有：深回踩(近10/20日线或跌破MA5) + 缩量 + 未大跌
-        var reason = t.nearMA20 ? '近20日线' : (t.deepPull ? '破5日线'+d+'%' : '未到位');
-        var line=cond(t.nearBuyZone, reason, '', '')+'  '+
-                 cond(t.shrinking, '缩量', t.volRatio, '')+'  '+
-                 cond(t.notCrashing, '未大跌', (t.chg.charAt(0)==='-'?'':'+')+t.chg, '%');
-        html += '<div style="font-size:11px;padding:1px 0 1px 16px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--border-light)">'+
-          '<span><span style="color:'+t.sc+';font-weight:600">'+t.status+'</span> <strong>'+t.name+'</strong>'+
-            (t.code?' <span style="font-size:10px;color:var(--text-disabled)">'+t.code+'</span>':'')+'</span>'+
-          '<span style="font-size:11px">'+line+'</span></div>';
-      });
+    // 连板 W2 简化
+    var lbCandidates = lbPool.filter(function(s) {
+      var chg = p((liveQ[s['代码']]||{})['涨幅']);
+      return chg < 0 && chg > -5;
     });
-
-    // 趋势总结
-    var trSummary='';
-    if(trBuy>0)trSummary='→ 🟢 '+trBuy+'只可低吸，重点看：'+allTrendEvals.filter(function(t){return t.qualify;}).map(function(t){return t.name;}).join('、');
-    else if(trWaitShrink>0)trSummary='→ 🟡 '+trWaitShrink+'只等缩量';
-    else if(trWaitPull>0)trSummary='→ ⏳ '+trWaitPull+'只等深回踩';
-    else trSummary='→ 暂无标的满足深回踩条件（W2看近10/20日线或破MA5 1-5%）';
-    html += '<div style="margin-top:var(--sp-sm);padding-top:var(--sp-xs);border-top:1px solid var(--border-light);font-size:12px;font-weight:600;color:var(--info)">'+
-      '🟢'+trBuy+'可吸 🟡'+trWaitShrink+'等缩量 ⏳'+trWaitPull+'等深回踩 '+trSummary+'</div>';
-
-    html += '<div style="font-size:11px;color:var(--text-disabled);margin-top:var(--sp-sm);padding-top:var(--sp-xs);border-top:1px solid var(--border-light)">'+
-      '止损：回踩5日线-7% | 回踩10日线-5% | 总账户该股-10%</div>';
-    html += '</div></div>'; // 右栏
-
-    html += '</div>'; // 双栏容器
+    if (lbCandidates.length > 0) {
+      html += '<div style="margin-top:var(--sp-sm);padding:var(--sp-xs) var(--sp-sm);background:var(--bg-base);border-radius:var(--radius-sm);font-size:var(--fs-body)">'+
+        '<span style="color:var(--warn);font-weight:600">连板 W2 候选: </span>';
+      lbCandidates.forEach(function(s) {
+        var code = s['代码']||'';
+        var chg = p((liveQ[code]||{})['涨幅']);
+        var vr = parseFloat((liveQ[code]||{})['量比'])||1;
+        html += '<span style="margin-left:6px">'+s['标的']+' <span style="color:var(--down)">'+chg.toFixed(1)+'%</span> v'+vr.toFixed(1)+'</span>';
+      });
+      html += '</div>';
+    }
 
     body.innerHTML = html;
     this.updateTimestamp();

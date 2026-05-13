@@ -21,10 +21,34 @@ SECTOR_LOG = VAULT_DIR / "板块涨停日志.md"
 OUTPUT_FILE = VAULT_DIR / "live-dashboard/data/dashboard_data.json"
 
 def find_latest_review():
-    """找最新的复盘笔记"""
+    """找最新有实质内容的复盘笔记（跳过模板，回退到有数据的笔记）"""
     md_files = sorted(REVIEW_DIR.glob("**/*ReviewNote.md"), reverse=True)
     if not md_files:
         md_files = sorted(REVIEW_DIR.glob("**/*.md"), reverse=True)
+
+    for f in md_files:
+        try:
+            # 先看附录有没有持仓/自选池数据
+            appendix = parse_appendix(str(f))
+            has_appendix = (
+                len(appendix.get('positions', [])) > 0 or
+                len(appendix.get('lianban_pool', [])) > 0 or
+                len(appendix.get('trend_pool', [])) > 0 or
+                len(appendix.get('锚定股状态', [])) > 0
+            )
+            if has_appendix:
+                return str(f)
+
+            # 附录空但正文5节点表格有数据 → 也算有效
+            nodes = parse_sentiment_nodes(str(f))
+            filled = [n for n in ['竞价','早盘','午盘','尾盘','收盘'] if nodes.get(n)]
+            if len(filled) >= 2:  # 至少有2个节点有数据
+                print(f"[info] Using {f.name} (appendix empty, but {len(filled)} segments filled)")
+                return str(f)
+        except Exception:
+            pass
+
+    # 回退
     return str(md_files[0]) if md_files else None
 
 def clean_value(val, field_name=""):
@@ -180,24 +204,41 @@ def _parse_table(body, col_map):
     rows = []
     header = None
 
+    _TEMPLATE_VALS = {'—', '', '待填', '待定', '...', 'N股', 'N/A'}
+    _TEMPLATE_ROW_PATTERNS = ['龙头/高度板', 'W1/W2', 'W1追涨/只盯不买',
+                              '主趋势股/趋势候选', '主线/强支线', '持有/已清仓']
+
+    def _is_template_row(cells):
+        """检测整行是否为模板行（看标的列是否为指令文本而非真实名称）"""
+        # 第一个非空cell通常是指标名称
+        name = str(cells[0]).strip() if cells else ''
+        if name in _TEMPLATE_VALS:
+            return True
+        for p in _TEMPLATE_ROW_PATTERNS:
+            if p in name:
+                return True
+        return False
+
     for line in lines:
         line = line.strip()
         if not line or not line.startswith('|'):
             continue
-        if '---' in line:  # 分隔行，跳过
+        if '---' in line:
             continue
         cells = [c.strip() for c in line.split('|')[1:-1]]
         if header is None:
             header = cells
         else:
+            if _is_template_row(cells):
+                continue
             row = {}
             for i, cell in enumerate(cells):
                 if i < len(header) and header[i] in col_map:
                     key = col_map[header[i]]
                     val = clean_value(cell, key)
-                    if val is not None and val != '—' and val != '' and val != '待填' and val != '待定':
+                    if val is not None and val not in _TEMPLATE_VALS:
                         row[key] = val
-            if row:
+            if row and len(row) >= 2:  # 至少2个有效字段
                 rows.append(row)
     return rows
 
@@ -293,12 +334,116 @@ def _parse_positions(body):
     return [r for r in rows if r.get('标的') and r.get('标的') != '...']
 
 
-def get_style_data():
+def parse_sentiment_nodes(filepath):
+    """解析复盘笔记中的5节点情绪数据（表1 大盘全景 + 表2 情绪高标）
+    返回: { '竞价': {...}, '早盘': {...}, '午盘': {...}, '尾盘': {...}, '收盘': {...} }
+    """
+    try:
+        with open(filepath) as f:
+            content = f.read()
+    except Exception:
+        return {}
+
+    nodes = {}
+
+    # === 表1：大盘全景 ===
+    # | 节点 | 情绪 | 上证(%) | 涨/跌停 | 量能 | 涨跌比 | 总竞价涨幅 | 关键异动 |
+    t1 = re.search(r'### 表1.*?\n(.*?)(?:\n###|\n---|\Z)', content, re.DOTALL)
+    if t1:
+        lines = t1.group(1).strip().split('\n')
+        header = None
+        for line in lines:
+            if not line.startswith('|') or '---' in line:
+                continue
+            cells = [c.strip() for c in line.split('|')[1:-1]]
+            if header is None:
+                header = [h.strip() for h in cells]
+                continue
+            if len(cells) < 2:
+                continue
+            node_name = cells[0]
+            if node_name not in ('竞价', '早盘', '午盘', '尾盘', '收盘'):
+                continue
+            entry = {}
+            for i, h in enumerate(header[1:], 1):
+                if i < len(cells) and cells[i] and cells[i] not in ('—', '%', '/', ''):
+                    entry[h] = cells[i]
+            if len(entry) > 0:
+                nodes[node_name] = entry
+
+    # === 表2：情绪高标 ===
+    # | 指标 | 竞价 | 早盘 | 午盘 | 收盘 | 门槛 |
+    t2 = re.search(r'### 表2.*?\n(.*?)(?:\n###|\n---|\Z)', content, re.DOTALL)
+    if t2:
+        lines = t2.group(1).strip().split('\n')
+        for line in lines:
+            if not line.startswith('|') or '---' in line:
+                continue
+            cells = [c.strip() for c in line.split('|')[1:-1]]
+            if len(cells) < 3:
+                continue
+            indicator = cells[0]
+            # 指标名映射
+            key_map = {
+                '竞价强势家数': '竞价强势家数',
+                '涨停收益': '涨停收益',
+                '连板收益': '连板收益',
+                '炸板收益': '炸板收益',
+                '封板率': '封板率',
+                '炸板率': '炸板率',
+                '晋级率': '晋级率',
+                '最高板/次高板': '最高板',
+                '最高板': '最高板',
+                '次高板': '次高板',
+                '赚钱效应': '赚钱效应',
+                '情绪值': '情绪值',
+            }
+            key = key_map.get(indicator, indicator)
+            time_cols = [None, '竞价', '早盘', '午盘', '尾盘', '收盘']  # 支持5列
+            for i, time_name in enumerate(time_cols[1:], 1):
+                if i < len(cells) and cells[i] and cells[i] not in ('—', '%', ''):
+                    val = cells[i].strip('*').strip()  # 去掉加粗标记
+                    if time_name not in nodes:
+                        nodes[time_name] = {}
+                    nodes[time_name][key] = val
+
+    return nodes
+
+
+def _extract_iwencai_val(sd, dim_key, detail_key):
+    """从 style_detect 输出提取问财实时值，去掉单位和括号注释"""
+    dim = sd.get(dim_key) or {}
+    details = dim.get("details") or {}
+    raw = details.get(detail_key)
+    if raw is None:
+        return None
+    # 提取数字部分: "4.33%" → 4.33, "6板" → 6, "32642亿" → 32642
+    import re
+    s = str(raw).strip()
+    # 去掉括号注释
+    s = re.sub(r'（[^）]*）', '', s)
+    s = re.sub(r'\([^)]*\)', '', s)
+    # 纯数值提取
+    m = re.match(r'([+-]?[\d.]+)', s)
+    if m:
+        val = float(m.group(1))
+        if val == int(val):
+            val = int(val)
+        return val
+    # "好"/"一般"/"差" 等文字值
+    if s in ("好", "一般", "差", "较好", "较差"):
+        return s
+    return raw
+
+
+def get_style_data(review_path=None):
     """调用 style_detect.py 获取风格数据，映射为 dashboard 格式"""
     try:
+        cmd = ["python3", str(STYLE_DETECT), "--json"]
+        if review_path:
+            cmd.extend(["--review", review_path])
         result = subprocess.run(
-            ["python3", str(STYLE_DETECT), "--json"],
-            capture_output=True, text=True, timeout=60, cwd=str(STYLE_DETECT.parent)
+            cmd, capture_output=True, text=True, timeout=120, cwd=str(STYLE_DETECT.parent)
         )
         if result.returncode == 0 and result.stdout:
             # style_detect --json 输出：先打印可读文本，最后一行是 JSON
@@ -309,36 +454,52 @@ def get_style_data():
                 brace_idx = raw.find('{')
             if brace_idx >= 0:
                 sd = json.loads(raw[brace_idx:])
-                # 字段映射: style_detect → dashboard_data.json
+                # V0.3 字段映射: style_detect → dashboard_data.json
+                # 优先用 allocation（trading-core 插值表），信号强度作为参考
+                alloc = sd.get("allocation") or {}
+                tiered = sd.get("tiered_jjl") or {}
+                dim4 = sd.get("dim4") or {}
                 return {
                     "总分": sd.get("total"),
                     "风格": sd.get("style"),
-                    "连板占比": _compute_lianban_pct(sd),
-                    "趋势占比": _compute_trend_pct(sd),
+                    "置信度": sd.get("confidence"),
+                    # V0.3 直接用信号强度和分配表，不再用旧的风格名推算
+                    "连板占比": alloc.get("连板资金占比") or sd.get("lianban_conf"),
+                    "趋势占比": alloc.get("趋势资金占比") or sd.get("trend_conf"),
+                    "连板信号强度": sd.get("lianban_signal_pct"),
+                    "趋势信号强度": sd.get("trend_signal_pct"),
+                    "连板信号描述": sd.get("lianban_detail"),
+                    "趋势信号描述": sd.get("trend_detail"),
                     "总仓位上限": _compute_total_cap(sd),
                     "dim1_量能": (sd.get("dim1") or {}).get("score"),
                     "dim2_连板生态": (sd.get("dim2") or {}).get("score"),
                     "dim3_趋势": (sd.get("dim3") or {}).get("score"),
+                    "dim4_情绪广度": dim4.get("score"),
+                    # 分层晋级率（供 trading-core 硬卡判定）
+                    "一进二晋级率": tiered.get("一进二晋级率"),
+                    "二进三晋级率": tiered.get("二进三晋级率"),
+                    "三进四晋级率": tiered.get("三进四晋级率"),
+                    # === 问财实时情绪值（供 sentiment 域兜底）===
+                    "_iwencai_情绪值": _extract_iwencai_val(sd, "dim4", "情绪值"),
+                    "_iwencai_涨停收益": _extract_iwencai_val(sd, "dim2", "涨停收益"),
+                    "_iwencai_连板收益": _extract_iwencai_val(sd, "dim2", "连板收益"),
+                    "_iwencai_炸板收益": _extract_iwencai_val(sd, "dim2", "炸板收益"),
+                    "_iwencai_晋级率": _extract_iwencai_val(sd, "dim2", "晋级率"),
+                    "_iwencai_封板率": _extract_iwencai_val(sd, "dim2", "封板率"),
+                    "_iwencai_炸板率": _extract_iwencai_val(sd, "dim2", "炸板率"),
+                    "_iwencai_连板风险值": _extract_iwencai_val(sd, "dim2", "连板风险值"),
+                    "_iwencai_最高板": _extract_iwencai_val(sd, "dim2", "最高板"),
+                    "_iwencai_赚钱效应": _extract_iwencai_val(sd, "dim4", "赚钱效应"),
+                    "_iwencai_全市场成交额": _extract_iwencai_val(sd, "dim1", "全市场成交额"),
+                    # 过渡预警
+                    "预警": sd.get("warnings", []),
+                    "持续天数": sd.get("days_in_regime"),
                 }
         if result.returncode != 0:
             print(f"[warn] style_detect.py returned {result.returncode}: {result.stderr[:200]}")
     except Exception as e:
         print(f"[warn] style_detect.py failed: {e}")
     return {}
-
-def _compute_lianban_pct(sd):
-    """根据风格判定计算连板占比"""
-    style = str(sd.get("style", ""))
-    total = sd.get("total", 50) or 50
-    if "连板" in style:
-        return 75 + min(25, int((total - 50) / 2))
-    elif "趋势" in style:
-        return max(0, 25 - int((50 - total) / 2))
-    else:  # 混合
-        return 50 + int((total - 50) / 2)
-
-def _compute_trend_pct(sd):
-    return 100 - _compute_lianban_pct(sd)
 
 def _compute_total_cap(sd):
     """根据总分计算总仓位上限"""
@@ -427,10 +588,30 @@ def get_weekday_str(date_str):
     except:
         return ""
 
+def _fallback_appendix(current_path, key):
+    """当今天笔记附录为空时，回退到最近一个完整笔记的附录数据"""
+    review_dir = Path(current_path).parent.parent  # 复盘笔记根目录
+    md_files = sorted(review_dir.glob("**/*ReviewNote.md"), reverse=True)
+    current_name = Path(current_path).name
+
+    for f in md_files:
+        if f.name == current_name:
+            continue  # 跳过当前笔记
+        try:
+            appendix = parse_appendix(str(f))
+            val = appendix.get(key)
+            if val and len(val) > 0:
+                print(f"[info] Fallback {key}: using {f.name} ({len(val)} items)")
+                return val
+        except Exception:
+            pass
+    return []
+
+
 def build_dashboard_data(review_path):
     """组装完整的 dashboard_data.json"""
     fm = parse_frontmatter(review_path)
-    style = get_style_data()
+    style = get_style_data(review_path)
     appendix = parse_appendix(review_path)
 
     raw_date = fm.get("date", datetime.now().strftime("%Y-%m-%d"))
@@ -442,6 +623,9 @@ def build_dashboard_data(review_path):
     style["实际执行"] = compute_style_execution(fm, style)
     if style["实际执行"]["总仓位上限"] != style.get("总仓位上限", 30):
         style["总仓位上限"] = style["实际执行"]["总仓位上限"]
+
+    # 问财实时值兜底（笔记frontmatter有值优先，无值用问财）
+    iw = {k.replace('_iwencai_', ''): v for k, v in style.items() if k.startswith('_iwencai_')}
 
     data = {
         "meta": {
@@ -458,24 +642,24 @@ def build_dashboard_data(review_path):
             "涨跌比": clean_value(fm.get("涨跌比")),
             "涨停家数": clean_value(fm.get("涨停家数"), "涨停家数"),
             "跌停家数": clean_value(fm.get("跌停家数")),
-            "炸板率": clean_value(fm.get("炸板率")),
-            "封板率": clean_value(fm.get("封板率")),
+            "炸板率": clean_value(fm.get("炸板率")) or iw.get("炸板率"),
+            "封板率": clean_value(fm.get("封板率")) or iw.get("封板率"),
         },
         "sentiment": {
-            "情绪值": clean_value(fm.get("情绪值")),
+            "情绪值": clean_value(fm.get("情绪值")) or iw.get("情绪值"),
             "情绪区间": clean_value(fm.get("情绪区间")),
             "昨日情绪": clean_value(fm.get("昨日情绪")),
             "情绪变化": clean_value(fm.get("情绪变化")),
-            "赚钱效应": clean_value(fm.get("赚钱效应")),
-            "昨日涨停收益": clean_value(fm.get("昨日涨停收益")),
-            "昨日炸板收益": clean_value(fm.get("昨日炸板收益")),
-            "连板收益": clean_value(fm.get("连板收益")),
-            "连板风险值": clean_value(fm.get("连板风险值")),
-            "晋级率": clean_value(fm.get("晋级率")),
-            "最高板": clean_value(fm.get("最高板"), "最高板"),
+            "赚钱效应": clean_value(fm.get("赚钱效应")) or iw.get("赚钱效应"),
+            "昨日涨停收益": clean_value(fm.get("昨日涨停收益")) or iw.get("涨停收益"),
+            "昨日炸板收益": clean_value(fm.get("昨日炸板收益")) or iw.get("炸板收益"),
+            "连板收益": clean_value(fm.get("昨日连板收益") or fm.get("连板收益")) or iw.get("连板收益"),
+            "连板风险值": clean_value(fm.get("连板风险值")) or iw.get("连板风险值"),
+            "晋级率": clean_value(fm.get("整体晋级率") or fm.get("晋级率")) or iw.get("晋级率"),
+            "最高板": clean_value(fm.get("最高板"), "最高板") or iw.get("最高板"),
             "次高板": clean_value(fm.get("次高板"), "次高板"),
             "连板梯队": clean_value(fm.get("连板梯队"), "连板梯队"),
-            "竞价情绪值": clean_value(fm.get("竞价情绪值")) or clean_value(fm.get("情绪值")),
+            "竞价情绪值": clean_value(fm.get("竞价情绪值")) or clean_value(fm.get("情绪值")) or iw.get("情绪值"),
         },
         "style": style if style else {
             "总分": None, "风格": None, "连板占比": None, "趋势占比": None,
@@ -501,20 +685,21 @@ def build_dashboard_data(review_path):
             "熔断触发": fm.get("熔断触发", False),
             "周回撤触发": fm.get("周回撤触发", False),
         },
-        "positions": appendix.get("positions", []),
-        "lianban_pool": appendix.get("lianban_pool", []),
-        "trend_pool": appendix.get("trend_pool", []),
-        "sectors": appendix.get("sectors", []),
+        "positions": appendix.get("positions", []) or _fallback_appendix(review_path, "positions"),
+        "lianban_pool": appendix.get("lianban_pool", []) or _fallback_appendix(review_path, "lianban_pool"),
+        "trend_pool": appendix.get("trend_pool", []) or _fallback_appendix(review_path, "trend_pool"),
+        "sectors": appendix.get("sectors", []) or _fallback_appendix(review_path, "sectors"),
         "上证15min": [],
         "live_index": {},
         "live_sectors": {},
         "live_quotes": {},
+        "sentiment_nodes": parse_sentiment_nodes(review_path),
         "decision": {
-            "竞价": appendix.get("竞价", {}),
-            "早盘": appendix.get("早盘", {}),
-            "盘中": appendix.get("盘中", {}),
-            "今日操作": appendix.get("今日操作", []),
-            "锚定股状态": appendix.get("锚定股状态", []),
+            "竞价": appendix.get("竞价") or {},
+            "早盘": appendix.get("早盘") or {},
+            "盘中": appendix.get("盘中") or {},
+            "今日操作": appendix.get("今日操作", []) or _fallback_appendix(review_path, "今日操作"),
+            "锚定股状态": appendix.get("锚定股状态", []) or _fallback_appendix(review_path, "锚定股状态"),
         }
     }
 

@@ -20,7 +20,7 @@ class LianbanPoolWidget extends YiMuWidget {
     var quotes = (data && data.live_quotes) || {};
     var self = this;
 
-    var cols = ['标的','板块','涨幅','最新价','量比','换手','MA5','角色','操作','备注'];
+    var cols = ['标的','板块','涨幅','最新价','量比','换手','MA10(60m)','MA5','角色','操作','备注'];
 
     // 构建行数据
     var rows = pool.map(function(s) {
@@ -36,6 +36,7 @@ class LianbanPoolWidget extends YiMuWidget {
           '最新价':  live['最新价'] || s['收盘价'] || s['最新价'] || '—',
           '量比':   live['量比'] || s['量比'] || '—',
           '换手':   live['换手'] || s['换手'] || '—',
+          'MA10(60m)': (live['MA10_60m']||s['MA10_60m']) || '—',
           'MA5':   s['MA5'] || '—',
           '角色':   s['角色'] || '—',
           '操作':   s['操作'] || '—',

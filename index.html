@@ -35,6 +35,7 @@
 <script src="widgets/today-ops.js"></script>
 <script src="widgets/anchor-stocks.js"></script>
 <script src="widgets/midday-review.js"></script>
+<script src="widgets/llm-monitor.js"></script>
 <style>
 /* Inline critical styles for initial load */
 body{opacity:0;transition:opacity .3s}
@@ -66,6 +67,7 @@ body.ready{opacity:1}
   <span class="conn-text" id="connText">轮询</span>
   <button id="addWidgetBtn" title="添加组件" style="background:var(--info);color:#fff;font-weight:600;border:none;padding:var(--sp-xs) var(--sp-md);border-radius:var(--radius-sm);cursor:pointer;font-size:var(--fs-body);font-family:var(--font-sans);white-space:nowrap;height:28px;line-height:1">+ 添加组件</button>
   <button id="inputPanelBtn" title="报数面板" style="background:var(--accent-purple);color:#fff;font-weight:600;border:none;padding:var(--sp-xs) var(--sp-md);border-radius:var(--radius-sm);cursor:pointer;font-size:var(--fs-body);font-family:var(--font-sans);white-space:nowrap;height:28px;line-height:1">报数</button>
+  <button id="llmPanelBtn" title="AI盯盘" style="background:var(--info);color:#fff;font-weight:600;border:none;padding:var(--sp-xs) var(--sp-md);border-radius:var(--radius-sm);cursor:pointer;font-size:var(--fs-body);font-family:var(--font-sans);white-space:nowrap;height:28px;line-height:1;position:relative">🤖 AI盯盘</button>
   <span style="flex:1"></span>
   <button class="widget-btn" id="saveLayoutBtn" title="保存布局 (Ctrl+S)">保存</button>
   <button class="widget-btn" id="exportLayoutBtn" title="导出布局 JSON">导出</button>
@@ -98,6 +100,20 @@ body.ready{opacity:1}
       <button class="widget-btn" id="inputPanelClose" style="font-size:18px">×</button>
     </div>
     <div class="widget-panel-body" id="inputPanelBody"></div>
+  </div>
+</div>
+
+<!-- W20 AI盯盘浮窗 -->
+<div class="widget-panel-overlay" id="llmPanelOverlay">
+  <div class="widget-panel" style="max-width:720px;max-height:85vh">
+    <div class="widget-panel-header">
+      <span style="font-size:var(--fs-subtitle);font-weight:600">🤖 AI盯盘</span>
+      <div style="display:flex;gap:var(--sp-sm)">
+        <button id="llmPanelRefresh" style="background:var(--info);color:#fff;border:none;padding:2px 12px;border-radius:var(--radius-sm);cursor:pointer;font-size:var(--fs-body)">🔄 立即研判</button>
+        <button class="widget-btn" id="llmPanelClose" style="font-size:18px">×</button>
+      </div>
+    </div>
+    <div class="widget-panel-body" id="llmPanelBody"></div>
   </div>
 </div>
 
@@ -311,6 +327,89 @@ document.getElementById('widgetPanelClose').addEventListener('click', function()
 // 顶栏按钮
 document.getElementById('addWidgetBtn').addEventListener('click', _showWidgetPanel);
 document.getElementById('inputPanelBtn').addEventListener('click', _showInputPanel);
+document.getElementById('llmPanelBtn').addEventListener('click', _showLLMPanel);
+
+// === W20 AI盯盘浮窗 ===
+var _llmLoading = false;
+function _showLLMPanel() {
+  document.getElementById('llmPanelOverlay').classList.add('show');
+  _refreshLLMPanel();
+}
+function _refreshLLMPanel() {
+  if (_llmLoading) return;
+  var body = document.getElementById('llmPanelBody');
+  _llmLoading = true;
+  body.innerHTML = '<div style="text-align:center;padding:var(--sp-lg);color:var(--text-secondary)">⏳ 加载研判数据...</div>';
+
+  // 加载 llm_insights.json
+  fetch('data/llm_insights.json?t=' + Date.now())
+    .then(function(r) { return r.ok ? r.json() : {}; })
+    .catch(function() { return {}; })
+    .then(function(insights) {
+      var today = new Date().toISOString().slice(0,10);
+      var todayItems = insights[today] || {};
+      var nodes = ['竞价','早盘','午盘','尾盘','收盘'];
+      var entries = [];
+      Object.keys(todayItems).forEach(function(k) {
+        entries.push({node: k, ts: todayItems[k].timestamp, text: todayItems[k].text});
+      });
+      entries.sort(function(a,b) { return (a.ts||'').localeCompare(b.ts||''); });
+
+      var html = '';
+      if (entries.length === 0) {
+        html += '<div style="text-align:center;padding:var(--sp-lg);color:var(--text-disabled)">今日暂无研判<br><span style="font-size:var(--fs-label)">盘中每15分钟自动触发，或点🔄手动触发</span></div>';
+      } else {
+        entries.forEach(function(e) {
+          html += '<div style="margin-bottom:var(--sp-md);padding:var(--sp-sm) var(--sp-md);background:var(--bg-base);border-radius:var(--radius-md);border-left:3px solid var(--info)">'+
+            '<div style="display:flex;align-items:center;gap:var(--sp-sm);margin-bottom:var(--sp-xs)">'+
+              '<span style="font-weight:700;font-size:14px;color:var(--info)">'+e.node+'</span>'+
+              '<span style="font-size:var(--fs-label);color:var(--text-disabled)">'+e.ts+'</span>'+
+            '</div>'+
+            '<div style="font-size:14px;line-height:1.8">'+(e.text||'').replace(/\n/g,'<br>')+'</div>'+
+            '</div>';
+        });
+      }
+      _llmLoading = false;
+      body.innerHTML = html;
+    });
+}
+function _triggerLLMFromPanel() {
+  if (_llmLoading) return;
+  var body = document.getElementById('llmPanelBody');
+  _llmLoading = true;
+  body.innerHTML = '<div style="text-align:center;padding:var(--sp-lg);color:var(--warn)">⏳ AI 正在分析全盘数据...</div>';
+
+  // 收集数据快照
+  var d = DataStore.merged || {};
+  var S = d.sentiment || {}, li = d.live_index || {};
+  var snapshot = {
+    time: new Date().toLocaleTimeString('zh-CN', {hour:'2-digit', minute:'2-digit'}),
+    上证: li['上证指数涨幅'] || '—',
+    涨跌家数: (li['上涨家数']||'—')+'/'+(li['下跌家数']||'—'),
+    情绪: S['情绪值'],
+    涨停收益: S['昨日涨停收益'],
+    赚钱效应: S['赚钱效应'],
+  };
+
+  fetch('/api/llm', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({node: new Date().toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit'}), data_snapshot: snapshot})
+  })
+  .then(function(r) { return r.json(); })
+  .then(function(res) {
+    _llmLoading = false;
+    _refreshLLMPanel();
+  })
+  .catch(function() { _llmLoading = false; _refreshLLMPanel(); });
+}
+document.getElementById('llmPanelClose').addEventListener('click', function() {
+  document.getElementById('llmPanelOverlay').classList.remove('show');
+});
+document.getElementById('llmPanelOverlay').addEventListener('click', function(e) {
+  if (e.target === this) this.classList.remove('show');
+});
+document.getElementById('llmPanelRefresh').addEventListener('click', _triggerLLMFromPanel);
 
 // === W16 报数面板浮窗 ===
 function _showInputPanel() {

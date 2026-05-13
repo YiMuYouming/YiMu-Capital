@@ -3,6 +3,7 @@
 在看板目录运行: python3 scripts/bridge.py
 然后浏览器打开 http://localhost:8080
 W15 记流水时自动 POST 到 /api/sync，实时写入 JSON
+LLM Hook: POST /api/llm → Anthropic API → 研判文本
 """
 
 import json, os, sys
@@ -12,6 +13,164 @@ from urllib.parse import parse_qs
 
 ROOT = Path(__file__).resolve().parent.parent
 DATA_FILE = ROOT / "data/dashboard_data.json"
+LLM_INSIGHTS_FILE = ROOT / "data/llm_insights.json"
+
+# === LLM System Prompt ===
+SYSTEM_PROMPT = """你是洋米盯盘助手，为弈沐哥的A股短线+趋势混合交易提供实时研判。
+
+## 交易规则摘要
+- W1(9:30-10:00): 连板追涨 + 趋势强回踩买入(60分钟MA10)
+- W2(14:00-14:50): 连板尾盘低吸 + 趋势弱回踩确认
+- 核心指标: 60分钟MA10回踩(方向↑,距≤1%) + 缩量(量比<0.8) + 未大跌(>-5%)
+- 情绪: <20%冰点, 20-40%低迷, 40-60%主升, 60-80%强势, >80%高潮
+- 涨停收益>2%可操作, 赚钱效应好/较好可做
+- 单日熔断-3%, 连亏2天空仓
+
+## 输出格式
+你必须输出两个部分，用 [TEXT] 和 [SIGNALS] 标记分隔：
+
+[TEXT]
+3-5句中文研判。结论优先，简洁直白。
+[SIGNALS]
+每行一个信号，格式: 类型 | 标的 | 方向 | 置信度
+类型: BUY(买入信号)/WATCH(关注)/RISK(风险)/INFO(信息)
+方向: 多/空/—
+置信度: 高/中/低
+示例:
+BUY | 兆易创新 | 多 | 中
+WATCH | CPO板块 | 多 | 高
+RISK | 北方华创 | — | 低"""
+
+
+def _load_api_config():
+    """从 ~/.claude/settings.json 读取 DeepSeek API 配置"""
+    settings_path = Path.home() / ".claude" / "settings.json"
+    if settings_path.exists():
+        try:
+            with open(settings_path) as f:
+                s = json.load(f)
+            env = s.get("env", {})
+            return {
+                "base_url": env.get("ANTHROPIC_BASE_URL", "").rstrip("/"),
+                "token": env.get("ANTHROPIC_AUTH_TOKEN", ""),
+                "model": env.get("ANTHROPIC_DEFAULT_HAIKU_MODEL", "DeepSeek-V4-Flash"),
+            }
+        except Exception:
+            pass
+    return {}
+
+
+def _verify_signals(signals_raw, snapshot):
+    """ReAct 验证：交叉检查 LLM 输出的信号是否与数据一致"""
+    verified = []
+    for line in signals_raw.strip().split('\n'):
+        line = line.strip()
+        if not line or '|' not in line:
+            continue
+        parts = [p.strip() for p in line.split('|')]
+        if len(parts) < 4:
+            continue
+        sig_type, target, direction, confidence = parts[0], parts[1], parts[2], parts[3]
+
+        check = {'signal': line, 'type': sig_type, 'target': target, 'status': '✅', 'note': ''}
+
+        # 验证规则（基于数据快照交叉检查）
+        try:
+            if sig_type == 'BUY':
+                # 检查该标的是否真的在趋势自选里，且满足 W2 回踩条件
+                trend_stocks = snapshot.get('趋势自选', [])
+                found = None
+                for s in trend_stocks:
+                    if target in str(s.get('name', '')):
+                        found = s
+                        break
+                if found:
+                    dist_str = str(found.get('dist_to_ma10_60m', '—'))
+                    vol_str = str(found.get('volRatio', '1'))
+                    if '—' in dist_str:
+                        check['status'] = '⚠️'
+                        check['note'] = 'MA10数据缺失，无法验证回踩距离'
+                    else:
+                        dist = float(dist_str.replace('%', ''))
+                        vol = float(vol_str)
+                        conditions_met = 0
+                        if -1 <= dist <= 0.5:
+                            conditions_met += 1
+                        else:
+                            check['note'] = f'距MA10 {dist}% (需-1%~0.5%)'
+                        if vol < 0.8:
+                            conditions_met += 1
+                        else:
+                            check['note'] = (check['note'] + ' ' if check['note'] else '') + f'量比{vol}(需<0.8)'
+                        if conditions_met < 2:
+                            check['status'] = '⚠️'
+                            if not check['note']:
+                                check['note'] = '回踩条件不足'
+                        elif conditions_met == 2:
+                            check['note'] = '满足回踩+缩量' + ((' ' + check['note']) if check['note'] else '')
+                else:
+                    check['status'] = '⚠️'
+                    check['note'] = '标的未在趋势自选池中'
+
+            elif sig_type == 'RISK':
+                # 检查风控指标
+                positions = snapshot.get('持仓', [])
+                for p in positions:
+                    if target in str(p.get('name', '')):
+                        pnl = float(str(p.get('pnl_pct', '0')).replace('%', ''))
+                        if pnl < -3:
+                            check['note'] = f'浮亏{pnl}%，接近熔断线'
+                        elif pnl < 0:
+                            check['note'] = f'浮亏{pnl}%，正常范围内'
+                        else:
+                            check['note'] = f'浮盈，无风险'
+                        break
+
+            elif sig_type == 'INFO':
+                # 信息类信号，仅检查数据是否存在
+                sectors = snapshot.get('sectors', [])
+                found_sec = any(target in str(s.get('name', '')) for s in sectors)
+                if not found_sec:
+                    check['status'] = '⚠️'
+                    check['note'] = '板块未在数据中'
+
+        except Exception as e:
+            check['status'] = '⚠️'
+            check['note'] = f'验证异常: {str(e)[:50]}'
+
+        verified.append(check)
+
+    return verified
+
+
+def _call_llm_api(prompt_text):
+    """调用 DeepSeek Anthropic-compatible API"""
+    cfg = _load_api_config()
+    if not cfg.get("token"):
+        return {"error": "API token not found in ~/.claude/settings.json"}
+
+    import urllib.request
+    url = cfg["base_url"] + "/v1/messages"
+    body = json.dumps({
+        "model": cfg["model"],
+        "max_tokens": 600,
+        "system": SYSTEM_PROMPT,
+        "messages": [{"role": "user", "content": prompt_text}],
+    }).encode()
+
+    req = urllib.request.Request(url, data=body, headers={
+        "x-api-key": cfg["token"],
+        "Content-Type": "application/json",
+    })
+
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            result = json.loads(resp.read())
+            content = result.get("content", [])
+            text = "".join(c.get("text", "") for c in content if c.get("type") == "text")
+            return {"ok": True, "text": text}
+    except Exception as e:
+        return {"ok": False, "error": str(e)[:300]}
 
 class BridgeHandler(SimpleHTTPRequestHandler):
     def __init__(self, *args, **kwargs):
@@ -30,7 +189,6 @@ class BridgeHandler(SimpleHTTPRequestHandler):
             body = self.rfile.read(length)
             try:
                 payload = json.loads(body)
-                # 合并写入：读现有 JSON → 覆盖 positions + 今日操作 → 写回
                 if DATA_FILE.exists():
                     with open(DATA_FILE) as f:
                         data = json.load(f)
@@ -57,6 +215,96 @@ class BridgeHandler(SimpleHTTPRequestHandler):
                 self.end_headers()
                 self.wfile.write(json.dumps({'error': str(e)}).encode())
                 print(f"  [bridge] Error: {e}")
+
+        elif self.path == '/api/refresh':
+            try:
+                import subprocess
+                gen_script = ROOT / "scripts" / "gen_dashboard_data.py"
+                result = subprocess.run(
+                    ["python3", str(gen_script)],
+                    capture_output=True, text=True, timeout=120,
+                    cwd=str(ROOT)
+                )
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/json')
+                self.end_headers()
+                self.wfile.write(json.dumps({
+                    'ok': True,
+                    'output': result.stdout[-200:] if result.stdout else '',
+                    'error': result.stderr[-200:] if result.stderr else ''
+                }).encode())
+                print(f"  [bridge] gen_dashboard_data.py triggered (rc={result.returncode})")
+            except Exception as e:
+                self.send_response(500)
+                self.end_headers()
+                self.wfile.write(json.dumps({'ok': False, 'error': str(e)}).encode())
+                print(f"  [bridge] refresh error: {e}")
+
+        elif self.path == '/api/llm':
+            length = int(self.headers.get('Content-Length', 0))
+            body = self.rfile.read(length)
+            try:
+                payload = json.loads(body)
+                node = payload.get('node', '盘中')
+                data_snapshot = payload.get('data_snapshot', {})
+
+                prompt = f"当前时间: {node}\n\n全盘数据:\n{json.dumps(data_snapshot, ensure_ascii=False, indent=2)}"
+                result = _call_llm_api(prompt)
+
+                if result.get('ok'):
+                    raw_text = result['text']
+
+                    # 解析结构化输出 [TEXT]...[SIGNALS]...
+                    text_part = raw_text
+                    signals_part = ''
+                    if '[TEXT]' in raw_text and '[SIGNALS]' in raw_text:
+                        parts = raw_text.split('[SIGNALS]')
+                        text_part = parts[0].replace('[TEXT]', '').strip()
+                        signals_part = parts[1].strip() if len(parts) > 1 else ''
+
+                    # ReAct 验证
+                    verified_signals = _verify_signals(signals_part, data_snapshot) if signals_part else []
+
+                    insight = {
+                        'timestamp': __import__('datetime').datetime.now().strftime('%H:%M:%S'),
+                        'node': node,
+                        'text': text_part,
+                        'signals': verified_signals,
+                        'verified_count': sum(1 for v in verified_signals if v['status'] == '✅'),
+                        'warning_count': sum(1 for v in verified_signals if v['status'] == '⚠️'),
+                    }
+                    # 持久化写入
+                    today = __import__('datetime').datetime.now().strftime('%Y-%m-%d')
+                    insights = {}
+                    if LLM_INSIGHTS_FILE.exists():
+                        try:
+                            with open(LLM_INSIGHTS_FILE) as f:
+                                insights = json.load(f)
+                        except Exception:
+                            pass
+                    if today not in insights:
+                        insights[today] = {}
+                    insights[today][node] = insight
+                    LLM_INSIGHTS_FILE.parent.mkdir(parents=True, exist_ok=True)
+                    with open(LLM_INSIGHTS_FILE, 'w') as f:
+                        json.dump(insights, f, ensure_ascii=False, indent=2)
+
+                    self.send_response(200)
+                    self.send_header('Content-Type', 'application/json')
+                    self.end_headers()
+                    self.wfile.write(json.dumps({'ok': True, **insight}).encode())
+                    print(f"  [bridge] LLM insight: {node} ({len(text_part)} chars, {insight['verified_count']}✓/{insight['warning_count']}⚠)")
+                else:
+                    self.send_response(502)
+                    self.end_headers()
+                    self.wfile.write(json.dumps(result).encode())
+                    print(f"  [bridge] LLM error: {result.get('error', 'unknown')}")
+            except Exception as e:
+                self.send_response(500)
+                self.end_headers()
+                self.wfile.write(json.dumps({'ok': False, 'error': str(e)}).encode())
+                print(f"  [bridge] LLM exception: {e}")
+
         else:
             self.send_response(404)
             self.end_headers()

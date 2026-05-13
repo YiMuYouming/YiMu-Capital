@@ -151,6 +151,10 @@ _tdx_using_fallback = False
 
 # 量比计算缓存：{code: avg_daily_vol}
 _vol_avg_cache = {}
+# 均线缓存：{code: {ma5_d, ma10_d, ma20_d, ma10_60m, is_strong}}，每日计算一次
+_ma_cache = {}
+# 60分钟K线缓存：{code: [(time, open, high, low, close, vol), ...]}
+_60m_cache = {}
 
 
 def log(msg):
@@ -277,6 +281,9 @@ def fetch_quotes_pytdx(codes):
         _tdx_fail_count += 1
         return None
 
+    # 查询成功 → 重置失败计数
+    _tdx_fail_count = 0
+
     result = {}
     now = datetime.now()
     market_open = now.replace(hour=9, minute=30, second=0, microsecond=0)
@@ -298,11 +305,20 @@ def fetch_quotes_pytdx(codes):
         # 换手率：尝试从 reversed_bytes 解码
         turnover = _decode_turnover(row, code)
 
+        # 均线（每日计算一次，盘中不变）
+        mas = _get_mas(api, code, price)
+
         result[code] = {
             "最新价": price,
             "涨幅": f"{pct_chg:+.2f}%",
             "量比": f"{vol_ratio:.2f}" if vol_ratio else "—",
             "换手": f"{turnover:.2f}%" if turnover else "—",
+            "MA5_d": mas.get("ma5_d"),        # 日线MA5（方向/强弱）
+            "MA10_d": mas.get("ma10_d"),      # 日线MA10
+            "MA20_d": mas.get("ma20_d"),      # 日线MA20
+            "MA10_60m": mas.get("ma10_60m"),  # 60分钟MA10（核心回踩锚点·强势股）
+            "MA10_60m_dir": mas.get("ma10_60m_dir", "—"),
+            "is_strong": mas.get("_strong", False),  # 强势趋势股标记
         }
 
     return result
@@ -337,6 +353,77 @@ def _compute_volume_ratio(api, code, current_vol, minutes_traded):
         return None
 
     return round(current_vol / expected_vol, 2)
+
+
+def _get_mas(api, code, current_price):
+    """获取均线：日线 MA5/MA10/MA20 + 60分钟 MA10 + 强势/普通分类"""
+    global _ma_cache, _60m_cache
+    cache_key = str(code)
+    if cache_key in _ma_cache:
+        return _ma_cache[cache_key]
+
+    mas = {}
+    mkt = 1 if (str(code).startswith("6") or str(code).startswith("688")) else 0
+
+    # 1. 日线均线 MA5/MA10/MA20
+    try:
+        bars_d = api.get_security_bars(9, mkt, str(code), 0, 25)
+        if bars_d:
+            closes = [b.get("close", 0) for b in bars_d if b.get("close", 0) > 0]
+            for n, key in [(5, "ma5_d"), (10, "ma10_d"), (20, "ma20_d")]:
+                if len(closes) >= n:
+                    mas[key] = round(sum(closes[-n:]) / n, 2)
+
+            # 强势趋势股判定：近5日收盘从未跌破MA5
+            if len(closes) >= 10 and mas.get("ma5_d"):
+                ma5 = mas["ma5_d"]
+                recent_closes = closes[-5:]  # 最近5天
+                # 用昨天的MA5判断（今天盘中MA5可能还没到位）
+                prev_closes = closes[-6:-1] if len(closes) >= 6 else closes[-5:]
+                prev_ma5 = round(sum(prev_closes) / min(5, len(prev_closes)), 2)
+                below_ma5 = sum(1 for c in recent_closes if c < ma5)
+                mas["_strong"] = below_ma5 == 0  # True = 强势趋势股
+    except Exception:
+        pass
+
+    # 2. 60分钟均线 MA10（近10根60分钟K线）
+    try:
+        bars_60m = api.get_security_bars(3, mkt, str(code), 0, 15)
+        if bars_60m:
+            _60m_cache[cache_key] = []
+            closes_60m = []
+            for b in bars_60m[-12:]:  # 取最近12根
+                c = b.get("close", 0)
+                if c > 0:
+                    closes_60m.append(c)
+                _60m_cache[cache_key].append({
+                    "time": b.get("datetime", ""),
+                    "open": b.get("open", 0),
+                    "close": b.get("close", 0),
+                    "high": b.get("high", 0),
+                    "low": b.get("low", 0),
+                    "vol": b.get("vol", 0),
+                })
+            if len(closes_60m) >= 8:
+                mas["ma10_60m"] = round(sum(closes_60m[-10:]) / min(10, len(closes_60m)), 2)
+                # 60分钟MA10方向：比较前5根和后5根的均值
+                half = len(closes_60m) // 2
+                prev_half = closes_60m[:half]
+                later_half = closes_60m[half:]
+                prev_avg = sum(prev_half) / len(prev_half) if prev_half else 0
+                later_avg = sum(later_half) / len(later_half) if later_half else 0
+                if later_avg > prev_avg * 1.005:
+                    mas["ma10_60m_dir"] = "向上"
+                elif later_avg < prev_avg * 0.995:
+                    mas["ma10_60m_dir"] = "向下"
+                else:
+                    mas["ma10_60m_dir"] = "走平"
+    except Exception:
+        pass
+
+    if mas:
+        _ma_cache[cache_key] = mas
+    return mas
 
 
 def _decode_turnover(row, code):
@@ -909,6 +996,68 @@ def fetch_15min_bars(code, market, cache_key):
 
 # ========== TDX 板块指数查询 ==========
 
+def _get_sector_mas(api, code, price):
+    """板块指数均线 MA5/MA20 + 成交额趋势（每日计算一次）"""
+    global _sector_ma_cache
+    cache_key = str(code)
+    if cache_key in _sector_ma_cache:
+        return _sector_ma_cache[cache_key]
+
+    info = {}
+    try:
+        bars = api.get_security_bars(9, 1, str(code), 0, 30)
+        if bars and len(bars) >= 3:
+            # 检查基准是否一致：最近一根日K收盘价应在实时价±50%范围内
+            last_close = bars[-1].get("close", 0) if bars else 0
+            if last_close <= 0 or (price > 0 and (last_close < price * 0.3 or last_close > price * 3)):
+                return info  # 基准不一致，跳过
+            # 过滤脏数据：从最新往前取，遇到价格跳变(>30%)即停止
+            valid = []
+            prev_c = price
+            for b in reversed(bars):
+                c = b.get("close", 0)
+                if c <= 0: continue
+                if prev_c > 0 and (c < prev_c * 0.5 or c > prev_c * 2.0): break
+                valid.insert(0, b)
+                prev_c = c
+            closes = [b.get("close", 0) for b in valid]
+            amounts = [b.get("amount", 0) for b in valid if b.get("amount", 0) > 0]
+            # 板块指数数据稀疏，≥3根即可算趋势
+            if len(closes) >= 3:
+                n_ma = min(5, len(closes))
+                info["ma5"] = round(sum(closes[-n_ma:]) / n_ma, 2)
+                # MA5方向：后半段 vs 前半段
+                half = len(closes) // 2
+                recent = closes[-half:] if half > 0 else closes
+                earlier = closes[:half] if half > 0 else closes[:1]
+                if sum(recent)/len(recent) > sum(earlier)/len(earlier) * 1.005:
+                    info["ma5_dir"] = "向上"
+                elif sum(recent)/len(recent) < sum(earlier)/len(earlier) * 0.995:
+                    info["ma5_dir"] = "向下"
+                else:
+                    info["ma5_dir"] = "走平"
+                # 站上/跌破5日线
+                info["vs_ma5"] = "站上" if price > info["ma5"] else "跌破"
+            if len(closes) >= 20:
+                info["ma20"] = round(sum(closes[-20:]) / 20, 2)
+            if len(amounts) >= 3:
+                n_amt = min(5, len(amounts))
+                ma5_amt = sum(amounts[-n_amt:]) / n_amt
+                today_amt = amounts[-1] if amounts else 0
+                if today_amt > ma5_amt * 1.15:
+                    info["amt_trend"] = "放量"
+                elif today_amt < ma5_amt * 0.85:
+                    info["amt_trend"] = "缩量"
+                else:
+                    info["amt_trend"] = "持平"
+    except Exception:
+        pass
+
+    if info:
+        _sector_ma_cache[cache_key] = info
+    return info
+
+
 def fetch_sectors_tdx(sector_names):
     """通过 PyTDX 查询板块指数 → live_sectors 格式"""
     if not sector_names:
@@ -950,11 +1099,24 @@ def fetch_sectors_tdx(sector_names):
         pct = round((price - last_close) / last_close * 100, 2) if last_close else 0
         amount = row.get("amount", 0)
 
+        # 板块均线（每日计算一次）
+        ma_info = _get_sector_mas(api, code, price)
+
+        # 距MA5距离
+        dist_ma5 = None
+        if ma_info.get("ma5") and price:
+            dist_ma5 = round((price - ma_info["ma5"]) / ma_info["ma5"] * 100, 2)
+
         result[name] = {
             "涨跌幅": pct,
-            "主力净流入": "—",     # TDX 板块指数无资金流向
-            "5日线": "—",          # 需额外查 K 线
-            "今日涨停数": "—",      # TDX 板块指数无涨停数
+            "最新价": price,
+            "MA5": ma_info.get("ma5"),
+            "MA20": ma_info.get("ma20"),
+            "MA5方向": ma_info.get("ma5_dir", "—"),
+            "站上MA5": ma_info.get("vs_ma5", "—"),
+            "距MA5": dist_ma5,
+            "成交额趋势": ma_info.get("amt_trend", "—"),
+            "今日涨停数": "—",
         }
 
     return result
@@ -962,6 +1124,7 @@ def fetch_sectors_tdx(sector_names):
 
 # ========== 数据组装 ==========
 
+_sector_ma_cache = {}  # 板块均线缓存：{code: {ma5, ma20, vol_ma5}}
 _last_sectors_cache = {}  # 板块数据缓存，非刷新轮次复用
 _last_yesterday_baseline = {}  # 昨日基线缓存，仅30s刷新一次
 
@@ -974,13 +1137,39 @@ def build_live_data(codes, skip_sectors=False):
         data["yesterday_baseline"] = _last_yesterday_baseline  # 非刷新轮次复用缓存
 
     # 个股 + 指数
+    # 兜底切换：连续3次PyTDX失败 → 切到 easyquotation
     if _tdx_fail_count >= 3 and not _tdx_using_fallback:
         _tdx_using_fallback = True
         log("PyTDX 连续3次失败，切换到 easyquotation 兜底")
 
     if _tdx_using_fallback:
-        data["live_quotes"] = fetch_quotes_fallback(codes)
-        data["live_index"] = {}
+        # 兜底模式：每 30s 尝试一次 PyTDX 重连，不阻塞
+        now_ts = time.time()
+        if not hasattr(build_live_data, '_last_reconnect_attempt'):
+            build_live_data._last_reconnect_attempt = 0
+        if now_ts - build_live_data._last_reconnect_attempt >= 30:
+            build_live_data._last_reconnect_attempt = now_ts
+            test_api = _get_tdx_api()
+            if test_api:
+                # 尝试查询一只股票验证连接
+                try:
+                    test_result = test_api.get_security_quotes([(1, '000001')])
+                    if test_result and len(test_result) > 0:
+                        _tdx_fail_count = 0
+                        _tdx_using_fallback = False
+                        log("切回 PyTDX")
+                except Exception:
+                    pass
+
+        if _tdx_using_fallback:
+            data["live_quotes"] = fetch_quotes_fallback(codes)
+            data["live_index"] = {}
+        else:
+            # 切回成功，走正常 PyTDX 路径
+            quotes = fetch_quotes_pytdx(codes)
+            index_data = fetch_index_pytdx()
+            data["live_quotes"] = quotes or {}
+            data["live_index"] = index_data or {}
     else:
         quotes = fetch_quotes_pytdx(codes)
         index_data = fetch_index_pytdx()
@@ -993,11 +1182,6 @@ def build_live_data(codes, skip_sectors=False):
         else:
             data["live_quotes"] = quotes or {}
             data["live_index"] = index_data or {}
-
-        # 每60s尝试切回PyTDX
-        if _tdx_using_fallback and _tdx_fail_count == 0:
-            _tdx_using_fallback = False
-            log("切回 PyTDX")
 
     # 15min量价（三大指数）
     for key, (code, market) in _15MIN_INDEXES.items():
