@@ -1232,6 +1232,13 @@ def watch_mode(interval_stocks=5, interval_sectors=30, skip_sectors=False):
     try:
         while True:
             now = time.time()
+
+            # 收盘后自动停止（15:05 之后退出）
+            dt = datetime.now()
+            if dt.hour >= 16 and dt.minute >= 5:
+                log(f"收盘自动停止 ({write_count}次写入)")
+                break
+
             need_sectors = (not skip_sectors) and (now - last_sector_update >= interval_sectors)
 
             data = build_live_data(codes, skip_sectors=(not need_sectors))
