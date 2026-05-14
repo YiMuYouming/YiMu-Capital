@@ -2,6 +2,22 @@
 'use strict';
 
 class W1CheckWidget extends YiMuWidget {
+  constructor(config) {
+    super(config);
+    this._aiInsights = null;
+    this._aiLoaded = false;
+  }
+
+  _loadAI() {
+    if (this._aiLoaded) return;
+    this._aiLoaded = true;
+    var self = this;
+    fetch('data/llm_insights.json?t=' + Date.now())
+      .then(function(r){ return r.json(); })
+      .then(function(d){ self._aiInsights = d; self._renderBody(); })
+      .catch(function(){});
+  }
+
   render(data) {
     var body = this.getBody();
     if (!body) return;
@@ -159,6 +175,36 @@ class W1CheckWidget extends YiMuWidget {
     // ===== 分隔 =====
     html += '<div style="border-top:1px solid var(--border-light);margin:4px 0"></div>';
 
+    // ===== 龙头+合力 预计算 =====
+    function findLeader(sectorName) {
+      var sec = sectors.find(function(x){ return x['板块']===sectorName || (x['板块']||'').indexOf(sectorName)>=0 || (sectorName||'').indexOf(x['板块'])>=0; });
+      if (!sec) return null;
+      var leaderRaw = sec['龙头'] || '';
+      var leaderClean = leaderRaw.replace(/\d+板.*$/, '').trim();
+      if (!leaderClean) return null;
+      var ls = lbPoolAll.find(function(x){ return x['标的']===leaderClean || leaderRaw.indexOf(x['标的'])>=0; });
+      return ls || null;
+    }
+    function checkLeader(leaderStock) {
+      if (!leaderStock) return {ok:null, val:'无龙头数据'};
+      var lq = liveQ[leaderStock['代码']] || {};
+      var lchg = parseFloat(String(lq['涨幅']||leaderStock['涨幅']||'0').replace('%','').replace('+','')) || 0;
+      var alive = lchg >= 9.5;
+      return {ok:alive, val:leaderStock['标的']+(alive?' 封板':' +'+lchg.toFixed(1)+'%')};
+    }
+    function checkSynergy(sectorName) {
+      var count=0, names=[];
+      lbPoolAll.forEach(function(x){
+        var xs = x['板块']||'';
+        if (xs===sectorName || xs.indexOf(sectorName)>=0 || (sectorName||'').indexOf(xs)>=0) {
+          var q = liveQ[x['代码']] || {};
+          var xchg = parseFloat(String(q['涨幅']||x['涨幅']||'0').replace('%','').replace('+','')) || 0;
+          if (xchg > 3) { count++; if (names.length<3) names.push(x['标的']+'+'+xchg.toFixed(1)+'%'); }
+        }
+      });
+      return {ok:count>=3, val:count+'只>3%'+(names.length>0?' ('+names.join(' ')+')':'')};
+    }
+
     // ===== 标的信号卡 =====
     if (lbPool.length > 0) {
       html += '<div style="padding:0">';
@@ -174,20 +220,28 @@ class W1CheckWidget extends YiMuWidget {
         var sector = s['板块'] || '';
 
         var isWatch = role.indexOf('情绪标')>=0 || role.indexOf('龙头')>=0 || op.indexOf('只盯')>=0;
-        var is3jin4 = !isWatch && (role.indexOf('3进4')>=0 || name.indexOf('华电')>=0);
-        var is2jin3 = !isWatch && (role.indexOf('2进3')>=0 || name.indexOf('万控')>=0);
-        var is1jin2 = !isWatch && (role.indexOf('1进2')>=0 || name.indexOf('韶能')>=0);
+        var isSkip = role.indexOf('移除')>=0 || op.indexOf('不碰')>=0;
+        var is3jin4 = !isWatch && !isSkip && (role.indexOf('3进4')>=0 || name.indexOf('华电')>=0);
+        var is2jin3 = !isWatch && !isSkip && (role.indexOf('2进3')>=0 || name.indexOf('万控')>=0);
+        var is1jin2 = !isWatch && !isSkip && (role.indexOf('1进2')>=0 || name.indexOf('韶能')>=0);
+
+        // 预计算龙头+合力
+        var leaderStock = findLeader(sector);
+        var leaderCheck = checkLeader(leaderStock);
+        var synergyCheck = checkSynergy(sector);
 
         var conds = [];
         if (is3jin4 || is2jin3) {
           conds.push({label:'高开3-7%', ok: chg>=3&&chg<=7, val:'+'+chg.toFixed(1)+'%'});
           conds.push({label:'量比>1.5', ok: vr>=1.5, val:vr.toFixed(1)});
-          conds.push({label:'龙头存活', ok: null, val:'待确认'});
-          if (is3jin4) conds.push({label:'板块合力', ok: null, val:'≥3只高开'});
+          conds.push({label:'龙头存活', ok: leaderCheck.ok, val: leaderCheck.val});
+          if (is3jin4) conds.push({label:'板块合力', ok: synergyCheck.ok, val: synergyCheck.val});
         } else if (is1jin2) {
           conds.push({label:'高开>0%', ok: chg>0, val:'+'+chg.toFixed(1)+'%'});
-          conds.push({label:'跟风确认', ok: null, val:'待确认'});
-          conds.push({label:'龙头存活', ok: null, val:'待确认'});
+          conds.push({label:'板块合力', ok: synergyCheck.ok, val: synergyCheck.val});
+          conds.push({label:'龙头存活', ok: leaderCheck.ok, val: leaderCheck.val});
+        } else if (isSkip) {
+          // 不碰标的：不显示条件
         } else if (!isWatch) {
           conds.push({label:'高开3-7%', ok: chg>=3&&chg<=7, val:'+'+chg.toFixed(1)+'%'});
           conds.push({label:'量比>1.5', ok: vr>=1.5, val:vr.toFixed(1)});
@@ -200,7 +254,8 @@ class W1CheckWidget extends YiMuWidget {
         var stockFail = failCount>0;
 
         var stockStatus, stColor;
-        if (isWatch)      { stockStatus = '👁 只盯不买'; stColor = 'var(--text-secondary)'; }
+        if (isSkip)       { stockStatus = '不碰'; stColor = 'var(--text-disabled)'; }
+        else if (isWatch) { stockStatus = '只盯不买'; stColor = 'var(--text-secondary)'; }
         else if (stockOk) { stockStatus = '追涨'; stColor = '#22c55e'; }
         else if (stockWait) { stockStatus = '待确认'; stColor = '#f59e0b'; }
         else              { stockStatus = '条件不足'; stColor = '#ef4444'; }
@@ -210,7 +265,7 @@ class W1CheckWidget extends YiMuWidget {
 
         // 左侧：状态灯 + 名称
         html += '<div style="flex:0 0 auto;text-align:center;min-width:44px">'+
-          signalDot(isWatch?null:stockOk?true:stockFail?false:null, 36)+
+          signalDot((isWatch||isSkip)?null:stockOk?true:stockFail?false:null, 36)+
           '<div style="font-size:10px;font-weight:600;color:'+stColor+';margin-top:2px">'+stockStatus+'</div>'+
           '</div>';
 
@@ -270,6 +325,30 @@ class W1CheckWidget extends YiMuWidget {
           '</div>';
       });
       html += '</div>';
+    }
+
+    // ===== AI 盯盘信号 =====
+    this._loadAI();
+    if (this._aiInsights) {
+      var today = new Date().toISOString().slice(0,10);
+      var todayData = this._aiInsights[today] || {};
+      var aiNodes = Object.keys(todayData).sort().reverse();
+      if (aiNodes.length > 0) {
+        var latestAi = todayData[aiNodes[0]];
+        var aiText = (latestAi.text||'').substring(0, 120);
+        var aiSignals = latestAi.signals || [];
+        var buyCount = aiSignals.filter(function(s){return s.type==='BUY'&&s.status==='✅';}).length;
+        var watchCount = aiSignals.filter(function(s){return s.type==='WATCH';}).length;
+        html += '<div style="padding:6px 8px;margin-top:4px;background:rgba(59,130,246,0.06);border-radius:6px;border-left:3px solid var(--info)">'+
+          '<div style="display:flex;align-items:center;gap:6px;margin-bottom:2px">'+
+            '<span style="font-size:11px;font-weight:700;color:var(--info)">AI 盯盘</span>'+
+            '<span style="font-size:10px;color:var(--text-disabled)">'+aiNodes[0]+'</span>'+
+            (buyCount>0?'<span style="font-size:10px;color:var(--up)">'+buyCount+' BUY</span>':'')+
+            (watchCount>0?'<span style="font-size:10px;color:var(--info)">'+watchCount+' WATCH</span>':'')+
+          '</div>'+
+          '<div style="font-size:11px;color:var(--text-secondary);line-height:1.5">'+aiText+'...</div>'+
+          '</div>';
+      }
     }
 
     // ===== 底部环境条 =====

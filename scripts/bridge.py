@@ -26,18 +26,25 @@ SYSTEM_PROMPT = """你是洋米盯盘助手，为弈沐哥的A股短线+趋势�
 - 涨停收益>2%可操作, 赚钱效应好/较好可做
 - 单日熔断-3%, 连亏2天空仓
 
+## W1 早盘特别关注
+W1时段(9:30-10:00)额外评估以下项目，在研判中优先回答：
+1. 连板龙头状态: 检查连板池中各板块龙头是否封板/断板，封板量能是否健康
+2. 板块合力: 各板块有多少只标的涨幅>3%，合力是否形成(≥3只)
+3. W1候选标的: 华电辽能(3进4)/万控智造(2进3)/韶能股份(1进2)各自条件是否满足
+4. 竞价三件套: 情绪是否≥60%? 涨停收益是否>2%? W1标的是否有高开3-7%?
+
 ## 输出格式
 你必须输出两个部分，用 [TEXT] 和 [SIGNALS] 标记分隔：
 
 [TEXT]
-3-5句中文研判。结论优先，简洁直白。
+3-5句中文研判。结论优先，简洁直白。W1时段优先回答龙头和合力问题。
 [SIGNALS]
 每行一个信号，格式: 类型 | 标的 | 方向 | 置信度
 类型: BUY(买入信号)/WATCH(关注)/RISK(风险)/INFO(信息)
 方向: 多/空/—
 置信度: 高/中/低
 示例:
-BUY | 兆易创新 | 多 | 中
+BUY | 华电辽能 | 多 | 中
 WATCH | CPO板块 | 多 | 高
 RISK | 北方华创 | — | 低"""
 
@@ -248,7 +255,11 @@ class BridgeHandler(SimpleHTTPRequestHandler):
                 node = payload.get('node', '盘中')
                 data_snapshot = payload.get('data_snapshot', {})
 
-                prompt = f"当前时间: {node}\n\n全盘数据:\n{json.dumps(data_snapshot, ensure_ascii=False, indent=2)}"
+                # W1时段加专属提示
+                w1_hint = ''
+                if node and '09:' in str(node) or '10:0' in str(node):
+                    w1_hint = '\n\n⚠️ 当前是W1早盘时段(9:30-10:00)。请按W1特别关注4项评估：龙头状态、板块合力、候选标的、竞价三件套。连板池中标的的操作信号优先输出。'
+                prompt = f"当前时间: {node}{w1_hint}\n\n全盘数据:\n{json.dumps(data_snapshot, ensure_ascii=False, indent=2)}"
                 result = _call_llm_api(prompt)
 
                 if result.get('ok'):
