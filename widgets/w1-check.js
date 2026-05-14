@@ -219,7 +219,7 @@ class W1CheckWidget extends YiMuWidget {
           if (xchg > 3) { count++; if (names.length<3) names.push(x['标的']+'+'+xchg.toFixed(1)+'%'); }
         }
       });
-      return {ok:count>=3, val:count+'只>3%'+(names.length>0?' ('+names.join(' ')+')':'')};
+      return {ok:count>=2, val:count+'只>3%'+(names.length>0?' ('+names.join(' ')+')':'')};
     }
 
     // ===== 标的信号卡 =====
@@ -341,14 +341,16 @@ class W1CheckWidget extends YiMuWidget {
         var distMA5 = ma5>0 ? ((price-ma5)/ma5*100) : null;
         var holding = (s['角色']||'').indexOf('持仓')>=0 || (s['操作']||'').indexOf('持有')>=0;
 
-        var ok = chg > -3;
+        var ok = chg >= 0;
+        var dotOk = ok;  // 绿涨红跌
+        var nameColor = holding ? 'var(--warn)' : 'var(--text-secondary)';
         html += '<div style="display:flex;align-items:center;gap:8px;padding:3px 0;font-size:12px">'+
-          miniDot(ok)+
-          '<span style="font-weight:'+(holding?'700':'400')+';color:'+(holding?'var(--warn)':'var(--text-secondary)')+'">'+s['标的']+'</span>'+
+          miniDot(dotOk)+
+          '<span style="font-weight:'+(holding?'700':'400')+';color:'+nameColor+'">'+s['标的']+'</span>'+
           '<span style="font-size:10px;color:var(--text-disabled)">'+code+'</span>'+
           '<span style="flex:1"></span>'+
           '<span style="font-weight:600;color:'+(chg>=0?'var(--up)':'var(--danger)')+'">'+(chg>=0?'+':'')+chg.toFixed(1)+'%</span>'+
-          (distMA5!==null?'<span style="font-size:10px;color:var(--text-disabled)">MA5 '+(distMA5>=0?'+':'')+distMA5.toFixed(1)+'%</span>':'')+
+          (distMA5!==null?'<span style="font-size:10px;color:var(--text-disabled)">MA5 '+(distMA5>=0?'+':'')+distMA5.toFixed(1)+'%</span>':'<span style="font-size:10px;color:var(--text-disabled)">MA5 —</span>')+
           (s['止损']?'<span style="font-size:10px;color:var(--danger)">止损'+s['止损']+'</span>':'')+
           '</div>';
       });
