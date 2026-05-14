@@ -6,6 +6,7 @@ class W1CheckWidget extends YiMuWidget {
     super(config);
     this._aiInsights = null;
     this._aiLoaded = false;
+    this._openSnapshot = null;  // 9:25 开盘快照，锁住高开+合力判定
   }
 
   _loadAI() {
@@ -40,6 +41,22 @@ class W1CheckWidget extends YiMuWidget {
     var inW1 = (hour === 9 && min >= 30) || (hour === 9 && min <= 59) || (hour === 10 && min === 0);
     var isFriday = now.getDay() === 5;
 
+    // ===== 开盘快照：W1 首次有数据时定格，用于高开/合力判定 =====
+    if (inW1 && !this._openSnapshot && Object.keys(liveQ).length > 0) {
+      var hasValidData = Object.values(liveQ).some(function(q){ return parseFloat(String(q['涨幅']||'0').replace('%','').replace('+','')) > 0; });
+      if (hasValidData) {
+        this._openSnapshot = {};
+        Object.keys(liveQ).forEach(function(k){
+          this._openSnapshot[k] = {
+            涨幅: liveQ[k]['涨幅'],
+            量比: liveQ[k]['量比'],
+            最新价: liveQ[k]['最新价']
+          };
+        }, this);
+      }
+    }
+    var openQ = this._openSnapshot || liveQ;  // 开盘数据优先，无快照时用实时
+
     // ===== 数值 =====
     var qx = parseFloat(S['情绪值']) || 0;
     var yestQx = parseFloat(closeS['情绪值']) || 0;
@@ -61,9 +78,9 @@ class W1CheckWidget extends YiMuWidget {
     var piece3_stocks = [];
     lbPool.forEach(function(s){
       var code = s['代码'] || '';
-      var q = liveQ[code] || {};
-      var chg = parseFloat(String(q['涨幅']||s['涨幅']||'0').replace('%','').replace('+','')) || 0;
-      if (chg >= 3 && chg <= 7) piece3_stocks.push({name:s['标的'], code:code, chg:chg});
+      var oq = openQ[code] || liveQ[code] || {};
+      var ochg = parseFloat(String(oq['涨幅']||s['涨幅']||'0').replace('%','').replace('+','')) || 0;
+      if (ochg >= 3 && ochg <= 9.5) piece3_stocks.push({name:s['标的'], code:code, chg:ochg});
     });
     var piece2_ok = ztProfit > 2;
     var piece3_ok = piece3_stocks.length > 0;
@@ -197,8 +214,8 @@ class W1CheckWidget extends YiMuWidget {
       lbPoolAll.forEach(function(x){
         var xs = x['板块']||'';
         if (xs===sectorName || xs.indexOf(sectorName)>=0 || (sectorName||'').indexOf(xs)>=0) {
-          var q = liveQ[x['代码']] || {};
-          var xchg = parseFloat(String(q['涨幅']||x['涨幅']||'0').replace('%','').replace('+','')) || 0;
+          var oq = openQ[x['代码']] || liveQ[x['代码']] || {};
+          var xchg = parseFloat(String(oq['涨幅']||x['涨幅']||'0').replace('%','').replace('+','')) || 0;
           if (xchg > 3) { count++; if (names.length<3) names.push(x['标的']+'+'+xchg.toFixed(1)+'%'); }
         }
       });
@@ -215,6 +232,9 @@ class W1CheckWidget extends YiMuWidget {
         var q = liveQ[code] || {};
         var chg = parseFloat(String(q['涨幅']||s['涨幅']||'0').replace('%','').replace('+','')) || 0;
         var vr = parseFloat(q['量比']||s['量比']) || 0;
+        // 开盘涨幅（定格），用于高开条件判定
+        var oq = openQ[code] || liveQ[code] || {};
+        var ochg = parseFloat(String(oq['涨幅']||s['涨幅']||'0').replace('%','').replace('+','')) || 0;
         var role = s['角色'] || '';
         var op = s['操作'] || '';
         var sector = s['板块'] || '';
@@ -225,30 +245,36 @@ class W1CheckWidget extends YiMuWidget {
         var is2jin3 = !isWatch && !isSkip && (role.indexOf('2进3')>=0 || name.indexOf('万控')>=0);
         var is1jin2 = !isWatch && !isSkip && (role.indexOf('1进2')>=0 || name.indexOf('韶能')>=0);
 
-        // 预计算龙头+合力
+        // 预计算龙头+合力（标的本身是龙头则跳过龙头检查）
         var leaderStock = findLeader(sector);
-        var leaderCheck = checkLeader(leaderStock);
+        var selfIsLeader = leaderStock && leaderStock['代码'] === code;
+        var leaderCheck = selfIsLeader ? {ok:null, val:'自身为龙头', _skip:true} : checkLeader(leaderStock);
         var synergyCheck = checkSynergy(sector);
 
         var conds = [];
         if (is3jin4 || is2jin3) {
-          conds.push({label:'高开3-7%', ok: chg>=3&&chg<=7, val:'+'+chg.toFixed(1)+'%'});
+          var gapOk = ochg>=3 && ochg<=9.5;
+          var gapLabel = ochg>7 ? '高开偏高' : '高开3-7%';
+          conds.push({label: gapLabel, ok: gapOk, val:'开盘+'+ochg.toFixed(1)+'%'});
           conds.push({label:'量比>1.5', ok: vr>=1.5, val:vr.toFixed(1)});
           conds.push({label:'龙头存活', ok: leaderCheck.ok, val: leaderCheck.val});
           if (is3jin4) conds.push({label:'板块合力', ok: synergyCheck.ok, val: synergyCheck.val});
         } else if (is1jin2) {
-          conds.push({label:'高开>0%', ok: chg>0, val:'+'+chg.toFixed(1)+'%'});
+          conds.push({label:'高开>0%', ok: ochg>0, val:'开盘+'+ochg.toFixed(1)+'%'});
           conds.push({label:'板块合力', ok: synergyCheck.ok, val: synergyCheck.val});
           conds.push({label:'龙头存活', ok: leaderCheck.ok, val: leaderCheck.val});
         } else if (isSkip) {
           // 不碰标的：不显示条件
         } else if (!isWatch) {
-          conds.push({label:'高开3-7%', ok: chg>=3&&chg<=7, val:'+'+chg.toFixed(1)+'%'});
+          var gapOk2 = ochg>=3 && ochg<=9.5;
+          var gapLabel2 = ochg>7 ? '高开偏高' : '高开3-7%';
+          conds.push({label: gapLabel2, ok: gapOk2, val:'开盘+'+ochg.toFixed(1)+'%'});
           conds.push({label:'量比>1.5', ok: vr>=1.5, val:vr.toFixed(1)});
         }
 
-        var failCount = conds.filter(function(c){return c.ok===false;}).length;
-        var pendCount = conds.filter(function(c){return c.ok===null;}).length;
+        var activeConds = conds.filter(function(c){return !c._skip;});
+        var failCount = activeConds.filter(function(c){return c.ok===false;}).length;
+        var pendCount = activeConds.filter(function(c){return c.ok===null;}).length;
         var stockOk = failCount===0 && pendCount===0;
         var stockWait = failCount===0 && pendCount>0;
         var stockFail = failCount>0;
@@ -286,9 +312,11 @@ class W1CheckWidget extends YiMuWidget {
         }
         html += '</div>';
 
-        // 右侧：涨幅+量比
+        // 右侧：开盘+实时涨幅+量比
+        var hasOpenData = openQ[code] && ochg !== chg;
         html += '<div style="flex:0 0 auto;text-align:right;font-size:11px;color:var(--text-secondary)">'+
           '<div style="font-size:15px;font-weight:700;color:'+(chg>=0?'var(--up)':'var(--danger)')+'">'+(chg>=0?'+':'')+chg.toFixed(1)+'%</div>'+
+          (hasOpenData?'<div style="font-size:10px;color:var(--text-disabled)">开盘'+(ochg>=0?'+':'')+ochg.toFixed(1)+'%</div>':'')+
           '<div>量比 '+vr.toFixed(1)+'</div>'+
           '<div style="font-size:10px;color:var(--text-disabled)">'+sector+'</div>'+
           '</div>';
