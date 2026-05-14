@@ -10,7 +10,6 @@ class SectorHeatWidget extends YiMuWidget {
   render(data) {
     // 异步加载 LLM 研判
     if (!this._insights) this._loadInsights();
-    var self = this;
     var body = this.getBody();
     if (!body) return;
     var sectors = (data && data.sectors) || [];
@@ -152,10 +151,10 @@ class SectorHeatWidget extends YiMuWidget {
 
         // === 行3：LLM（从 llm_insights 读取最新研判）===
         var llmText = '';
-        if (self._insights) {
+        if (this._insights) {
           // 取今天最新一条研判中匹配此板块的内容
           var today = new Date().toISOString().slice(0,10);
-          var todayData = self._insights[today] || {};
+          var todayData = this._insights[today] || {};
           var keys = Object.keys(todayData).sort().reverse();
           for (var ki = 0; ki < keys.length; ki++) {
             var text = todayData[keys[ki]].text || '';
@@ -183,18 +182,19 @@ class SectorHeatWidget extends YiMuWidget {
       html += '</div>';
     });
 
-    // === 行业净流入 TOP5 (ym-stock-data) ===
+    // === 行业净流入 TOP5 (ym-stock-data, 同花顺行业) ===
     var inflow = (data && data.sector_inflow) || [];
     if (inflow.length) {
       html += '<div style="margin-top:8px;padding:6px var(--sp-sm);background:var(--bg-base);border:1px solid var(--border-light);border-radius:var(--radius-md)">';
-      html += '<span style="font-weight:700;font-size:13px;color:var(--info)">行业净流入 TOP5</span>';
+      html += '<span style="font-weight:700;font-size:13px;color:var(--info)">💰 行业净流入 TOP5</span>';
       html += '<div style="margin-top:4px;display:flex;flex-wrap:wrap;gap:6px">';
       for (var i = 0; i < Math.min(5, inflow.length); i++) {
         var s = inflow[i];
         var nf = s.net_inflow_yi || 0;
+        var cls = nf > 0 ? 'up' : 'down';
         html += '<span style="font-size:11px;padding:2px 6px;background:var(--bg-base);border:1px solid var(--border-light);border-radius:3px">';
-        html += s.name + ' ';
-        html += '<span class="' + (nf > 0 ? 'up' : 'down') + '" style="font-family:var(--font-mono)">' + (nf >= 0 ? '+' : '') + nf.toFixed(1) + '亿</span>';
+        html += '<span style="color:var(--text-primary)">' + s.name + '</span> ';
+        html += '<span class="' + cls + '" style="font-family:var(--font-mono)">' + (nf >= 0 ? '+' : '') + nf.toFixed(1) + '亿</span>';
         html += '</span>';
       }
       html += '</div></div>';
