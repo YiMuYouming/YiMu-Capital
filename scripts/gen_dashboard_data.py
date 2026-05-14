@@ -607,12 +607,35 @@ def _fallback_appendix(current_path, key):
             pass
     return []
 
+def _fallback_frontmatter(current_path):
+    """当今天笔记 frontmatter 为空时，回退到最近一个完整笔记的 frontmatter"""
+    review_dir = Path(current_path).parent.parent
+    md_files = sorted(review_dir.glob("**/*ReviewNote.md"), reverse=True)
+    current_name = Path(current_path).name
+
+    for f in md_files:
+        if f.name == current_name:
+            continue
+        fm = parse_frontmatter(str(f))
+        # 检查是否有实质数据（情绪值不为空）
+        if fm.get("情绪值") is not None and fm.get("情绪值") != "":
+            print(f"[info] Fallback frontmatter: using {f.name}")
+            return fm
+    return {}
+
 
 def build_dashboard_data(review_path):
     """组装完整的 dashboard_data.json"""
     fm = parse_frontmatter(review_path)
+    prev_fm = _fallback_frontmatter(review_path)  # 今天空字段用昨天的值
     style = get_style_data(review_path)
     appendix = parse_appendix(review_path)
+    # 合并 frontmatter：今天有值用今天，空字段回退昨天
+    def fm_val(key, default=None):
+        v = clean_value(fm.get(key))
+        if v is not None and v != "":
+            return v
+        return clean_value(prev_fm.get(key)) if prev_fm else default
 
     raw_date = fm.get("date", datetime.now().strftime("%Y-%m-%d"))
     date_str = str(raw_date) if not isinstance(raw_date, str) else raw_date
@@ -636,30 +659,33 @@ def build_dashboard_data(review_path):
             "note": f"自动生成自 {os.path.basename(review_path)}"
         },
         "market": {
-            "上证指数": clean_value(fm.get("上证指数")),
-            "上证涨幅": clean_value(fm.get("上证涨幅")),
-            "市场量能": clean_value(fm.get("市场量能")),
-            "涨跌比": clean_value(fm.get("涨跌比")),
-            "涨停家数": clean_value(fm.get("涨停家数"), "涨停家数"),
-            "跌停家数": clean_value(fm.get("跌停家数")),
-            "炸板率": clean_value(fm.get("炸板率")) or iw.get("炸板率"),
-            "封板率": clean_value(fm.get("封板率")) or iw.get("封板率"),
+            "上证指数": fm_val("上证指数"),
+            "上证涨幅": fm_val("上证涨幅"),
+            "市场量能": fm_val("市场量能"),
+            "涨跌比": fm_val("涨跌比"),
+            "涨停家数": fm_val("涨停家数") or iw.get("涨停家数"),
+            "跌停家数": fm_val("跌停家数"),
+            "炸板率": fm_val("炸板率") or iw.get("炸板率"),
+            "封板率": fm_val("封板率") or iw.get("封板率"),
         },
         "sentiment": {
-            "情绪值": clean_value(fm.get("情绪值")) or iw.get("情绪值"),
-            "情绪区间": clean_value(fm.get("情绪区间")),
-            "昨日情绪": clean_value(fm.get("昨日情绪")),
-            "情绪变化": clean_value(fm.get("情绪变化")),
-            "赚钱效应": clean_value(fm.get("赚钱效应")) or iw.get("赚钱效应"),
-            "昨日涨停收益": clean_value(fm.get("昨日涨停收益")) or iw.get("涨停收益"),
-            "昨日炸板收益": clean_value(fm.get("昨日炸板收益")) or iw.get("炸板收益"),
-            "连板收益": clean_value(fm.get("昨日连板收益") or fm.get("连板收益")) or iw.get("连板收益"),
-            "连板风险值": clean_value(fm.get("连板风险值")) or iw.get("连板风险值"),
-            "晋级率": clean_value(fm.get("整体晋级率") or fm.get("晋级率")) or iw.get("晋级率"),
-            "最高板": clean_value(fm.get("最高板"), "最高板") or iw.get("最高板"),
-            "次高板": clean_value(fm.get("次高板"), "次高板"),
-            "连板梯队": clean_value(fm.get("连板梯队"), "连板梯队"),
-            "竞价情绪值": clean_value(fm.get("竞价情绪值")) or clean_value(fm.get("情绪值")) or iw.get("情绪值"),
+            "情绪值": fm_val("情绪值") or iw.get("情绪值"),
+            "情绪区间": fm_val("情绪区间"),
+            "昨日情绪": fm_val("昨日情绪"),
+            "情绪变化": fm_val("情绪变化"),
+            "赚钱效应": fm_val("赚钱效应") or iw.get("赚钱效应"),
+            "昨日涨停收益": fm_val("昨日涨停收益") or iw.get("涨停收益"),
+            "昨日炸板收益": fm_val("昨日炸板收益") or iw.get("炸板收益"),
+            "连板收益": fm_val("昨日连板收益") or fm_val("连板收益") or iw.get("连板收益"),
+            "连板风险值": fm_val("连板风险值") or iw.get("连板风险值"),
+            "晋级率": fm_val("整体晋级率") or fm_val("晋级率") or iw.get("晋级率"),
+            "一进二晋级率": fm_val("一进二晋级率"),
+            "二进三晋级率": fm_val("二进三晋级率"),
+            "三进四晋级率": fm_val("三进四晋级率"),
+            "最高板": fm_val("最高板") or iw.get("最高板"),
+            "次高板": fm_val("次高板"),
+            "连板梯队": fm_val("连板梯队"),
+            "竞价情绪值": fm_val("竞价情绪值") or fm_val("情绪值") or iw.get("情绪值"),
         },
         "style": style if style else {
             "总分": None, "风格": None, "连板占比": None, "趋势占比": None,
