@@ -92,9 +92,9 @@ class W1CheckWidget extends YiMuWidget {
     // 环境阻断
     if (blocked) {
       html += '<div style="text-align:center;padding:20px">'+
-        '<div style="display:inline-block;width:64px;height:64px;border-radius:50%;background:var(--danger);'+
-          'box-shadow:0 0 24px var(--danger);line-height:64px;font-size:28px;color:#fff;margin-bottom:12px">✕</div>'+
-        '<div style="font-size:16px;font-weight:700;color:var(--danger);margin-bottom:8px">W1 关闭</div>';
+        '<div style="display:inline-block;width:48px;height:48px;border-radius:50%;background:var(--danger);'+
+          'box-shadow:0 0 16px var(--danger);line-height:48px;font-size:22px;color:#fff;margin-bottom:8px">✕</div>'+
+        '<div style="font-size:14px;font-weight:700;color:var(--danger);margin-bottom:6px">W1 关闭</div>';
       blocks.forEach(function(b){
         html += '<div style="font-size:12px;color:var(--text-secondary)">'+b.label+': '+b.detail+'</div>';
       });
@@ -133,25 +133,25 @@ class W1CheckWidget extends YiMuWidget {
 
     // 灯1: 情绪
     html += '<div style="text-align:center">'+
-      signalDot(piece1_ok, 50)+
-      '<div style="font-size:12px;font-weight:600;color:var(--text-primary);margin-top:6px">情绪≥60%</div>'+
-      '<div style="font-size:18px;font-weight:700;color:'+(piece1_ok?'var(--up)':'var(--danger)')+'">'+qx+'%</div>'+
+      signalDot(piece1_ok, 40)+
+      '<div style="font-size:12px;font-weight:600;color:var(--text-primary);margin-top:5px">情绪≥60%</div>'+
+      '<div style="font-size:15px;font-weight:700;color:'+(piece1_ok?'var(--up)':'var(--danger)')+'">'+qx+'%</div>'+
       '<div style="font-size:10px;color:var(--text-disabled)">昨日 '+yestQx+'%</div>'+
       '</div>';
 
     // 灯2: 涨停收益
     html += '<div style="text-align:center">'+
-      signalDot(piece2_ok, 50)+
-      '<div style="font-size:12px;font-weight:600;color:var(--text-primary);margin-top:6px">涨停收益>2%</div>'+
-      '<div style="font-size:18px;font-weight:700;color:'+(piece2_ok?'var(--up)':'var(--danger)')+'">'+ztProfit.toFixed(1)+'%</div>'+
+      signalDot(piece2_ok, 40)+
+      '<div style="font-size:12px;font-weight:600;color:var(--text-primary);margin-top:5px">涨停收益>2%</div>'+
+      '<div style="font-size:15px;font-weight:700;color:'+(piece2_ok?'var(--up)':'var(--danger)')+'">'+ztProfit.toFixed(1)+'%</div>'+
       '<div style="font-size:10px;color:var(--text-disabled)">炸板率 '+fbRate.toFixed(1)+'%</div>'+
       '</div>';
 
     // 灯3: 标的高开
     html += '<div style="text-align:center">'+
-      signalDot(piece3_ok, 50)+
-      '<div style="font-size:12px;font-weight:600;color:var(--text-primary);margin-top:6px">标的高开3-7%</div>'+
-      '<div style="font-size:18px;font-weight:700;color:'+(piece3_ok?'var(--up)':'var(--danger)')+'">'+
+      signalDot(piece3_ok, 40)+
+      '<div style="font-size:12px;font-weight:600;color:var(--text-primary);margin-top:5px">标的高开3-7%</div>'+
+      '<div style="font-size:15px;font-weight:700;color:'+(piece3_ok?'var(--up)':'var(--danger)')+'">'+
         (piece3_ok ? piece3_stocks.length+'只' : '0只')+'</div>'+
       '<div style="font-size:10px;color:var(--text-disabled)">'+
         (piece3_ok ? piece3_stocks.map(function(s){return s.name+'+'+s.chg.toFixed(1)+'%';}).join(' ') : '标的未达区间')+'</div>'+
@@ -181,7 +181,7 @@ class W1CheckWidget extends YiMuWidget {
     html += '<div style="display:inline-block;padding:10px 36px;border-radius:8px;'+
       'background:'+sigBg+';box-shadow:'+sigGlow+';'+
       'border:2px solid '+sigColor+';margin:0 auto">'+
-      '<div style="font-size:20px;font-weight:800;color:'+sigColor+';letter-spacing:6px">'+sigText+'</div>'+
+      '<div style="font-size:16px;font-weight:800;color:'+sigColor+';letter-spacing:3px">'+sigText+'</div>'+
       '<div style="font-size:11px;color:var(--text-secondary);margin-top:2px">'+
         '涨停'+ztCount+'家 | 最高'+topN+'板'+topName+' | 晋级1进2:'+fmtPct(S['一进二晋级率']||S['晋级率'])+' 2进3:'+fmtPct(S['二进三晋级率'])+' 3进4:'+fmtPct(S['三进四晋级率'])+
       '</div>'+
@@ -291,7 +291,7 @@ class W1CheckWidget extends YiMuWidget {
 
         // 左侧：状态灯 + 名称
         html += '<div style="flex:0 0 auto;text-align:center;min-width:44px">'+
-          signalDot((isWatch||isSkip)?null:stockOk?true:stockFail?false:null, 36)+
+          signalDot((isWatch||isSkip)?null:stockOk?true:stockFail?false:null, 28)+
           '<div style="font-size:10px;font-weight:600;color:'+stColor+';margin-top:2px">'+stockStatus+'</div>'+
           '</div>';
 
