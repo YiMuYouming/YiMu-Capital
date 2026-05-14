@@ -182,6 +182,24 @@ class SectorHeatWidget extends YiMuWidget {
       html += '</div>';
     });
 
+    // === 行业净流入 TOP5 (ym-stock-data, 同花顺行业) ===
+    var inflow = (data && data.sector_inflow) || [];
+    if (inflow.length) {
+      html += '<div style="margin-top:8px;padding:6px var(--sp-sm);background:var(--bg-base);border:1px solid var(--border-light);border-radius:var(--radius-md)">';
+      html += '<span style="font-weight:700;font-size:13px;color:var(--info)">💰 行业净流入 TOP5</span>';
+      html += '<div style="margin-top:4px;display:flex;flex-wrap:wrap;gap:6px">';
+      for (var i = 0; i < Math.min(5, inflow.length); i++) {
+        var s = inflow[i];
+        var nf = s.net_inflow_yi || 0;
+        var cls = nf > 0 ? 'up' : 'down';
+        html += '<span style="font-size:11px;padding:2px 6px;background:var(--bg-base);border:1px solid var(--border-light);border-radius:3px">';
+        html += '<span style="color:var(--text-primary)">' + s.name + '</span> ';
+        html += '<span class="' + cls + '" style="font-family:var(--font-mono)">' + (nf >= 0 ? '+' : '') + nf.toFixed(1) + '亿</span>';
+        html += '</span>';
+      }
+      html += '</div></div>';
+    }
+
     body.innerHTML = html;
     this.updateTimestamp();
   }

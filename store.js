@@ -186,6 +186,10 @@ const DataStore = (function() {
         d.live_breadth = d.live_breadth || {};
         for (var k in liveData.live_breadth) { d.live_breadth[k] = liveData.live_breadth[k]; }
       }
+      // ym-stock-data 新增字段
+      if (liveData.sector_inflow) { d.sector_inflow = liveData.sector_inflow; }
+      if (liveData.northbound) { d.northbound = liveData.northbound; }
+      if (liveData.hot_list) { d.hot_list = liveData.hot_list; }
       if (liveData.yesterday_baseline) {
         d.yesterday_baseline = d.yesterday_baseline || {};
         for (var k in liveData.yesterday_baseline) { d.yesterday_baseline[k] = liveData.yesterday_baseline[k]; }
