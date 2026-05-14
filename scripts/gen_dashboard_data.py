@@ -14,11 +14,12 @@ import json, os, sys, re, subprocess
 from datetime import datetime
 from pathlib import Path
 
-VAULT_DIR = Path(__file__).resolve().parent.parent.parent  # 弈沐资本根目录 (scripts/ → live-dashboard/ → 弈沐资本/)
-REVIEW_DIR = VAULT_DIR / "复盘笔记"
+ROOT_DIR = Path(__file__).resolve().parent.parent  # live-dashboard/
+TRADING_DIR = Path.home() / "Documents/YouMingVault/10_⚡Now/01_💰弈沐资本"  # 交易系统根 (复盘笔记在此)
+REVIEW_DIR = TRADING_DIR / "复盘笔记"
 STYLE_DETECT = Path.home() / "WorkBuddy/Tools/style_detect.py"
-SECTOR_LOG = VAULT_DIR / "板块涨停日志.md"
-OUTPUT_FILE = VAULT_DIR / "live-dashboard/data/dashboard_data.json"
+SECTOR_LOG = TRADING_DIR / "板块涨停日志.md"
+OUTPUT_FILE = ROOT_DIR / "data/dashboard_data.json"
 
 def find_latest_review():
     """找最新有实质内容的复盘笔记（跳过模板，回退到有数据的笔记）"""
