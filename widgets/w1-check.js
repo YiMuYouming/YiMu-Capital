@@ -315,7 +315,7 @@ class W1CheckWidget extends YiMuWidget {
         // 右侧：开盘+实时涨幅+量比
         var hasOpenData = openQ[code] && ochg !== chg;
         html += '<div style="flex:0 0 auto;text-align:right;font-size:11px;color:var(--text-secondary)">'+
-          '<div style="font-size:15px;font-weight:700;color:'+(chg>=0?'var(--up)':'var(--danger)')+'">'+(chg>=0?'+':'')+chg.toFixed(1)+'%</div>'+
+          '<div style="font-size:15px;font-weight:700;color:'+(chg>=0?'var(--up)':'var(--down)')+'">'+(chg>=0?'+':'')+chg.toFixed(1)+'%</div>'+
           (hasOpenData?'<div style="font-size:10px;color:var(--text-disabled)">开盘'+(ochg>=0?'+':'')+ochg.toFixed(1)+'%</div>':'')+
           '<div>量比 '+vr.toFixed(1)+'</div>'+
           '<div style="font-size:10px;color:var(--text-disabled)">'+sector+'</div>'+
@@ -349,7 +349,7 @@ class W1CheckWidget extends YiMuWidget {
           '<span style="font-weight:'+(holding?'700':'400')+';color:'+nameColor+'">'+s['标的']+'</span>'+
           '<span style="font-size:10px;color:var(--text-disabled)">'+code+'</span>'+
           '<span style="flex:1"></span>'+
-          '<span style="font-weight:600;color:'+(chg>=0?'var(--up)':'var(--danger)')+'">'+(chg>=0?'+':'')+chg.toFixed(1)+'%</span>'+
+          '<span style="font-weight:600;color:'+(chg>=0?'var(--up)':'var(--down)')+'">'+(chg>=0?'+':'')+chg.toFixed(1)+'%</span>'+
           (distMA5!==null?'<span style="font-size:10px;color:var(--text-disabled)">MA5 '+(distMA5>=0?'+':'')+distMA5.toFixed(1)+'%</span>':'<span style="font-size:10px;color:var(--text-disabled)">MA5 —</span>')+
           (s['止损']?'<span style="font-size:10px;color:var(--danger)">止损'+s['止损']+'</span>':'')+
           '</div>';
