@@ -179,7 +179,7 @@ class LLMMonitorWidget extends YiMuWidget {
       '</span>'+
       '<span style="margin-left:auto;display:flex;gap:var(--sp-sm)">'+
         (this._loading ? '<span style="font-size:var(--fs-body);color:var(--warn)">⏳ 分析中...</span>' : '')+
-        '<button id="w20_refresh" style="font-size:var(--fs-label);padding:1px 8px;background:var(--info);color:#fff;border:none;border-radius:3px;cursor:pointer" '+
+        '<button id="w20_refresh" style="font-size:var(--fs-label);padding:1px 8px;background:var(--info);color:var(--text-inverse);border:none;border-radius:3px;cursor:pointer" '+
           (this._loading ? 'disabled' : '')+'>🔄 立即研判</button>'+
       '</span></div>';
 

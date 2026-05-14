@@ -73,7 +73,7 @@ class SentimentDashWidget extends YiMuWidget {
       html += '<span style="font-size:var(--fs-body);font-weight:'+(on?'600':'400')+';color:'+(on?'var(--text-primary)':'var(--text-disabled)')+'">' + n + '</span>';
     });
     html += '<span style="margin-left:auto;display:flex;align-items:center;gap:var(--sp-sm)">' +
-      '<button id="w05_refresh" style="font-size:var(--fs-label);padding:1px 8px;background:var(--info);color:#fff;border:none;border-radius:3px;cursor:pointer">🔄 刷新</button>' +
+      '<button id="w05_refresh" style="font-size:var(--fs-label);padding:1px 8px;background:var(--info);color:var(--text-inverse);border:none;border-radius:3px;cursor:pointer">🔄 刷新</button>' +
       '<span style="font-size:var(--fs-body)">' +
         '<span style="color:var(--text-disabled)">涨跌 </span>' +
         '<span class="up" style="font-weight:600">'+(liveUp||'—')+'</span>' +

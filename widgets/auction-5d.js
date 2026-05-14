@@ -126,7 +126,7 @@ class Auction5DWidget extends YiMuWidget {
         var srcCls = src==='连板'?'up':src==='趋势'?'down':'info';
         h += '<div style="display:flex;align-items:center;gap:2px;padding:1px 0;font-size:var(--fs-body)">' +
           '<span style="font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0">'+s['名称']+'</span>' +
-          (src?'<span style="font-size:8px;padding:0 3px;border-radius:2px;background:var(--'+srcCls+');color:#fff;flex-shrink:0">'+src+'</span>':'') +
+          (src?'<span style="font-size:8px;padding:0 3px;border-radius:2px;background:var(--'+srcCls+');color:var(--text-inverse);flex-shrink:0">'+src+'</span>':'') +
           '<span class="'+cls+'" style="font-family:var(--font-mono);font-weight:600;margin-left:auto;flex-shrink:0;font-size:var(--fs-body)">'+sign+chg.toFixed(2)+'%</span>' +
           '</div>';
       });

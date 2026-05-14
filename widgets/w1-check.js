@@ -93,7 +93,7 @@ class W1CheckWidget extends YiMuWidget {
     if (blocked) {
       html += '<div style="text-align:center;padding:20px">'+
         '<div style="display:inline-block;width:48px;height:48px;border-radius:50%;background:var(--danger);'+
-          'box-shadow:0 0 16px var(--danger);line-height:48px;font-size:22px;color:#fff;margin-bottom:8px">✕</div>'+
+          'box-shadow:0 0 16px var(--danger);line-height:48px;font-size:22px;color:var(--text-inverse);margin-bottom:8px">✕</div>'+
         '<div style="font-size:14px;font-weight:700;color:var(--danger);margin-bottom:6px">W1 关闭</div>';
       blocks.forEach(function(b){
         html += '<div style="font-size:12px;color:var(--text-secondary)">'+b.label+': '+b.detail+'</div>';
@@ -108,18 +108,18 @@ class W1CheckWidget extends YiMuWidget {
     function signalDot(ok, size) {
       var s = size || 48;
       var color, glow;
-      if (ok === true)  { color = '#22c55e'; glow = '0 0 20px rgba(34,197,94,0.6)'; }
-      else if (ok === false) { color = '#ef4444'; glow = '0 0 20px rgba(239,68,68,0.5)'; }
-      else              { color = '#6b7280'; glow = 'none'; }
+      if (ok === true)  { color = 'var(--down)'; glow = '0 0 20px rgba(5,150,105,0.4)'; }
+      else if (ok === false) { color = 'var(--danger)'; glow = '0 0 20px rgba(220,38,38,0.35)'; }
+      else              { color = 'var(--text-disabled)'; glow = 'none'; }
       return '<span style="display:inline-block;width:'+s+'px;height:'+s+'px;border-radius:50%;'+
         'background:'+color+';box-shadow:'+glow+';'+
-        'line-height:'+s+'px;text-align:center;font-size:'+Math.floor(s*0.45)+'px;color:#fff;'+
+        'line-height:'+s+'px;text-align:center;font-size:'+Math.floor(s*0.45)+'px;color:var(--text-inverse);'+
         'transition:all 0.5s">'+
         (ok===true?'✓':ok===false?'✕':'—')+'</span>';
     }
 
     function miniDot(ok) {
-      var color = ok===true ? '#22c55e' : ok===false ? '#ef4444' : '#4b5563';
+      var color = ok===true ? 'var(--down)' : ok===false ? 'var(--danger)' : 'var(--text-disabled)';
       var glow = ok===true ? '0 0 6px rgba(34,197,94,0.5)' : 'none';
       return '<span style="display:inline-block;width:14px;height:14px;border-radius:50%;'+
         'background:'+color+';box-shadow:'+glow+';vertical-align:middle;margin-right:2px;transition:all 0.4s"></span>';
@@ -164,17 +164,17 @@ class W1CheckWidget extends YiMuWidget {
     if (threePass) {
       sigText = '买 入 信 号';
       sigBg = 'rgba(34,197,94,0.12)';
-      sigColor = '#22c55e';
+      sigColor = 'var(--down)';
       sigGlow = '0 0 32px rgba(34,197,94,0.4)';
     } else if (piece1_ok && piece2_ok) {
       sigText = '等 待 信 号';
       sigBg = 'rgba(245,158,11,0.1)';
-      sigColor = '#f59e0b';
+      sigColor = 'var(--warn)';
       sigGlow = '0 0 16px rgba(245,158,11,0.25)';
     } else {
       sigText = '降级 · 1进2或空仓';
       sigBg = 'rgba(239,68,68,0.08)';
-      sigColor = '#ef4444';
+      sigColor = 'var(--danger)';
       sigGlow = 'none';
     }
 
@@ -282,9 +282,9 @@ class W1CheckWidget extends YiMuWidget {
         var stockStatus, stColor;
         if (isSkip)       { stockStatus = '不碰'; stColor = 'var(--text-disabled)'; }
         else if (isWatch) { stockStatus = '只盯不买'; stColor = 'var(--text-secondary)'; }
-        else if (stockOk) { stockStatus = '追涨'; stColor = '#22c55e'; }
-        else if (stockWait) { stockStatus = '待确认'; stColor = '#f59e0b'; }
-        else              { stockStatus = '条件不足'; stColor = '#ef4444'; }
+        else if (stockOk) { stockStatus = '追涨'; stColor = 'var(--down)'; }
+        else if (stockWait) { stockStatus = '待确认'; stColor = 'var(--warn)'; }
+        else              { stockStatus = '条件不足'; stColor = 'var(--danger)'; }
 
         // 标的行
         html += '<div style="padding:8px 4px;border-bottom:1px solid var(--border-light);display:flex;align-items:center;gap:10px">';

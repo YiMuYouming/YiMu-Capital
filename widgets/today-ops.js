@@ -89,7 +89,7 @@ class TodayOpsWidget extends YiMuWidget {
 
     // 添加按钮
     html += '<div style="margin-bottom:var(--sp-sm)">' +
-      '<button id="w17_add" style="background:var(--info);color:#fff;border:none;padding:var(--sp-xs) var(--sp-md);border-radius:var(--radius-sm);cursor:pointer;font-size:var(--fs-body);font-family:var(--font-sans)">+ 添加操作</button>' +
+      '<button id="w17_add" style="background:var(--info);color:var(--text-inverse);border:none;padding:var(--sp-xs) var(--sp-md);border-radius:var(--radius-sm);cursor:pointer;font-size:var(--fs-body);font-family:var(--font-sans)">+ 添加操作</button>' +
       '</div>';
 
     if (!ops.length) {
@@ -168,7 +168,7 @@ class TodayOpsWidget extends YiMuWidget {
       '</div>' +
       '<div class="input-group" style="margin-top:var(--sp-sm)"><label>原因</label><input id="w17_reason" style="width:100%"></div>' +
       '<div style="display:flex;gap:var(--sp-sm);margin-top:var(--sp-md)">' +
-        '<button id="w17_save" style="flex:1;background:var(--info);color:#fff;border:none;padding:var(--sp-sm);border-radius:var(--radius-sm);cursor:pointer;font-size:var(--fs-body)">确认</button>' +
+        '<button id="w17_save" style="flex:1;background:var(--info);color:var(--text-inverse);border:none;padding:var(--sp-sm);border-radius:var(--radius-sm);cursor:pointer;font-size:var(--fs-body)">确认</button>' +
         '<button id="w17_cancel" style="flex:1;background:var(--bg-base);color:var(--text-primary);border:1px solid var(--border);padding:var(--sp-sm);border-radius:var(--radius-sm);cursor:pointer;font-size:var(--fs-body)">取消</button>' +
       '</div></div></div>';
 

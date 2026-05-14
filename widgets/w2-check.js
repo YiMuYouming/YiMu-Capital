@@ -29,15 +29,15 @@ class W2CheckWidget extends YiMuWidget {
     // ===== 信号灯 =====
     function signalDot(ok, size) {
       var s = size || 32;
-      var color = ok===true ? '#22c55e' : ok===false ? '#ef4444' : '#6b7280';
-      var glow = ok===true ? '0 0 12px rgba(34,197,94,0.5)' : 'none';
+      var color = ok===true ? 'var(--down)' : ok===false ? 'var(--danger)' : 'var(--text-disabled)';
+      var glow = ok===true ? '0 0 12px rgba(5,150,105,0.4)' : 'none';
       return '<span style="display:inline-block;width:'+s+'px;height:'+s+'px;border-radius:50%;'+
         'background:'+color+';box-shadow:'+glow+';line-height:'+s+'px;text-align:center;'+
-        'font-size:'+Math.floor(s*0.4)+'px;color:#fff;transition:all 0.5s">'+
+        'font-size:'+Math.floor(s*0.4)+'px;color:var(--text-inverse);transition:all 0.5s">'+
         (ok===true?'✓':ok===false?'✕':'—')+'</span>';
     }
     function miniDot(ok) {
-      var color = ok===true?'#22c55e':ok===false?'#ef4444':'#4b5563';
+      var color = ok===true?'var(--down)':ok===false?'var(--danger)':'var(--text-disabled)';
       return '<span style="display:inline-block;width:12px;height:12px;border-radius:50%;'+
         'background:'+color+';vertical-align:middle;margin-right:2px"></span>';
     }
@@ -89,9 +89,9 @@ class W2CheckWidget extends YiMuWidget {
       var hardMet = (near60m?1:0) + (shrink?1:0) + (notCrash?1:0);
 
       var signal, sigColor;
-      if (hardMet >= 3)      { signal = '买入'; sigColor = '#22c55e'; }
-      else if (hardMet >= 2) { signal = '接近'; sigColor = '#f59e0b'; }
-      else                   { signal = '—'; sigColor = '#6b7280'; }
+      if (hardMet >= 3)      { signal = '买入'; sigColor = 'var(--down)'; }
+      else if (hardMet >= 2) { signal = '接近'; sigColor = 'var(--warn)'; }
+      else                   { signal = '—'; sigColor = 'var(--text-disabled)'; }
 
       var holding = (s['角色']||'').indexOf('持仓')>=0 || (s['操作']||'').indexOf('持有')>=0;
 
@@ -192,9 +192,9 @@ class W2CheckWidget extends YiMuWidget {
         var stockFail = hardMet < 2;
 
         var stockStatus, stColor;
-        if (stockOk)      { stockStatus = '低吸'; stColor = '#22c55e'; }
-        else if (stockWait) { stockStatus = '观察'; stColor = '#f59e0b'; }
-        else              { stockStatus = '—'; stColor = '#6b7280'; }
+        if (stockOk)      { stockStatus = '低吸'; stColor = 'var(--down)'; }
+        else if (stockWait) { stockStatus = '观察'; stColor = 'var(--warn)'; }
+        else              { stockStatus = '—'; stColor = 'var(--text-disabled)'; }
 
         html += '<div style="padding:6px 4px;border-bottom:1px solid var(--border-light);display:flex;align-items:center;gap:8px">'+
           '<div style="flex:0 0 auto;text-align:center;min-width:36px">'+

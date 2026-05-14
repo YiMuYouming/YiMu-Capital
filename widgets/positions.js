@@ -97,7 +97,7 @@ class PositionsWidget extends YiMuWidget {
     // ===== 今日记录 =====
     html += '<div style="display:flex;align-items:center;gap:var(--sp-sm);margin-top:var(--sp-md);margin-bottom:var(--sp-xs)">'+
       '<span style="font-size:var(--fs-body);font-weight:600">今日记录</span>'+
-      '<button id="w15_add" style="background:var(--info);color:#fff;border:none;padding:2px 10px;border-radius:var(--radius-sm);cursor:pointer;font-size:var(--fs-body);font-family:var(--font-sans)">记流水</button></div>';
+      '<button id="w15_add" style="background:var(--info);color:var(--text-inverse);border:none;padding:2px 10px;border-radius:var(--radius-sm);cursor:pointer;font-size:var(--fs-body);font-family:var(--font-sans)">记流水</button></div>';
 
     if (ops.length) {
       html += '<table class="data-table"><thead><tr><th>时间</th><th>动作</th><th>标的</th><th>价格</th><th>数量</th><th>窗口</th><th>原因</th><th></th></tr></thead><tbody>';
@@ -186,7 +186,7 @@ class PositionsWidget extends YiMuWidget {
         '<div class="input-group" style="grid-column:1/-1"><label>交易理由</label><input id="f_reason" style="width:100%"></div>'+
       '</div>'+
       '<div style="display:flex;gap:var(--sp-sm);margin-top:var(--sp-md)">'+
-        '<button id="f_save" style="flex:1;background:var(--info);color:#fff;border:none;padding:var(--sp-sm);border-radius:var(--radius-sm);cursor:pointer;font-size:var(--fs-body)">确认</button>'+
+        '<button id="f_save" style="flex:1;background:var(--info);color:var(--text-inverse);border:none;padding:var(--sp-sm);border-radius:var(--radius-sm);cursor:pointer;font-size:var(--fs-body)">确认</button>'+
         '<button id="f_cancel" style="flex:1;background:var(--bg-base);color:var(--text-primary);border:1px solid var(--border);padding:var(--sp-sm);border-radius:var(--radius-sm);cursor:pointer;font-size:var(--fs-body)">取消</button>'+
       '</div></div>';
     document.body.appendChild(o);

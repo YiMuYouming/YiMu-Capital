@@ -1,72 +1,76 @@
-/* theme.css — 弈沐资本数据看板 v2.0 全局主题 */
+/* theme.css — 弈沐资本数据看板 v2.5 全局主题 (warm light) */
 
 /* ===== CSS Variables ===== */
 :root {
-  /* Background layers */
-  --bg-deep: #0a0e14;
-  --bg-base: #111820;
-  --bg-card: #161d28;
-  --bg-hover: #1c2533;
-  --bg-input: #0d1117;
+  /* Background layers — warm ivory family (aligned with portal) */
+  --bg-deep: #F7F5F3;
+  --bg-base: #FAFAF9;
+  --bg-card: #FFFFFF;
+  --bg-hover: #F5F2EE;
+  --bg-input: #FAFAF9;
 
   /* Text hierarchy */
-  --text-primary: #e8eaed;
-  --text-secondary: #9aa0a6;
-  --text-disabled: #5f6368;
-  --text-inverse: #0a0e14;
+  --text-primary: #2D2926;
+  --text-secondary: #5C5652;
+  --text-disabled: #8A8480;
+  --text-inverse: #FFFFFF;
 
   /* A-share direction: red=up, green=down */
-  --up: #ef5350;
-  --up-deep: #e53935;
-  --up-bg: rgba(239,83,80,0.10);
-  --up-bg-hover: rgba(239,83,80,0.18);
-  --down: #66bb6a;
-  --down-deep: #43a047;
-  --down-bg: rgba(102,187,106,0.10);
-  --down-bg-hover: rgba(102,187,106,0.18);
+  --up: #DC2626;
+  --up-deep: #B91C1C;
+  --up-bg: rgba(220,38,38,0.08);
+  --up-bg-hover: rgba(220,38,38,0.15);
+  --down: #059669;
+  --down-deep: #047857;
+  --down-bg: rgba(5,150,105,0.08);
+  --down-bg-hover: rgba(5,150,105,0.15);
+
+  /* Brand accent — terracotta (portal aligned) */
+  --accent: #D97706;
+  --accent-bg: rgba(217,119,6,0.08);
 
   /* 4-level semantic */
-  --info: #5c9ce6;
-  --info-bg: rgba(92,156,230,0.10);
-  --warn: #ffa726;
-  --warn-bg: rgba(255,167,38,0.10);
-  --danger: #ef5350;
-  --danger-bg: rgba(239,83,80,0.10);
-  --special: #ab47bc;
-  --special-bg: rgba(171,71,188,0.10);
+  --info: #2563EB;
+  --info-bg: rgba(37,99,235,0.08);
+  --warn: #D97706;
+  --warn-bg: rgba(217,119,6,0.08);
+  --danger: #DC2626;
+  --danger-bg: rgba(220,38,38,0.08);
+  --special: #7C3AED;
+  --special-bg: rgba(124,58,237,0.08);
 
-  /* Purple accent (v2.0: non-urgent but important highlight) */
-  --accent-purple: #7c4dff;
-  --accent-purple-bg: rgba(124,77,255,0.10);
+  /* Purple accent */
+  --accent-purple: #7C3AED;
+  --accent-purple-bg: rgba(124,58,237,0.08);
 
   /* Component type accent bars (title bar left 3px stripe) */
-  --color-decision: #5c9ce6;
-  --color-data: #66bb6a;
-  --color-risk: #ef5350;
-  --color-tool: #9aa0a6;
+  --color-decision: #2563EB;
+  --color-data: #059669;
+  --color-risk: #DC2626;
+  --color-tool: #8A8480;
 
-  /* Sector 6 colors */
-  --sector-main: #ef5350;
-  --sector-strong: #ffa726;
-  --sector-candidate: #5c9ce6;
-  --sector-divergence: #ffa726;
-  --sector-pulse: #9aa0a6;
-  --sector-ebb: #5f6368;
+  /* Sector 6 colors — softened for light bg */
+  --sector-main: #DC2626;
+  --sector-strong: #D97706;
+  --sector-candidate: #2563EB;
+  --sector-divergence: #D97706;
+  --sector-pulse: #8A8480;
+  --sector-ebb: #B0ACA8;
 
-  /* Borders */
-  --border: #2a3140;
-  --border-light: #1e2632;
-  --divider: #3c4043;
+  /* Borders — warm gray */
+  --border: #E5E2DE;
+  --border-light: #F0EEEC;
+  --divider: #D1CFC5;
 
-  /* Shadows 4-level (v2.0 upgrade: tinted blue-black for dark bg) */
-  --shadow-card: 0 1px 0px rgba(10,14,20,0.4);
-  --shadow-elevated: 0 4px 12px rgba(10,14,20,0.5);
-  --shadow-drag: 0 8px 24px rgba(10,14,20,0.6);
-  --shadow-modal: 0 0 0 1px rgba(255,255,255,0.08), 0 24px 48px rgba(10,14,20,0.7);
-  --shadow-glow-info: 0 0 12px rgba(92,156,230,0.12);
+  /* Shadows 4-level — warm-toned for light bg */
+  --shadow-card: 0 1px 3px rgba(45,41,38,0.06);
+  --shadow-elevated: 0 4px 12px rgba(45,41,38,0.10);
+  --shadow-drag: 0 8px 24px rgba(45,41,38,0.14);
+  --shadow-modal: 0 0 0 1px rgba(45,41,38,0.06), 0 24px 48px rgba(45,41,38,0.16);
+  --shadow-glow-info: 0 0 16px rgba(37,99,235,0.12);
 
   /* GridStack override */
-  --widget-header-bg: rgba(17,24,32,0.95);
+  --widget-header-bg: rgba(255,255,255,0.92);
   --widget-header-height: 32px;
   --widget-radius: 8px;
 
@@ -94,11 +98,11 @@
   --radius-md: 6px;
   --radius-lg: 10px;
 
-  /* Interaction states (v2.0: Linear +2% brightness model) */
-  --interactive-default: rgba(255,255,255,0.02);
-  --interactive-hover: rgba(255,255,255,0.04);
-  --interactive-active: rgba(255,255,255,0.06);
-  --interactive-disabled: rgba(255,255,255,0.01);
+  /* Interaction states — warm tint for light bg */
+  --interactive-default: rgba(45,41,38,0.02);
+  --interactive-hover: rgba(45,41,38,0.04);
+  --interactive-active: rgba(45,41,38,0.08);
+  --interactive-disabled: rgba(45,41,38,0.01);
 }
 
 /* ===== Reset ===== */
@@ -125,7 +129,7 @@ html,body{
   position:sticky;top:0;z-index:100;
   display:flex;align-items:center;gap:var(--sp-sm);
   padding:var(--sp-sm) var(--sp-lg);
-  background:rgba(17,24,32,0.92);
+  background:var(--widget-header-bg);
   backdrop-filter:blur(12px);
   -webkit-backdrop-filter:blur(12px);
   border-bottom:1px solid var(--border);
@@ -137,6 +141,7 @@ html,body{
   font-weight:700;
   margin-right:var(--sp-md);
   white-space:nowrap;
+  color:var(--accent);
 }
 .topbar-preset-select{
   background:var(--bg-card);
@@ -207,7 +212,7 @@ html,body{
 }
 /* Placeholder */
 .grid-stack-placeholder > .placeholder-content{
-  background:rgba(92,156,230,0.06);
+  background:var(--info-bg);
   border:1px dashed var(--info);
   border-radius:var(--widget-radius);
 }
@@ -386,7 +391,7 @@ html,body{
 .timeline-seg.future{background:var(--bg-base)}
 .timeline-seg-fill{
   position:absolute;left:0;top:0;bottom:0;
-  background:rgba(92,156,230,0.25);
+  background:rgba(37,99,235,0.15);
 }
 
 /* ===== Volume bars (W11) ===== */
@@ -446,14 +451,14 @@ html,body{
 .input-refresh{
   margin-top:var(--sp-sm);
   padding:var(--sp-sm) var(--sp-lg);
-  background:var(--info);color:#fff;
+  background:var(--info);color:var(--text-inverse);
   border:none;border-radius:var(--radius-sm);
   font-size:var(--fs-body);cursor:pointer;
   font-family:var(--font-sans);
   transition:background .15s;
 }
-.input-refresh:hover{background:#4a8bd4}
-.input-refresh:active{background:#3d7bc4}
+.input-refresh:hover{opacity:.88}
+.input-refresh:active{opacity:.78}
 
 /* ===== Status dots ===== */
 .dot{display:inline-block;width:6px;height:6px;border-radius:50%}

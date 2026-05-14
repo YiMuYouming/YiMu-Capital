@@ -7,13 +7,13 @@ class TimelineWidget extends YiMuWidget {
     if (!body) return;
 
     var segments = [
-      {label:'竞价',      start:{h:9,m:15}, end:{h:9,m:30},  color:'#ffa726'},
-      {label:'W1窗口',   start:{h:9,m:30}, end:{h:10,m:0},  color:'#ef5350'},
-      {label:'上午观察',  start:{h:10,m:0}, end:{h:11,m:30}, color:'#5c9ce6'},
-      {label:'午盘复盘',  start:{h:11,m:30},end:{h:13,m:0},  color:'#ab47bc'},
-      {label:'下午观察',  start:{h:13,m:0}, end:{h:14,m:0},  color:'#5c9ce6'},
-      {label:'W2窗口',   start:{h:14,m:0}, end:{h:14,m:45}, color:'#66bb6a'},
-      {label:'尾盘观察',  start:{h:14,m:45},end:{h:15,m:0},  color:'#9aa0a6'}
+      {label:'竞价',      start:{h:9,m:15}, end:{h:9,m:30},  color:'var(--warn)'},
+      {label:'W1窗口',   start:{h:9,m:30}, end:{h:10,m:0},  color:'var(--danger)'},
+      {label:'上午观察',  start:{h:10,m:0}, end:{h:11,m:30}, color:'var(--info)'},
+      {label:'午盘复盘',  start:{h:11,m:30},end:{h:13,m:0},  color:'var(--special)'},
+      {label:'下午观察',  start:{h:13,m:0}, end:{h:14,m:0},  color:'var(--info)'},
+      {label:'W2窗口',   start:{h:14,m:0}, end:{h:14,m:45}, color:'var(--down)'},
+      {label:'尾盘观察',  start:{h:14,m:45},end:{h:15,m:0},  color:'var(--text-disabled)'}
     ];
 
     // 调试模式：URL 加 ?time=HH:MM
