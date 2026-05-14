@@ -76,6 +76,36 @@
       ],
       "verified_count": 2,
       "warning_count": 1
+    },
+    "18:03": {
+      "timestamp": "18:03:15",
+      "node": "18:03",
+      "text": "盘后数据显示情绪低迷（28%）、赚钱效应一般，叠加上证下跌1.52%，市场整体弱势，W1时段需等竞价确认情绪能否回升至60%以上，当前不具备主动开仓条件。涨停收益3.04%虽达标，但赚钱效益不够配合，建议明日优先观察连板龙头封板情况和板块合力是否形成，再作决策。",
+      "signals": [
+        {
+          "signal": "INFO | 市场整体 | — | 中",
+          "type": "INFO",
+          "target": "市场整体",
+          "status": "⚠️",
+          "note": "板块未在数据中"
+        },
+        {
+          "signal": "RISK | 上证指数 | 空 | 高",
+          "type": "RISK",
+          "target": "上证指数",
+          "status": "✅",
+          "note": ""
+        },
+        {
+          "signal": "WATCH | 明日竞价情绪 | 多 | 低",
+          "type": "WATCH",
+          "target": "明日竞价情绪",
+          "status": "✅",
+          "note": ""
+        }
+      ],
+      "verified_count": 2,
+      "warning_count": 1
     }
   }
 }
