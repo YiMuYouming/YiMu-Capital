@@ -11,23 +11,21 @@
 import json, os, sys, time, re
 from pathlib import Path
 from datetime import datetime
-from subprocess import run, PIPE
+
+# 统一走 ym_stock_data
+sys.path.insert(0, "/Users/YouMing/Documents/YM_Capital/ym-stock-data")
+from ym_stock_data.sources.iwencai import query as _iwencai_query
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
 OUTPUT_FILE = ROOT_DIR / "data" / "auction_snapshot.json"
 DASHBOARD_DATA = ROOT_DIR / "data" / "dashboard_data.json"
-IWENCAI = Path.home() / "WorkBuddy" / "Tools" / "iwencai_query.py"
 
 
 def q(query_str, limit=100):
-    """调用 iwencai 查询"""
-    r = run(["python3", str(IWENCAI), query_str, "--output", "json", "--limit", str(limit)],
-            capture_output=True, text=True, timeout=30)
-    if r.returncode != 0:
-        return {}
+    """调用 ym_stock_data 问财查询，返回原始 JSON"""
     try:
-        return json.loads(r.stdout)
-    except json.JSONDecodeError:
+        return _iwencai_query(query_str, limit=limit)
+    except Exception:
         return {}
 
 

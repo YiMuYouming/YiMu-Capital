@@ -10,12 +10,15 @@ v2.1: 盘中实时数据已迁移到 poll_live.py（PyTDX + 东方财富）。
   python3 poll_iwencai.py --tier quotes  # 单查个股（手工调试用）
 """
 
-import json, os, sys, time, subprocess, re
+import json, os, sys, time, re
 from datetime import datetime
 from pathlib import Path
 
+# 统一走 ym_stock_data
+sys.path.insert(0, "/Users/YouMing/Documents/YM_Capital/ym-stock-data")
+from ym_stock_data.sources.iwencai import query as _iwencai_query
+
 ROOT_DIR = Path(__file__).resolve().parent.parent  # live-dashboard/
-IWC_SCRIPT = Path.home() / "WorkBuddy/Tools/iwencai_query.py"
 OUTPUT_FILE = ROOT_DIR / "data/dashboard_live.json"
 DASHBOARD_DATA = ROOT_DIR / "data/dashboard_data.json"
 
@@ -27,21 +30,14 @@ TIER_INTERVALS = {
     "all": 30,  # 综合模式取最小值
 }
 
-def run_iwencai(query, extra_args=None):
-    """调用 iwencai_query.py 查询"""
-    cmd = ["python3", str(IWC_SCRIPT), query]
-    if extra_args:
-        cmd.extend(extra_args)
+def run_iwencai(q, extra_args=None):
+    """调用 ym_stock_data 问财查询，返回 datas 列表"""
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=45, cwd=str(ROOT_DIR))
-        if result.returncode == 0:
-            return result.stdout.strip()
-        else:
-            print(f"[warn] iwencai query failed: {result.stderr[:200]}", file=sys.stderr)
+        raw = _iwencai_query(q)
+        if "error" in raw:
+            print(f"[warn] iwencai: {raw['error']}", file=sys.stderr)
             return None
-    except subprocess.TimeoutExpired:
-        print("[warn] iwencai query timed out", file=sys.stderr)
-        return None
+        return raw.get("datas", [])
     except Exception as e:
         print(f"[warn] iwencai error: {e}", file=sys.stderr)
         return None
@@ -187,46 +183,16 @@ def review_mode(save=False):
         print(json.dumps(results, ensure_ascii=False, indent=2))
 
 
-def _parse_iwencai_table(text):
-    """解析 iwencai 管道表格 → [{col: val}, ...]
-    iwencai 输出格式：
-      --- (顶部边框)
-      表头1 | 表头2 | ...
-      --- (分隔线)
-      数据行...
-      --- (底部边框, 可选)
-    """
-    if not text:
+def _parse_iwencai_table(datas):
+    """归一化字段名：去掉 [日期] 后缀 (如 涨跌幅[20260514] → 涨跌幅)"""
+    if not datas:
         return []
-    lines = text.strip().split("\n")
-    n = len(lines)
-
-    # 找表头行：夹在两个 --- 之间的那行
-    header_idx = -1
-    data_start = -1
-    for i in range(1, n - 1):
-        if lines[i - 1].startswith("---") and lines[i + 1].startswith("---"):
-            header_idx = i
-            data_start = i + 2
-            break
-
-    if header_idx < 0:
-        return []
-
-    headers_raw = [h.strip() for h in lines[header_idx].split("|") if h.strip()]
-    # 归一化：去掉 [日期] 后缀
-    headers = [re.sub(r'\[.*\]', '', h).strip() for h in headers_raw]
-
     rows = []
-    for line in lines[data_start:]:
-        if not line.strip() or line.startswith("---"):
-            continue
-        cells = [c.strip() for c in line.split("|")]  # 保留空值，用位置对齐
-        if len(cells) < len(headers):
-            continue
+    for item in datas:
         row = {}
-        for j, h in enumerate(headers):
-            row[h] = cells[j].strip() if j < len(cells) else ""
+        for k, v in item.items():
+            clean_key = re.sub(r'\[.*\]', '', k).strip()
+            row[clean_key] = v
         rows.append(row)
     return rows
 
