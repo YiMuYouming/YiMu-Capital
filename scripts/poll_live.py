@@ -11,7 +11,7 @@ v2.0: PyTDX(个股+指数) + 东方财富(板块，境外IP可能受限) + easyq
   python3 poll_live.py --no-sectors    # 跳过板块数据
 """
 
-import json, os, sys, time, argparse, re
+import json, os, sys, time, argparse, re, subprocess
 from pathlib import Path
 from datetime import datetime, timedelta
 
@@ -1228,16 +1228,31 @@ def watch_mode(interval_stocks=5, interval_sectors=30, skip_sectors=False):
     write_count = 0
     error_count = 0
     last_source = None
+    auction_done = False  # 9:26 竞价快照只跑一次
 
     try:
         while True:
             now = time.time()
+            dt = datetime.now()
 
             # 收盘后自动停止（15:05 之后退出）
-            dt = datetime.now()
             if dt.hour >= 16 and dt.minute >= 5:
                 log(f"收盘自动停止 ({write_count}次写入)")
                 break
+
+            # 9:26 自动抓竞价快照（仅一次）
+            if not auction_done and (dt.hour > 9 or (dt.hour == 9 and dt.minute >= 25)):
+                auction_done = True
+                try:
+                    auc_script = OUTPUT_FILE.parent.parent / "scripts" / "poll_iwencai.py"
+                    result = subprocess.run(
+                        ["python3", str(auc_script), "--auction"],
+                        capture_output=True, text=True, timeout=60
+                    )
+                    last_line = result.stdout.strip().split('\n')[-1] if result.stdout else str(result.stderr)[:100]
+                    log(f"竞价快照: {last_line}")
+                except Exception as e:
+                    log(f"竞价快照失败: {e}")
 
             need_sectors = (not skip_sectors) and (now - last_sector_update >= interval_sectors)
 
