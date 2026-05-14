@@ -24,8 +24,8 @@ live-dashboard/
 ├── index.html              # 主入口
 ├── store.js                # DataStore 数据中枢
 ├── widget-base.js          # 组件基类
-├── widget-registry.js      # 16 组件注册表
-├── widgets/                # 16 个独立组件
+├── widget-registry.js      # 20 组件注册表
+├── widgets/                # 20 个独立组件
 ├── presets/                # 4 套布局预设
 ├── css/theme.css           # 全局主题
 ├── data/                   # 数据文件
@@ -37,7 +37,7 @@ live-dashboard/
 
 ## 数据管线
 
-数据由 `../scripts/` 中的 Python 脚本产出到 `data/` 目录：
+数据由 `scripts/` 中的 Python 脚本产出到 `data/` 目录：
 
 ```
 scripts/gen_dashboard_data.py   → data/dashboard_data.json   (每日复盘后)

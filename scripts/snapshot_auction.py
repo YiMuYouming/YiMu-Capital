@@ -13,7 +13,7 @@ from pathlib import Path
 from datetime import datetime
 
 # 统一走 ym_stock_data
-sys.path.insert(0, "/Users/YouMing/Documents/YM_Capital/ym-stock-data")
+sys.path.insert(0, "/Users/YouMing/Documents/YM_Capital/YM-data-pipeline")
 from ym_stock_data.sources.iwencai import query as _iwencai_query
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
