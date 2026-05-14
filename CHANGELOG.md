@@ -1,5 +1,9 @@
 # 开发日志
 
+## 2026-05-14 项目搬迁
+- 从 `YouMingVault/.../live-dashboard/` 迁至 `YM_Capital/live-dashboard/`
+- YM_Capital 为父文件夹（非 git repo），三个项目各为独立仓库
+
 ## 2026-05-11 实时数据管线 v2.0
 
 ### poll_live.py 多源实时管线（替代 iwencai 轮询）

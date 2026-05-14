@@ -3,7 +3,7 @@
 ## 打开方式
 
 ```bash
-cd ~/Documents/YouMingVault/10_⚡Now/01_💰弈沐资本/live-dashboard
+cd ~/Documents/YM_Capital/live-dashboard
 python3 scripts/bridge.py 8088
 ```
 
