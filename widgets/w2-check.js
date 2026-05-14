@@ -154,24 +154,69 @@ class W2CheckWidget extends YiMuWidget {
       html += '<div style="text-align:center;padding:8px;color:var(--text-disabled);font-size:12px">趋势池无数据</div>';
     }
 
-    // ===== 连板 W2 候选 =====
+    // ===== 连板 W2 低吸候选（信号灯）=====
     var lbW2 = lbPool.filter(function(s){ var w=s['窗口']||''; return w==='W2'; });
-    var lbDown = lbW2.filter(function(s){
-      var chg = p((liveQ[s['代码']]||{})['涨幅']||s['涨幅']);
-      return chg < 0 && chg > -7;
+    if (lbW2.length === 0) lbW2 = lbPool.filter(function(s){
+      var op=s['操作']||''; return op.indexOf('低吸')>=0 || op.indexOf('W2')>=0;
     });
-    if (lbDown.length > 0) {
-      html += '<div style="margin-top:6px;padding:6px 8px;background:var(--bg-base);border-radius:6px;border-left:3px solid var(--warn)">'+
-        '<span style="font-size:12px;font-weight:700;color:var(--warn)">连板 W2</span>';
-      lbDown.forEach(function(s){
-        var code = s['代码']||'';
-        var chg = p((liveQ[code]||{})['涨幅']||s['涨幅']);
-        var vr = parseFloat((liveQ[code]||{})['量比']||s['量比'])||1;
-        html += '<span style="margin-left:8px;font-size:11px">'+s['标的']+
-          ' <span style="color:var(--down);font-weight:600">'+(chg>=0?'+':'')+chg.toFixed(1)+'%</span>'+
-          ' <span style="font-size:9px;color:var(--text-disabled)">量'+vr.toFixed(1)+'</span></span>';
+    if (lbW2.length > 0) {
+      html += '<div style="font-size:12px;font-weight:700;color:var(--text-primary);margin:8px 0 4px;padding-top:4px;border-top:1px solid var(--border-light)">连板 W2 低吸</div>';
+
+      lbW2.forEach(function(s){
+        var code = s['代码'] || '';
+        var name = s['标的'] || '';
+        var q = liveQ[code] || {};
+        var chg = p(q['涨幅']||s['涨幅']);
+        var vr = parseFloat(q['量比']||s['量比'])||1;
+        var sector = s['板块'] || '';
+        var isSkip = (s['角色']||'').indexOf('移除')>=0 || (s['操作']||'').indexOf('不碰')>=0;
+        if (isSkip) return;
+
+        // 连板W2条件: 分歧回落 + 缩量 + 龙头存活 + 非冰点
+        var diverge = chg < 0 && chg > -7;  // 分歧回落（非崩盘）
+        var shrink2 = vr < 0.8;
+        var leaderAlive = false;
+        // 找板块龙头（从lbPool中找情绪标的）
+        lbPool.forEach(function(ls){
+          if ((ls['角色']||'').indexOf('情绪标')>=0 && (ls['板块']||'')===sector) {
+            var lchg = p((liveQ[ls['代码']]||{})['涨幅']||ls['涨幅']);
+            if (lchg >= 3) leaderAlive = true;
+          }
+        });
+        if (!leaderAlive) leaderAlive = true; // 找不到明确龙头时放行
+        var notIce = qx >= 20;
+
+        var hardMet = (diverge?1:0) + (shrink2?1:0) + (leaderAlive?1:0) + (notIce?1:0);
+        var stockOk = hardMet >= 3;
+        var stockWait = hardMet >= 2 && hardMet < 3;
+        var stockFail = hardMet < 2;
+
+        var stockStatus, stColor;
+        if (stockOk)      { stockStatus = '低吸'; stColor = '#22c55e'; }
+        else if (stockWait) { stockStatus = '观察'; stColor = '#f59e0b'; }
+        else              { stockStatus = '—'; stColor = '#6b7280'; }
+
+        html += '<div style="padding:6px 4px;border-bottom:1px solid var(--border-light);display:flex;align-items:center;gap:8px">'+
+          '<div style="flex:0 0 auto;text-align:center;min-width:36px">'+
+            signalDot(stockOk?true:stockFail?false:null, 28)+
+            '<div style="font-size:9px;font-weight:600;color:'+stColor+';margin-top:1px">'+stockStatus+'</div></div>'+
+          '<div style="flex:1;min-width:0">'+
+            '<div style="display:flex;align-items:baseline;gap:4px;margin-bottom:2px">'+
+              '<span style="font-size:13px;font-weight:700;color:var(--text-primary)">'+name+'</span>'+
+              '<span style="font-size:9px;color:var(--text-disabled)">'+code+' '+sector+'</span></div>'+
+            '<div style="display:flex;gap:8px;flex-wrap:wrap;font-size:10px">'+
+              '<span>'+miniDot(diverge)+'分歧回落 <span style="color:var(--text-secondary)">'+(chg>=0?'+':'')+chg.toFixed(1)+'%</span></span>'+
+              '<span>'+miniDot(shrink2)+'缩量 <span style="color:var(--text-secondary)">'+vr.toFixed(2)+'</span></span>'+
+              '<span>'+miniDot(leaderAlive)+'龙头活 <span style="color:var(--text-secondary)">'+sector+'</span></span>'+
+              '<span>'+miniDot(notIce)+'非冰点 <span style="color:var(--text-secondary)">'+qx+'%</span></span>'+
+            '</div>'+
+            (stockWait?'<div style="font-size:9px;color:var(--text-disabled);margin-top:1px">仓位≤10% 等缩量+分时企稳</div>':'')+
+          '</div>'+
+          '<div style="flex:0 0 auto;text-align:right;font-size:11px;color:var(--text-secondary)">'+
+            '<div style="font-size:14px;font-weight:700;color:'+(chg>=0?'var(--up)':'var(--down)')+'">'+(chg>=0?'+':'')+chg.toFixed(1)+'%</div>'+
+            '<div style="font-size:9px">量'+vr.toFixed(1)+'</div></div>'+
+          '</div>';
       });
-      html += '</div>';
     }
 
     body.innerHTML = html;
