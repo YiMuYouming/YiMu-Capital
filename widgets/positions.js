@@ -46,8 +46,10 @@ class PositionsWidget extends YiMuWidget {
     });
 
     active.forEach(function(p) {
-      var q = parseFloat(p['数量'])||0, pr = parseFloat(p['现价'])||0, c = parseFloat(p['成本'])||0;
-      p['_mv'] = Math.round(pr*q); p['_pnl'] = Math.round((pr-c)*q);
+      var qty = parseFloat(String(p['数量']||'0').replace('股',''))||0;
+      var pr = parseFloat(p['现价'])||0, c = parseFloat(p['成本'])||0;
+      p['_qty'] = qty;
+      p['_mv'] = Math.round(pr*qty); p['_pnl'] = Math.round((pr-c)*qty);
       p['_pct'] = c>0?((pr-c)/c*100):0;
     });
 
@@ -55,19 +57,20 @@ class PositionsWidget extends YiMuWidget {
 
     // ===== 汇总卡片 =====
     var ta = parseFloat(manual['总资产'])||0;
-    var pv=0, pc=0; active.forEach(function(p){pv+=p['_mv']||0;pc+=Math.round((parseFloat(p['成本'])||0)*(parseFloat(p['数量'])||0));});
-    var tpCalc=pv-pc; // 计算盈亏（未扣费）
-    // 实际值优先：W16 可录「总盈亏」「可用资金」覆盖计算值
-    var tp = (manual['总盈亏']!=null) ? parseFloat(manual['总盈亏']) : tpCalc;
+    var pv=0, pc=0; active.forEach(function(p){pv+=p['_mv']||0;pc+=Math.round((parseFloat(p['成本'])||0)*(p['_qty']||0));});
+    // 总盈亏始终从实时数据计算，不被手工值覆盖
+    var tpCalc=pv-pc;
+    var tp = tpCalc; // 实时计算盈亏（未扣费）
+    var manualPnL = (manual['总盈亏']!=null) ? parseFloat(manual['总盈亏']) : null;
     var af = (manual['可用资金']!=null) ? parseFloat(manual['可用资金']) : ta-pv;
-    // 用实际盈亏反推仓位成本
-    var actualCost = pc + (tp - tpCalc); // 实际成本=计算成本+费用差
+    // 如果没报总资产，从持仓市值推算
+    if (!ta || ta <= 0) ta = pv + af;
     var tc=tp>0?'up':tp<0?'down':'', pp=pc>0?(tp/pc*100):0, pr=ta>0?Math.round(pv/ta*100):0;
 
     html += '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:var(--sp-xs) var(--sp-sm);margin-bottom:var(--sp-md);padding:var(--sp-sm);background:var(--bg-base);border-radius:var(--radius-md);font-size:var(--fs-body)">'+
       '<div style="text-align:center"><div class="kpi-label">总资产</div><div style="font-family:var(--font-mono);font-size:var(--fs-subtitle);font-weight:700">'+ta.toLocaleString()+'</div></div>'+
       '<div style="text-align:center"><div class="kpi-label">持仓市值</div><div style="font-family:var(--font-mono);font-size:var(--fs-subtitle);font-weight:700">'+pv.toLocaleString()+'</div></div>'+
-      '<div style="text-align:center"><div class="kpi-label">总盈亏</div><div style="font-family:var(--font-mono);font-size:var(--fs-subtitle);font-weight:700;color:var(--'+tc+')">'+(tp>=0?'+':'')+tp.toFixed(2)+'</div>'+(tp!==tpCalc?'<div style=\"font-size:10px;color:var(--text-disabled)\">计算'+(tpCalc>=0?'+':'')+tpCalc+'</div>':'')+'</div>'+
+      '<div style="text-align:center"><div class="kpi-label">总盈亏</div><div style="font-family:var(--font-mono);font-size:var(--fs-subtitle);font-weight:700;color:var(--'+tc+')">'+(tp>=0?'+':'')+tp.toFixed(2)+'</div>'+(manualPnL!==null&&manualPnL!==tp?'<div style=\"font-size:10px;color:var(--text-disabled)\">手工报'+(manualPnL>=0?'+':'')+manualPnL.toFixed(2)+'</div>':'')+'</div>'+
       '<div style="text-align:center"><div class="kpi-label">总盈亏%</div><div style="font-family:var(--font-mono);font-size:var(--fs-subtitle);font-weight:700;color:var(--'+tc+')">'+(pp>=0?'+':'')+pp.toFixed(2)+'%</div></div>'+
       '<div style="text-align:center"><div class="kpi-label">可用资金</div><div style="font-family:var(--font-mono);font-size:var(--fs-subtitle);font-weight:700">'+af.toLocaleString()+'</div></div>'+
       '<div style="text-align:center"><div class="kpi-label">仓位</div><div style="font-family:var(--font-mono);font-size:var(--fs-subtitle);font-weight:700;color:'+(pr>80?'var(--danger)':pr>50?'var(--warn)':'var(--info)')+'">'+pr+'%</div></div>'+
@@ -81,7 +84,7 @@ class PositionsWidget extends YiMuWidget {
         var pc=(p['_pnl']||0)>0?'up':(p['_pnl']||0)<0?'down':'', pt=(p['_pct']||0)>0?'up':(p['_pct']||0)<0?'down':'';
         html += '<tr><td style="font-size:var(--fs-body);font-weight:600">'+(p['标的']||'—')+' <span style="font-size:var(--fs-label);color:var(--text-disabled)">'+(p['代码']||'')+'</span></td>'+
           '<td style="font-size:var(--fs-body);font-family:var(--font-mono);font-weight:600">'+(p['_mv']||0).toLocaleString()+'</td>'+
-          '<td style="font-size:var(--fs-body);font-family:var(--font-mono)">'+(p['数量']||0).toLocaleString()+'</td>'+
+          '<td style="font-size:var(--fs-body);font-family:var(--font-mono)">'+(p['_qty']||0).toLocaleString()+'</td>'+
           '<td style="font-size:var(--fs-body);font-family:var(--font-mono)">'+(p['现价']||'—')+'</td>'+
           '<td style="font-size:var(--fs-body);font-family:var(--font-mono);color:var(--text-secondary)">'+(p['成本']||'—')+'</td>'+
           '<td class="'+pc+'" style="font-size:var(--fs-body);font-family:var(--font-mono);font-weight:600">'+(p['_pnl']>=0?'+':'')+(p['_pnl']||0).toLocaleString()+'</td>'+
