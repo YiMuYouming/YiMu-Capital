@@ -233,13 +233,6 @@ class PnLCurveWidget extends YiMuWidget {
       .then(function(data) {
         // 今日无日内数据时，自动切到本月视图
         if (period === 'today' && (!data || !data.labels || !data.labels.length)) {
-          self._state.period = 'month';
-          var root = document.getElementById('pnl_' + self.id);
-          if (root) {
-            root.querySelectorAll('.pnl-period').forEach(function(el) {
-              el.classList.toggle('active', el.dataset.p === 'month');
-            });
-          }
           return fetch('/api/pnl?range=month&index=' + idx).then(function(r) { return r.json(); });
         }
         return data;
@@ -248,8 +241,7 @@ class PnLCurveWidget extends YiMuWidget {
         if (data && data.labels && data.labels.length) {
           // 缓存到 _periodCache 供 drawer 使用
           if (!self._periodCache) self._periodCache = {};
-          var cachePeriod = self._state.period;  // 可能被 auto-fallback 改了
-          self._periodCache[cachePeriod + '_' + idx] = data;
+          self._periodCache[period + '_' + idx] = data;
           callback(data);
         } else {
           callback(null);
@@ -720,9 +712,9 @@ class PnLCurveWidget extends YiMuWidget {
     var isDaily = chartData.type === 'daily';
     var labelStep;
     if (isDaily) {
-      labelStep = Math.max(1, Math.floor(n / 10));  // daily: 约10个标签
+      labelStep = Math.max(1, Math.floor(n / 10));
     } else if (isToday) {
-      labelStep = 6;  // today: 每30分钟
+      labelStep = 3;  // today: 每15分钟（3×5min）
     } else {
       labelStep = 48;  // week/month: 每天首条
       if (n <= 48) labelStep = Math.max(1, Math.floor(n / 8));
