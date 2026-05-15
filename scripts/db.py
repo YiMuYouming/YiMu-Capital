@@ -127,6 +127,7 @@ def query_pnl(range='today', index='sh'):
     idx_field = idx_map.get(index, 'sh_pct')
     today = datetime.now().strftime('%Y-%m-%d')
 
+    # today: 走 intraday_snapshots（5分钟粒度），唯一保留的日内路径
     if range == 'today':
         rows = _exec(
             f"SELECT ts, pnl_pct, {idx_field} AS bm_pct, pos_pct, nav FROM intraday_snapshots WHERE date = ? ORDER BY ts",
@@ -140,10 +141,7 @@ def query_pnl(range='today', index='sh'):
             'nav': [r['nav'] for r in rows],
         }
 
-    if range == 'all':
-        rows = _exec(f"SELECT date, pnl_pct, {idx_field} AS bm_pct, pos_pct, nav FROM daily_summary ORDER BY date")
-        return {'type':'daily','labels':[r['date'][-5:] for r in rows],'portfolio':[r['pnl_pct'] for r in rows],'benchmark':[r['bm_pct'] for r in rows],'position':[r['pos_pct'] for r in rows],'nav':[r['nav'] for r in rows],'dates':[r['date'] for r in rows]}
-
+    # 计算 from_date
     now = datetime.now()
     day_of_week = now.weekday()
     if range == 'week':
@@ -159,57 +157,21 @@ def query_pnl(range='today', index='sh'):
     else:
         from_date = '2020-01-01'
 
-    # 周/月/季/年：走日内快照（5分钟粒度），季/年降采样到15分钟
-    # 季/年：走日频汇总（数据点太多5分钟没意义）
-    if range in ('quarter', 'year'):
-        raw = _exec(f"""
-            SELECT date, pnl_pct, {idx_field} AS bm_pct, pos_pct, nav
-            FROM daily_summary WHERE date >= ? ORDER BY date
-        """, (from_date,))
-        rows = [dict(r) for r in raw]
-        return {
-            'type': 'daily',
-            'labels': [r['date'][-5:] for r in rows],
-            'portfolio': [r['pnl_pct'] for r in rows],
-            'benchmark': [r['bm_pct'] for r in rows],
-            'position': [r['pos_pct'] for r in rows],
-            'nav': [r['nav'] for r in rows],
-        }
-
-    raw = _exec(f"""
-        SELECT ts, pnl_pct, {idx_field} AS bm_pct, pos_pct, nav
-        FROM intraday_snapshots WHERE date >= ? ORDER BY ts
+    # week/month/quarter/year/all — 统一走 daily_summary（日频数据）
+    # 前端拿到后自己做 TWR 连乘，避免 intraday_snapshots 的单日累积值歧义
+    rows = _exec(f"""
+        SELECT date, pnl_pct, {idx_field} AS bm_pct, pos_pct, nav
+        FROM daily_summary WHERE date >= ? ORDER BY date
     """, (from_date,))
-    rows = [dict(r) for r in raw]
-
-    if not rows:
-        return {'type': 'intraday', 'labels': [], 'portfolio': [], 'benchmark': [], 'position': [], 'nav': []}
-
-    # 仓位平滑：按天取平均值，每天一条线
-    day_pos = {}
-    for r in rows:
-        d = r['ts'][:10]
-        if d not in day_pos: day_pos[d] = []
-        day_pos[d].append(r['pos_pct'])
-    pos_map = {d: round(sum(v)/len(v), 1) for d, v in day_pos.items()}
-    positions = [pos_map.get(r['ts'][:10], r['pos_pct']) for r in rows]
-
-    # 标签格式
-    if range == 'today':
-        labels = [r['ts'][11:16] for r in rows]
-    elif range in ('week', 'month'):
-        labels = [r['ts'][5:16].replace('T', ' ') for r in rows]
-    else:
-        # quarter/year: daily_summary
-        labels = [r['ts'][5:10] for r in rows]
-
+    rows_list = [dict(r) for r in rows]
     return {
-        'type': 'intraday' if range != 'year' and range != 'quarter' else 'daily',
-        'labels': labels,
-        'portfolio': [r['pnl_pct'] for r in rows],
-        'benchmark': [r['bm_pct'] for r in rows],
-        'position': positions,
-        'nav': [r['nav'] for r in rows],
+        'type': 'daily',
+        'labels': [r['date'][-5:] for r in rows_list],
+        'portfolio': [r['pnl_pct'] for r in rows_list],
+        'benchmark': [r['bm_pct'] for r in rows_list],
+        'position': [r['pos_pct'] for r in rows_list],
+        'nav': [r['nav'] for r in rows_list],
+        'dates': [r['date'] for r in rows_list],
     }
 
 
