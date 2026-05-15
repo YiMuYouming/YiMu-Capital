@@ -873,7 +873,8 @@ class PnLCurveWidget extends YiMuWidget {
   }
 
   onResize(w, h) {
-    this._drawChart();
+    if (this._lastChartData) this._drawChart(this._lastChartData);
+    if (this._posCache) this._drawPosChart();
   }
 }
 
