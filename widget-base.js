@@ -19,6 +19,23 @@ class YiMuWidget {
     this._unsubscribers = [];  // DataStore 订阅清理函数
     this._timers = [];          // setInterval/setTimeout 清理
     this._lastRender = null;   // 上次渲染时间戳
+    this._fsState = 0;         // 0=普通 1=内容适配 2=全屏铺满
+  }
+
+  /** 处理全屏退出事件（全局绑定一次） */
+  static _initFullscreenESC() {
+    if (YiMuWidget._escBound) return;
+    YiMuWidget._escBound = true;
+    document.addEventListener('keydown', function(e) {
+      if (e.key === 'Escape') {
+        var fsEl = document.querySelector('.widget-fullscreen');
+        if (fsEl) {
+          var id = fsEl.closest('[gs-id]');
+          var inst = id && window.widgetInstances && window.widgetInstances[id.getAttribute('gs-id')];
+          if (inst && inst._fsState > 0) inst._exitFullscreen();
+        }
+      }
+    });
   }
 
   // === 生命周期 ===
@@ -30,6 +47,7 @@ class YiMuWidget {
     this._renderBody();    // 内容（try-catch 隔离）
     this._subscribe();     // DataStore 订阅
     this._startTimers();   // 定时刷新
+    YiMuWidget._initFullscreenESC(); // 全局 ESC 监听
   }
 
   /** GridStack 尺寸变化 */
@@ -69,11 +87,18 @@ class YiMuWidget {
         '<span class="data-timestamp" id="ts_' + this.id + '">—</span>' +
         '<span class="widget-actions">' +
           '<button class="widget-btn" data-action="collapse" title="折叠">−</button>' +
+          '<button class="widget-btn" data-action="fullscreen" title="内容展开" id="fs_' + this.id + '">□</button>' +
           '<button class="widget-btn" data-action="refresh" title="刷新">↻</button>' +
           '<button class="widget-btn" data-action="remove" title="删除">×</button>' +
         '</span>' +
       '</div>' +
-      '<div class="widget-body" id="body_' + this.id + '"></div>' +
+      '<div class="widget-body" id="body_' + this.id + '">' +
+        '<div class="widget-skeleton">' +
+          '<div class="skeleton-bar" style="width:60%;height:12px;margin:8px 0;border-radius:4px"></div>' +
+          '<div class="skeleton-bar" style="width:40%;height:12px;margin:8px 0;border-radius:4px"></div>' +
+          '<div class="skeleton-bar" style="width:50%;height:12px;margin:8px 0;border-radius:4px"></div>' +
+        '</div>' +
+      '</div>' +
       '<div class="widget-error" id="err_' + this.id + '" style="display:none">' +
         '<span>组件加载失败</span>' +
       '</div>';
@@ -92,6 +117,7 @@ class YiMuWidget {
       var action = btn.dataset.action;
       if (action === 'refresh') self.refresh();
       if (action === 'collapse') self._toggleCollapse();
+      if (action === 'fullscreen') self._toggleFullscreen();
       if (action === 'remove') self._triggerRemove();
     });
   }
@@ -101,6 +127,59 @@ class YiMuWidget {
     if (body) {
       body.style.display = body.style.display === 'none' ? '' : 'none';
     }
+  }
+
+  /** 全屏按钮：三态切换 普通→内容适配→全屏铺满→退出 */
+  _toggleFullscreen() {
+    if (!this._container) return;
+    var self = this;
+    var fsBtn = this._container.querySelector('[data-action="fullscreen"]');
+
+    if (this._fsState === 0) {
+      // 状态0→1：内容适配（居中按比例展开，内容完整可见）
+      this._fsState = 1;
+      var gsItem = this._container.closest('.grid-stack-item');
+      if (!gsItem) return;
+      var gridWrap = document.querySelector('.grid-stack');
+      var gsRect = gridWrap ? gridWrap.getBoundingClientRect() : null;
+      var ratio = this.defaultSize.w / this.defaultSize.h;
+      this._container.style.setProperty('--fs-ratio', ratio);
+      this._container.style.setProperty('--fs-origin-left', (gsRect ? gsRect.left : 0) + 'px');
+      this._container.style.setProperty('--fs-origin-top', (gsRect ? gsRect.top : 0) + 'px');
+      this._container.classList.add('widget-fullscreen', 'fs-fit');
+      document.body.classList.add('has-fullscreen');
+      if (fsBtn) { fsBtn.textContent = '⛶'; fsBtn.title = '全屏铺满'; }
+      requestAnimationFrame(function() { self._renderBody(); });
+    } else if (this._fsState === 1) {
+      // 状态1→2：全屏铺满
+      this._fsState = 2;
+      this._container.classList.remove('fs-fit');
+      this._container.classList.add('fs-cover');
+      if (fsBtn) { fsBtn.textContent = '✕'; fsBtn.title = '退出 (ESC)'; }
+      requestAnimationFrame(function() { self._renderBody(); });
+    } else {
+      // 状态2→0：退出
+      this._exitFullscreen();
+    }
+  }
+
+  /** 直接退出全屏（ESC 或按钮点击） */
+  _exitFullscreen() {
+    if (!this._container || this._fsState === 0) return;
+    this._fsState = 0;
+    var cls = this._container.classList;
+    var fsBtn = this._container.querySelector('[data-action="fullscreen"]');
+    cls.add('fs-exit');
+    document.body.classList.remove('has-fullscreen');
+    this._renderBody();
+    if (fsBtn) { fsBtn.textContent = '□'; fsBtn.title = '内容展开'; }
+    var self = this;
+    setTimeout(function() {
+      cls.remove('widget-fullscreen', 'fs-exit', 'fs-fit', 'fs-cover');
+      self._container.style.removeProperty('--fs-ratio');
+      self._container.style.removeProperty('--fs-origin-left');
+      self._container.style.removeProperty('--fs-origin-top');
+    }, 280);
   }
 
   _triggerRemove() {
