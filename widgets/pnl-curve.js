@@ -233,6 +233,13 @@ class PnLCurveWidget extends YiMuWidget {
       .then(function(data) {
         // 今日无日内数据时，自动切到本月视图
         if (period === 'today' && (!data || !data.labels || !data.labels.length)) {
+          self._state.period = 'month';
+          var root = document.getElementById('pnl_' + self.id);
+          if (root) {
+            root.querySelectorAll('.pnl-period').forEach(function(el) {
+              el.classList.toggle('active', el.dataset.p === 'month');
+            });
+          }
           return fetch('/api/pnl?range=month&index=' + idx).then(function(r) { return r.json(); });
         }
         return data;
@@ -241,7 +248,8 @@ class PnLCurveWidget extends YiMuWidget {
         if (data && data.labels && data.labels.length) {
           // 缓存到 _periodCache 供 drawer 使用
           if (!self._periodCache) self._periodCache = {};
-          self._periodCache[period + '_' + idx] = data;
+          var cachePeriod = self._state.period;  // 可能被 auto-fallback 改了
+          self._periodCache[cachePeriod + '_' + idx] = data;
           callback(data);
         } else {
           callback(null);
