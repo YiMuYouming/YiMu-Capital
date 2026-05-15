@@ -241,7 +241,7 @@ class PnLCurveWidget extends YiMuWidget {
         if (data && data.labels && data.labels.length) {
           // 缓存到 _periodCache 供 drawer 使用
           if (!self._periodCache) self._periodCache = {};
-          self._periodCache[period] = data;
+          self._periodCache[period + '_' + idx] = data;
           callback(data);
         } else {
           callback(null);
@@ -387,7 +387,7 @@ class PnLCurveWidget extends YiMuWidget {
     var cumPnlAll = 1.0, cumBmAll = 1.0, cumDD = 0;
 
     periods.forEach(function(p, i) {
-      var d = cache[p];
+      var d = cache[p + '_' + self._state.index];
       if (!d || !d.portfolio || !d.portfolio.length) {
         html += '<tr><td class="pnl-td-period">' + labels[i] + '</td><td class="pnl-td-num" colspan="4">加载中...</td></tr>';
         return;
