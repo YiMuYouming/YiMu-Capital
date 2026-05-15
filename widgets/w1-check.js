@@ -113,7 +113,7 @@ class W1CheckWidget extends YiMuWidget {
       else              { color = 'var(--text-disabled)'; glow = 'none'; }
       return '<span style="display:inline-block;width:'+s+'px;height:'+s+'px;border-radius:50%;'+
         'background:'+color+';box-shadow:'+glow+';'+
-        'line-height:'+s+'px;text-align:center;font-size:'+Math.floor(s*0.45)+'px;color:var(--text-inverse);'+
+        'line-height:'+s+'px;text-align:center;font-size:'+Math.floor(s*0.5)+'px;font-weight:700;color:#fff;'+
         'transition:all 0.5s">'+
         (ok===true?'✓':ok===false?'✕':'—')+'</span>';
     }

@@ -33,7 +33,7 @@ class W2CheckWidget extends YiMuWidget {
       var glow = ok===true ? '0 0 12px rgba(5,150,105,0.4)' : 'none';
       return '<span style="display:inline-block;width:'+s+'px;height:'+s+'px;border-radius:50%;'+
         'background:'+color+';box-shadow:'+glow+';line-height:'+s+'px;text-align:center;'+
-        'font-size:'+Math.floor(s*0.4)+'px;color:var(--text-inverse);transition:all 0.5s">'+
+        'font-size:'+Math.floor(s*0.48)+'px;font-weight:700;color:#fff;transition:all 0.5s">'+
         (ok===true?'✓':ok===false?'✕':'—')+'</span>';
     }
     function miniDot(ok) {
@@ -44,16 +44,34 @@ class W2CheckWidget extends YiMuWidget {
 
     var html = '';
 
-    // ===== 顶栏 =====
-    var envOk = qx >= 20 && ztProfit >= 2;
-    var topColor = inW2 ? (envOk ? 'var(--down)' : 'var(--warn)') : 'var(--text-disabled)';
-    html += '<div style="display:flex;align-items:center;gap:8px;padding:6px 10px;margin-bottom:8px;'+
-      'background:var(--bg-base);border-radius:6px;border-left:3px solid '+topColor+'">'+
-      '<span style="font-weight:700;font-size:13px;color:'+topColor+'">'+(inW2?'W2 '+w2Label:w2Label)+'</span>'+
-      '<span style="font-size:11px;color:var(--text-secondary)">'+
-        '情绪'+qx+'%'+zone+' | 涨停收益'+ztProfit.toFixed(1)+'% | 赚钱'+profitFx+
-        ' | 涨'+upCnt+'跌'+dnCnt+' | 上证'+szChg+
-      '</span></div>';
+    // ===== 顶栏：3 信号灯=条件 =====
+    var c1 = qx >= 20;     // 条件1: 非冰点
+    var c2 = ztProfit >= 2; // 条件2: 赚钱效应
+    var c3 = profitFx === '好' || profitFx === '较好' || profitFx.indexOf('好') >= 0; // 条件3: 赚钱评判
+    var allOk = c1 && c2 && c3;
+    function dot(ok) {
+      return '<span style="display:inline-block;width:14px;height:14px;border-radius:50%;'+
+        'background:'+(ok===true?'var(--down)':(ok===false?'var(--danger)':'var(--text-disabled)'))+';'+
+        'box-shadow:'+(ok===true?'0 0 6px rgba(5,150,105,0.4)':'none')+';'+
+        'vertical-align:middle;margin:0 2px"></span>';
+    }
+    var overallColor = allOk ? 'var(--down)' : 'var(--danger)';
+    var overallLabel = allOk ? '✅ W2环境可操作' : '⚠️ W2环境不佳';
+    html += '<div style="padding:6px 10px;background:var(--bg-base);border-radius:6px;'+
+      'border-left:3px solid '+overallColor+';margin-bottom:6px">'+
+      '<div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">'+
+        '<span style="font-weight:700;font-size:13px;color:'+overallColor+'">'+overallLabel+'</span>'+
+        '<span style="flex:1"></span>'+
+        '<span style="font-size:11px;color:var(--text-secondary)">'+(inW2?w2Label:'非W2时段')+'</span>'+
+      '</div>'+
+      '<div style="display:flex;gap:10px;font-size:11px">'+
+        '<span>'+dot(c1)+'情绪≥20 <span style="color:'+(c1?'var(--down)':'var(--danger)')+'">'+qx+'%</span></span>'+
+        '<span>'+dot(c2)+'涨停收益≥2 <span style="color:'+(c2?'var(--down)':'var(--danger)')+'">'+ztProfit.toFixed(1)+'%</span></span>'+
+        '<span>'+dot(c3)+'赚钱效应好 <span style="color:'+(c3?'var(--down)':'var(--danger)')+'">'+profitFx+'</span></span>'+
+      '</div>'+
+      '<div style="font-size:10px;color:var(--text-disabled);margin-top:3px">'+
+        '涨'+upCnt+'跌'+dnCnt+' | 上证'+szChg+' | 情绪区：'+qx.toFixed(0)+'% '+zone+
+      '</div></div>';
 
     // ===== 趋势 W2 标的信号卡 =====
     var trW2 = trPool.filter(function(s){ var w=s['窗口']||''; return !w||w==='W2'; });
