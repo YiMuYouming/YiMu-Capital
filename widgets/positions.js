@@ -146,6 +146,19 @@ class PositionsWidget extends YiMuWidget {
     body.innerHTML = html;
     this._bindEvents(active);
     this.updateTimestamp();
+
+    // 自动同步：首次渲染时将 localStorage 的持仓+操作同步到服务端
+    if (!PositionsWidget._synced && location.protocol !== 'file:') {
+      PositionsWidget._synced = true;
+      var mp = DataStore.manualData.getAll();
+      if (mp['_positions'] || mp['_今日操作']) {
+        var pos = []; try { pos = JSON.parse(mp['_positions'] || 'null'); } catch(e) {}
+        var ops = []; try { ops = JSON.parse(mp['_今日操作'] || '[]'); } catch(e) {}
+        if (pos || ops.length) {
+          _bridgeSync(pos, ops);
+        }
+      }
+    }
   }
 
   _bindEvents(active) {
