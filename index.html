@@ -452,7 +452,7 @@ function _showInputPanel() {
   var body = document.getElementById('inputPanelBody');
   var manual = DataStore.manualData.getAll();
 
-  var fields = [
+  var allFields = [
     {id:'总资产',type:'number',label:'总资产(元)'},
     {id:'可用资金',type:'number',label:'可用资金(元)'},
     {id:'总盈亏',type:'number',label:'总盈亏(元)'},
@@ -479,21 +479,43 @@ function _showInputPanel() {
     {id:'W2观察3',type:'text',label:'W2观察3'}
   ];
 
-  var html = '<div style="display:grid;grid-template-columns:repeat(5,1fr);gap:var(--sp-sm)">';
-  fields.forEach(function(f) {
-    html += '<div class="input-group"><label for="in_'+f.id+'">'+f.label+'</label>';
-    if (f.type === 'select') {
-      html += '<select id="in_'+f.id+'" style="width:100%">';
-      (f.opts||[]).forEach(function(o) {
-        html += '<option value="'+o+'"'+(String(manual[f.id]||'')===o?' selected':'')+'>'+(o||'—')+'</option>';
-      });
-      html += '</select>';
-    } else {
-      html += '<input type="'+f.type+'" id="in_'+f.id+'" value="'+(manual[f.id]||'')+'" style="width:100%">';
-    }
-    html += '</div>';
+  // 快速查表：id → {type,label,opts}
+  var fieldMeta = {};
+  allFields.forEach(function(f) { fieldMeta[f.id] = f; });
+
+  var groups = [
+    {name:'账户头寸',open:true,ids:['总资产','可用资金','总盈亏']},
+    {name:'情绪指标',open:true,ids:['情绪值','涨停收益','连板收益','炸板收益','赚钱效应']},
+    {name:'盘面数据',open:true,ids:['上涨','下跌','涨停家数','跌停家数','晋级率','封板率']},
+    {name:'连板生态',open:false,ids:['风险值','最高板','次高板','梯队']},
+    {name:'W1窗口',open:false,ids:['W1观察1','W1观察2','W1观察3']},
+    {name:'W2窗口',open:false,ids:['W2观察1','W2观察2','W2观察3']}
+  ];
+
+  var html = '';
+  groups.forEach(function(g) {
+    html += '<div class="input-group-section">' +
+      '<div class="input-group-header" style="cursor:pointer;display:flex;align-items:center;gap:6px;padding:8px 0;border-bottom:1px solid var(--border-light);margin-bottom:8px;font-weight:600;font-size:13px;color:var(--text)">' +
+      '<span class="group-arrow" style="transition:transform .2s;display:inline-block">' + (g.open ? '▼' : '▶') + '</span>' +
+      g.name + ' <span style="font-weight:400;font-size:10px;color:var(--text-disabled)">(' + g.ids.length + '项)</span>' +
+      '</div>' +
+      '<div class="input-group-fields" style="display:' + (g.open ? 'grid' : 'none') + ';grid-template-columns:repeat(5,1fr);gap:var(--sp-sm);margin-bottom:12px">';
+    g.ids.forEach(function(id) {
+      var f = fieldMeta[id];
+      html += '<div class="input-group"><label for="in_' + id + '">' + f.label + '</label>';
+      if (f.type === 'select') {
+        html += '<select id="in_' + id + '" style="width:100%">';
+        (f.opts||[]).forEach(function(o) {
+          html += '<option value="' + o + '"' + (String(manual[id]||'') === o ? ' selected' : '') + '>' + (o||'—') + '</option>';
+        });
+        html += '</select>';
+      } else {
+        html += '<input type="' + f.type + '" id="in_' + id + '" value="' + (manual[id]||'') + '" style="width:100%">';
+      }
+      html += '</div>';
+    });
+    html += '</div></div>';
   });
-  html += '</div>';
 
   html += '<div style="display:flex;align-items:center;gap:var(--sp-md);margin-top:var(--sp-md)">' +
     '<button class="input-refresh" id="btnInputRefresh" style="flex:1;font-size:var(--fs-subtitle);padding:var(--sp-sm) var(--sp-lg)">刷新全部数据</button>' +
@@ -503,10 +525,23 @@ function _showInputPanel() {
   body.innerHTML = html;
   overlay.classList.add('show');
 
+  // 分组折叠
+  body.querySelectorAll('.input-group-header').forEach(function(hdr) {
+    hdr.addEventListener('click', function() {
+      var fields = this.nextElementSibling;
+      var arrow = this.querySelector('.group-arrow');
+      if (fields.style.display === 'none') {
+        fields.style.display = 'grid'; arrow.textContent = '▼';
+      } else {
+        fields.style.display = 'none'; arrow.textContent = '▶';
+      }
+    });
+  });
+
   // 刷新按钮
   document.getElementById('btnInputRefresh').addEventListener('click', function() {
-    fields.forEach(function(f) {
-      var el = document.getElementById('in_'+f.id);
+    allFields.forEach(function(f) {
+      var el = document.getElementById('in_' + f.id);
       if (el) DataStore.manualData.set(f.id, el.value);
     });
     DataStore.merge();
@@ -517,8 +552,8 @@ function _showInputPanel() {
   });
 
   // 输入即同步到 manualData
-  fields.forEach(function(f) {
-    var el = body.querySelector('#in_'+f.id);
+  allFields.forEach(function(f) {
+    var el = body.querySelector('#in_' + f.id);
     if (el) {
       el.addEventListener('input', function() { DataStore.manualData.set(f.id, this.value); });
       el.addEventListener('change', function() { DataStore.manualData.set(f.id, this.value); });
