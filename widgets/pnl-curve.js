@@ -235,6 +235,10 @@ class PnLCurveWidget extends YiMuWidget {
           if (!self._periodCache) self._periodCache = {};
           self._periodCache[period + '_' + idx] = data;
           callback(data);
+        } else if (period === 'today') {
+          // 非交易时间：保留上次今日缓存，图表停留在最后交易日
+          var cached = (self._periodCache || {})['today_' + idx];
+          callback(cached || null);
         } else {
           callback(null);
         }
