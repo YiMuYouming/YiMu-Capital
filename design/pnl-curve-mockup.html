@@ -1,0 +1,403 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PnL 曲线组件 · 设计样稿 v8</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --bg:#F7F5F3; --bg-card:#FFFFFF; --bg2:#FAFAF9; --bg3:#F5F2EE;
+  --border:#E5E2DE; --border-light:#F0EEEC;
+  --text:#2D2926; --text2:#5C5652; --text3:#8A8480;
+  --up:#DC2626; --down:#059669;
+  --accent:#D97706; --accent-bg:rgba(217,119,6,.12);
+  --info:#2563EB; --info-bg:rgba(37,99,235,.08);
+  --font-sans:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+  --font-mono:"JetBrains Mono","SF Mono","Cascadia Code",monospace;
+}
+body{font-family:var(--font-sans);background:var(--bg);color:var(--text);padding:32px}
+
+/* === Layout === */
+.page-title{font-size:28px;font-weight:700;margin-bottom:4px}
+.page-sub{font-size:14px;color:var(--text2);margin-bottom:32px}
+
+.widget{background:var(--bg-card);border:1px solid var(--border-light);border-radius:10px;overflow:hidden;max-width:960px;box-shadow:0 1px 3px rgba(45,41,38,.06)}
+.widget-header{display:flex;align-items:center;padding:0 14px;height:34px;background:rgba(255,255,255,.92);border-bottom:1px solid var(--border-light);position:relative}
+.widget-header::before{content:'';position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--up)}
+.widget-title{font-size:13px;font-weight:600;margin-left:12px;flex:1}
+
+/* === KPI: 5 card single row === */
+.kpi-row{display:grid;grid-template-columns:repeat(5,1fr);gap:1px;background:var(--border)}
+.kpi-card{background:var(--bg-card);padding:14px 18px;min-height:76px}
+.kpi-label{font-size:10px;text-transform:uppercase;letter-spacing:.4px;color:var(--text2);margin-bottom:3px;font-weight:500}
+.kpi-value{font-size:26px;font-weight:700;font-family:var(--font-mono);line-height:1.2;font-variant-numeric:tabular-nums}
+.kpi-sub{font-size:10px;color:var(--text3);margin-top:2px}
+.kpi-last{border-left:2px solid var(--accent)}
+
+/* === Controls === */
+.controls-row{display:flex;align-items:center;gap:6px;padding:8px 14px;border-bottom:1px solid var(--border-light);background:var(--bg2);flex-wrap:wrap}
+.index-selector{display:flex;gap:3px;margin-right:12px}
+.index-btn,.time-tab{
+  padding:3px 10px;border-radius:4px;font-size:11px;cursor:pointer;
+  color:var(--text2);background:transparent;border:none;
+  font-family:var(--font-sans);font-weight:500;transition:all .12s
+}
+.index-btn:hover,.time-tab:hover{background:var(--bg3);color:var(--text)}
+.index-btn.active{background:var(--info-bg);color:var(--info);font-weight:600}
+.time-tabs{display:flex;gap:4px}
+.time-tab.active{background:var(--info-bg);color:var(--info);font-weight:600}
+.time-tab.custom{border:1px dashed var(--border);color:var(--text3);margin-left:8px}
+
+/* === Chart === */
+.chart-area{padding:8px 14px 4px}
+canvas{width:100%;height:280px;display:block;border-radius:6px}
+
+/* === Legend === */
+.legend{display:flex;gap:20px;padding:0 14px 8px;align-items:center;flex-wrap:wrap}
+.legend-item{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--text2)}
+
+/* === Drawer trigger === */
+.drawer-trigger{padding:0 14px 10px}
+.drawer-btn{
+  width:100%;padding:9px 14px;border-radius:6px;font-size:13px;cursor:pointer;
+  background:var(--bg2);border:1px solid var(--border);
+  color:var(--text);font-family:var(--font-sans);font-weight:600;transition:all .12s;
+  letter-spacing:.2px;display:flex;align-items:center;justify-content:center;gap:6px;
+}
+.drawer-btn::after{content:'▼';font-size:9px;color:var(--text3);transition:transform .2s}
+.drawer-btn.active::after{transform:rotate(180deg)}
+.drawer-btn:hover{background:var(--accent-bg);border-color:var(--accent);color:var(--accent)}
+.drawer-btn.active{background:var(--accent-bg);border-color:var(--accent);color:var(--accent);font-weight:600}
+
+/* === Drawer: fund-style table === */
+.drawer{display:none;margin:0 14px 14px;border-radius:8px;border:1px solid var(--border-light);overflow:hidden}
+.drawer.show{display:block}
+
+.drawer-table{width:100%;border-collapse:collapse;font-size:12px}
+.drawer-table thead{position:sticky;top:0;z-index:1}
+.drawer-table th{
+  background:var(--bg2);padding:8px 12px;font-size:10px;text-transform:uppercase;letter-spacing:.5px;
+  color:var(--text2);font-weight:600;text-align:left;border-bottom:1px solid var(--border-light);
+  white-space:nowrap;
+}
+.drawer-table td{padding:8px 12px;border-bottom:1px solid var(--border-light);font-variant-numeric:tabular-nums}
+.drawer-table tbody tr:hover td{background:var(--bg3)}
+.drawer-table tbody tr:last-child td{border-bottom:none}
+
+/* Cumulative row */
+.drawer-table tbody tr.cumulative{background:var(--bg2)}
+.drawer-table tbody tr.cumulative td{
+  font-weight:600;border-top:2px solid var(--border);padding:10px 12px;
+}
+
+/* Column widths + alignment */
+.col-period{font-weight:600;white-space:nowrap;width:72px}
+.col-num{font-family:var(--font-mono);text-align:right;white-space:nowrap;width:100px}
+.col-benchmark{font-family:var(--font-mono);text-align:right;white-space:nowrap;width:100px}
+.col-excess{font-family:var(--font-mono);text-align:right;white-space:nowrap;width:90px}
+.col-dd{font-family:var(--font-mono);text-align:right;white-space:nowrap;width:100px}
+.col-nav{font-family:var(--font-mono);text-align:right;white-space:nowrap;width:90px;font-weight:600}
+
+/* th alignment matches td */
+.drawer-table th.col-period{text-align:left}
+.drawer-table th.col-num{text-align:right}
+.drawer-table th.col-benchmark{text-align:right}
+.drawer-table th.col-excess{text-align:right}
+.drawer-table th.col-dd{text-align:right}
+.drawer-table th.col-nav{text-align:right}
+
+/* === Drawer summary strip === */
+.drawer-summary{
+  display:grid;grid-template-columns:repeat(5,1fr);gap:1px;background:var(--border);
+  border-top:1px solid var(--border);
+}
+.summary-cell{background:var(--bg-card);padding:10px 14px;text-align:center}
+.summary-label{font-size:9px;text-transform:uppercase;letter-spacing:.3px;color:var(--text3);margin-bottom:2px}
+.summary-value{font-size:14px;font-weight:600;font-family:var(--font-mono)}
+</style>
+</head>
+<body>
+
+<div class="page-title">📈 账户收益曲线</div>
+<div class="page-sub">设计样稿 v8 · 基金级损益表 + TWR 累计 · 点击表格行高亮回撤</div>
+
+<div class="widget">
+  <div class="widget-header">
+    <span class="widget-title">账户收益曲线</span>
+    <span style="font-size:10px;color:var(--text3)">弈沐资本 · 实时收益曲线 · TWR 时间加权</span>
+  </div>
+
+  <!-- KPI — 5 cards -->
+  <div class="kpi-row">
+    <div class="kpi-card">
+      <div class="kpi-label">当前资产</div>
+      <div class="kpi-value" style="color:var(--text)">101.2<span style="font-size:17px">万</span></div>
+      <div class="kpi-sub">+1.2% 今日</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-label">持仓盈亏</div>
+      <div class="kpi-value" style="color:var(--up)">+2,185</div>
+      <div class="kpi-sub">+2.18% 浮动</div>
+    </div>
+    <div class="kpi-card">
+      <div class="kpi-label">仓位</div>
+      <div class="kpi-value" style="color:var(--accent)">42<span style="font-size:17px">%</span></div>
+      <div class="kpi-sub">持有 3 只</div>
+    </div>
+    <div class="kpi-card kpi-last">
+      <div class="kpi-label" id="kpiPeriod">今日收益</div>
+      <div class="kpi-value" id="kpiPnl" style="color:var(--up)">+0.85<span style="font-size:17px">%</span></div>
+      <div class="kpi-sub" id="kpiExcess">对应上证 +0.12%</div>
+    </div>
+    <div class="kpi-card kpi-last">
+      <div class="kpi-label" id="kpiDDLabel">今日回撤</div>
+      <div class="kpi-value" id="kpiDDVal" style="color:var(--down)">-0.35<span style="font-size:17px">%</span></div>
+      <div class="kpi-sub" id="kpiDDRange">10:25 → 10:55</div>
+    </div>
+  </div>
+
+  <!-- Controls -->
+  <div class="controls-row">
+    <span style="font-size:10px;color:var(--text3);letter-spacing:.3px;text-transform:uppercase">对比</span>
+    <div class="index-selector">
+      <button class="index-btn active">上证</button>
+      <button class="index-btn">深证</button>
+      <button class="index-btn">创业板</button>
+    </div>
+    <div class="time-tabs">
+      <button class="time-tab active" data-period="today">今日</button>
+      <button class="time-tab" data-period="week">本周</button>
+      <button class="time-tab" data-period="month">本月</button>
+      <button class="time-tab" data-period="quarter">近三月</button>
+      <button class="time-tab" data-period="year">近一年</button>
+      <button class="time-tab custom">自定义</button>
+    </div>
+  </div>
+
+  <!-- Chart -->
+  <div class="chart-area">
+    <canvas id="pnlChart"></canvas>
+  </div>
+
+  <!-- Legend -->
+  <div class="legend">
+    <div class="legend-item"><div style="width:20px;height:3px;border-radius:2px;background:var(--up);flex-shrink:0"></div><span>账户收益(TWR)</span></div>
+    <div class="legend-item"><div style="width:20px;height:3px;border-radius:2px;background:var(--info);flex-shrink:0"></div><span id="indexLabel">上证指数</span></div>
+    <div class="legend-item"><div style="width:20px;height:3px;border-radius:2px;background:var(--text3);opacity:.5;flex-shrink:0"></div><span>仓位</span></div>
+    <div class="legend-item" style="margin-left:auto;font-size:10px;color:var(--text3)">最后更新 14:58</div>
+  </div>
+
+  <!-- Drawer trigger -->
+  <div class="drawer-trigger">
+    <button class="drawer-btn" id="drawerBtn">📊 损益明细 · TWR累计 +12.45% | 累计收益额 +26万</button>
+  </div>
+
+  <!-- Drawer table -->
+  <div class="drawer" id="drawer">
+    <div style="overflow-x:auto">
+    <table class="drawer-table">
+      <thead>
+        <tr>
+          <th class="col-period">周期</th>
+          <th class="col-num">账户收益</th>
+          <th class="col-benchmark">上证收益</th>
+          <th class="col-excess">超额α</th>
+          <th class="col-dd">最大回撤</th>
+          <th class="col-nav">累计净值</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td class="col-period">今日</td>
+          <td class="col-num" style="color:var(--up)">+0.85%</td>
+          <td class="col-benchmark" style="color:var(--up)">+0.12%</td>
+          <td class="col-excess" style="color:var(--up)">+0.73%</td>
+          <td class="col-dd" style="color:var(--down)">-0.35%</td>
+          <td class="col-nav">—</td>
+        </tr>
+        <tr>
+          <td class="col-period">本周</td>
+          <td class="col-num" style="color:var(--up)">+1.20%</td>
+          <td class="col-benchmark" style="color:var(--down)">-0.35%</td>
+          <td class="col-excess" style="color:var(--up)">+1.55%</td>
+          <td class="col-dd" style="color:var(--down)">-0.82%</td>
+          <td class="col-nav">—</td>
+        </tr>
+        <tr>
+          <td class="col-period">本月</td>
+          <td class="col-num" style="color:var(--up)">+3.21%</td>
+          <td class="col-benchmark" style="color:var(--up)">+1.88%</td>
+          <td class="col-excess" style="color:var(--up)">+1.33%</td>
+          <td class="col-dd" style="color:var(--down)">-1.63%</td>
+          <td class="col-nav">—</td>
+        </tr>
+        <tr>
+          <td class="col-period">近三月</td>
+          <td class="col-num" style="color:var(--up)">+4.52%</td>
+          <td class="col-benchmark" style="color:var(--up)">+2.34%</td>
+          <td class="col-excess" style="color:var(--up)">+2.18%</td>
+          <td class="col-dd" style="color:var(--down)">-3.12%</td>
+          <td class="col-nav">—</td>
+        </tr>
+        <tr>
+          <td class="col-period">近一年</td>
+          <td class="col-num" style="color:var(--up)">+8.12%</td>
+          <td class="col-benchmark" style="color:var(--up)">+4.67%</td>
+          <td class="col-excess" style="color:var(--up)">+3.45%</td>
+          <td class="col-dd" style="color:var(--down)">-5.21%</td>
+          <td class="col-nav">1.0812</td>
+        </tr>
+        <!-- Cumulative row -->
+        <tr class="cumulative">
+          <td class="col-period" style="font-size:13px">累计</td>
+          <td class="col-num" style="color:var(--up);font-size:14px">+12.45%</td>
+          <td class="col-benchmark" style="color:var(--up);font-size:14px">+5.88%</td>
+          <td class="col-excess" style="color:var(--up);font-size:14px">+6.57%</td>
+          <td class="col-dd" style="color:var(--down);font-size:14px">-5.21%</td>
+          <td class="col-nav" style="font-size:14px">1.1245</td>
+        </tr>
+      </tbody>
+    </table>
+    </div>
+    <!-- Summary strip -->
+    <div class="drawer-summary">
+      <div class="summary-cell"><div class="summary-label">初始净值</div><div class="summary-value">1.0000</div></div>
+      <div class="summary-cell"><div class="summary-label">当前净值</div><div class="summary-value" style="color:var(--up)">1.1245</div></div>
+      <div class="summary-cell"><div class="summary-label">累计入金</div><div class="summary-value">200 万</div></div>
+      <div class="summary-cell"><div class="summary-label">当前资产</div><div class="summary-value" style="color:var(--up)">226 万</div></div>
+      <div class="summary-cell"><div class="summary-label">累计收益额</div><div class="summary-value" style="color:var(--up)">+26 万</div></div>
+    </div>
+  </div>
+
+</div>
+
+<p style="margin-top:12px;font-size:12px;color:var(--text3)">
+TWR 时间加权收益率 — 追加资金不影响收益率计算，真实反映交易能力。<br>
+累计净值 = 1 + TWR累计收益率；收益额 = 当前资产 − 累计入金。
+</p>
+
+<script>
+(function(){
+  var canvas=document.getElementById('pnlChart');
+  var rect=canvas.getBoundingClientRect();
+  var W=rect.width,H=rect.height,DPR=window.devicePixelRatio||1;
+  canvas.width=W*DPR;canvas.height=H*DPR;
+  var ctx=canvas.getContext('2d');ctx.scale(DPR,DPR);
+
+  var n=66,labels=[];
+  for(var i=0;i<n;i++){var m=9*60+30+i*5;labels.push(String(Math.floor(m/60)).padStart(2,'0')+':'+String(m%60).padStart(2,'0'));}
+
+  var pnlData=[],shData=[],posData=[];
+  var v=0,sv=0;
+  for(var i=0;i<n;i++){
+    if(i<5){v+=(Math.random()-0.3)*0.08;sv+=(Math.random()-0.5)*0.06;}
+    else if(i<15){v+=(Math.random()-0.2)*0.1+0.04;sv+=(Math.random()-0.4)*0.08;}
+    else if(i<25){v+=(Math.random()-0.3)*0.08-0.02;sv+=(Math.random()-0.4)*0.07;}
+    else if(i<40){v+=(Math.random()-0.2)*0.06+0.03;sv+=(Math.random()-0.4)*0.07;}
+    else{v+=(Math.random()-0.3)*0.05;sv+=(Math.random()-0.5)*0.05;}
+    pnlData.push(Math.round(v*100)/100);shData.push(Math.round(sv*100)/100);posData.push(i<48?42:38);
+  }
+
+  // 回撤范围定义：各周期在66个数据点中的起止索引
+  var ddRanges={today:{startIdx:11,endIdx:17},week:{startIdx:4,endIdx:20},month:{startIdx:0,endIdx:28},quarter:{startIdx:0,endIdx:32},year:{startIdx:0,endIdx:55}};
+  function calcDD(range){
+    var si=range.startIdx,ei=range.endIdx,peak={idx:si,val:pnlData[si]},trough={idx:si,val:pnlData[si]};
+    for(var i=si;i<=ei;i++){if(pnlData[i]>peak.val){peak.idx=i;peak.val=pnlData[i];}if(i>peak.idx&&pnlData[i]<trough.val){trough.idx=i;trough.val=pnlData[i];}}
+    return{peak,trough,dd:Math.round((trough.val-peak.val)*100)/100};
+  }
+  // 当前选中周期（自动回撤高亮用）
+  var currentPeriod='today';
+
+  var periodData={today:{kpiLabel:'今日收益',pnl:'+0.85%',excess:'对应上证 +0.12%',dd:'-0.35%',ddRange:'10:25 → 10:55'},
+    week:{kpiLabel:'本周收益',pnl:'+1.20%',excess:'对应上证 -0.35%',dd:'-0.82%',ddRange:'5/13 10:15 → 11:00'},
+    month:{kpiLabel:'本月收益',pnl:'+3.21%',excess:'对应上证 +1.88%',dd:'-1.63%',ddRange:'5/8 09:35 → 5/12 10:30'},
+    quarter:{kpiLabel:'近三月收益',pnl:'+4.52%',excess:'对应上证 +2.34%',dd:'-3.12%',ddRange:'3/10 → 3/18'},
+    year:{kpiLabel:'近一年收益',pnl:'+8.12%',excess:'对应上证 +4.67%',dd:'-5.21%',ddRange:'2/5 → 3/18'}};
+
+
+  document.querySelectorAll('.time-tab:not(.custom)').forEach(function(tab){
+    tab.addEventListener('click',function(){
+      document.querySelectorAll('.time-tab').forEach(function(t){t.classList.remove('active')});
+      this.classList.add('active');
+      var p=this.dataset.period,d=periodData[p];
+      if(!d)return;
+      currentPeriod=p;
+      document.getElementById('kpiPeriod').textContent=d.kpiLabel;
+      document.getElementById('kpiPnl').textContent=d.pnl;
+      document.getElementById('kpiExcess').textContent=d.excess;
+      document.getElementById('kpiDDLabel').textContent=(p==='today'?'今日':p==='week'?'本周':p==='month'?'本月':p==='quarter'?'近三月':'近一年')+'回撤';
+      document.getElementById('kpiDDVal').textContent=d.dd;
+      document.getElementById('kpiDDRange').textContent=d.ddRange;
+      draw();
+    });
+  });
+
+  document.getElementById('drawerBtn').addEventListener('click',function(){
+    var open=document.getElementById('drawer').classList.toggle('show');
+    this.classList.toggle('active',open);
+    this.textContent=open?'📊 收起损益明细':'📊 损益明细 · TWR累计 +12.45% | 累计收益额 +26万';
+  });
+
+  document.querySelectorAll('.index-btn').forEach(function(btn){
+    btn.addEventListener('click',function(){
+      document.querySelectorAll('.index-btn').forEach(function(b){b.classList.remove('active')});
+      this.classList.add('active');
+      document.getElementById('indexLabel').textContent=this.textContent+'指数';
+    });
+  });
+
+  function draw(){
+    var w=W,h=H,PAD={t:24,r:52,b:30,l:48},cw=w-PAD.l-PAD.r,ch=h-PAD.t-PAD.b;
+    ctx.clearRect(0,0,w,h);ctx.fillStyle='#FFFFFF';ctx.fillRect(0,0,w,h);
+    var allVals=pnlData.concat(shData),minY=Math.min.apply(null,allVals),maxY=Math.max.apply(null,allVals);
+    var padY=Math.max(Math.abs(maxY-minY)*0.18,0.3);minY-=padY;maxY+=padY;if(minY>-0.1)minY=-0.2;
+    function yVal(v){return PAD.t+ch-((v-minY)/(maxY-minY))*ch}
+    function xVal(i){return PAD.l+(i/(n-1))*cw}
+
+    // 自动：当前周期最大回撤高亮
+    if(currentPeriod&&ddRanges[currentPeriod]){
+      var r=ddRanges[currentPeriod],ddInfo=calcDD(r);
+      ctx.fillStyle='rgba(217,119,6,0.07)';
+      ctx.fillRect(xVal(r.startIdx),PAD.t,xVal(r.endIdx)-xVal(r.startIdx),ch);
+      ctx.beginPath();ctx.moveTo(xVal(ddInfo.peak.idx),yVal(ddInfo.peak.val));
+      for(var i=ddInfo.peak.idx;i<=ddInfo.trough.idx;i++)ctx.lineTo(xVal(i),yVal(pnlData[i]));
+      ctx.strokeStyle='#D97706';ctx.lineWidth=4;ctx.stroke();
+      [ddInfo.peak,ddInfo.trough].forEach(function(pt){
+        ctx.beginPath();ctx.arc(xVal(pt.idx),yVal(pt.val),5,0,Math.PI*2);
+        ctx.fillStyle='#D97706';ctx.fill();ctx.strokeStyle='#FFFFFF';ctx.lineWidth=2;ctx.stroke();
+      });
+      ctx.strokeStyle='rgba(217,119,6,0.4)';ctx.setLineDash([4,4]);
+      ctx.beginPath();ctx.moveTo(xVal(ddInfo.peak.idx),yVal(ddInfo.peak.val));
+      ctx.lineTo(xVal(ddInfo.trough.idx),yVal(ddInfo.peak.val));
+      ctx.lineTo(xVal(ddInfo.trough.idx),yVal(ddInfo.trough.val));
+      ctx.stroke();ctx.setLineDash([]);
+      var midX=(xVal(ddInfo.peak.idx)+xVal(ddInfo.trough.idx))/2;
+      ctx.fillStyle='#D97706';ctx.font='bold 12px -apple-system,sans-serif';ctx.textAlign='center';ctx.textBaseline='bottom';
+      ctx.fillText('↘ 最大回撤 '+ddInfo.dd.toFixed(2)+'%',midX,Math.min(yVal(ddInfo.peak.val),yVal(ddInfo.trough.val))-6);
+      ctx.fillStyle='rgba(217,119,6,0.6)';ctx.font='9px -apple-system,sans-serif';ctx.textAlign='center';ctx.textBaseline='top';
+      ctx.fillText('峰值 '+labels[ddInfo.peak.idx],xVal(ddInfo.peak.idx),yVal(ddInfo.peak.val)+6);
+      ctx.fillText('谷值 '+labels[ddInfo.trough.idx],xVal(ddInfo.trough.idx),yVal(ddInfo.trough.val)+6);
+    }
+
+    ctx.strokeStyle='#F0EEEC';ctx.lineWidth=1;
+    for(var g=0;g<=4;g++){ctx.beginPath();ctx.moveTo(PAD.l,PAD.t+(g/4)*ch);ctx.lineTo(PAD.l+cw,PAD.t+(g/4)*ch);ctx.stroke()}
+    var zeroY=yVal(0);ctx.strokeStyle='#E5E2DE';ctx.setLineDash([4,4]);ctx.beginPath();ctx.moveTo(PAD.l,zeroY);ctx.lineTo(PAD.l+cw,zeroY);ctx.stroke();ctx.setLineDash([]);
+    ctx.fillStyle='#8A8480';ctx.font='10px -apple-system,sans-serif';ctx.textAlign='right';ctx.textBaseline='middle';
+    for(var g=0;g<=4;g++){var val=minY+(g/4)*(maxY-minY);ctx.fillText((val>=0?'+':'')+val.toFixed(2)+'%',PAD.l-6,PAD.t+(g/4)*ch)}
+    ctx.textAlign='left';for(var g=0;g<=4;g++){ctx.fillText((100-(g/4)*100).toFixed(0)+'%',PAD.l+cw+6,PAD.t+(g/4)*ch)}
+    ctx.fillStyle='#8A8480';ctx.font='10px -apple-system,sans-serif';ctx.textAlign='center';ctx.textBaseline='top';for(var xi=0;xi<n;xi+=6){ctx.fillText(labels[xi],xVal(xi),PAD.t+ch+6)}
+    ctx.beginPath();ctx.moveTo(xVal(0),zeroY);for(var i=0;i<n;i++)ctx.lineTo(xVal(i),yVal(pnlData[i]));ctx.lineTo(xVal(n-1),zeroY);ctx.closePath();
+    var grad=ctx.createLinearGradient(0,PAD.t,0,PAD.t+ch);grad.addColorStop(0,'rgba(220,38,38,0.12)');grad.addColorStop(1,'rgba(220,38,38,0.01)');ctx.fillStyle=grad;ctx.fill();
+    ctx.beginPath();for(var i=0;i<n;i++){if(i===0)ctx.moveTo(xVal(i),yVal(pnlData[i]));else ctx.lineTo(xVal(i),yVal(pnlData[i]))}ctx.strokeStyle='#DC2626';ctx.lineWidth=2.5;ctx.stroke();
+    ctx.beginPath();for(var i=0;i<n;i++){if(i===0)ctx.moveTo(xVal(i),yVal(shData[i]));else ctx.lineTo(xVal(i),yVal(shData[i]))}ctx.strokeStyle='#2563EB';ctx.lineWidth=2;ctx.setLineDash([6,3]);ctx.stroke();ctx.setLineDash([]);
+    ctx.beginPath();for(var i=0;i<n;i++){if(i===0)ctx.moveTo(xVal(i),PAD.t+ch-(posData[i]/100)*ch);else ctx.lineTo(xVal(i),PAD.t+ch-(posData[i]/100)*ch)}ctx.strokeStyle='rgba(138,132,128,0.5)';ctx.lineWidth=1.5;ctx.setLineDash([3,4]);ctx.stroke();ctx.setLineDash([]);
+    ctx.fillStyle='rgba(138,132,128,0.7)';ctx.font='9px -apple-system,sans-serif';ctx.textAlign='center';ctx.textBaseline='bottom';ctx.fillText('42%',xVal(0),PAD.t+ch-(42/100)*ch-2);ctx.fillText('38%',xVal(55),PAD.t+ch-(38/100)*ch-2);
+    ctx.font='bold 12px -apple-system,sans-serif';ctx.textAlign='left';ctx.textBaseline='middle';ctx.fillStyle='#DC2626';ctx.fillText((pnlData[n-1]>=0?'+':'')+pnlData[n-1].toFixed(2)+'%',xVal(n-1)+6,yVal(pnlData[n-1]));ctx.fillStyle='#2563EB';ctx.font='11px -apple-system,sans-serif';ctx.fillText('上证 '+(shData[n-1]>=0?'+':'')+shData[n-1].toFixed(2)+'%',xVal(n-1)+6,yVal(shData[n-1]));
+  }
+  draw();
+})();
+</script>
+
+</body>
+</html>

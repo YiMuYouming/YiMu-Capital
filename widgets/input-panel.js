@@ -38,6 +38,7 @@ class InputPanelWidget extends YiMuWidget {
       {id:'最高板',type:'text',label:'最高板'},
       {id:'次高板',type:'text',label:'次高板'},
       {id:'梯队',type:'text',label:'连板梯队'},
+      {id:'累计入金',type:'number',label:'累计入金(元)'},
     ];
 
     var manual = DataStore.manualData.getAll();
@@ -88,11 +89,17 @@ class InputPanelWidget extends YiMuWidget {
   }
 
   _saveAndRefresh() {
-    var fields = ['总资产','可用资金','总盈亏','情绪值','上涨','下跌','涨停收益','连板收益','炸板收益','风险值','晋级率','封板率','涨停家数','跌停家数','赚钱效应','最高板','次高板','梯队'];
+    var fields = ['总资产','可用资金','总盈亏','情绪值','上涨','下跌','涨停收益','连板收益','炸板收益','风险值','晋级率','封板率','涨停家数','跌停家数','赚钱效应','最高板','次高板','梯队','累计入金'];
     fields.forEach(function(f) {
       var el = document.getElementById('in_'+f);
       if (el) DataStore.manualData.set(f, el.value);
     });
+
+    // PnL 基线同步到 bridge
+    _bridgeSyncPnl(
+      parseFloat(document.getElementById('in_总资产')?.value) || 0,
+      parseFloat(document.getElementById('in_累计入金')?.value) || 0
+    );
 
     DataStore.merge();
     DataStore.notifyAll();
@@ -111,3 +118,14 @@ class InputPanelWidget extends YiMuWidget {
 }
 
 WidgetRegistry.register('W16', InputPanelWidget);
+
+function _bridgeSyncPnl(asset, deposit) {
+  if (location.protocol === 'file:') return;
+  try {
+    fetch('/api/sync', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ pnl: { 总资产: asset, 累计入金: deposit } })
+    }).catch(function(){});
+  } catch(e) {}
+}

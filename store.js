@@ -39,11 +39,11 @@ const DataStore = (function() {
   // === 数据适配器（v2.0 新增，预留 Dify 替换点）===
   var adapter = {
     fetchBase: function() {
-      return fetch('data/dashboard_data.json?t=' + Date.now())
+      return fetch('data/dashboard_data.json?t=' + Date.now() + Math.random())
         .then(function(r) { if (!r.ok) throw new Error('base fetch failed'); return r.json(); });
     },
     fetchLive: function() {
-      return fetch('data/dashboard_live.json?t=' + Date.now())
+      return fetch('data/dashboard_live.json?t=' + Date.now() + Math.random())
         .then(function(r) { return r.ok ? r.json() : null; })
         .catch(function() { return null; });
     }
@@ -99,9 +99,10 @@ const DataStore = (function() {
     var src = baseData || fallback || {};
     var d = deepClone(src);
 
-    // Step 2: manualData 覆盖（替代原 DOM 直读方式）
+    // Step 2: manualData 覆盖（报数面板手动录入）
     if (manualData) {
-      if (manualData['情绪值']) {
+      // 情绪值：只覆盖如果 baseData 没有情绪值（日报SSOT优先，防旧缓存覆盖）
+      if (manualData['情绪值'] && (!src.sentiment || !src.sentiment['情绪值'])) {
         d.sentiment = d.sentiment || {};
         var sv = parseFloat(manualData['情绪值']) || d.sentiment['情绪值'];
         d.sentiment['情绪值'] = sv;
@@ -216,6 +217,7 @@ const DataStore = (function() {
   }
 
   // === 刷新数据（v2.0 多源实时管线）===
+  var _refreshCount = 0;
   function refresh(tier) {
     if (tier === 'manual' || tier === 'daily' || tier === 'slow') return;
 
@@ -223,11 +225,15 @@ const DataStore = (function() {
     notifyConnListeners();
 
     if (tier === 'tick' || tier === 'fast') {
-      adapter.fetchLive().then(function(live) {
-        if (live) {
-          liveData = live;
-          connectionStatus = 'live';
-        }
+      // 每 12 次 tick（~60s）重拉 base 数据（gen 脚本可能更新了文件）
+      if (tier === 'tick') _refreshCount++;
+      var reloadBase = (_refreshCount % 12 === 0);
+      var chain = reloadBase ? adapter.fetchBase() : new Promise(function(r){r(baseData);});
+      chain.then(function(base) {
+        if (reloadBase && base) baseData = base;
+        return adapter.fetchLive();
+      }).then(function(live) {
+        if (live) { liveData = live; connectionStatus = 'live'; }
         merge();
         notifyAll();
         notifyConnListeners();
@@ -270,13 +276,13 @@ const DataStore = (function() {
       notifyAll();
       notifyConnListeners();
     }).catch(function(err) {
-      // file:// 协议下 fetch 必然失败，静默降级
+      // 即使 live 拉取失败，baseData 已更新 → 合并 baseData 保证最新
       connectionStatus = 'dead';
-      if (!baseData && fallback) {
-                setMerged(deepClone(fallback));
+      if (baseData) {
+        merge();
         notifyAll();
-      } else if (!merged && fallback) {
-                setMerged(deepClone(fallback));
+      } else if (fallback) {
+        setMerged(deepClone(fallback));
         notifyAll();
       }
       notifyConnListeners();
@@ -355,6 +361,20 @@ const DataStore = (function() {
     fetchAll: fetchAll,
     merge: merge,
     notifyAll: notifyAll,
+    // 强制刷新 base 数据（gen 运行后调用）
+    refreshBase: function() {
+      adapter.fetchBase().then(function(base) {
+        if (base) baseData = base;
+        return adapter.fetchLive();
+      }).then(function(live) {
+        if (live) liveData = live;
+        merge();
+        notifyAll();
+        notifyConnListeners();
+      }).catch(function() {
+        if (baseData) { merge(); notifyAll(); }
+      });
+    },
 
     // 适配器（可替换为 Dify）
     adapter: adapter,

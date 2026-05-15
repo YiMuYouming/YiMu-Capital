@@ -1,0 +1,254 @@
+{
+  "meta": {
+    "version": "1.0",
+    "currency": "CNY",
+    "total_deposit": 68707.55,
+    "last_twr_nav": 0.9858928414802732,
+    "updated": "2026-05-15T16:02:21.650483"
+  },
+  "intraday_histories": {},
+  "daily": [
+    {
+      "date": "2026-03-30",
+      "total": 68707.55,
+      "nav": 1.0,
+      "pnl_pct": 0.0,
+      "sh_pct": 0,
+      "sz_pct": 0,
+      "cy_pct": 0,
+      "pos_pct": 66.96,
+      "deposit": 0
+    },
+    {
+      "date": "2026-03-31",
+      "total": 68690.24,
+      "nav": 0.999748,
+      "pnl_pct": -0.0252,
+      "sh_pct": 0,
+      "sz_pct": 0,
+      "cy_pct": 0,
+      "pos_pct": 0.0,
+      "deposit": 0
+    },
+    {
+      "date": "2026-04-02",
+      "total": 68678.56,
+      "nav": 0.999748,
+      "pnl_pct": 0.0,
+      "sh_pct": 0,
+      "sz_pct": 0,
+      "cy_pct": 0,
+      "pos_pct": 56.7,
+      "deposit": 0
+    },
+    {
+      "date": "2026-04-03",
+      "total": 65709.76,
+      "nav": 0.956532,
+      "pnl_pct": -4.3227,
+      "sh_pct": 0,
+      "sz_pct": 0,
+      "cy_pct": 0,
+      "pos_pct": 0.0,
+      "deposit": 0
+    },
+    {
+      "date": "2026-04-08",
+      "total": 65693.39,
+      "nav": 0.956532,
+      "pnl_pct": 0.0,
+      "sh_pct": 0,
+      "sz_pct": 0,
+      "cy_pct": 0,
+      "pos_pct": 83.08,
+      "deposit": 0
+    },
+    {
+      "date": "2026-04-09",
+      "total": 64590.57,
+      "nav": 0.940475,
+      "pnl_pct": -1.6787,
+      "sh_pct": 0,
+      "sz_pct": 0,
+      "cy_pct": 0,
+      "pos_pct": 0.0,
+      "deposit": 0
+    },
+    {
+      "date": "2026-04-10",
+      "total": 64562.63,
+      "nav": 0.940475,
+      "pnl_pct": 0.0,
+      "sh_pct": 0,
+      "sz_pct": 0,
+      "cy_pct": 0,
+      "pos_pct": 144.23,
+      "deposit": 0
+    },
+    {
+      "date": "2026-04-13",
+      "total": 66586.71,
+      "nav": 0.970283,
+      "pnl_pct": 3.1695,
+      "sh_pct": 0,
+      "sz_pct": 0,
+      "cy_pct": 0,
+      "pos_pct": 111.3,
+      "deposit": 0
+    },
+    {
+      "date": "2026-04-14",
+      "total": 68980.71,
+      "nav": 1.005168,
+      "pnl_pct": 3.5953,
+      "sh_pct": 0,
+      "sz_pct": 0,
+      "cy_pct": 0,
+      "pos_pct": 0.0,
+      "deposit": 0
+    },
+    {
+      "date": "2026-04-15",
+      "total": 139340.95,
+      "nav": 1.005168,
+      "pnl_pct": 0.0,
+      "sh_pct": 0,
+      "sz_pct": 0,
+      "cy_pct": 0,
+      "pos_pct": 34.06,
+      "deposit": 0
+    },
+    {
+      "date": "2026-04-17",
+      "total": 138163.43,
+      "nav": 0.996673,
+      "pnl_pct": -0.8451,
+      "sh_pct": 0,
+      "sz_pct": 0,
+      "cy_pct": 0,
+      "pos_pct": 0.0,
+      "deposit": 0
+    },
+    {
+      "date": "2026-04-20",
+      "total": 138163.43,
+      "nav": 0.996673,
+      "pnl_pct": 0.0,
+      "sh_pct": 0,
+      "sz_pct": 0,
+      "cy_pct": 0,
+      "pos_pct": 0.0,
+      "deposit": 0
+    },
+    {
+      "date": "2026-04-21",
+      "total": 208390.11,
+      "nav": 0.996673,
+      "pnl_pct": 0.0,
+      "sh_pct": 0,
+      "sz_pct": 0,
+      "cy_pct": 0,
+      "pos_pct": 26.19,
+      "deposit": 0
+    },
+    {
+      "date": "2026-04-22",
+      "total": 206229.41,
+      "nav": 0.986428,
+      "pnl_pct": -1.0279,
+      "sh_pct": 0,
+      "sz_pct": 0,
+      "cy_pct": 0,
+      "pos_pct": 30.24,
+      "deposit": 0
+    },
+    {
+      "date": "2026-04-27",
+      "total": 209981.47,
+      "nav": 1.004375,
+      "pnl_pct": 1.8194,
+      "sh_pct": 0,
+      "sz_pct": 0,
+      "cy_pct": 0,
+      "pos_pct": 0.0,
+      "deposit": 0
+    },
+    {
+      "date": "2026-05-06",
+      "total": 209967.78,
+      "nav": 1.004375,
+      "pnl_pct": 0.0,
+      "sh_pct": 0,
+      "sz_pct": 0,
+      "cy_pct": 0,
+      "pos_pct": 21.78,
+      "deposit": 0
+    },
+    {
+      "date": "2026-05-07",
+      "total": 209366.47,
+      "nav": 1.001499,
+      "pnl_pct": -0.2864,
+      "sh_pct": 0,
+      "sz_pct": 0,
+      "cy_pct": 0,
+      "pos_pct": 13.1,
+      "deposit": 0
+    },
+    {
+      "date": "2026-05-08",
+      "total": 207990.65,
+      "nav": 0.994918,
+      "pnl_pct": -0.6571,
+      "sh_pct": 0,
+      "sz_pct": 0,
+      "cy_pct": 0,
+      "pos_pct": 0.0,
+      "deposit": 0
+    },
+    {
+      "date": "2026-05-12",
+      "total": 207973.48,
+      "nav": 0.994918,
+      "pnl_pct": 0.0,
+      "sh_pct": 0,
+      "sz_pct": 0,
+      "cy_pct": 0,
+      "pos_pct": 27.52,
+      "deposit": 0
+    },
+    {
+      "date": "2026-05-13",
+      "total": 207961.46,
+      "nav": 0.994918,
+      "pnl_pct": 0.0,
+      "sh_pct": 0,
+      "sz_pct": 0,
+      "cy_pct": 0,
+      "pos_pct": 46.79,
+      "deposit": 0
+    },
+    {
+      "date": "2026-05-14",
+      "total": 206075.0,
+      "nav": 0.985893,
+      "pnl_pct": -0.9071,
+      "sh_pct": 0,
+      "sz_pct": 0,
+      "cy_pct": 0,
+      "pos_pct": 27.77,
+      "deposit": 0
+    },
+    {
+      "date": "2026-05-15",
+      "total": 206075.0,
+      "nav": 0.985893,
+      "pnl_pct": 0.0,
+      "sh_pct": 0,
+      "sz_pct": 0,
+      "cy_pct": 0,
+      "pos_pct": 52.26,
+      "deposit": 0
+    }
+  ]
+}

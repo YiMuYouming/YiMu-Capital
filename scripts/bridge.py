@@ -9,11 +9,20 @@ LLM Hook: POST /api/llm → Anthropic API → 研判文本
 import json, os, sys
 from http.server import HTTPServer, SimpleHTTPRequestHandler
 from pathlib import Path
-from urllib.parse import parse_qs
+from datetime import datetime
+from urllib.parse import parse_qs, urlparse
 
 ROOT = Path(__file__).resolve().parent.parent
 DATA_FILE = ROOT / "data/dashboard_data.json"
 LLM_INSIGHTS_FILE = ROOT / "data/llm_insights.json"
+
+# SQLite db
+try:
+    from scripts.db import query_pnl, query_trades, query_pnl_summary
+except ImportError:
+    _s = str(ROOT)
+    if _s not in sys.path: sys.path.insert(0, _s)
+    from scripts.db import query_pnl, query_trades, query_pnl_summary
 
 # === LLM System Prompt ===
 SYSTEM_PROMPT = """你是洋米盯盘助手，为弈沐哥的A股短线+趋势混合交易提供实时研判。
@@ -184,6 +193,49 @@ class BridgeHandler(SimpleHTTPRequestHandler):
         super().__init__(*args, directory=str(ROOT), **kwargs)
 
     def do_GET(self):
+        parsed = urlparse(self.path)
+        if parsed.path == '/api/pnl':
+            qs = parse_qs(parsed.query)
+            range_val = qs.get('range', ['today'])[0]
+            index_val = qs.get('index', ['sh'])[0]
+            try:
+                result = query_pnl(range_val, index_val)
+                body = json.dumps(result, ensure_ascii=False).encode()
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/json')
+                self.end_headers()
+                self.wfile.write(body)
+            except Exception as e:
+                self.send_response(500)
+                self.end_headers()
+                self.wfile.write(json.dumps({'error': str(e)}).encode())
+            return
+        elif parsed.path == '/api/pnl/summary':
+            try:
+                result = query_pnl_summary()
+                body = json.dumps(result, ensure_ascii=False).encode()
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/json')
+                self.end_headers()
+                self.wfile.write(body)
+            except Exception as e:
+                self.send_response(500)
+                self.end_headers()
+                self.wfile.write(json.dumps({'error': str(e)}).encode())
+            return
+        elif parsed.path == '/api/trades':
+            try:
+                result = query_trades(limit=50)
+                body = json.dumps(result, ensure_ascii=False).encode()
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/json')
+                self.end_headers()
+                self.wfile.write(body)
+            except Exception as e:
+                self.send_response(500)
+                self.end_headers()
+                self.wfile.write(json.dumps({'error': str(e)}).encode())
+            return
         super().do_GET()
 
     def end_headers(self):
@@ -212,6 +264,31 @@ class BridgeHandler(SimpleHTTPRequestHandler):
                     if 'decision' not in data:
                         data['decision'] = {}
                     data['decision']['今日操作'] = payload['今日操作']
+                if 'pnl' in payload:
+                    if 'pnl' not in data:
+                        data['pnl'] = {}
+                    for key in ['总资产', '累计入金']:
+                        if key in payload['pnl'] and payload['pnl'][key] is not None:
+                            data['pnl'][key] = payload['pnl'][key]
+
+                # 同步写入 SQLite 交易记录
+                try:
+                    from scripts.db import insert_trade
+                    tdate = payload.get('_trade_date', datetime.now().strftime('%Y-%m-%d'))
+                    for op in (payload.get('今日操作') or []):
+                        insert_trade({
+                            'trade_date': tdate,
+                            'trade_time': op.get('时间'),
+                            'action': op.get('动作'),
+                            'code': op.get('代码', ''),
+                            'name': op.get('标的', ''),
+                            'price': op.get('价格'),
+                            'qty': op.get('数量'),
+                            'window': op.get('窗口'),
+                            'reason': op.get('原因'),
+                        })
+                except Exception as e:
+                    print(f"  [bridge] SQLite trade insert error: {e}")
 
                 with open(DATA_FILE, 'w') as f:
                     json.dump(data, f, ensure_ascii=False, indent=2)
@@ -281,7 +358,7 @@ class BridgeHandler(SimpleHTTPRequestHandler):
                     verified_signals = _verify_signals(signals_part, data_snapshot) if signals_part else []
 
                     insight = {
-                        'timestamp': __import__('datetime').datetime.now().strftime('%H:%M:%S'),
+                        'timestamp': datetime.now().strftime('%H:%M:%S'),
                         'node': node,
                         'text': text_part,
                         'signals': verified_signals,
@@ -289,7 +366,7 @@ class BridgeHandler(SimpleHTTPRequestHandler):
                         'warning_count': sum(1 for v in verified_signals if v['status'] == '⚠️'),
                     }
                     # 持久化写入
-                    today = __import__('datetime').datetime.now().strftime('%Y-%m-%d')
+                    today = datetime.now().strftime('%Y-%m-%d')
                     insights = {}
                     if LLM_INSIGHTS_FILE.exists():
                         try:
@@ -303,6 +380,14 @@ class BridgeHandler(SimpleHTTPRequestHandler):
                     LLM_INSIGHTS_FILE.parent.mkdir(parents=True, exist_ok=True)
                     with open(LLM_INSIGHTS_FILE, 'w') as f:
                         json.dump(insights, f, ensure_ascii=False, indent=2)
+
+                    # 同步写入 SQLite
+                    try:
+                        from scripts.db import insert_llm
+                        insert_llm(today, node, text_part, verified_signals,
+                                   insight['verified_count'], insight['warning_count'])
+                    except Exception as e:
+                        print(f"  [bridge] SQLite LLM insert error: {e}")
 
                     self.send_response(200)
                     self.send_header('Content-Type', 'application/json')

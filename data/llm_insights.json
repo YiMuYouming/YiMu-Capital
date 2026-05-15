@@ -107,5 +107,37 @@
       "verified_count": 2,
       "warning_count": 1
     }
+  },
+  "2026-05-15": {
+    "早盘": {
+      "timestamp": "18:14:34",
+      "node": "早盘",
+      "text": "早盘上证微涨+0.12%，但缺乏连板龙头、板块合力及竞价三件套数据，无法判断早盘情绪与候选标的条件。建议补充涨停池、板块涨跌幅及量能数据后再做W1研判。当前无明确买入信号，谨慎观望为主。",
+      "signals": [
+        {
+          "signal": "INFO | 上证指数 | — | 低",
+          "type": "INFO",
+          "target": "上证指数",
+          "status": "⚠️",
+          "note": "板块未在数据中"
+        },
+        {
+          "signal": "WATCH | 连板龙头 | 多 | 低",
+          "type": "WATCH",
+          "target": "连板龙头",
+          "status": "✅",
+          "note": ""
+        },
+        {
+          "signal": "WATCH | 竞价三件套 | — | 低",
+          "type": "WATCH",
+          "target": "竞价三件套",
+          "status": "✅",
+          "note": ""
+        }
+      ],
+      "verified_count": 2,
+      "warning_count": 1
+    }
   }
 }

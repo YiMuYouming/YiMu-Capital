@@ -13,11 +13,32 @@ v2.0: PyTDX(个股+指数) + 东方财富(板块，境外IP可能受限) + easyq
 
 import json, os, sys, time, argparse, re
 from pathlib import Path
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
+
+try:
+    from ym_stock_data.fetch import fetch
+except ImportError:
+    import sys as _sys
+    _pipeline_path = os.path.expanduser("~/Documents/YM_Capital/YM-data-pipeline")
+    if _pipeline_path not in _sys.path:
+        _sys.path.insert(0, _pipeline_path)
+    try:
+        from ym_stock_data.fetch import fetch
+    except ImportError:
+        fetch = None
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
 DASHBOARD_DATA = ROOT_DIR / "data/dashboard_data.json"
 OUTPUT_FILE = ROOT_DIR / "data/dashboard_live.json"
+# PnL 数据库（db.py SQLite）
+try:
+    from scripts.db import init_db, insert_snapshot, insert_daily_summary
+except ImportError:
+    import sys as _sys
+    _scripts_path = os.path.join(os.path.dirname(__file__), '..', 'scripts')
+    if _scripts_path not in _sys.path:
+        _sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+    from scripts.db import init_db, insert_snapshot, insert_daily_summary
 
 # === 板块名称映射：复盘笔记名称 → 东方财富 BK 代码 ===
 # 首次运行自动匹配，匹配不到的需手动补充
@@ -513,36 +534,56 @@ def _get_up_down_count():
 
 # ========== 全市场涨跌分布 ==========
 
-_A_SHARE_CODES = None  # 缓存A股代码列表
+_A_SHARE_CODES = None  # 缓存A股代码列表（真实股票）
+_STOCK_NAMES = {}  # 缓存 code→name 映射
 
 def _get_a_share_codes():
-    """生成A股代码列表 [(market, code), ...]"""
-    global _A_SHARE_CODES
+    """精准获取全A股代码列表 + 名称映射"""
+    global _A_SHARE_CODES, _STOCK_NAMES
     if _A_SHARE_CODES:
         return _A_SHARE_CODES
+
+    api = _get_tdx_api()
+    if not api:
+        return []
+
     codes = []
-    # 上海主板 + 科创板
-    for prefix, start, end in [('60', 600000, 606000), ('688', 688000, 689000)]:
-        for i in range(start, end):
-            codes.append((1, str(i)))
-    # 深圳主板 + 中小板 + 创业板
-    for i in range(1, 4000):
-        codes.append((0, f'{i:06d}'))
-    for i in range(300000, 302000):
-        codes.append((0, str(i)))
+    name_map = {}
+    for mkt, start, end in [(0, 0, 2000), (1, 24000, 27000)]:
+        for offset in range(start, end, 1000):
+            try:
+                items = api.get_security_list(mkt, offset) or []
+                for item in items:
+                    code = str(item.get('code', ''))
+                    if not code.isdigit() or len(code) != 6:
+                        continue
+                    name = str(item.get('name', ''))
+                    if mkt == 1 and code.startswith(('600','601','602','603','604','605','688','689')):
+                        codes.append((mkt, code))
+                        name_map[code] = name
+                    elif mkt == 0 and code.startswith(('000','001','002','003','004','300','301')):
+                        codes.append((mkt, code))
+                        name_map[code] = name
+            except Exception:
+                pass
+
+    codes = sorted(set(codes))
     _A_SHARE_CODES = codes
+    _STOCK_NAMES = name_map
+    log(f"加载A股代码: {len(codes)} 只")
     return codes
 
 
 def fetch_breadth():
-    """全市场涨跌分布 → {label: count}，约 2-3s，供 30s 轮询"""
+    """全市场涨跌分布 + 涨停股收集 → {cats: {label: count}, zt_codes: [{code,zhangfu,amount}]}"""
     api = _get_tdx_api()
     if not api:
         return None
     all_codes = _get_a_share_codes()
-    batch_size = 200
+    batch_size = 50  # 小批量避免单次失败整批丢数据
     cats = {'涨停': 0, '>7%': 0, '5~7%': 0, '3~5%': 0, '0~3%': 0,
             '-0~-3%': 0, '-3~-5%': 0, '-5~-7%': 0, '<-7%': 0, '跌停': 0}
+    zt_codes = []
     total_valid = 0
     errors = 0
 
@@ -553,7 +594,7 @@ def fetch_breadth():
         except Exception:
             errors += 1
             if errors > 5:
-                break  # 连续错误过多，放弃本轮
+                break
             continue
         errors = 0
         if not raw:
@@ -563,10 +604,21 @@ def fetch_breadth():
             last_close = r.get('last_close', 0)
             if not price or not last_close:
                 continue
+            code = r.get('code', '')
             pct = round((price - last_close) / last_close * 100, 2)
             total_valid += 1
             if pct >= 9.9:
                 cats['涨停'] += 1
+                # zt_codes only for real zt: ST不记、科创/创业>=19.5%
+                is_st = code.startswith(('ST', '*ST', 'S'))
+                is_kcb_cyb = code.startswith(('688', '300', '301'))
+                is_real_zt = (is_kcb_cyb and pct >= 19.5) or (not is_kcb_cyb and pct >= 9.8)
+                if is_real_zt and not is_st:
+                    zt_codes.append({
+                        'code': code,
+                        'zhangfu': pct,
+                        'amount': r.get('amount', 0),
+                    })
             elif pct > 7:
                 cats['>7%'] += 1
             elif pct > 5:
@@ -589,7 +641,7 @@ def fetch_breadth():
     if total_valid == 0:
         return None
     cats['_total'] = total_valid
-    return cats
+    return {'cats': cats, 'zt_codes': zt_codes}
 
 
 def fetch_index_pytdx():
@@ -1127,12 +1179,197 @@ def fetch_sectors_tdx(sector_names):
 _sector_ma_cache = {}  # 板块均线缓存：{code: {ma5, ma20, vol_ma5}}
 _last_sectors_cache = {}  # 板块数据缓存，非刷新轮次复用
 _last_yesterday_baseline = {}  # 昨日基线缓存，仅30s刷新一次
+_live_zt_cache = []  # PyTDX 全市场扫描涨停缓存（30s更新一次，5s周期不覆盖）
+_last_breadth_cache = {}  # 全市场涨跌分布缓存（同理防覆盖）
+
+# 涨停梯队历史缓存：{date_str: [zt_stocks]}
+_zt_history_cache = None
+_zt_history_loaded = False
+
+# P&L 快照：每 60 秒写入一次 SQLite
+_last_pnl_log = 0
+_PNL_LOG_INTERVAL = 300  # 5分钟快照粒度
+_last_rollup_date = None  # 日终 rollup 防重复
+
+
+def is_trading_time():
+    now = datetime.now()
+    if now.weekday() >= 5:  # Sat=5, Sun=6
+        return False
+    t = now.hour * 60 + now.minute
+    return 570 <= t < 900  # 9:30-15:00
+
+
+def calc_pnl(data, quotes):
+    """从持仓+实时报价计算浮动盈亏"""
+    pnl_section = data.get('pnl', {}) or {}
+    total_asset = pnl_section.get('总资产', 0) or 0
+    positions = data.get('positions', [])
+    mv, cost = 0.0, 0.0
+    for p in positions:
+        status = str(p.get('状态', ''))
+        if '清' in status:
+            continue
+        code = str(p.get('代码', ''))
+        qty_str = str(p.get('数量', '0')).replace('股', '')
+        try:
+            qty = float(qty_str) if qty_str else 0
+        except ValueError:
+            qty = 0
+        try:
+            cost_price = float(p.get('成本', 0))
+        except (ValueError, TypeError):
+            cost_price = 0
+        live = quotes.get(code, {})
+        try:
+            cur_price = float(live.get('最新价', 0))
+        except (ValueError, TypeError):
+            cur_price = 0
+        if cur_price <= 0:
+            cur_price = cost_price
+        mv += qty * cur_price
+        cost += qty * cost_price
+    pnl_amount = mv - cost
+    pnl_pct = (pnl_amount / total_asset * 100) if total_asset > 0 else 0
+    pos_pct = (mv / total_asset * 100) if total_asset > 0 else 0
+    return {
+        'mv': round(mv, 2),
+        'cost': round(cost, 2),
+        'pnl_amount': round(pnl_amount, 2),
+        'pnl_pct': round(pnl_pct, 4),
+        'pos_pct': round(pos_pct, 2),
+        'total_asset': total_asset,
+    }
+
+
+def log_pnl_snapshot(pnl, live_index):
+    """写入一条日内 P&L 快照到 SQLite"""
+    now = datetime.now()
+    today = now.strftime('%Y-%m-%d')
+    ts_iso = now.strftime('%Y-%m-%dT%H:%M:%S')
+
+    def safe_float(v, default=0.0):
+        if v is None: return default
+        try: return round(float(str(v).replace('%', '')), 4)
+        except (ValueError, TypeError): return default
+
+    li = live_index or {}
+    try:
+        insert_snapshot({
+            'ts': ts_iso,
+            'date': today,
+            'pnl_pct': pnl['pnl_pct'],
+            'nav': 1.0,  # TWR NAV 由日终 rollup 更新
+            'sh_pct': safe_float(li.get('上证指数涨幅', 0)),
+            'sz_pct': safe_float(li.get('深证指数涨幅', 0)),
+            'cy_pct': safe_float(li.get('创业指数涨幅', 0)),
+            'pos_pct': pnl['pos_pct'],
+            'mv': pnl['mv'],
+            'total_asset': pnl['total_asset'],
+        })
+        log(f"PnL: {now.strftime('%H:%M')} pnl={pnl['pnl_pct']:.2f}% pos={pnl['pos_pct']:.0f}%")
+    except Exception as e:
+        log(f"PnL snapshot error: {e}")
+
+
+def rollup_daily():
+    """收盘后汇总当日日内数据写入 daily_summary"""
+    global _last_rollup_date
+    now = datetime.now()
+    today = now.strftime('%Y-%m-%d')
+    if _last_rollup_date == today:
+        return  # 当天已 rollup
+    try:
+        from scripts.db import query_pnl as db_query_pnl
+        data = db_query_pnl('today')
+        if not data or not data['portfolio']:
+            return
+        n = len(data['portfolio'])
+        if n < 2: return  # 数据太少不 rollup
+        # 计算日内最大回撤
+        peak = data['portfolio'][0]
+        max_dd = 0
+        dd_start = dd_end = None
+        peak_idx = 0
+        for i, v in enumerate(data['portfolio']):
+            if v > peak: peak = v; peak_idx = i
+            dd = v - peak
+            if dd < max_dd:
+                max_dd = dd
+                dd_start = data['labels'][peak_idx] if data['labels'] else None
+                dd_end = data['labels'][i] if data['labels'] else None
+        insert_daily_summary({
+            'date': today,
+            'nav': 1.0,
+            'pnl_pct': round(data['portfolio'][-1], 4),
+            'sh_pct': round(data['benchmark'][-1], 4) if data['benchmark'] else 0,
+            'sz_pct': 0,
+            'cy_pct': 0,
+            'pos_pct': round(data['position'][-1], 2) if data['position'] else 0,
+            'deposit': 0,
+            'max_dd': round(max_dd, 4),
+            'max_dd_start': dd_start,
+            'max_dd_end': dd_end,
+        })
+        _last_rollup_date = today
+        log(f"Daily rollup: pnl={data['portfolio'][-1]:.2f}% dd={max_dd:.2f}%")
+    except Exception as e:
+        log(f"Rollup error: {e}")
+
+
+def _load_zt_history():
+    """加载近5个交易日涨停数据（会话内一次）"""
+    global _zt_history_cache, _zt_history_loaded
+    if _zt_history_loaded:
+        return _zt_history_cache
+    if not fetch:
+        _zt_history_loaded = True
+        return None
+
+    from datetime import timedelta as _td
+    history = {}
+    today = date.today()
+    for i in range(5):
+        d = (today - _td(days=i)).strftime("%Y-%m-%d")
+        try:
+            r = fetch("ths_hot", date_str=d)
+            if r and r.get("zt_stocks"):
+                history[d] = r["zt_stocks"]
+        except Exception:
+            pass
+    _zt_history_loaded = True
+    _zt_history_cache = history if history else None
+    return _zt_history_cache
+
+
+def _fetch_hot_list():
+    """拉取同花顺热点涨停数据"""
+    if not fetch:
+        return None
+    try:
+        r = fetch("ths_hot")
+        hl = {
+            "total": r.get("total", 0),
+            "zt_count": r.get("zt_count", 0),
+            "reason_stats": r.get("reason_stats", {}),
+            "zt_stocks": r.get("zt_stocks", []),
+            "all_stocks": r.get("stocks", []),  # 全量强势股（供名称查表）
+        }
+        history = _load_zt_history()
+        if history:
+            hl["zt_history"] = history
+        return hl
+    except Exception:
+        return None
+
 
 def build_live_data(codes, skip_sectors=False):
     """组装完整 live 数据"""
-    global _tdx_using_fallback, _tdx_fail_count, _last_sectors_cache, _last_yesterday_baseline
+    global _tdx_using_fallback, _tdx_fail_count, _last_sectors_cache, _last_yesterday_baseline, _live_zt_cache, _last_breadth_cache
 
     data = {"live_sectors": _last_sectors_cache}  # 默认复用上次板块数据
+    if _last_breadth_cache:
+        data["live_breadth"] = _last_breadth_cache  # 每个周期都写入缓存
     if _last_yesterday_baseline:
         data["yesterday_baseline"] = _last_yesterday_baseline  # 非刷新轮次复用缓存
 
@@ -1202,10 +1439,61 @@ def build_live_data(codes, skip_sectors=False):
             data["yesterday_baseline"] = yest_base
             _last_yesterday_baseline = yest_base  # 更新缓存
 
-        # 全市场涨跌分布（与板块同频，30s）
-        breadth = fetch_breadth()
-        if breadth:
-            data["live_breadth"] = breadth
+        # 全市场涨跌分布 + 涨停收集（与板块同频，30s）
+        try:
+            breadth_result = fetch_breadth()
+            if breadth_result:
+                _last_breadth_cache = breadth_result['cats']
+                data["live_breadth"] = _last_breadth_cache
+                _live_zt_cache = breadth_result.get('zt_codes', [])
+                log(f"全市场扫描: {breadth_result['cats'].get('涨停',0)}涨停 {len(_live_zt_cache)}只")
+            else:
+                log("全市场扫描返回空")
+        except Exception as e:
+            log(f"全市场扫描异常: {e}")
+
+    # 同花顺热榜涨停 (每轮更新当日 + 历史缓存)
+    hl = _fetch_hot_list()
+    if hl:
+        # PyTDX 全市场扫描涨停：用 ths_hot 名称补全，缓存防覆盖
+        live_zt_codes = _live_zt_cache
+        if live_zt_codes:
+            # 名称查表：ths_hot + stock_names + zt_history
+            name_map = dict(_STOCK_NAMES)
+            for s in hl.get('all_stocks', []):
+                name_map[s['code']] = s['name']
+            for s in hl.get('zt_stocks', []):
+                name_map[s['code']] = s['name']
+            for d_stocks in hl.get('zt_history', {}).values():
+                for s in d_stocks:
+                    name_map[s['code']] = s['name']
+            live_zt = []
+            for z in live_zt_codes:
+                code = z['code']
+                name = name_map.get(code, code)
+                live_zt.append({
+                    'code': code,
+                    'name': name,
+                    'zhangfu': z['zhangfu'],
+                    'chengjiaoe': round(z['amount'] / 10000, 1) if z['amount'] else None,
+                    'huanshou': None,
+                    'reason': '',
+                })
+            # 如果 ths_hot 今天没数据（zhangfu全0），用 live 数据覆盖
+            ths_zt = hl.get('zt_stocks', [])
+            ths_all_zero = all(s.get('zhangfu', 0) == 0 for s in ths_zt) if ths_zt else True
+            if live_zt and ths_all_zero:
+                hl['zt_stocks'] = live_zt
+                hl['zt_count'] = len(live_zt)
+            elif live_zt:
+                # ths_hot 有数据：合并去重
+                existing = {s['code'] for s in ths_zt}
+                for z in live_zt:
+                    if z['code'] not in existing:
+                        ths_zt.append(z)
+                hl['zt_stocks'] = ths_zt
+                hl['zt_count'] = len(ths_zt)
+        data["hot_list"] = hl
 
     data["meta"] = {
         "fetched": datetime.now().strftime("%Y-%m-%dT%H:%M:%S+08:00"),
@@ -1254,6 +1542,31 @@ def watch_mode(interval_stocks=5, interval_sectors=30, skip_sectors=False):
             if src != last_source:
                 log(f"{'⚠️ 兜底模式' if src == 'easyquotation' else 'PyTDX 正常'} — {n_stocks}只股票")
                 last_source = src
+
+            # P&L 快照（每60s一次，仅交易时段）
+            # 非交易时间跳过所有数据写入
+            global _last_pnl_log, _last_rollup_date
+            in_trading = is_trading_time()
+            if not in_trading:
+                time.sleep(interval_stocks * 20)  # 非交易时间降低轮询频率
+                continue
+            if data.get("live_quotes") and (now - _last_pnl_log >= _PNL_LOG_INTERVAL):
+                try:
+                    base = {}
+                    if DASHBOARD_DATA.exists():
+                        with open(DASHBOARD_DATA) as f:
+                            base = json.load(f)
+                    pnl = calc_pnl(base, data.get("live_quotes", {}))
+                    live_idx = data.get("live_index", {})
+                    log_pnl_snapshot(pnl, live_idx)
+                    _last_pnl_log = now
+                except Exception as e:
+                    log(f"PnL calc error: {e}")
+
+            # 日终 rollup（15:01 后执行一次）
+            rollup_now = datetime.now()
+            if in_trading and rollup_now.hour == 15 and rollup_now.minute >= 1:
+                rollup_daily()
 
             if need_sectors:
                 last_sector_update = now
