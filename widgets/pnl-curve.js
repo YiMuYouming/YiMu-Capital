@@ -284,12 +284,8 @@ class PnLCurveWidget extends YiMuWidget {
 
     // Current asset
     var ta = s.totalAsset;
-    if (!ta || ta <= 0) {
-      asset.textContent = '—';
-      document.getElementById('pnl_asset_sub').textContent = '请先同步报数面板';
-      return;
-    }
-    asset.textContent = ta ? _pnlFmtMoney(ta) : '—';
+    var hasAsset = ta && ta > 0;
+    asset.textContent = hasAsset ? _pnlFmtMoney(ta) : '—';
     document.getElementById('pnl_asset_sub').textContent = ta ? '累计入金 ' + _pnlFmtMoney(s.totalDeposit) : '—';
 
     // Position P&L
