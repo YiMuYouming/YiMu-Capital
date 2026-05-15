@@ -127,11 +127,21 @@ def query_pnl(range='today', index='sh'):
     idx_field = idx_map.get(index, 'sh_pct')
     today = datetime.now().strftime('%Y-%m-%d')
 
-    # today: 走 intraday_snapshots（5分钟粒度），唯一保留的日内路径
+    # today: 走 intraday_snapshots（5分钟粒度）
+    # 非交易日自动回退到最近一个交易日的日内数据
     if range == 'today':
         rows = _exec(
             f"SELECT ts, pnl_pct, {idx_field} AS bm_pct, pos_pct, nav FROM intraday_snapshots WHERE date = ? ORDER BY ts",
             (today,))
+        if not rows:
+            # 回退到最近有数据的交易日
+            last_date_row = _exec(
+                "SELECT date FROM intraday_snapshots ORDER BY date DESC LIMIT 1")
+            if last_date_row:
+                today = last_date_row[0]['date']
+                rows = _exec(
+                    f"SELECT ts, pnl_pct, {idx_field} AS bm_pct, pos_pct, nav FROM intraday_snapshots WHERE date = ? ORDER BY ts",
+                    (today,))
         return {
             'type': 'intraday',
             'labels': [r['ts'][-8:-3] if 'T' in r['ts'] else r['ts'] for r in rows],
