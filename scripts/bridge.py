@@ -203,7 +203,11 @@ class BridgeHandler(SimpleHTTPRequestHandler):
                     data = {}
 
                 if 'positions' in payload:
-                    data['positions'] = payload['positions']
+                    # merge by 标的: 更新已有或追加新标的，不删除 data 中已有的标的
+                    existing = {p.get('标的'): p for p in data.get('positions', [])}
+                    for p in payload['positions']:
+                        existing[p.get('标的')] = p
+                    data['positions'] = list(existing.values())
                 if '今日操作' in payload:
                     if 'decision' not in data:
                         data['decision'] = {}

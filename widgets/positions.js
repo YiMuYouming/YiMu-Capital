@@ -55,22 +55,18 @@ class PositionsWidget extends YiMuWidget {
 
     var html = '';
 
-    // ===== 汇总卡片 =====
+    // 汇总卡片：仅 总资产/可用资金 可手工报，其余全自动计算
     var ta = parseFloat(manual['总资产'])||0;
     var pv=0, pc=0; active.forEach(function(p){pv+=p['_mv']||0;pc+=Math.round((parseFloat(p['成本'])||0)*(p['_qty']||0));});
-    // 总盈亏始终从实时数据计算，不被手工值覆盖
-    var tpCalc=pv-pc;
-    var tp = tpCalc; // 实时计算盈亏（未扣费）
-    var manualPnL = (manual['总盈亏']!=null) ? parseFloat(manual['总盈亏']) : null;
+    var tp = pv - pc;
     var af = (manual['可用资金']!=null) ? parseFloat(manual['可用资金']) : ta-pv;
-    // 如果没报总资产，从持仓市值推算
     if (!ta || ta <= 0) ta = pv + af;
     var tc=tp>0?'up':tp<0?'down':'', pp=pc>0?(tp/pc*100):0, pr=ta>0?Math.round(pv/ta*100):0;
 
     html += '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:var(--sp-xs) var(--sp-sm);margin-bottom:var(--sp-md);padding:var(--sp-sm);background:var(--bg-base);border-radius:var(--radius-md);font-size:var(--fs-body)">'+
       '<div style="text-align:center"><div class="kpi-label">总资产</div><div style="font-family:var(--font-mono);font-size:var(--fs-subtitle);font-weight:700">'+ta.toLocaleString()+'</div></div>'+
       '<div style="text-align:center"><div class="kpi-label">持仓市值</div><div style="font-family:var(--font-mono);font-size:var(--fs-subtitle);font-weight:700">'+pv.toLocaleString()+'</div></div>'+
-      '<div style="text-align:center"><div class="kpi-label">总盈亏</div><div style="font-family:var(--font-mono);font-size:var(--fs-subtitle);font-weight:700;color:var(--'+tc+')">'+(tp>=0?'+':'')+tp.toFixed(2)+'</div>'+(manualPnL!==null&&manualPnL!==tp?'<div style=\"font-size:10px;color:var(--text-disabled)\">手工报'+(manualPnL>=0?'+':'')+manualPnL.toFixed(2)+'</div>':'')+'</div>'+
+      '<div style="text-align:center"><div class="kpi-label">总盈亏</div><div style="font-family:var(--font-mono);font-size:var(--fs-subtitle);font-weight:700;color:var(--'+tc+')">'+(tp>=0?'+':'')+tp.toFixed(2)+'</div></div>'+
       '<div style="text-align:center"><div class="kpi-label">总盈亏%</div><div style="font-family:var(--font-mono);font-size:var(--fs-subtitle);font-weight:700;color:var(--'+tc+')">'+(pp>=0?'+':'')+pp.toFixed(2)+'%</div></div>'+
       '<div style="text-align:center"><div class="kpi-label">可用资金</div><div style="font-family:var(--font-mono);font-size:var(--fs-subtitle);font-weight:700">'+af.toLocaleString()+'</div></div>'+
       '<div style="text-align:center"><div class="kpi-label">仓位</div><div style="font-family:var(--font-mono);font-size:var(--fs-subtitle);font-weight:700;color:'+(pr>80?'var(--danger)':pr>50?'var(--warn)':'var(--info)')+'">'+pr+'%</div></div>'+

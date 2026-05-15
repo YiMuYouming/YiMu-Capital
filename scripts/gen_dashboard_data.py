@@ -749,7 +749,7 @@ def build_dashboard_data(review_path):
 
 
 def _preserve_cleared(new_data):
-    """从现有 dashboard_data.json 中提取清仓持仓，合并到新数据中"""
+    """从现有 dashboard_data.json 中提取清仓持仓（7日内），合并到新数据中"""
     if not OUTPUT_FILE.exists():
         return
     try:
@@ -760,11 +760,22 @@ def _preserve_cleared(new_data):
     old_positions = old.get("positions", [])
     if not old_positions:
         return
-    # 提取旧数据中的清仓持仓
-    cleared = [p for p in old_positions if p.get("状态", "").find("清") >= 0]
+    now = datetime.now()
+    cleared = []
+    for p in old_positions:
+        if p.get("状态", "").find("清") < 0:
+            continue
+        d = p.get("清仓日期", "")
+        if d:
+            try:
+                age = (now - datetime.strptime(d, "%Y-%m-%d")).days
+                if age > 7:
+                    continue
+            except Exception:
+                pass
+        cleared.append(p)
     if not cleared:
         return
-    # 去重后合并
     existing_names = {p.get("标的") for p in new_data.get("positions", [])}
     for p in cleared:
         if p.get("标的") not in existing_names:
