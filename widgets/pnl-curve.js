@@ -78,8 +78,8 @@ class PnLCurveWidget extends YiMuWidget {
     var liveQ = (data && data.live_quotes) || {};
     var positions = (data && data.positions) || [];
     var pnlCfg = (data && data.pnl) || {};
-    var totalAsset = pnlCfg['总资产'] || 0;
-    var totalDeposit = pnlCfg['累计入金'] || 0;
+    var totalAsset = pnlCfg['总资产'] || (this._state && this._state.totalAsset) || 0;
+    var totalDeposit = pnlCfg['累计入金'] || (this._state && this._state.totalDeposit) || 0;
 
     this._state = {
       period: (this._state && this._state.period) || 'today',
