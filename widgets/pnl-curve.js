@@ -62,7 +62,7 @@
     '.pnl-cum-row td{font-weight:600;border-top:2px solid var(--border);padding:10px 12px}' +
     // Summary
     '.pnl-summary{display:grid;grid-template-columns:repeat(5,1fr);gap:1px;background:var(--border);border-top:1px solid var(--border)}' +
-    '.pnl-sum-cell{background:var(--bg-card);padding:10px 14px;text-align:center}' +
+    '.pnl-sum-cell{background:var(--bg-card);padding:10px 14px;text-align:right}' +
     '.pnl-sum-lbl{font-size:9px;text-transform:uppercase;letter-spacing:.3px;color:var(--text-disabled);margin-bottom:2px}' +
     '.pnl-sum-val{font-size:14px;font-weight:600;font-family:var(--font-mono)}';
   document.head.appendChild(style);
@@ -158,7 +158,7 @@ class PnLCurveWidget extends YiMuWidget {
       // KPI row
       '<div class="pnl-kpi" id="pnl_kpi_' + this.id + '">' +
         '<div class="pnl-kpi-card"><div class="pnl-kpi-lbl">当前资产</div><div class="pnl-kpi-val" id="pnl_asset">—</div><div class="pnl-kpi-sub" id="pnl_asset_sub">—</div></div>' +
-        '<div class="pnl-kpi-card"><div class="pnl-kpi-lbl">持仓盈亏</div><div class="pnl-kpi-val" id="pnl_pnl">—</div><div class="pnl-kpi-sub" id="pnl_pnl_sub">—</div></div>' +
+        '<div class="pnl-kpi-card"><div class="pnl-kpi-lbl">浮动盈亏</div><div class="pnl-kpi-val" id="pnl_pnl">—</div><div class="pnl-kpi-sub" id="pnl_pnl_sub">—</div></div>' +
         '<div class="pnl-kpi-card"><div class="pnl-kpi-lbl">仓位</div><div class="pnl-kpi-val" id="pnl_pos">—</div><div class="pnl-kpi-sub" id="pnl_pos_sub">—</div></div>' +
         '<div class="pnl-kpi-card pnl-kpi-dyn"><div class="pnl-kpi-lbl" id="pnl_period_label">今日收益</div><div class="pnl-kpi-val" id="pnl_period_val">—</div><div class="pnl-kpi-sub" id="pnl_period_sub">—</div></div>' +
         '<div class="pnl-kpi-card pnl-kpi-dyn"><div class="pnl-kpi-lbl" id="pnl_dd_label">今日回撤</div><div class="pnl-kpi-val" id="pnl_dd_val">—</div><div class="pnl-kpi-sub" id="pnl_dd_sub">—</div></div>' +
@@ -177,7 +177,7 @@ class PnLCurveWidget extends YiMuWidget {
           '<button class="pnl-period" data-p="month">本月</button>' +
           '<button class="pnl-period" data-p="quarter">近三月</button>' +
           '<button class="pnl-period" data-p="year">近一年</button>' +
-          '<button class="pnl-period pnl-period-custom">自定义</button>' +
+          '' +
         '</div>' +
       '</div>' +
       // Chart
@@ -214,7 +214,7 @@ class PnLCurveWidget extends YiMuWidget {
     var now = new Date();
     var day = now.getDay() || 7;
     switch(period) {
-      case 'week': { var mon = new Date(now); mon.setDate(now.getDate() - day + 1); return daily.filter(function(d){return new Date(d.date)>=mon;}); }
+      case 'week': { var dow = now.getDay(); var diff = dow === 0 ? -6 : 1 - dow; var mon = new Date(now); mon.setDate(now.getDate() + diff); mon.setHours(0,0,0,0); return daily.filter(function(d){return new Date(d.date)>=mon;}); }
       case 'month': return daily.filter(function(d){var dt=new Date(d.date); return dt.getMonth()===now.getMonth()&&dt.getFullYear()===now.getFullYear();});
       case 'quarter': { var q = new Date(now); q.setMonth(now.getMonth()-3); return daily.filter(function(d){return new Date(d.date)>=q;}); }
       case 'year': return daily.filter(function(d){return new Date(d.date).getFullYear()===now.getFullYear();});
@@ -326,14 +326,14 @@ class PnLCurveWidget extends YiMuWidget {
     // Period KPI
     var periodLabel = { today:'今日', week:'本周', month:'本月', quarter:'近三月', year:'近一年' };
     var perStr = periodLabel[s.period] || s.period;
-    document.getElementById('pnl_period_label').textContent = perStr + '收益';
+    document.getElementById('pnl_period_label').textContent = perStr + '净值变化';
     document.getElementById('pnl_dd_label').textContent = perStr + '回撤';
 
     // 今日：用实时持仓浮动盈亏；周/月/季/年：用 all-data 缓存算 TWR
     if (s.period === 'today') {
       document.getElementById('pnl_period_val').textContent = (pnlPct >= 0 ? '+' : '') + pnlPct.toFixed(2) + '%';
       document.getElementById('pnl_period_val').style.color = pnlPct >= 0 ? 'var(--up)' : 'var(--down)';
-      document.getElementById('pnl_period_sub').textContent = '持仓浮动';
+      document.getElementById('pnl_period_sub').textContent = '浮动盈亏/总资产';
     } else {
       var cache = this._posCache || this._allDailyData;
       if (cache && cache.dates && cache.dates.length) {
