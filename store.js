@@ -168,6 +168,13 @@ const DataStore = (function() {
       if (cgVal) { d.sentiment = d.sentiment || {}; d.sentiment['次高板'] = cgVal; }
       var tdVal = manualData['梯队'] || '';
       if (tdVal) { d.sentiment = d.sentiment || {}; d.sentiment['连板梯队'] = tdVal; }
+      // 账户头寸 → d.pnl（W22 收益曲线依赖）
+      var zcVal = manualData['总资产'] || '';
+      if (zcVal) { d.pnl = d.pnl || {}; d.pnl['总资产'] = parseFloat(zcVal) || 0; }
+      var rjVal = manualData['可用资金'] || '';
+      if (rjVal) { d.pnl = d.pnl || {}; d.pnl['可用资金'] = parseFloat(rjVal) || 0; }
+      var ykVal = manualData['总盈亏'] || '';
+      if (ykVal) { d.pnl = d.pnl || {}; d.pnl['总盈亏'] = parseFloat(ykVal) || 0; }
     }
 
     // Step 3: liveData 覆盖（实时报价 + 15min量价 + 板块）
