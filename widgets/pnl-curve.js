@@ -379,57 +379,82 @@ class PnLCurveWidget extends YiMuWidget {
 
     function pctStr(v) { return (isNaN(v) ? '—' : (v >= 0 ? '+' : '') + v.toFixed(2) + '%'); }
 
-    var periods = ['today', 'week', 'month', 'quarter', 'year'];
-    var labels = ['今日', '本周', '本月', '近三月', '近一年'];
-    var cache = this._periodCache || {};
-    var html = '';
+    var ad = this._allDailyData;
+    if (!ad || !ad.dates || !ad.dates.length) return;
 
-    // 各时段行：用 TWR 连乘计算时段累计收益（不是取末点）
-    var self = this;
-    periods.forEach(function(p, i) {
-      var d = cache[p + '_' + self._state.index];
-      if (!d || !d.portfolio || !d.portfolio.length) {
-        html += '<tr><td class="pnl-td-period">' + labels[i] + '</td><td class="pnl-td-num" colspan="4">加载中...</td></tr>';
-        return;
-      }
-      // TWR 连乘 + 时段内最大回撤
+    // 从 _allDailyData 按日期过滤 + TWR 连乘（秒开，无需等 _periodCache）
+    function computePeriod(fromDateStr) {
       var tP = 1.0, tB = 1.0, tPk = -Infinity, tDD = 0, tRP = 0;
-      for (var j = 0; j < d.portfolio.length; j++) {
-        tP *= (1 + d.portfolio[j] / 100);
-        tB *= (1 + d.benchmark[j] / 100);
+      var hasData = false;
+      for (var i = 0; i < ad.dates.length; i++) {
+        if (ad.dates[i] < fromDateStr) continue;
+        hasData = true;
+        tP *= (1 + ad.portfolio[i] / 100);
+        tB *= (1 + ad.benchmark[i] / 100);
         tRP = (tP - 1) * 100;
         if (tRP > tPk) tPk = tRP;
         if (tRP - tPk < tDD) tDD = tRP - tPk;
       }
-      var periodPnl = (tP - 1) * 100;
-      var periodBm = (tB - 1) * 100;
-      html += '<tr>' +
-        '<td class="pnl-td-period">' + labels[i] + '</td>' +
-        '<td class="pnl-td-num" style="color:' + (periodPnl >= 0 ? 'var(--up)' : 'var(--down)') + '">' + pctStr(periodPnl) + '</td>' +
-        '<td class="pnl-td-num" style="color:' + (periodBm >= 0 ? 'var(--up)' : 'var(--down)') + '">' + pctStr(periodBm) + '</td>' +
-        '<td class="pnl-td-num" style="color:' + ((periodPnl - periodBm) >= 0 ? 'var(--up)' : 'var(--down)') + ';font-size:11px">' + pctStr(periodPnl - periodBm) + '</td>' +
-        '<td class="pnl-td-num" style="color:var(--down)">' + pctStr(tDD) + '</td>' +
-      '</tr>';
+      if (!hasData) return null;
+      return { pnl: (tP - 1) * 100, bm: (tB - 1) * 100, dd: tDD };
+    }
+
+    var now = new Date();
+    var dow = now.getDay();
+    var weekStart = new Date(now); weekStart.setDate(now.getDate() + (dow === 0 ? -6 : 1 - dow));
+    var fromDates = {
+      today:     now.toISOString().slice(0, 10),
+      week:      weekStart.toISOString().slice(0, 10),
+      month:     new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10),
+      quarter:   new Date(now.getFullYear(), now.getMonth() - 3, 1).toISOString().slice(0, 10),
+      year:      now.getFullYear() + '-01-01',
+    };
+    var periods = ['today', 'week', 'month', 'quarter', 'year'];
+    var labels  = ['今日', '本周', '本月', '近三月', '近一年'];
+
+    var html = '';
+    var self = this;
+    periods.forEach(function(p, i) {
+      // 今日：优先用 _periodCache intraday 数据（5分钟粒度更精确），fallback 到 _allDailyData
+      var result;
+      if (p === 'today') {
+        var ic = (self._periodCache || {})['today_' + self._state.index];
+        if (ic && ic.portfolio && ic.portfolio.length >= 2) {
+          var tP = 1.0, tB = 1.0, tPk = -Infinity, tDD = 0, tRP = 0;
+          for (var j = 0; j < ic.portfolio.length; j++) {
+            tP *= (1 + ic.portfolio[j] / 100);
+            tB *= (1 + ic.benchmark[j] / 100);
+            tRP = (tP - 1) * 100;
+            if (tRP > tPk) tPk = tRP;
+            if (tRP - tPk < tDD) tDD = tRP - tPk;
+          }
+          result = { pnl: (tP - 1) * 100, bm: (tB - 1) * 100, dd: tDD };
+        }
+      }
+      if (!result) result = computePeriod(fromDates[p]);
+
+      if (!result) {
+        html += '<tr><td class="pnl-td-period">' + labels[i] + '</td><td class="pnl-td-num" colspan="4">—</td></tr>';
+      } else {
+        html += '<tr>' +
+          '<td class="pnl-td-period">' + labels[i] + '</td>' +
+          '<td class="pnl-td-num" style="color:' + (result.pnl >= 0 ? 'var(--up)' : 'var(--down)') + '">' + pctStr(result.pnl) + '</td>' +
+          '<td class="pnl-td-num" style="color:' + (result.bm >= 0 ? 'var(--up)' : 'var(--down)') + '">' + pctStr(result.bm) + '</td>' +
+          '<td class="pnl-td-num" style="color:' + ((result.pnl - result.bm) >= 0 ? 'var(--up)' : 'var(--down)') + ';font-size:11px">' + pctStr(result.pnl - result.bm) + '</td>' +
+          '<td class="pnl-td-num" style="color:var(--down)">' + pctStr(result.dd) + '</td>' +
+        '</tr>';
+      }
     });
 
-    // 累计行：从 _allDailyData 全量日频数据计算真实 TWR + maxDD
-    if (self._allDailyData && self._allDailyData.portfolio && self._allDailyData.portfolio.length) {
-      var allP = self._allDailyData.portfolio;
-      var allB = self._allDailyData.benchmark;
-      var cumP = 1.0, cumB = 1.0, pk = -Infinity, cumDD = 0, rp = 0;
-      for (var k = 0; k < allP.length; k++) {
-        cumP *= (1 + allP[k] / 100);
-        cumB *= (1 + allB[k] / 100);
-        rp = (cumP - 1) * 100;
-        if (rp > pk) pk = rp;
-        if (rp - pk < cumDD) cumDD = rp - pk;
-      }
+    // 累计行：全量 _allDailyData TWR
+    var cumResult = computePeriod('2020-01-01');
+    if (cumResult) {
       html += '<tr class="pnl-cum-row">' +
         '<td class="pnl-td-period pnl-td-bold">累计</td>' +
-        '<td class="pnl-td-num" style="color:' + ((cumP - 1) * 100 >= 0 ? 'var(--up)' : 'var(--down)') + '">' + pctStr((cumP - 1) * 100) + '</td>' +
-        '<td class="pnl-td-num" style="color:' + ((cumB - 1) * 100 >= 0 ? 'var(--up)' : 'var(--down)') + '">' + pctStr((cumB - 1) * 100) + '</td>' +
-        '<td class="pnl-td-num" style="color:' + (((cumP - 1) * 100 - (cumB - 1) * 100) >= 0 ? 'var(--up)' : 'var(--down)') + ';font-size:11px">' + pctStr((cumP - 1) * 100 - (cumB - 1) * 100) + '</td>' +
-        '<td class="pnl-td-num" style="color:var(--down)">' + pctStr(cumDD) + '</td>' +
+        '<td class="pnl-td-num" style="color:' + (cumResult.pnl >= 0 ? 'var(--up)' : 'var(--down)') + '">' + pctStr(cumResult.pnl) + '</td>' +
+        '<td class="pnl-td-num" style="color:' + (cumResult.bm >= 0 ? 'var(--up)' : 'var(--down)') + '">' + pctStr(cumResult.bm) + '</td>' +
+        '<td class="pnl-td-num" style="color:' + ((cumResult.pnl - cumResult.bm) >= 0 ? 'var(--up)' : 'var(--down)') + ';font-size:11px">' + pctStr(cumResult.pnl - cumResult.bm) + '</td>' +
+        '<td class="pnl-td-num" style="color:var(--down)">' + pctStr(cumResult.dd) + '</td>' +
       '</tr>';
     }
     tbody.innerHTML = html;
