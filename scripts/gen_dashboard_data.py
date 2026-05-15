@@ -742,7 +742,34 @@ def build_dashboard_data(review_path):
         except (ValueError, TypeError):
             pass
 
+    # 保留现有 dashboard_data.json 中的清仓持仓（bridge sync 写入，复盘笔记不含）
+    _preserve_cleared(data)
+
     return data
+
+
+def _preserve_cleared(new_data):
+    """从现有 dashboard_data.json 中提取清仓持仓，合并到新数据中"""
+    if not OUTPUT_FILE.exists():
+        return
+    try:
+        with open(OUTPUT_FILE) as f:
+            old = json.load(f)
+    except Exception:
+        return
+    old_positions = old.get("positions", [])
+    if not old_positions:
+        return
+    # 提取旧数据中的清仓持仓
+    cleared = [p for p in old_positions if p.get("状态", "").find("清") >= 0]
+    if not cleared:
+        return
+    # 去重后合并
+    existing_names = {p.get("标的") for p in new_data.get("positions", [])}
+    for p in cleared:
+        if p.get("标的") not in existing_names:
+            new_data.setdefault("positions", []).append(p)
+
 
 def watch_mode(review_path, interval=10):
     """监控复盘笔记文件变化，自动重跑管线"""

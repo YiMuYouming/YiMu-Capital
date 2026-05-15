@@ -1225,6 +1225,7 @@ def watch_mode(interval_stocks=5, interval_sectors=30, skip_sectors=False):
     log(f"启动: 个股/指数 {interval_stocks}s, 板块 {interval_sectors}s → {OUTPUT_FILE}")
     codes = get_stock_codes()
     last_sector_update = -999  # 首次立即查板块
+    last_code_refresh = time.time()  # 定期刷新代码列表（纳入 bridge sync 后的清仓股）
     write_count = 0
     error_count = 0
     last_source = None
@@ -1232,6 +1233,13 @@ def watch_mode(interval_stocks=5, interval_sectors=30, skip_sectors=False):
     try:
         while True:
             now = time.time()
+            # 每60秒刷新代码列表，纳入通过 bridge sync 新加入的清仓股票
+            if now - last_code_refresh >= 60:
+                new_codes = get_stock_codes()
+                if set(new_codes) != set(codes):
+                    log(f"代码列表更新: {len(codes)} → {len(new_codes)} (新增: {set(new_codes)-set(codes)})")
+                codes = new_codes
+                last_code_refresh = now
             need_sectors = (not skip_sectors) and (now - last_sector_update >= interval_sectors)
 
             data = build_live_data(codes, skip_sectors=(not need_sectors))

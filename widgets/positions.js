@@ -126,15 +126,17 @@ class PositionsWidget extends YiMuWidget {
         html += '<table class="data-table"><thead><tr><th>标的</th><th>成本</th><th>卖出价</th><th>盈亏%</th><th>现价</th><th>卖出后涨跌</th><th>原因</th></tr></thead><tbody>';
         tracked.forEach(function(p) {
           var sp=parseFloat(p['卖出价']||p['现价'])||0, cp=parseFloat(p['成本'])||0;
-          var lq=liveQ[(p['代码']||'')]||{}, cur=parseFloat(lq['最新价']||p['最新价']||p['现价'])||0;
+          var lq=liveQ[(p['代码']||'')]||{};
+          var liveOk = lq['最新价'] != null && parseFloat(lq['最新价']) > 0;
+          var cur = liveOk ? parseFloat(lq['最新价']) : 0;
           var pl=cp>0?((sp-cp)/cp*100):0, pcls=pl>0?'up':'down';
-          var ap=sp>0?((cur-sp)/sp*100):0, acls=ap>0?'up':'down';
+          var ap=liveOk&&sp>0?((cur-sp)/sp*100):0, acls=ap>0?'up':ap<0?'down':'';
           html += '<tr><td style="font-size:var(--fs-body);font-weight:600">'+(p['标的']||'—')+'</td>'+
             '<td style="font-size:var(--fs-body);font-family:var(--font-mono)">'+(cp||'—')+'</td>'+
             '<td style="font-size:var(--fs-body);font-family:var(--font-mono)">'+(sp||'—')+'</td>'+
             '<td class="'+pcls+'" style="font-size:var(--fs-body);font-family:var(--font-mono);font-weight:600">'+(pl>=0?'+':'')+pl.toFixed(2)+'%</td>'+
-            '<td style="font-size:var(--fs-body);font-family:var(--font-mono)">'+(cur>0?cur:'—')+'</td>'+
-            '<td class="'+acls+'" style="font-size:var(--fs-body);font-family:var(--font-mono);font-weight:600">'+(ap>=0?'+':'')+ap.toFixed(2)+'%</td>'+
+            '<td style="font-size:var(--fs-body);font-family:var(--font-mono)">'+(liveOk?cur:'—')+'</td>'+
+            '<td class="'+acls+'" style="font-size:var(--fs-body);font-family:var(--font-mono);font-weight:600">'+(liveOk&&sp>0?(ap>=0?'+':'')+ap.toFixed(2)+'%':'—')+'</td>'+
             '<td style="font-size:var(--fs-body);color:var(--text-secondary);max-width:100px;white-space:normal">'+(p['清仓原因']||'')+'</td></tr>';
         });
         html += '</tbody></table>';

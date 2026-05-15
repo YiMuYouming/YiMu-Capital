@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>涨停梯队 Mockup</title>
+<style>
+  :root {
+    --bg: #1a1a2e;
+    --card: #16213e;
+    --text: #e0e0e0;
+    --text-secondary: #a0a0b0;
+    --up: #ff4757;
+    --down: #2ed573;
+    --fire: #ff6b35;
+    --accent: #7c5ce7;
+    --border: #2a2a4a;
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { background:var(--bg); color:var(--text); font-family: -apple-system, "PingFang SC", sans-serif; padding:20px; }
+  .widget { max-width:600px; margin:0 auto; background:var(--card); border-radius:8px; border:1px solid var(--border); overflow:hidden; }
+  .header { padding:10px 14px; border-bottom:1px solid var(--border); display:flex; justify-content:space-between; align-items:center; }
+  .header h2 { font-size:14px; }
+  .refresh-btn { background:var(--accent); color:#fff; border:none; padding:4px 12px; border-radius:4px; cursor:pointer; font-size:11px; }
+
+  /* Row 1: Concepts */
+  .concept-row { padding:10px 14px; display:flex; gap:10px; overflow-x:auto; border-bottom:1px solid var(--border); }
+  .concept-tag { display:flex; align-items:center; gap:4px; padding:4px 10px; border-radius:14px; font-size:12px; white-space:nowrap; cursor:pointer; border:1px solid transparent; }
+  .concept-tag .count { font-family:monospace; }
+  .concept-tag.fire { border-color:var(--fire); }
+  .concept-tag.fire .fire-emoji { font-size:13px; }
+  .concept-tag.active { background:var(--accent); border-color:var(--accent); }
+
+  /* Row 2: Date tabs */
+  .date-row { padding:6px 14px; display:flex; gap:6px; border-bottom:1px solid var(--border); }
+  .date-tab { padding:4px 12px; border-radius:4px; font-size:12px; cursor:pointer; color:var(--text-secondary); }
+  .date-tab.active { background:var(--accent); color:#fff; }
+
+  /* Body: Stock list */
+  .stock-list { }
+  .stock-row { display:grid; grid-template-columns:1fr 60px 72px 1fr; gap:8px; padding:8px 14px; border-bottom:1px solid var(--border); font-size:12px; align-items:center; }
+  .stock-row:hover { background:rgba(255,255,255,0.03); }
+  .stock-name { font-weight:600; }
+  .stock-chg { text-align:right; font-family:monospace; color:var(--up); }
+  .stock-nature { text-align:center; font-size:11px; padding:2px 6px; border-radius:3px; }
+  .nature-1 { background:#2ed57320; color:#2ed573; }   /* 首板 */
+  .nature-2 { background:#ffa50220; color:#ffa502; }   /* 二连板 */
+  .nature-3 { background:#ff475720; color:#ff4757; }   /* 三天两板 */
+  .stock-reason { color:var(--text-secondary); font-size:11px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+
+  /* Status bar */
+  .status-bar { padding:6px 14px; display:flex; justify-content:space-between; font-size:10px; color:var(--text-secondary); border-top:1px solid var(--border); }
+
+  /* Color key */
+  .key { margin-top:20px; max-width:600px; margin-left:auto; margin-right:auto; padding:14px; background:var(--card); border-radius:8px; border:1px solid var(--border); }
+  .key h3 { font-size:12px; margin-bottom:8px; }
+  .key-grid { display:grid; grid-template-columns:1fr 1fr; gap:4px; font-size:11px; }
+</style>
+</head>
+<body>
+
+<div class="widget">
+  <div class="header">
+    <h2>📊 涨停梯队</h2>
+    <button class="refresh-btn" onclick="alert('手动刷新触发')">🔄 刷新</button>
+  </div>
+
+  <!-- Row 1: 概念热度 -->
+  <div class="concept-row">
+    <span class="concept-tag fire"><span>🤖 机器人</span><span class="count">12</span><span class="fire-emoji">🔥</span></span>
+    <span class="concept-tag fire"><span>💡 光伏</span><span class="count">9</span><span class="fire-emoji">🔥</span></span>
+    <span class="concept-tag"><span>🔌 算力</span><span class="count">7</span></span>
+    <span class="concept-tag active"><span>🧠 芯片</span><span class="count">6</span></span>
+    <span class="concept-tag"><span>🛡️ 军工</span><span class="count">5</span></span>
+    <span class="concept-tag"><span>⚡ 电力</span><span class="count">4</span></span>
+    <span class="concept-tag"><span>💊 医药</span><span class="count">3</span></span>
+  </div>
+
+  <!-- Row 2: 日期Tab -->
+  <div class="date-row">
+    <span class="date-tab">5月12日</span>
+    <span class="date-tab">5月13日</span>
+    <span class="date-tab">5月14日</span>
+    <span class="date-tab active">5月15日</span>
+  </div>
+
+  <!-- Body: 涨停列表 (筛选：芯片) -->
+  <div class="stock-list">
+    <div class="stock-row">
+      <span class="stock-name">北方华创</span>
+      <span class="stock-chg">+10.00%</span>
+      <span class="stock-nature nature-1">首板</span>
+      <span class="stock-reason">芯片+半导体设备+算力</span>
+    </div>
+    <div class="stock-row">
+      <span class="stock-name">中芯国际</span>
+      <span class="stock-chg">+19.80%</span>
+      <span class="stock-nature nature-2">二连板</span>
+      <span class="stock-reason">芯片制造+先进制程</span>
+    </div>
+    <div class="stock-row">
+      <span class="stock-name">韦尔股份</span>
+      <span class="stock-chg">+10.02%</span>
+      <span class="stock-nature nature-3">三天两板</span>
+      <span class="stock-reason">CIS芯片+汽车电子</span>
+    </div>
+    <div class="stock-row">
+      <span class="stock-name">紫光国微</span>
+      <span class="stock-chg">+10.01%</span>
+      <span class="stock-nature nature-1">首板</span>
+      <span class="stock-reason">芯片+军工</span>
+    </div>
+    <div class="stock-row">
+      <span class="stock-name">兆易创新</span>
+      <span class="stock-chg">+10.00%</span>
+      <span class="stock-nature nature-2">二连板</span>
+      <span class="stock-reason">存储芯片+MCU</span>
+    </div>
+    <div class="stock-row">
+      <span class="stock-name">长电科技</span>
+      <span class="stock-chg">+9.99%</span>
+      <span class="stock-nature nature-1">首板</span>
+      <span class="stock-reason">芯片封测+先进封装</span>
+    </div>
+  </div>
+
+  <div class="status-bar">
+    <span>共 6 只涨停 | 芯片概念</span>
+    <span>⏱ 5秒前刷新</span>
+  </div>
+</div>
+
+<div class="key">
+  <h3>颜色说明</h3>
+  <div class="key-grid">
+    <div><span class="stock-nature nature-1">首板</span> 首次涨停</div>
+    <div><span class="stock-nature nature-2">二连板</span> 连续2天涨停</div>
+    <div><span class="stock-nature nature-3">三天两板</span> 3天内2次涨停</div>
+    <div>🔥 当日涨停≥8只的概念</div>
+  </div>
+</div>
+
+</body>
+</html>
