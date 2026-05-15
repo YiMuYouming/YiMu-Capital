@@ -32,13 +32,13 @@ DASHBOARD_DATA = ROOT_DIR / "data/dashboard_data.json"
 OUTPUT_FILE = ROOT_DIR / "data/dashboard_live.json"
 # PnL 数据库（db.py SQLite）
 try:
-    from scripts.db import init_db, insert_snapshot, insert_daily_summary
+    from scripts.db import init_db, insert_snapshot, insert_daily_summary, _exec
 except ImportError:
     import sys as _sys
     _scripts_path = os.path.join(os.path.dirname(__file__), '..', 'scripts')
     if _scripts_path not in _sys.path:
         _sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
-    from scripts.db import init_db, insert_snapshot, insert_daily_summary
+    from scripts.db import init_db, insert_snapshot, insert_daily_summary, _exec
 
 # === 板块名称映射：复盘笔记名称 → 东方财富 BK 代码 ===
 # 首次运行自动匹配，匹配不到的需手动补充
@@ -1253,13 +1253,31 @@ def log_pnl_snapshot(pnl, live_index):
         try: return round(float(str(v).replace('%', '')), 4)
         except (ValueError, TypeError): return default
 
+    # 盘中 NAV：从上一快照或前日收盘 NAV 连乘
+    prev_snap = _exec(
+        "SELECT nav, pnl_pct FROM intraday_snapshots WHERE date = ? ORDER BY ts DESC LIMIT 1",
+        (today,))
+    if prev_snap:
+        # 不是当日第一个快照：NAV = 上一快照NAV × (1 + delta/100)
+        prev_nav = prev_snap[0]['nav']
+        prev_pnl_pct = prev_snap[0]['pnl_pct']
+        delta = pnl['pnl_pct'] - prev_pnl_pct
+        nav = round(prev_nav * (1 + delta / 100), 6)
+    else:
+        # 当日第一个快照：从前日 daily_summary NAV 继承
+        prev_day = _exec(
+            "SELECT nav FROM daily_summary WHERE date < ? ORDER BY date DESC LIMIT 1",
+            (today,))
+        prev_close_nav = prev_day[0]['nav'] if prev_day else 1.0
+        nav = round(prev_close_nav * (1 + pnl['pnl_pct'] / 100), 6)
+
     li = live_index or {}
     try:
         insert_snapshot({
             'ts': ts_iso,
             'date': today,
             'pnl_pct': pnl['pnl_pct'],
-            'nav': 1.0,  # TWR NAV 由日终 rollup 更新
+            'nav': nav,
             'sh_pct': safe_float(li.get('上证指数涨幅', 0)),
             'sz_pct': safe_float(li.get('深证指数涨幅', 0)),
             'cy_pct': safe_float(li.get('创业指数涨幅', 0)),
@@ -1267,7 +1285,7 @@ def log_pnl_snapshot(pnl, live_index):
             'mv': pnl['mv'],
             'total_asset': pnl['total_asset'],
         })
-        log(f"PnL: {now.strftime('%H:%M')} pnl={pnl['pnl_pct']:.2f}% pos={pnl['pos_pct']:.0f}%")
+        log(f"PnL: {now.strftime('%H:%M')} pnl={pnl['pnl_pct']:.2f}% nav={nav:.6f} pos={pnl['pos_pct']:.0f}%")
     except Exception as e:
         log(f"PnL snapshot error: {e}")
 
@@ -1281,30 +1299,74 @@ def rollup_daily():
         return  # 当天已 rollup
     try:
         from scripts.db import query_pnl as db_query_pnl
-        data = db_query_pnl('today')
+        data = db_query_pnl('today', 'sh')
         if not data or not data['portfolio']:
             return
         n = len(data['portfolio'])
         if n < 2: return  # 数据太少不 rollup
-        # 计算日内最大回撤
-        peak = data['portfolio'][0]
-        max_dd = 0
-        dd_start = dd_end = None
+
+        # 日 TWR：用盘中维护的 nav 字段计算
+        nav_rows = _exec(
+            "SELECT nav FROM intraday_snapshots WHERE date = ? ORDER BY ts",
+            (today,))
+        # 检测是否为旧数据（所有 nav=1.0）——旧 poll_live 不写 nav
+        has_real_nav = nav_rows and len(nav_rows) >= 2 and any(r['nav'] != 1.0 for r in nav_rows)
+        if has_real_nav:
+            nav_open = nav_rows[0]['nav']
+            nav_close = nav_rows[-1]['nav']
+            if nav_open > 0:
+                daily_twr = round((nav_close - nav_open) / nav_open * 100, 4)
+            else:
+                daily_twr = 0.0
+            new_nav = nav_close
+        else:
+            # fallback: 用 pnl_pct 末点 + 前日 NAV 连乘
+            prev = _exec("SELECT nav FROM daily_summary WHERE date < ? ORDER BY date DESC LIMIT 1", (today,))
+            prev_nav = prev[0]['nav'] if prev else 1.0
+            daily_twr = round(data['portfolio'][-1], 4)
+            new_nav = round(prev_nav * (1 + daily_twr / 100), 6)
+
+        # 标准最大回撤：先找全局 peak，再从 peak 之后找最大回撤
+        peak = -float('inf')
         peak_idx = 0
         for i, v in enumerate(data['portfolio']):
-            if v > peak: peak = v; peak_idx = i
+            if v > peak:
+                peak = v
+                peak_idx = i
+        max_dd = 0.0
+        dd_start = dd_end = None
+        for i, v in enumerate(data['portfolio']):
+            if i <= peak_idx:
+                continue
             dd = v - peak
             if dd < max_dd:
                 max_dd = dd
-                dd_start = data['labels'][peak_idx] if data['labels'] else None
                 dd_end = data['labels'][i] if data['labels'] else None
+        dd_start = data['labels'][peak_idx] if data['labels'] and peak_idx < len(data['labels']) else None
+
+        # 补全 sz/cy 指数日收益
+        sz_pct = 0.0
+        cy_pct = 0.0
+        try:
+            sz_data = db_query_pnl('today', 'sz')
+            if sz_data and sz_data['benchmark']:
+                sz_pct = round(sz_data['benchmark'][-1], 4)
+        except Exception:
+            pass
+        try:
+            cy_data = db_query_pnl('today', 'cy')
+            if cy_data and cy_data['benchmark']:
+                cy_pct = round(cy_data['benchmark'][-1], 4)
+        except Exception:
+            pass
+
         insert_daily_summary({
             'date': today,
-            'nav': 1.0,
-            'pnl_pct': round(data['portfolio'][-1], 4),
+            'nav': new_nav,
+            'pnl_pct': daily_twr,
             'sh_pct': round(data['benchmark'][-1], 4) if data['benchmark'] else 0,
-            'sz_pct': 0,
-            'cy_pct': 0,
+            'sz_pct': sz_pct,
+            'cy_pct': cy_pct,
             'pos_pct': round(data['position'][-1], 2) if data['position'] else 0,
             'deposit': 0,
             'max_dd': round(max_dd, 4),
@@ -1312,7 +1374,7 @@ def rollup_daily():
             'max_dd_end': dd_end,
         })
         _last_rollup_date = today
-        log(f"Daily rollup: pnl={data['portfolio'][-1]:.2f}% dd={max_dd:.2f}%")
+        log(f"Daily rollup: nav={new_nav:.6f} twr={daily_twr:.2f}% sh={data['benchmark'][-1]:.2f}% sz={sz_pct:.2f}% cy={cy_pct:.2f}% dd={max_dd:.2f}%")
     except Exception as e:
         log(f"Rollup error: {e}")
 
