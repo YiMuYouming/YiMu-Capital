@@ -92,23 +92,37 @@ class PnLCurveWidget extends YiMuWidget {
       _pnlSummary: this._state && this._state._pnlSummary,
     };
 
-    // 预加载仓位数据缓存（完成后自动绘制如果checkbox已勾选）
-    if (location.protocol !== 'file:' && !this._posCache && !this._posLoading) {
-      this._posLoading = true;
-      var that = this;
+    // 统一预加载：一次 range=all 请求 → _posCache + _allDailyData + drawer + summary
+    if (location.protocol !== 'file:' && !this._allDataLoading && !this._allDataReady) {
+      this._allDataLoading = true;
+      var self = this;
       fetch('/api/pnl?range=all&index=sh')
         .then(function(r) { return r.json(); })
         .then(function(d) {
-          that._posCache = d; that._posLoading = false;
-          // 如果仓位图已勾选，自动绘制
-          var tog = document.getElementById('pnl_pos_toggle_' + that.id);
+          self._posCache = d;
+          self._allDailyData = d;
+          self._allDataReady = true;
+          self._allDataLoading = false;
+          self._updateDrawer(d);
+          // 同时拉 summary（独立端点）
+          return fetch('/api/pnl/summary').then(function(r) { return r.json(); });
+        })
+        .then(function(s) {
+          if (s) { self._state._pnlSummary = s; self._updateSummary(); }
+          // 如果仓位图已勾选且有缓存，自动绘制
+          var tog = document.getElementById('pnl_pos_toggle_' + self.id);
           if (tog && tog.checked) {
-            var ch = document.getElementById('pnl_pos_chart_' + that.id);
+            var ch = document.getElementById('pnl_pos_chart_' + self.id);
             if (ch) ch.style.display = '';
-            that._drawPosChart();
+            self._drawPosChart();
           }
         })
-        .catch(function(){ that._posLoading = false; });
+        .catch(function() { self._allDataLoading = false; });
+    }
+    // 缓存已就绪时直接更新（后续 render 触发时）
+    if (this._allDailyData) {
+      this._updateDrawer(this._allDailyData);
+      this._updateSummary();
     }
 
     var self = this;
@@ -117,24 +131,6 @@ class PnLCurveWidget extends YiMuWidget {
       self._drawChart(chartData);
       self._drawPosChart();
     });
-
-    // 抽屉数据：首屏预加载，后续不再重复拉取
-    if (location.protocol !== 'file:' && !self._drawerLoaded) {
-      self._drawerLoaded = true;
-      fetch('/api/pnl?range=all&index=' + self._state.index)
-        .then(function(r) { return r.json(); })
-        .then(function(allData) { self._allDailyData = allData; self._updateDrawer(allData); })
-        .catch(function() {});
-      fetch('/api/pnl/summary')
-        .then(function(r) { return r.json(); })
-        .then(function(s) { self._state._pnlSummary = s; self._updateSummary(); })
-        .catch(function() {});
-    }
-    // 如果已加载过，直接用缓存数据更新抽屉
-    if (self._allDailyData) {
-      self._updateDrawer(self._allDailyData);
-      self._updateSummary();
-    }
     // 恢复抽屉状态
     if (this._state.drawerOpen) {
       var drawer = document.getElementById('pnl_drawer_' + this.id);
@@ -452,17 +448,7 @@ class PnLCurveWidget extends YiMuWidget {
     var self = this;
     var canvas = document.getElementById('pnl_pos_canvas_' + this.id);
     if (!canvas) return;
-    // 首次加载时预取缓存（防重复请求）
-    if (!self._posCache && !self._posLoading) {
-      self._posLoading = true;
-      fetch('/api/pnl?range=all&index=sh')
-        .then(function(r) { return r.json(); })
-        .then(function(d) { self._posCache = d; self._posLoading = false; self._drawPosChart(); })
-        .catch(function(){ self._posLoading = false; });
-      return;
-    }
-    if (self._posLoading) return;  // 正在加载中
-    if (!self._posCache) return;   // 加载失败
+    if (!self._posCache) return;   // 缓存未就绪，等统一预加载完成
     // 用缓存数据绘制
     var d = self._posCache;
     if (!d.labels || !d.labels.length) return;
