@@ -167,8 +167,28 @@ def query_pnl(range='today', index='sh'):
     else:
         from_date = '2020-01-01'
 
-    # week/month/quarter/year/all — 统一走 daily_summary（日频数据）
-    # 前端拿到后自己做 TWR 连乘，避免 intraday_snapshots 的单日累积值歧义
+    # week/month: 走 intraday_snapshots（5分钟粒度，平滑曲线）
+    # quarter/year/all: 走 daily_summary（日频，数据点太多走日内无意义）
+    if range in ('week', 'month'):
+        raw = _exec(f"""
+            SELECT ts, pnl_pct, {idx_field} AS bm_pct, pos_pct, nav
+            FROM intraday_snapshots WHERE date >= ? ORDER BY ts
+        """, (from_date,))
+        rows = [dict(r) for r in raw]
+        if not rows:
+            return {'type': 'intraday', 'labels': [], 'portfolio': [], 'benchmark': [], 'position': [], 'nav': []}
+        # 标签：周/月显示 "MM-DD HH:MM"
+        labels = [r['ts'][5:16].replace('T', ' ') for r in rows]
+        return {
+            'type': 'intraday',
+            'labels': labels,
+            'portfolio': [r['pnl_pct'] for r in rows],
+            'benchmark': [r['bm_pct'] for r in rows],
+            'position': [r['pos_pct'] for r in rows],
+            'nav': [r['nav'] for r in rows],
+        }
+
+    # quarter/year/all: 走 daily_summary（日频数据）
     rows = _exec(f"""
         SELECT date, pnl_pct, {idx_field} AS bm_pct, pos_pct, nav
         FROM daily_summary WHERE date >= ? ORDER BY date
