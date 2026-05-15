@@ -466,16 +466,29 @@ class PnLCurveWidget extends YiMuWidget {
     var s = this._state;
     var lastNav = (s._pnlSummary && s._pnlSummary.last_nav) || 1.0;
     var totalAsset = s.totalAsset || 0;
-    // TWR累计收益 = (当前净值 - 1) × 100
     var cumReturn = (lastNav - 1) * 100;
-    // 近似收益额 = 当前资产 × 累计收益率
-    var approxPnl = cumReturn > -99 ? totalAsset * cumReturn / (100 + cumReturn) : 0;
+
+    // 从 _allDailyData 算基准 TWR + 历史最大回撤
+    var bmTWR = 0, histMaxDD = 0;
+    if (this._allDailyData && this._allDailyData.portfolio && this._allDailyData.portfolio.length) {
+      var ad = this._allDailyData;
+      var cumB = 1.0, cumP = 1.0, pk = -Infinity, rp = 0;
+      for (var i = 0; i < ad.portfolio.length; i++) {
+        cumP *= (1 + ad.portfolio[i] / 100);
+        cumB *= (1 + ad.benchmark[i] / 100);
+        rp = (cumP - 1) * 100;
+        if (rp > pk) pk = rp;
+        if (rp - pk < histMaxDD) histMaxDD = rp - pk;
+      }
+      bmTWR = (cumB - 1) * 100;
+    }
+    var alpha = cumReturn - bmTWR;
 
     el.innerHTML =
       '<div class="pnl-sum-cell"><div class="pnl-sum-lbl">当前资产</div><div class="pnl-sum-val">' + _pnlFmtMoney(totalAsset) + '</div></div>' +
       '<div class="pnl-sum-cell"><div class="pnl-sum-lbl">TWR 累计收益</div><div class="pnl-sum-val" style="color:' + (cumReturn >= 0 ? 'var(--up)' : 'var(--down)') + '">' + (cumReturn >= 0 ? '+' : '') + cumReturn.toFixed(2) + '%</div></div>' +
-      '<div class="pnl-sum-cell"><div class="pnl-sum-lbl">超额 α</div><div class="pnl-sum-val" style="color:' + (cumReturn >= 0 ? 'var(--up)' : 'var(--down)') + '">' + (cumReturn >= 0 ? '+' : '') + (cumReturn - 0).toFixed(2) + '%</div></div>' +
-      '<div class="pnl-sum-cell"><div class="pnl-sum-lbl">最大回撤</div><div class="pnl-sum-val" style="color:var(--down)">' + (cumReturn >= 0 ? '+' : '') + '0.00%</div></div>' +
+      '<div class="pnl-sum-cell"><div class="pnl-sum-lbl">超额 α</div><div class="pnl-sum-val" style="color:' + (alpha >= 0 ? 'var(--up)' : 'var(--down)') + '">' + (alpha >= 0 ? '+' : '') + alpha.toFixed(2) + '%</div></div>' +
+      '<div class="pnl-sum-cell"><div class="pnl-sum-lbl">最大回撤</div><div class="pnl-sum-val" style="color:var(--down)">' + histMaxDD.toFixed(2) + '%</div></div>' +
       '<div class="pnl-sum-cell"><div class="pnl-sum-lbl">数据起点</div><div class="pnl-sum-val">2026-03-30</div></div>';
   }
 
