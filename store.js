@@ -460,17 +460,81 @@ const DataStore = (function() {
     // SSOT 溯源
     getSSOT: function(path) {
       var map = {
-        'style.总分':           { source: 'style_detect.py → dashboard_data.json', freq: '每日复盘后', owner: '稳米' },
-        'style.风格':           { source: 'style_detect.py → dashboard_data.json', freq: '每日复盘后', owner: '稳米' },
-        'style.总仓位上限':      { source: 'trading-core.md §第一层 优先级检查', freq: '实时', owner: '规则引擎（自动）' },
-        'sentiment.情绪值':      { source: 'T3涨跌家数比(主) / T2 iwencai(校验) / T4手工覆盖(需checkbox)', freq: '5s/2min/随录', owner: 'store.js merge()' },
-        'sentiment.竞价情绪值':   { source: '同花顺APP→手工录入', freq: '9:25', owner: '弈沐哥' },
-        'market.封板率':         { source: '同花顺APP→手工录入', freq: '盘中随录', owner: '弈沐哥' },
-        'live_index.*':          { source: 'PyTDX → poll_live.py', freq: '5s', owner: 'poll_live.py' },
-        'live_sectors.*':       { source: '东方财富HTTP（境外IP受限）→ 回退Layer 1基线', freq: '30s / 每日', owner: 'poll_live.py / 复盘笔记' },
-        'live_quotes.*':        { source: 'PyTDX → poll_live.py', freq: '5s', owner: 'poll_live.py' },
+        // === T1 实时（秒级，YM-data-pipeline → bridge APScheduler） ===
+        'live_index.*':           { source: 'YM-data-pipeline fetch(index) → collectors/quotes.py → bridge CACHE', freq: '5s', owner: 'bridge APScheduler' },
+        'live_quotes.*':          { source: 'YM-data-pipeline fetch(quotes) → collectors/quotes.py → bridge CACHE', freq: '5s', owner: 'bridge APScheduler' },
+        'live_breadth.*':         { source: 'YM-data-pipeline fetch(breadth) → collectors/quotes.py → bridge CACHE', freq: '30s', owner: 'bridge APScheduler' },
+        'live_sectors.*':         { source: 'YM-data-pipeline fetch(sector_index) → collectors/quotes.py → bridge CACHE', freq: '30s', owner: 'bridge APScheduler' },
+        '上证15min.*':             { source: 'PyTDX 5分钟K线 → poll_live.py (待迁入 quotes.py)', freq: '5min', owner: 'bridge APScheduler' },
+        '深证15min.*':             { source: 'PyTDX 5分钟K线 → poll_live.py (待迁入 quotes.py)', freq: '5min', owner: 'bridge APScheduler' },
+        '创业15min.*':             { source: 'PyTDX 5分钟K线 → poll_live.py (待迁入 quotes.py)', freq: '5min', owner: 'bridge APScheduler' },
+        'northbound.*':           { source: 'YM-data-pipeline fetch(northbound) → collectors/quotes.py → bridge CACHE', freq: '60s', owner: 'bridge APScheduler' },
+        // === T2 阶段（分钟/日级，iwencai/同花顺） ===
+        'sentiment.涨停收益':       { source: 'iwencai 2min轮询 → CACHE[iwencai] → /api/live/iwencai', freq: '2min', owner: 'collectors/iwencai_poll.py' },
+        'sentiment.连板收益':       { source: 'iwencai 2min轮询 → CACHE[iwencai]', freq: '2min', owner: 'collectors/iwencai_poll.py' },
+        'sentiment.昨日炸板收益':    { source: 'iwencai 2min轮询 → CACHE[iwencai]', freq: '2min', owner: 'collectors/iwencai_poll.py' },
+        'sentiment.封板率':         { source: 'iwencai 2min轮询 → CACHE[iwencai]', freq: '2min', owner: 'collectors/iwencai_poll.py' },
+        'sentiment.炸板率':         { source: 'iwencai 2min轮询 → CACHE[iwencai]', freq: '2min', owner: 'collectors/iwencai_poll.py' },
+        'sentiment.晋级率':         { source: 'iwencai 2min轮询 → CACHE[iwencai]', freq: '2min', owner: 'collectors/iwencai_poll.py' },
+        'sentiment.最高板':         { source: 'iwencai 2min轮询（连板个股取max）→ CACHE[iwencai]', freq: '2min', owner: 'collectors/iwencai_poll.py' },
+        'sentiment.连板风险值':      { source: 'iwencai 2min轮询（从晋级率反推）→ CACHE[iwencai]', freq: '2min', owner: 'collectors/iwencai_poll.py' },
+        'sentiment.连板股数':       { source: 'iwencai 2min轮询 → CACHE[iwencai]', freq: '2min', owner: 'collectors/iwencai_poll.py' },
+        'sentiment.涨停溢价率':      { source: 'iwencai 2min轮询（昨日涨停今日涨幅均值）→ CACHE[iwencai]', freq: '2min', owner: 'collectors/iwencai_poll.py' },
+        'market.涨停家数':          { source: 'T1 breadth → bridge CACHE', freq: '30s', owner: 'collectors/quotes.py' },
+        'market.跌停家数':          { source: 'T1 breadth → bridge CACHE', freq: '30s', owner: 'collectors/quotes.py' },
+        'market.炸板率':            { source: 'T2 iwencai → CACHE[iwencai]', freq: '2min', owner: 'collectors/iwencai_poll.py' },
+        'market.封板率':            { source: 'T2 iwencai → CACHE[iwencai]', freq: '2min', owner: 'collectors/iwencai_poll.py' },
+        'sector_inflow.*':        { source: 'YM-data-pipeline fetch(sector_inflow) → collectors/market_data.py → bridge CACHE', freq: '5min', owner: 'bridge APScheduler' },
+        'hot_list.*':             { source: 'YM-data-pipeline fetch(ths_hot) → collectors/quotes.py → bridge CACHE', freq: '5min', owner: 'bridge APScheduler' },
+        'news.*':                 { source: 'YM-data-pipeline fetch(news) → collectors/market_data.py → bridge CACHE', freq: '5min', owner: 'bridge APScheduler' },
+        'decision.竞价.*':         { source: 'snapshot_auction.py 9:25快照 → auction_snapshot.json', freq: '9:25', owner: 'bridge APScheduler' },
+        'sentiment_nodes.*':      { source: 'sentiment_snapshot.py 30min自动快照 → sentiment_auto.json', freq: '30min', owner: 'bridge APScheduler' },
+        // === T3 实时计算（从 T1+T2 逻辑推导） ===
+        'sentiment.情绪值':         { source: 'T3涨跌家数比(主) / T2 iwencai(校验) / T4手工覆盖(需checkbox)', freq: '5s/2min/随录', owner: 'store.js merge() Step4' },
+        'sentiment.情绪区间':       { source: 'T3计算: 情绪值阈值判定(<20冰点 <40低迷 <60主升 <80强势 ≥80高潮)', freq: '实时', owner: 'store.js merge() Step4' },
+        'sentiment.竞价情绪值':     { source: 'T3计算: 竞价涨跌比 / T2 iwencai / snapshot_auction 高潮保护', freq: '9:25', owner: 'snapshot_auction.py' },
+        'sentiment.赚钱效应':       { source: 'T3计算: 昨日涨停收益阈值(>2%好 <0差 其余一般)', freq: '2min', owner: 'collectors/iwencai_poll.py' },
+        'pnl.*':                  { source: 'T3计算: P&L链(NAV连乘) / T2存储: pnl.db daily_summary', freq: '5min/每日', owner: 'bridge APScheduler + pnl_calc.py' },
+        'market.赚钱效应':          { source: 'T3计算: 涨停收益阈值判定', freq: '2min', owner: 'store.js merge()' },
+        // === T4 人工/复盘笔记（策略决策类字段） ===
+        'style.*':                { source: 'style_detect.py → gen_dashboard_data.py → dashboard_data.json', freq: '每日盘前', owner: '稳米 + gen脚本' },
+        'lianban_pool.*':         { source: '复盘笔记附录A → pools.json / 数据附录 → dashboard_data.json', freq: '每日盘前', owner: '稳米 + gen脚本' },
+        'trend_pool.*':           { source: '复盘笔记附录A → pools.json / 数据附录 → dashboard_data.json', freq: '每日盘前', owner: '稳米 + gen脚本' },
+        'sectors.*':              { source: '复盘笔记数据附录 → dashboard_data.json', freq: '每日盘前', owner: '稳米 + gen脚本' },
+        'anchor_stocks.*':        { source: '复盘笔记附录A → pools.json', freq: '每日盘前', owner: '稳米 + gen脚本' },
+        'positions.*':            { source: 'W16输入面板/W15记流水 → pnl.db + localStorage', freq: '随录', owner: '弈沐哥' },
+        'decision.今日操作.*':      { source: 'W17自助录入 → pnl.db trade_records', freq: '随录', owner: '弈沐哥' },
+        'decision.锚定股状态.*':    { source: '复盘笔记数据附录 → dashboard_data.json', freq: '每日盘前', owner: '稳米 + gen脚本' },
+        'decision.早盘.*':         { source: '复盘笔记数据附录 W1早盘确认 → dashboard_data.json', freq: '每日盘前', owner: '稳米 + gen脚本' },
+        'decision.盘中.*':         { source: '复盘笔记数据附录 W2盘中跟踪 → dashboard_data.json', freq: '每日盘前', owner: '稳米 + gen脚本' },
+        'risk.当日盈亏':           { source: 'T4人工: 复盘笔记 frontmatter → gen脚本校验 vs T3计算', freq: '每日', owner: '弈沐哥 + gen脚本' },
+        'risk.熔断触发':           { source: 'T4人工: 复盘笔记 frontmatter', freq: '每日', owner: '弈沐哥' },
+        'risk.周回撤触发':          { source: 'T4人工: 复盘笔记 frontmatter', freq: '每日', owner: '弈沐哥' },
+        'risk.*':                 { source: 'T4人工: 复盘笔记 frontmatter → dashboard_data.json', freq: '每日', owner: '弈沐哥 + gen脚本' },
+        'time_window.*':          { source: 'T1系统时钟 / T4人工: frontmatter W1/W2状态', freq: '实时/每日', owner: 'bridge + 弈沐哥' },
+        'market.上证指数':          { source: 'T1实时: fetch(index) → bridge CACHE / T4回退: frontmatter', freq: '5s/每日', owner: 'bridge APScheduler' },
+        'market.上证涨幅':          { source: 'T1实时: fetch(index) → bridge CACHE / T4回退: frontmatter', freq: '5s/每日', owner: 'bridge APScheduler' },
+        'market.市场量能':          { source: 'T1实时: fetch(index) → bridge CACHE / T4回退: frontmatter', freq: '5s/每日', owner: 'bridge APScheduler' },
+        'market.涨跌比':            { source: 'T1实时: fetch(breadth) → bridge CACHE', freq: '30s', owner: 'bridge APScheduler' },
+        // === 其他 ===
+        'yesterday_baseline.*':   { source: 'pools.json + dashboard_data.json 前日快照', freq: '每日', owner: 'gen脚本' },
+        '_freshness.*':           { source: 'bridge.py _add_freshness() 辅助函数', freq: '实时', owner: 'bridge API' },
+        'meta.*':                 { source: 'gen_dashboard_data.py → dashboard_data.json', freq: '每日', owner: 'gen脚本' },
       };
-      return map[path] || { source: '—', freq: '—', owner: '—' };
+      // 前缀匹配：先精确匹配，再按前缀最长匹配
+      if (map[path]) return map[path];
+      var best = null;
+      Object.keys(map).forEach(function(key) {
+        if (key.endsWith('.*')) {
+          var prefix = key.slice(0, -2);
+          if (path.indexOf(prefix) === 0) {
+            if (!best || prefix.length > best.prefixLen) {
+              best = { val: map[key], prefixLen: prefix.length };
+            }
+          }
+        }
+      });
+      return (best && best.val) || { source: '— (未映射，需补充)', freq: '—', owner: '—' };
     },
 
     // 连接状态
