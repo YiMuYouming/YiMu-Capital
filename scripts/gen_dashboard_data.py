@@ -20,6 +20,7 @@ REVIEW_DIR = TRADING_DIR / "复盘笔记"
 STYLE_DETECT = Path.home() / "WorkBuddy/Tools/style_detect.py"
 SECTOR_LOG = TRADING_DIR / "板块涨停日志.md"
 OUTPUT_FILE = ROOT_DIR / "data/dashboard_data.json"
+POOLS_FILE = ROOT_DIR / "data/pools.json"
 
 def find_latest_review():
     """找最新有实质内容的复盘笔记（跳过模板，回退到有数据的笔记）"""
@@ -199,6 +200,112 @@ def parse_appendix(filepath):
     return result
 
 
+def parse_appendix_a(filepath):
+    """解析复盘笔记「附录A：次日盘前速查」章节，返回 pools.json SSOT 数据"""
+    try:
+        with open(filepath) as f:
+            content = f.read()
+    except Exception:
+        return {}
+
+    m = re.search(r'##\s*附录A[：:]\s*次日盘前速查.*?\n(.*?)(?=\n##\s|\Z)', content, re.DOTALL)
+    if not m:
+        return {}
+
+    appendix_a = m.group(1)
+    result = {
+        "lianban_pool": [],
+        "trend_pool": [],
+        "anchor_stocks": [],
+        "sectors": [],
+        "excluded": []
+    }
+
+    sections = re.split(r'\n###\s+', appendix_a)
+    for section in sections:
+        if not section.strip():
+            continue
+        lines = section.strip().split('\n')
+        title = lines[0].strip()
+        body = '\n'.join(lines[1:]).strip()
+
+        if '连板板块' in title and '操作映射' in title:
+            result['lianban_pool'] = _parse_appendix_a_table(body, {
+                '板块': '板块', '温度标（只盯）': '温度标', '操作标的': '操作标的',
+                '窗口': '窗口', '触发条件': '触发条件'
+            })
+        elif '趋势板块' in title and '操作映射' in title:
+            result['trend_pool'] = _parse_appendix_a_table(body, {
+                '板块': '板块', '观察标的（只盯）': '观察标的', '操作标的': '操作标的',
+                '触发条件': '触发条件'
+            })
+        elif '操作指南' in title:
+            _extract_excluded(body, result)
+
+    # 附录A 不碰列表为空时回退搜索全文档
+    if not result['excluded']:
+        _extract_excluded(content, result)
+
+    return result
+
+
+def _extract_excluded(text, result):
+    """从文本中提取不碰列表"""
+    for line in text.split('\n'):
+        line = line.strip()
+        if '不碰' not in line.replace('**', ''):
+            continue
+        excluded_text = re.sub(r'\*\*不碰\*\*[：:]?\s*', '', line)
+        excluded_text = re.sub(r'不碰[：:]?\s*', '', excluded_text)
+        if not excluded_text.strip():
+            continue
+        names = re.split(r'[/、；;]', excluded_text)
+        for name in names:
+            name = re.sub(r'[；;].*$', '', name).strip()
+            if name and len(name) < 10 and name not in result['excluded'] and not name.startswith('#'):
+                result['excluded'].append(name)
+
+
+def _parse_appendix_a_table(body, col_map):
+    """解析附录A简化表格（列名与数据附录不同），返回 list[dict]"""
+    import re as _re
+    lines = body.strip().split('\n')
+    rows = []
+    header = None
+    _TEMPLATE_VALS = {'—', '', '待填', '...', 'N/A'}
+
+    def _is_separator(cells):
+        """检测模板行：全为连续虚线（如 ------、---------）"""
+        return all(_re.match(r'^-{3,}$', c) for c in cells)
+
+    for line in lines:
+        line = line.strip()
+        if not line or not line.startswith('|'):
+            continue
+        cells = [c.strip() for c in line.split('|')]
+        cells = cells[1:-1] if len(cells) > 2 else cells
+        if not cells:
+            continue
+        if all(c in _TEMPLATE_VALS for c in cells):
+            continue
+        if _is_separator(cells):
+            continue
+        if header is None:
+            header = cells
+            continue
+        if len(cells) != len(header):
+            continue
+        row = {}
+        for i, h in enumerate(header):
+            key = col_map.get(h, h)
+            val = cells[i] if i < len(cells) else ''
+            if val and val not in _TEMPLATE_VALS:
+                row[key] = val
+        if row:
+            rows.append(row)
+    return rows
+
+
 def _parse_table(body, col_map):
     """解析 Markdown 表格，返回 list[dict]"""
     lines = body.strip().split('\n')
@@ -365,12 +472,18 @@ def parse_sentiment_nodes(filepath):
             node_name = cells[0]
             if node_name not in ('竞价', '早盘', '午盘', '尾盘', '收盘'):
                 continue
+            # 跳过模板行（情绪列为 % 或 - 等无效值）
+            emotion_val = cells[1] if len(cells) > 1 else ''
+            if emotion_val in ('%', '—', '', '/') or emotion_val.startswith('点位'):
+                continue
             entry = {}
             for i, h in enumerate(header[1:], 1):
                 if i < len(cells) and cells[i] and cells[i] not in ('—', '%', '/', ''):
                     entry[h] = cells[i]
             if len(entry) > 0:
-                nodes[node_name] = entry
+                # 已有同节点数据则不覆盖（保留第一次真实数据）
+                if node_name not in nodes:
+                    nodes[node_name] = entry
 
     # === 表2：情绪高标 ===
     # | 指标 | 竞价 | 早盘 | 午盘 | 收盘 | 门槛 |
@@ -625,11 +738,49 @@ def _fallback_frontmatter(current_path):
     return {}
 
 
+def _bidding_emotion(sentiment_nodes):
+    """从竞价节点提取情绪值数值"""
+    bidding = sentiment_nodes.get('竞价', {})
+    raw = bidding.get('情绪', '')
+    if not raw:
+        return None
+    # "41%" → 41, "-0.09%(4174)" → skip(not sentiment)
+    try:
+        import re
+        m = re.match(r'^([+-]?[\d.]+)', str(raw))
+        if m:
+            v = float(m.group(1))
+            if 0 <= v <= 100:  # 情绪值应该在这个范围
+                return v
+    except:
+        pass
+    return None
+
+
+def _fallback_review_path(current_path):
+    """当今天笔记 frontmatter 为空时，返回最近完整笔记的路径"""
+    review_dir = Path(current_path).parent.parent
+    md_files = sorted(review_dir.glob("**/*ReviewNote.md"), reverse=True)
+    current_name = Path(current_path).name
+    for f in md_files:
+        if f.name == current_name:
+            continue
+        fm = parse_frontmatter(str(f))
+        if fm.get("情绪值") is not None and fm.get("情绪值") != "":
+            return str(f)
+    return None
+
 def build_dashboard_data(review_path):
     """组装完整的 dashboard_data.json"""
     fm = parse_frontmatter(review_path)
     prev_fm = _fallback_frontmatter(review_path)  # 今天空字段用昨天的值
-    style = get_style_data(review_path)
+    style_review_path = review_path
+    if fm.get("情绪值") is None or fm.get("情绪值") == "":
+        fallback_path = _fallback_review_path(review_path)
+        if fallback_path:
+            print(f"[info] Fallback style_detect: using {Path(fallback_path).name}")
+            style_review_path = fallback_path
+    style = get_style_data(style_review_path)
     appendix = parse_appendix(review_path)
     # 合并 frontmatter：今天有值用今天，空字段回退昨天
     def fm_val(key, default=None):
@@ -659,21 +810,27 @@ def build_dashboard_data(review_path):
             "source": "gen_dashboard_data.py",
             "note": f"自动生成自 {os.path.basename(review_path)}"
         },
+        # === market 域：T1(实时)/T2(阶段) 优先，frontmatter 仅做收盘校验回退 ===
         "market": {
+            # T1: PyTDX 5s 实时 → live_index / live_breadth
             "上证指数": fm_val("上证指数"),
             "上证涨幅": fm_val("上证涨幅"),
             "市场量能": fm_val("市场量能"),
             "涨跌比": fm_val("涨跌比"),
             "涨停家数": fm_val("涨停家数") or iw.get("涨停家数"),
             "跌停家数": fm_val("跌停家数"),
+            # T2: iwencai 2min → frontmatter 仅做收盘校验
             "炸板率": fm_val("炸板率") or iw.get("炸板率"),
             "封板率": fm_val("封板率") or iw.get("封板率"),
         },
+        # === sentiment 域：T3(实时计算)/T2(校验) 优先，frontmatter 仅做回退 ===
         "sentiment": {
+            # T3 主源: store.js merge() 涨跌家数比 → frontmatter 仅做人工校验
             "情绪值": fm_val("情绪值") or iw.get("情绪值"),
             "情绪区间": fm_val("情绪区间"),
             "昨日情绪": fm_val("昨日情绪"),
             "情绪变化": fm_val("情绪变化"),
+            # T2: iwencai 2min → frontmatter 回退
             "赚钱效应": fm_val("赚钱效应") or iw.get("赚钱效应"),
             "昨日涨停收益": fm_val("昨日涨停收益") or iw.get("涨停收益"),
             "昨日炸板收益": fm_val("昨日炸板收益") or iw.get("炸板收益"),
@@ -686,7 +843,8 @@ def build_dashboard_data(review_path):
             "最高板": fm_val("最高板") or iw.get("最高板"),
             "次高板": fm_val("次高板"),
             "连板梯队": fm_val("连板梯队"),
-            "竞价情绪值": fm_val("竞价情绪值") or fm_val("情绪值") or iw.get("情绪值"),
+            # T2: auction snapshot (9:25) → frontmatter 回退
+            "竞价情绪值": fm_val("竞价情绪值") or _bidding_emotion(parse_sentiment_nodes(review_path)) or fm_val("情绪值") or iw.get("情绪值"),
         },
         "style": style if style else {
             "总分": None, "风格": None, "连板占比": None, "趋势占比": None,
@@ -804,6 +962,14 @@ def watch_mode(review_path, interval=10):
             with open(OUTPUT_FILE, 'w', encoding='utf-8') as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
             print(f"  → {len(json.dumps(data, ensure_ascii=False))} bytes written")
+            # 同步输出 pools.json
+            pools = parse_appendix_a(review_path)
+            if pools:
+                pools["version"] = 1
+                pools["updated"] = datetime.now().strftime("%Y-%m-%dT%H:%M:%S+08:00")
+                pools["source"] = f"复盘笔记 附录A ({os.path.basename(review_path)})"
+                with open(POOLS_FILE, 'w', encoding='utf-8') as f:
+                    json.dump(pools, f, ensure_ascii=False, indent=2)
         except Exception as e:
             print(f"  [ERROR] {e}")
 
@@ -830,8 +996,17 @@ def main():
     OUTPUT_FILE.parent.mkdir(parents=True, exist_ok=True)
     with open(OUTPUT_FILE, 'w', encoding='utf-8') as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
-
     print(f"[done] Written {len(json.dumps(data, ensure_ascii=False))} bytes → {OUTPUT_FILE}")
+
+    # 输出 pools.json（附录A SSOT）
+    pools = parse_appendix_a(review_path)
+    if pools:
+        pools["version"] = 1
+        pools["updated"] = datetime.now().strftime("%Y-%m-%dT%H:%M:%S+08:00")
+        pools["source"] = f"复盘笔记 附录A ({os.path.basename(review_path)})"
+        with open(POOLS_FILE, 'w', encoding='utf-8') as f:
+            json.dump(pools, f, ensure_ascii=False, indent=2)
+        print(f"[done] Written pools → {POOLS_FILE}")
 
 if __name__ == "__main__":
     main()

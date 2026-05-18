@@ -1,0 +1,16 @@
+{
+  "lianban_pool": [],
+  "trend_pool": [],
+  "anchor_stocks": [],
+  "sectors": [],
+  "excluded": [
+    "蒙娜丽莎",
+    "澜起科技",
+    "德明利",
+    "露笑",
+    "赛微"
+  ],
+  "version": 1,
+  "updated": "2026-05-18T13:24:23+08:00",
+  "source": "复盘笔记 附录A (2026_5_18_Monday_ReviewNote.md)"
+}
