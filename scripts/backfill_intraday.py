@@ -219,6 +219,15 @@ def main():
 
     total_snapshots = 0
 
+    # 获取前一日收盘 NAV（从 daily_summary 取）
+    nav = 1.0
+    try:
+        cur.execute("SELECT nav FROM daily_summary WHERE date < ? ORDER BY date DESC LIMIT 1", (trade_dates[0],))
+        row = cur.fetchone()
+        if row: nav = row[0]
+    except Exception:
+        pass
+
     for d in trade_dates:
         pos = timeline.get(d, {})
         if not pos:
@@ -260,14 +269,17 @@ def main():
             cur.execute("""
                 INSERT OR REPLACE INTO intraday_snapshots
                 (ts, date, pnl_pct, nav, sh_pct, sz_pct, cy_pct, pos_pct, mv, total_asset)
-                VALUES (?, ?, ?, 1.0, ?, ?, ?, ?, ?, ?)
-            """, (ts_iso, d, pnl_pct, sh, sz, cy, pos_pct, round(mv, 2), total_asset))
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (ts_iso, d, pnl_pct, round(nav * (1 + pnl_pct / 100), 6), sh, sz, cy, pos_pct, round(mv, 2), total_asset))
             day_snapshots += 1
 
         if day_snapshots > 0:
             conn.commit()
             total_snapshots += day_snapshots
-            print(f"  {d}: {day_snapshots} 条快照 (持仓 {len(pos)} 只, 成本 {total_cost:,.0f})")
+            # 更新 NAV 为当日收盘值，供次日使用
+            day_pnl = round((mv - total_cost) / total_asset * 100, 4) if total_asset > 0 else 0
+            nav = nav * (1 + day_pnl / 100)
+            print(f"  {d}: {day_snapshots} 条快照 (持仓 {len(pos)} 只, 成本 {total_cost:,.0f}, NAV {nav:.6f})")
 
     conn.close()
     print(f"\n{'=' * 60}")
