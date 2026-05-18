@@ -702,6 +702,44 @@ def get_weekday_str(date_str):
     except:
         return ""
 
+def _fallback_pools(current_path):
+    """当今天笔记附录A为空时，回退到最近完整笔记的数据附录（个股格式）"""
+    review_dir = Path(current_path).parent.parent
+    md_files = sorted(review_dir.glob("**/*ReviewNote.md"), reverse=True)
+    current_name = Path(current_path).name
+
+    for f in md_files:
+        if f.name == current_name:
+            continue
+        try:
+            appendix = parse_appendix(str(f))
+            lb = appendix.get("lianban_pool", [])
+            tr = appendix.get("trend_pool", [])
+            if lb or tr:
+                print(f"[info] Fallback pools: using {f.name} ({len(lb)} lianban, {len(tr)} trend)")
+                return {
+                    "lianban_pool": lb,
+                    "trend_pool": tr,
+                    "anchor_stocks": appendix.get("锚定股状态", []),
+                    "sectors": appendix.get("sectors", []),
+                    "excluded": _extract_excluded_from_appendix_a(str(f)),
+                }
+        except Exception:
+            pass
+    return {}
+
+def _extract_excluded_from_appendix_a(filepath):
+    """从附录A提取不碰列表"""
+    try:
+        with open(filepath) as f:
+            content = f.read()
+    except Exception:
+        return []
+    m = re.search(r'\*\*不碰\*\*[：:]\s*(.+?)(?:\n|$)', content)
+    if m:
+        return [s.strip() for s in m.group(1).replace('/', '、').replace('；', '、').split('、') if s.strip()]
+    return []
+
 def _fallback_appendix(current_path, key):
     """当今天笔记附录为空时，回退到最近一个完整笔记的附录数据"""
     review_dir = Path(current_path).parent.parent  # 复盘笔记根目录
@@ -959,17 +997,27 @@ def watch_mode(review_path, interval=10):
         try:
             data = build_dashboard_data(review_path)
             OUTPUT_FILE.parent.mkdir(parents=True, exist_ok=True)
-            with open(OUTPUT_FILE, 'w', encoding='utf-8') as f:
+            tmp = OUTPUT_FILE.with_suffix('.tmp')
+            with open(tmp, 'w', encoding='utf-8') as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
+            os.replace(tmp, OUTPUT_FILE)
             print(f"  → {len(json.dumps(data, ensure_ascii=False))} bytes written")
-            # 同步输出 pools.json
+            # 同步输出 pools.json（今天空则回退昨天）
             pools = parse_appendix_a(review_path)
+            used_fallback = False
+            if not pools or not (pools.get("lianban_pool") or pools.get("trend_pool")):
+                fallback = _fallback_pools(review_path)
+                if fallback:
+                    pools = fallback
+                    used_fallback = True
             if pools:
                 pools["version"] = 1
                 pools["updated"] = datetime.now().strftime("%Y-%m-%dT%H:%M:%S+08:00")
-                pools["source"] = f"复盘笔记 附录A ({os.path.basename(review_path)})"
-                with open(POOLS_FILE, 'w', encoding='utf-8') as f:
+                pools["source"] = f"复盘笔记 附录A ({'fallback' if used_fallback else os.path.basename(review_path)})"
+                tmp_pools = POOLS_FILE.with_suffix('.tmp')
+                with open(tmp_pools, 'w', encoding='utf-8') as f:
                     json.dump(pools, f, ensure_ascii=False, indent=2)
+                os.replace(tmp_pools, POOLS_FILE)
         except Exception as e:
             print(f"  [ERROR] {e}")
 
@@ -994,18 +1042,28 @@ def main():
     data = build_dashboard_data(review_path)
 
     OUTPUT_FILE.parent.mkdir(parents=True, exist_ok=True)
-    with open(OUTPUT_FILE, 'w', encoding='utf-8') as f:
+    tmp = OUTPUT_FILE.with_suffix('.tmp')
+    with open(tmp, 'w', encoding='utf-8') as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
+    os.replace(tmp, OUTPUT_FILE)
     print(f"[done] Written {len(json.dumps(data, ensure_ascii=False))} bytes → {OUTPUT_FILE}")
 
-    # 输出 pools.json（附录A SSOT）
+    # 输出 pools.json（附录A SSOT，今天空则回退昨天）
     pools = parse_appendix_a(review_path)
+    used_fallback = False
+    if not pools or not (pools.get("lianban_pool") or pools.get("trend_pool")):
+        fallback = _fallback_pools(review_path)
+        if fallback:
+            pools = fallback
+            used_fallback = True
     if pools:
         pools["version"] = 1
         pools["updated"] = datetime.now().strftime("%Y-%m-%dT%H:%M:%S+08:00")
-        pools["source"] = f"复盘笔记 附录A ({os.path.basename(review_path)})"
-        with open(POOLS_FILE, 'w', encoding='utf-8') as f:
+        pools["source"] = f"复盘笔记 {'fallback' if used_fallback else '附录A'} ({os.path.basename(review_path)})"
+        tmp_pools = POOLS_FILE.with_suffix('.tmp')
+        with open(tmp_pools, 'w', encoding='utf-8') as f:
             json.dump(pools, f, ensure_ascii=False, indent=2)
+        os.replace(tmp_pools, POOLS_FILE)
         print(f"[done] Written pools → {POOLS_FILE}")
 
 if __name__ == "__main__":

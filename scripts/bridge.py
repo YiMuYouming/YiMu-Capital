@@ -271,7 +271,8 @@ class BridgeHandler(SimpleHTTPRequestHandler):
                         if key in payload['pnl'] and payload['pnl'][key] is not None:
                             data['pnl'][key] = payload['pnl'][key]
 
-                # 同步写入 SQLite 交易记录
+                # 同步写入 SQLite 交易记录（先写 DB，成功后再原子写 JSON）
+                db_error = None
                 try:
                     from scripts.db import insert_trade
                     tdate = payload.get('_trade_date', datetime.now().strftime('%Y-%m-%d'))
@@ -288,10 +289,15 @@ class BridgeHandler(SimpleHTTPRequestHandler):
                             'reason': op.get('原因'),
                         })
                 except Exception as e:
+                    db_error = str(e)
                     print(f"  [bridge] SQLite trade insert error: {e}")
 
-                with open(DATA_FILE, 'w') as f:
-                    json.dump(data, f, ensure_ascii=False, indent=2)
+                # 原子写入 JSON（tmp + os.replace）
+                if not db_error:
+                    tmp = DATA_FILE.with_suffix('.tmp')
+                    with open(tmp, 'w') as f:
+                        json.dump(data, f, ensure_ascii=False, indent=2)
+                    os.replace(tmp, DATA_FILE)
 
                 self.send_response(200)
                 self.send_header('Content-Type', 'application/json')
