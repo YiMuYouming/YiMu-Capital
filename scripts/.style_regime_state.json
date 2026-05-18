@@ -1,0 +1,15 @@
+{
+  "current_regime": "混合（偏连板）",
+  "days_in_regime": 1,
+  "last_update": "2026-05-18",
+  "history": [
+    {
+      "date": "2026-05-18",
+      "style": "混合（偏连板）",
+      "total": 48,
+      "lianban_conf": 56,
+      "trend_conf": 44,
+      "confidence": 51
+    }
+  ]
+}

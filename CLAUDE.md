@@ -102,6 +102,25 @@ gen_dashboard_data.py
 8. **CSS 优先**：布局/适配用 CSS 解决，不让 JS 抢 CSS 的活
 9. **随时提交**：每个逻辑节点完成后提交（组件调通/bug修复/功能完成），不堆到收工时一次性提交。commit message 写清楚做了什么
 
+## 设计规范（DESIGN.md 精简）
+
+本项目遵循「暖砚」设计系统，完整规范见根目录 `DESIGN.md`。
+
+**CSS 关键规则**：
+- 所有 CSS 变量在 `css/theme.css`，不新增冷色变量、不使用 `#000000` 纯黑
+- 数字一律用 `JetBrains Mono` 等宽字体，启用 `font-variant-numeric: tabular-nums`
+- 圆角用 6-8px（`--radius-md` / `--widget-radius`），不用大圆角
+- 涨跌必须同时用颜色 + 符号（`+2.34%` + 红色 / `-1.02%` + 绿色）
+- 间距紧凑为主：sp-sm (8px) 是看板基础间距单位
+- 阴影用 4 级暖调系统（`--shadow-card/elevated/drag/modal`），不用冷色阴影
+- 四个组件类别的色条：决策蓝 `#2563EB` / 数据绿 `#059669` / 风险深红 `#B91C1C` / 工具灰 `#78716C`
+
+**生成新组件时**：
+1. 使用 `YiMuWidget` 基类，遵循 mount → render → resize → unmount 生命周期
+2. 注册到 `widget-registry.js`，设置正确的 tier（tick/fast/manual/daily）
+3. 涨跌数据用 `class="up"/"down"`，KPI 数值用 `class="kpi-value"`
+4. 所有内联 style 优先使用 CSS 变量而非硬编码值
+
 ## 调通状态
 
 | 组件 | 状态 | 备注 |

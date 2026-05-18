@@ -15,16 +15,17 @@ class Auction5DWidget extends YiMuWidget {
     var sent = (snap && snap['情绪指标']) || {};  // 9:25 实时 THS 数据
     var sty = (data && data.style) || {};
     var mkt = (data && data.market) || {};
+    var sen = (data && data.sentiment) || {};     // 复盘笔记 baseline 兜底
 
     // 首次加载：异步获取竞价快照
     if (!snap) {
       this._loadSnapshot(body);
-      this._renderPlaceholder(body, sent, sty, mkt);
+      this._renderPlaceholder(body, sent, sty, mkt, sen);
       return;
     }
 
     // 合并渲染
-    this._renderFull(body, snap, sent, sty, mkt);
+    this._renderFull(body, snap, sent, sty, mkt, sen);
   }
 
   _loadSnapshot(body) {
@@ -40,16 +41,14 @@ class Auction5DWidget extends YiMuWidget {
       .catch(function() {});
   }
 
-  _renderPlaceholder(body, sent, sty, mkt) {
+  _renderPlaceholder(body, sent, sty, mkt, sen) {
     var html = '<div style="font-size:var(--fs-label);color:var(--text-disabled);text-align:center;padding:var(--sp-md)">加载竞价数据...</div>';
-    if (sent['情绪值'] != null) {
-      html += this._renderSentiment(sent, sty, mkt);
-    }
+    html += this._renderSentiment(sent, sty, mkt, sen);
     body.innerHTML = html;
     this.updateTimestamp();
   }
 
-  _renderFull(body, snap, sent, sty, mkt) {
+  _renderFull(body, snap, sent, sty, mkt, sen) {
     var lights = snap['信号灯'] || {};
     var overall = lights['综合'] || {};
     var lightColors = {green:'var(--info)', orange:'var(--warn)', red:'var(--danger)'};
@@ -90,7 +89,7 @@ class Auction5DWidget extends YiMuWidget {
       return h;
     }());
 
-    html += this._renderSentiment(sent, sty, mkt);
+    html += this._renderSentiment(sent, sty, mkt, sen);
     html += '</div>';
 
     // === 下排：高标 | 自选 ===
@@ -118,18 +117,20 @@ class Auction5DWidget extends YiMuWidget {
     html += this._card('自选池', function() {
       var h = '';
       var pools = snap['自选池竞价'] || [];
-      pools.forEach(function(s) {
-        var chg = s['竞价涨幅'] || 0;
-        var cls = chg >= 3 ? 'up' : chg <= -3 ? 'down' : '';
-        var sign = chg >= 0 ? '+' : '';
-        var src = s['来源'] || '';
-        var srcCls = src==='连板'?'up':src==='趋势'?'down':'info';
-        h += '<div style="display:flex;align-items:center;gap:2px;padding:1px 0;font-size:var(--fs-body)">' +
-          '<span style="font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0">'+s['名称']+'</span>' +
-          (src?'<span style="font-size:8px;padding:0 3px;border-radius:2px;background:var(--'+srcCls+');color:var(--text-inverse);flex-shrink:0">'+src+'</span>':'') +
-          '<span class="'+cls+'" style="font-family:var(--font-mono);font-weight:600;margin-left:auto;flex-shrink:0;font-size:var(--fs-body)">'+sign+chg.toFixed(2)+'%</span>' +
-          '</div>';
-      });
+		pools.forEach(function(s) {
+		  var chg = s['竞价涨幅'];
+		  var hasData = chg != null && chg !== '';
+		  var cls = hasData ? (chg >= 3 ? 'up' : chg <= -3 ? 'down' : '') : '';
+		  var sign = hasData && chg >= 0 ? '+' : '';
+		  var display = hasData ? sign + chg.toFixed(2) + '%' : '—';
+		  var src = s['来源'] || '';
+		  var srcCls = src=='连板'?'up':src=='趋势'?'down':'info';
+		  h += '<div style="display:flex;align-items:center;gap:2px;padding:1px 0;font-size:var(--fs-body)">' +
+		    '<span style="font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0">'+s['名称']+'</span>' +
+		    (src?'<span style="font-size:8px;padding:0 3px;border-radius:2px;background:var(--'+srcCls+');color:var(--text-inverse);flex-shrink:0">'+src+'</span>':'') +
+		    '<span class="'+cls+'" style="font-family:var(--font-mono);font-weight:600;margin-left:auto;flex-shrink:0;font-size:var(--fs-body)">'+display+'</span>' +
+		    '</div>';
+		});
       return h;
     }());
 
@@ -160,7 +161,7 @@ class Auction5DWidget extends YiMuWidget {
   }
 
   // === 情绪指标卡片 (SSOT from 复盘笔记) ===
-  _renderSentiment(sent, sty, mkt) {
+  _renderSentiment(sent, sty, mkt, sen) {
     function kv(label, value, cls) {
       if (value == null || value === '') return '';
       return '<div style="display:flex;justify-content:space-between;gap:var(--sp-xs)">' +
@@ -181,6 +182,16 @@ class Auction5DWidget extends YiMuWidget {
 
     var h = '<div style="background:var(--bg-base);border-radius:var(--radius-md);padding:var(--sp-xs) var(--sp-sm)">' +
       '<div style="font-size:var(--fs-label);font-weight:600;color:var(--text-primary);margin-bottom:var(--sp-xs);padding-bottom:2px;border-bottom:1px solid var(--border-light)">情绪指标 9:25</div>';
+
+	    // fallback: 快照情绪为空时用 baseline sentiment（复盘笔记 frontmatter）
+	    sen = sen || {};
+	    if (sent['情绪值'] == null && sen['情绪值'] != null) sent['情绪值'] = sen['情绪值'];
+	    if (!sent['赚钱效应'] && sen['赚钱效应']) sent['赚钱效应'] = sen['赚钱效应'];
+	    if (!sent['昨日涨停收益'] && !sent['涨停收益'] && sen['昨日涨停收益'] != null) sent['昨日涨停收益'] = sen['昨日涨停收益'];
+	    if (!sent['昨日连板收益'] && !sent['连板收益'] && sen['连板收益'] != null) sent['连板收益'] = sen['连板收益'];
+	    if (!sent['昨日炸板收益'] && sen['昨日炸板收益'] != null) sent['昨日炸板收益'] = sen['昨日炸板收益'];
+	    if (sent['连板风险值'] == null && sen['连板风险值'] != null) sent['连板风险值'] = sen['连板风险值'];
+	    if (!sent['最高板'] && sen['最高板']) sent['最高板'] = sen['最高板'];
 
     h += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:2px var(--sp-md);font-size:var(--fs-body)">';
 
