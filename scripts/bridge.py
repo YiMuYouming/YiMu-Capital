@@ -321,6 +321,22 @@ class BridgeHandler(SimpleHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(body)
             return
+        elif parsed.path == '/api/live/quotes':
+            result = {
+                'live_index': CACHE.get('live_index', {}),
+                'live_quotes': CACHE.get('live_quotes', {}),
+                'breadth': CACHE.get('breadth', {}),
+                'live_sectors': CACHE.get('live_sectors', {}),
+                'hot_list': CACHE.get('hot_list', {}),
+                'sector_inflow': CACHE.get('sector_inflow', {}),
+            }
+            result = _add_freshness(result, 'live_quote')
+            body = json.dumps(result, ensure_ascii=False).encode()
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.end_headers()
+            self.wfile.write(body)
+            return
         super().do_GET()
 
     def end_headers(self):
@@ -516,22 +532,54 @@ if __name__ == '__main__':
     port = int(sys.argv[1]) if len(sys.argv) > 1 else 8080
 
     # === APScheduler 启动 ===
-    from scripts.collectors import iwencai_poll, market_data, sentiment_snapshot
+    from scripts.collectors import iwencai_poll, market_data, sentiment_snapshot, quotes
     iwencai_poll.CACHE = CACHE
     market_data.CACHE = CACHE
     sentiment_snapshot.CACHE = CACHE
+    quotes.CACHE = CACHE
+
+    # 从 dashboard_data.json 读取自选池代码
+    try:
+        with open(DATA_FILE) as f:
+            dd = json.load(f)
+        codes = list(set(
+            [s.get('代码') for s in dd.get('lianban_pool', []) if s.get('代码')] +
+            [s.get('代码') for s in dd.get('trend_pool', []) if s.get('代码')] +
+            [a.get('代码') for a in dd.get('decision', {}).get('锚定股状态', []) if a.get('代码')]
+        ))
+        quotes.set_stock_codes(codes)
+        print(f'[bridge] Stock codes loaded: {len(codes)}')
+    except Exception:
+        pass
 
     scheduler = BackgroundScheduler()
-    scheduler.add_job(iwencai_poll.poll_iwencai_sentiment, 'interval', minutes=2,
-                      id='iwencai_2min', next_run_time=datetime.now())
-    scheduler.add_job(market_data.poll_sector_inflow, 'interval', minutes=5,
-                      id='sector_inflow_5min', next_run_time=datetime.now())
-    scheduler.add_job(market_data.poll_news, 'interval', minutes=5,
-                      id='news_5min', next_run_time=datetime.now())
-    scheduler.add_job(sentiment_snapshot.take_sentiment_snapshot, 'cron', minute='0,30',
-                      id='sentiment_snapshot_30min')
+    # T1 实时（5s）
+    scheduler.add_job(quotes.collect_quotes, 'interval', seconds=5, id='quotes_5s',
+                      max_instances=1, misfire_grace_time=10)
+    scheduler.add_job(quotes.collect_index, 'interval', seconds=5, id='index_5s',
+                      max_instances=1, misfire_grace_time=10)
+    # T1 半实时（30s）
+    scheduler.add_job(quotes.collect_breadth, 'interval', seconds=30, id='breadth_30s',
+                      max_instances=1, misfire_grace_time=60)
+    scheduler.add_job(quotes.collect_sectors, 'interval', seconds=30, id='sectors_30s',
+                      max_instances=1, misfire_grace_time=60)
+    # T1 慢周期（300s）
+    scheduler.add_job(quotes.log_pnl_snapshot, 'interval', seconds=300, id='pnl_snap_300s',
+                      max_instances=1, misfire_grace_time=600)
+    # T2 阶段（2min-5min）
+    scheduler.add_job(iwencai_poll.poll_iwencai_sentiment, 'interval', minutes=2, id='iwencai_2min',
+                      max_instances=1, misfire_grace_time=180)
+    scheduler.add_job(market_data.poll_sector_inflow, 'interval', minutes=5, id='sector_inflow_5min',
+                      max_instances=1, misfire_grace_time=600)
+    scheduler.add_job(market_data.poll_news, 'interval', minutes=5, id='news_5min',
+                      max_instances=1, misfire_grace_time=600)
+    scheduler.add_job(quotes.collect_hot_list, 'interval', minutes=5, id='hot_list_5min',
+                      max_instances=1, misfire_grace_time=600)
+    # T2 定时快照
+    scheduler.add_job(sentiment_snapshot.take_sentiment_snapshot, 'cron', minute='0,30', id='sentiment_snap',
+                      max_instances=1, misfire_grace_time=300)
     scheduler.start()
-    print(f'[bridge] APScheduler started: 4 jobs registered')
+    print(f'[bridge] APScheduler started: 10 jobs registered')
 
     server = HTTPServer(('', port), BridgeHandler)
     print(f'[bridge] 看板桥接服务启动 → http://localhost:{port}')
