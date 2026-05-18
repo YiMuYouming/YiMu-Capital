@@ -30,7 +30,9 @@ def collect_quotes():
     try:
         r = _pipeline_fetch("quotes", codes=codes)
         if r:
-            CACHE["live_quotes"] = {"data": r, "_updated": datetime.now().strftime("%Y-%m-%dT%H:%M:%S+08:00")}
+            if isinstance(r, dict): r.pop('_meta', None)
+            CACHE["live_quotes"] = r
+            CACHE["live_quotes"]["_updated"] = datetime.now().strftime("%Y-%m-%dT%H:%M:%S+08:00")
     except Exception as e:
         print(f"  [quotes] collect_quotes error: {e}", file=sys.stderr)
 
@@ -42,7 +44,9 @@ def collect_index():
     try:
         r = _pipeline_fetch("index")
         if r:
-            CACHE["live_index"] = {"data": r, "_updated": datetime.now().strftime("%Y-%m-%dT%H:%M:%S+08:00")}
+            if isinstance(r, dict): r.pop('_meta', None)
+            CACHE["live_index"] = r
+            CACHE["live_index"]["_updated"] = datetime.now().strftime("%Y-%m-%dT%H:%M:%S+08:00")
     except Exception as e:
         print(f"  [quotes] collect_index error: {e}", file=sys.stderr)
 
@@ -54,7 +58,9 @@ def collect_breadth():
     try:
         r = _pipeline_fetch("breadth")
         if r:
-            CACHE["breadth"] = {"data": r, "_updated": datetime.now().strftime("%Y-%m-%dT%H:%M:%S+08:00")}
+            if isinstance(r, dict): r.pop('_meta', None)
+            CACHE["breadth"] = r
+            CACHE["breadth"]["_updated"] = datetime.now().strftime("%Y-%m-%dT%H:%M:%S+08:00")
     except Exception as e:
         print(f"  [quotes] collect_breadth error: {e}", file=sys.stderr)
 
@@ -66,7 +72,9 @@ def collect_sectors():
     try:
         r = _pipeline_fetch("sector_index")
         if r:
-            CACHE["live_sectors"] = {"data": r, "_updated": datetime.now().strftime("%Y-%m-%dT%H:%M:%S+08:00")}
+            if isinstance(r, dict): r.pop('_meta', None)
+            CACHE["live_sectors"] = r
+            CACHE["live_sectors"]["_updated"] = datetime.now().strftime("%Y-%m-%dT%H:%M:%S+08:00")
     except Exception as e:
         print(f"  [quotes] collect_sectors error: {e}", file=sys.stderr)
 

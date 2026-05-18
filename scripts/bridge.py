@@ -600,14 +600,14 @@ if __name__ == '__main__':
     scheduler = BackgroundScheduler()
     # T1 实时（5s）
     scheduler.add_job(quotes.collect_quotes, 'interval', seconds=5, id='quotes_5s',
-                      max_instances=1, misfire_grace_time=10)
+                      max_instances=3, misfire_grace_time=10, coalesce=True)
     scheduler.add_job(quotes.collect_index, 'interval', seconds=5, id='index_5s',
-                      max_instances=1, misfire_grace_time=10)
+                      max_instances=3, misfire_grace_time=10, coalesce=True)
     # T1 半实时（30s）
     scheduler.add_job(quotes.collect_breadth, 'interval', seconds=30, id='breadth_30s',
-                      max_instances=1, misfire_grace_time=60)
+                      max_instances=1, misfire_grace_time=60, coalesce=True)
     scheduler.add_job(quotes.collect_sectors, 'interval', seconds=30, id='sectors_30s',
-                      max_instances=1, misfire_grace_time=60)
+                      max_instances=1, misfire_grace_time=60, coalesce=True)
     # T1 慢周期（300s）
     scheduler.add_job(quotes.log_pnl_snapshot, 'interval', seconds=300, id='pnl_snap_300s',
                       max_instances=1, misfire_grace_time=600)
