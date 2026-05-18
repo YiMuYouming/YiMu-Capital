@@ -59,7 +59,7 @@ def get_pool_codes():
         for a in data.get("decision", {}).get("锚定股状态", []):
             code = str(a.get("代码", ""))
             name = a.get("标的", "")
-            if len(code) == 6:
+            if len(code) == 6 and code not in codes:
                 codes[code] = {"name": name, "pool": "锚定"}
     except Exception:
         pass
@@ -151,9 +151,11 @@ def fetch_pool_auction(codes):
     r = q(f"竞价涨幅 竞价评级 竞价异动类型 竞价量 竞价未匹配量 股票代码:{code_list}", limit=50)
 
     stocks = []
+    returned_codes = set()
     for d in r.get("datas", []):
         code = d.get("股票代码", "").split(".")[0] if "." in str(d.get("股票代码", "")) else d.get("股票代码", "")
         code = str(code)
+        returned_codes.add(code)
         name = d.get("股票简称", "")
         chg = val(d, find_field(d.keys(), "竞价涨幅"), 0)
         rating = d.get("竞价评级", d.get("竞价评级[2026", "")) or "—"
@@ -175,6 +177,19 @@ def fetch_pool_auction(codes):
             "竞价量": match_vol,
             "异动": str(anomaly)[:20] if anomaly else "",
         })
+
+    # 补位：问财没返回的标的用兜底数据，至少展示出来
+    for code, info in codes.items():
+        if code not in returned_codes:
+            stocks.append({
+                "名称": info.get("name", code),
+                "代码": code,
+                "来源": info.get("pool", ""),
+                "竞价涨幅": None,
+                "竞价评级": "—",
+                "竞价量": 0,
+                "异动": "",
+            })
 
     return stocks
 
@@ -212,7 +227,7 @@ def fetch_sector_auction():
 
 def find_today_review_note():
     """找今天的复盘笔记（支持 2026-05-13 和 2026_5_13 两种日期格式）"""
-    review_dir = ROOT_DIR.parent / "复盘笔记"
+    review_dir = Path.home() / "Documents/YouMingVault/10_⚡Now/01_💰弈沐资本/复盘笔记"
     now = datetime.now()
     patterns = [
         now.strftime("%Y-%m-%d"),                    # 2026-05-13
@@ -303,6 +318,9 @@ def build_auction_snapshot():
     # 7. 自动判定
     snapshot["信号灯"] = _auto_lights(snapshot)
 
+    # 8. 高潮保护判定（从 poll_iwencai 合并）
+    snapshot["高潮保护"] = _judge_auction(snapshot)
+
     return snapshot
 
 
@@ -355,6 +373,52 @@ def _auto_lights(snap):
         lights["综合"] = {"灯": "orange", "label": "分化"}
 
     return lights
+
+
+def _judge_auction(snap):
+    """高潮保护判定（从 poll_iwencai.py 迁入）
+    根据竞价情绪值判定保护级别：>=90 极端/>=85 高潮/>=80 接近沸点/<80 正常
+    """
+    sentiment_val = 0
+    sentiment = snap.get("情绪指标", {})
+    for s in (sentiment if isinstance(sentiment, list) else [sentiment]):
+        if isinstance(s, dict) and "竞价情绪" in str(s.get("名称", "")):
+            try:
+                sentiment_val = float(str(s.get("值", "0")).replace("%", ""))
+            except (ValueError, TypeError):
+                pass
+
+    # 从涨跌家数兜底
+    if sentiment_val == 0:
+        ud = snap.get("涨跌家数", {})
+        up = ud.get("涨", 0)
+        dn = ud.get("跌", 0)
+        if up + dn > 0:
+            sentiment_val = round(up / (up + dn) * 100)
+
+    if sentiment_val >= 90:
+        level = "一级高潮保护"
+        light = "red"
+        action = "全天只卖不买，连板+趋势全关"
+    elif sentiment_val >= 85:
+        level = "二级高潮保护"
+        light = "red"
+        action = "连板全关，趋势降半仓"
+    elif sentiment_val >= 80:
+        level = "三级高潮保护"
+        light = "orange"
+        action = "连板降半仓，趋势正常"
+    else:
+        level = "正常"
+        light = "green"
+        action = "正常执行W1/W2"
+
+    return {
+        "级别": level,
+        "灯": light,
+        "竞价情绪值": sentiment_val,
+        "动作": action
+    }
 
 
 def main():
