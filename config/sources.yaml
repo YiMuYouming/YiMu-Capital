@@ -1,0 +1,89 @@
+# 数据源降级链配置 v1.0
+# 每个数据源定义 primary / fallback / max_staleness，降级事件写入 CACHE["_degradations"]
+
+quotes:
+  primary:
+    name: ym_stock_data.fetch
+    type: quotes
+    timeout: 3s
+  fallback:
+    - name: baseline_json
+      type: file
+      path: data/dashboard_data.json
+      field: live_quotes
+
+index:
+  primary:
+    name: ym_stock_data.fetch
+    type: index
+    timeout: 3s
+  fallback:
+    - name: baseline_json
+      type: file
+      path: data/dashboard_data.json
+      field: live_index
+
+sectors:
+  primary:
+    name: ym_stock_data.fetch
+    type: sector_index
+    timeout: 5s
+  fallback:
+    - name: baseline_json
+      type: file
+      path: data/dashboard_data.json
+      field: sectors
+
+breadth:
+  primary:
+    name: ym_stock_data.fetch
+    type: breadth
+    timeout: 10s
+  fallback:
+    - name: baseline_json
+      type: file
+      path: data/dashboard_data.json
+      field: market
+
+auction:
+  primary:
+    name: iwencai
+    type: auction
+    max_staleness: 1h
+  fallback:
+    - name: baseline_json
+      type: file
+      path: data/dashboard_data.json
+      field: decision.竞价
+
+iwencai_sentiment:
+  primary:
+    name: iwencai
+    type: sentiment
+    max_staleness: 10min
+  fallback:
+    - name: baseline_json
+      type: file
+      path: data/dashboard_data.json
+      field: sentiment
+
+sector_inflow:
+  primary:
+    name: ym_stock_data.fetch
+    type: sector_inflow
+    timeout: 10s
+  fallback: []
+
+northbound:
+  primary:
+    name: ym_stock_data.fetch
+    type: northbound
+    timeout: 5s
+  fallback: []
+
+hot_list:
+  primary:
+    name: ym_stock_data.fetch
+    type: ths_hot
+    timeout: 5s
+  fallback: []

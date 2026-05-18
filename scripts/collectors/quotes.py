@@ -108,6 +108,22 @@ def _get_sector_names():
     return sorted(names) if names else []
 
 
+def collect_northbound():
+    """60s: 北向资金实时累计净买入"""
+    if not is_trading_time():
+        return
+    try:
+        r = _pipeline_fetch("northbound")
+        if r:
+            if isinstance(r, dict):
+                r.pop('_meta', None)
+                r.pop('error', None)
+            CACHE["northbound"] = r
+            CACHE["northbound"]["_updated"] = datetime.now().strftime("%Y-%m-%dT%H:%M:%S+08:00")
+    except Exception as e:
+        print(f"  [quotes] collect_northbound error: {e}", file=sys.stderr)
+
+
 def collect_hot_list():
     """5min: 同花顺热榜 + 题材归因"""
     if not is_trading_time():

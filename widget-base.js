@@ -255,11 +255,10 @@ class YiMuWidget {
     return this._container && this._container.querySelector('.widget-header');
   }
 
-  /** 更新数据时间戳 + 新鲜度状态 */
+  /** 更新数据时间戳 + 新鲜度状态（绿/黄/红点） */
   updateTimestamp(time) {
     var ts = this._container && this._container.querySelector('.data-timestamp');
     var freshness = null;
-    // 尝试从合并数据中读取 _freshness
     try {
       var merged = DataStore.getMerged ? DataStore.getMerged() : null;
       if (merged && merged._freshness) freshness = merged._freshness;
@@ -267,6 +266,20 @@ class YiMuWidget {
 
     if (ts) {
       var d = time || new Date();
+      // 新鲜度圆点（live=绿 / delayed=黄动画 / stale=红 / dead=灰）
+      var dot = ts.querySelector('.freshness-dot');
+      if (!dot) {
+        dot = document.createElement('span');
+        dot.className = 'freshness-dot';
+        ts.insertBefore(dot, ts.firstChild);
+      }
+      dot.classList.remove('freshness-dot--live', 'freshness-dot--delayed', 'freshness-dot--stale', 'freshness-dot--dead');
+      var level = freshness ? freshness.level : 'live';
+      dot.classList.add('freshness-dot--' + level);
+      if (level === 'delayed') dot.title = '数据延迟 ' + (freshness ? freshness.age_seconds + 's' : '');
+      else if (level === 'stale') dot.title = '数据过期';
+      else if (level === 'dead') dot.title = '数据失效';
+
       ts.textContent = d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
       // 清除旧状态类
       ts.classList.remove('data-timestamp--stale', 'data-timestamp--dead');
@@ -278,7 +291,6 @@ class YiMuWidget {
           ts.classList.add('data-timestamp--stale');
         }
       }
-      // API _freshness 覆盖：stale 或 dead 级别加对应类
       if (freshness) {
         if (freshness.level === 'stale') ts.classList.add('data-timestamp--stale');
         if (freshness.level === 'dead') ts.classList.add('data-timestamp--dead');

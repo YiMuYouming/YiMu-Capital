@@ -347,6 +347,7 @@ class BridgeHandler(SimpleHTTPRequestHandler):
                 'live_sectors': CACHE.get('live_sectors', {}),
                 'hot_list': CACHE.get('hot_list', {}),
                 'sector_inflow': CACHE.get('sector_inflow', {}),
+                'northbound': CACHE.get('northbound', {}),
             }
             result = _add_freshness(result, 'live_quote')
             body = json.dumps(result, ensure_ascii=False).encode()
@@ -372,6 +373,7 @@ class BridgeHandler(SimpleHTTPRequestHandler):
                         'live_sectors': CACHE.get('live_sectors', {}),
                         'hot_list': CACHE.get('hot_list', {}),
                         'sector_inflow': CACHE.get('sector_inflow', {}),
+                        'northbound': CACHE.get('northbound', {}),
                         'iwencai': CACHE.get('iwencai', {}),
                     }
                     result['_freshness'] = {'level': 'live', 'type': 'sse_stream'}
@@ -618,6 +620,8 @@ if __name__ == '__main__':
                       max_instances=1, misfire_grace_time=600)
     scheduler.add_job(market_data.poll_news, 'interval', minutes=5, id='news_5min',
                       max_instances=1, misfire_grace_time=600)
+    scheduler.add_job(quotes.collect_northbound, 'interval', seconds=60, id='northbound_60s',
+                      max_instances=1, misfire_grace_time=120)
     scheduler.add_job(quotes.collect_hot_list, 'interval', minutes=5, id='hot_list_5min',
                       max_instances=1, misfire_grace_time=600)
     # T2 定时快照
