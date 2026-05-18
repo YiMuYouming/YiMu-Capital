@@ -32,45 +32,54 @@ def _current_node():
 def take_sentiment_snapshot():
     """采集当前情绪指标快照，追加到 sentiment_auto.json"""
     now = datetime.now()
-    # 非交易时段跳过
+    # 非交易时段跳过（包含午休 11:30-13:00）
     if now.weekday() >= 5:
         return
     t = now.time()
-    if not (_time_module(9, 25) <= t <= _time_module(15, 10)):
+    if not (_time_module(9, 25) <= t <= _time_module(11, 30)) and not (_time_module(13, 0) <= t <= _time_module(15, 10)):
         return
     iwencai = CACHE.get("iwencai", {})
     live_index = CACHE.get("live_index", {})
     breadth = CACHE.get("breadth", {})
 
-    # 从 CACHE 取数据（1.3 后会由 quotes collector 填充更多字段）
+    # 情绪值：T3 实时计算（涨跌家数比），与 store.js 逻辑一致
+    up = live_index.get("上涨家数", 0) or 0
+    dn = live_index.get("下跌家数", 0) or 0
+    emotion_val = round(up / (up + dn) * 100, 1) if (up + dn) > 0 else None
+
+    # 炸板率：从封板率反推（iwencai 返回的炸板率字段定义与复盘口径不一致，约 72% vs 真实 ~30%）
+    fbr = iwencai.get("封板率")
+    zbr = round(1 - fbr, 4) if fbr is not None else None
+
+    # 从 CACHE 取数据
     snap = {
         "time": now.strftime("%Y-%m-%dT%H:%M:%S+08:00"),
         "node": _current_node(),
         # 情绪核心
-        "情绪值": iwencai.get("情绪值"),
-        "涨停家数": breadth.get("涨停") or live_index.get("涨停"),
-        "跌停家数": breadth.get("跌停") or live_index.get("跌停"),
+        "情绪值": emotion_val,
+        "涨停家数": breadth.get("涨停") if breadth else None,
+        "跌停家数": breadth.get("跌停") if breadth else None,
         "涨停收益": iwencai.get("昨日涨停收益"),
-        "封板率": iwencai.get("封板率"),
-        "炸板率": iwencai.get("炸板率"),
+        "封板率": fbr,
+        "炸板率": zbr,
         "晋级率": iwencai.get("晋级率"),
         "最高板": iwencai.get("最高板"),
         "连板风险值": iwencai.get("连板风险值"),
         "赚钱效应": iwencai.get("赚钱效应"),
         "涨停溢价率": iwencai.get("涨停溢价率"),
-        # 新增：连板/炸板收益（iwencai Q6/Q7）
+        # 连板/炸板收益（iwencai Q6/Q7）
         "连板收益": iwencai.get("连板收益"),
         "炸板收益": iwencai.get("炸板收益"),
         "连板股数": iwencai.get("连板股数"),
-        # 新增：大盘指数（live_index 5s）
+        # 大盘指数（live_index 5s）
         "上证指数": live_index.get("上证指数"),
         "上证涨幅": live_index.get("上证指数涨幅"),
         "深证涨幅": live_index.get("深证指数涨幅"),
         "创业板涨幅": live_index.get("创业板指涨幅"),
         "成交额": live_index.get("成交额"),
-        # 新增：涨跌家数（live_index 有上涨家数/下跌家数；breadth 只有分档没有这个键）
-        "上涨家数": live_index.get("上涨家数"),
-        "下跌家数": live_index.get("下跌家数"),
+        # 涨跌家数
+        "上涨家数": up or None,
+        "下跌家数": dn or None,
     }
 
     # 加载已有快照（按日期分组: {"2026-05-18": [{...}, ...]}）

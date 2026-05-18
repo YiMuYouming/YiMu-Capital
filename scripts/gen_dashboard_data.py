@@ -820,10 +820,16 @@ def build_dashboard_data(review_path):
             style_review_path = fallback_path
     style = get_style_data(style_review_path)
     appendix = parse_appendix(review_path)
+    # 自选池优先从附录A解析（与 pools.json 同源），数据附录为回退
+    appendix_a = parse_appendix_a(review_path)
+    lianban_pool_a = appendix_a.get("lianban_pool", []) if appendix_a else []
+    trend_pool_a = appendix_a.get("trend_pool", []) if appendix_a else []
+    anchor_a = appendix_a.get("anchor_stocks", []) if appendix_a else []
+    sectors_a = appendix_a.get("sectors", []) if appendix_a else []
     # 合并 frontmatter：今天有值用今天，空字段回退昨天
     def fm_val(key, default=None):
         v = clean_value(fm.get(key))
-        if v is not None and v != "":
+        if v is not None and v != "" and v != "待收盘":
             return v
         return clean_value(prev_fm.get(key)) if prev_fm else default
 
@@ -909,9 +915,9 @@ def build_dashboard_data(review_path):
             "周回撤触发": fm.get("周回撤触发", False),
         },
         "positions": appendix.get("positions", []) or _fallback_appendix(review_path, "positions"),
-        "lianban_pool": _filter_excluded(appendix.get("lianban_pool", []) or _fallback_appendix(review_path, "lianban_pool")),
-        "trend_pool": _filter_excluded(appendix.get("trend_pool", []) or _fallback_appendix(review_path, "trend_pool")),
-        "sectors": appendix.get("sectors", []) or _fallback_appendix(review_path, "sectors"),
+        "lianban_pool": _filter_excluded(lianban_pool_a or appendix.get("lianban_pool", []) or _fallback_appendix(review_path, "lianban_pool")),
+        "trend_pool": _filter_excluded(trend_pool_a or appendix.get("trend_pool", []) or _fallback_appendix(review_path, "trend_pool")),
+        "sectors": sectors_a or appendix.get("sectors", []) or _fallback_appendix(review_path, "sectors"),
         "上证15min": [],
         "live_index": {},
         "live_sectors": {},
@@ -922,7 +928,7 @@ def build_dashboard_data(review_path):
             "早盘": appendix.get("早盘") or {},
             "盘中": appendix.get("盘中") or {},
             "今日操作": appendix.get("今日操作", []) or _fallback_appendix(review_path, "今日操作"),
-            "锚定股状态": appendix.get("锚定股状态", []) or _fallback_appendix(review_path, "锚定股状态"),
+            "锚定股状态": anchor_a or appendix.get("锚定股状态", []) or _fallback_appendix(review_path, "锚定股状态"),
         }
     }
 

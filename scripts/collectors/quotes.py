@@ -3,7 +3,7 @@
 使用 YM-data-pipeline fetch() 统一接口，不再直接调 PyTDX/easyquotation。
 bridge.py APScheduler 调度：5s/30s/300s 三档频率。
 """
-import sys
+import sys, json
 from pathlib import Path
 from datetime import datetime, time as _time_module
 
@@ -18,7 +18,7 @@ def is_trading_time():
     if now.weekday() >= 5:
         return False
     t = now.time()
-    return (_time_module(9, 15) <= t <= _time_module(11, 30)) or (_time_module(13, 0) <= t <= _time_module(15, 2))
+    return (_time_module(9, 15) <= t <= _time_module(11, 30)) or (_time_module(13, 0) <= t <= _time_module(15, 10))
 
 
 def collect_quotes(force=False):
@@ -139,7 +139,7 @@ def collect_hot_list(force=False):
 
 def log_pnl_snapshot():
     """300s: P&L 快照写入 pnl.db"""
-    if not force and not is_trading_time():
+    if not is_trading_time():
         return
     try:
         from scripts.db import get_conn, init_db
@@ -147,14 +147,55 @@ def log_pnl_snapshot():
         conn = get_conn()
         cur = conn.cursor()
         now = datetime.now()
-        live_idx = (CACHE.get("live_index") or {}).get("data", {})
-        sh_pct = live_idx.get("上证指数涨幅", 0)
-        sz_pct = live_idx.get("深证指数涨幅", 0)
-        cy_pct = live_idx.get("创业板指涨幅", 0)
+        live_idx = CACHE.get("live_index") or {}
+        sh_pct = live_idx.get("上证指数涨幅", 0) or 0
+        sz_pct = live_idx.get("深证指数涨幅", 0) or 0
+        cy_pct = live_idx.get("创业板指涨幅", 0) or 0
+
+        # NAV: 从 pnl_history.json 读取 last_twr_nav + total_deposit，按持仓市值计算
+        nav = 1.0
+        total_asset = 0
+        pnl_pct = 0
+        pos_pct = 0
+        mv = 0
+        try:
+            ROOT = Path(__file__).resolve().parent.parent.parent
+            pnl_hist_file = ROOT / "data" / "pnl_history.json"
+            if pnl_hist_file.exists():
+                with open(pnl_hist_file) as f:
+                    ph = json.load(f)
+                meta = ph.get("meta", {})
+                last_nav = meta.get("last_twr_nav", 1.0)
+                total_deposit = meta.get("total_deposit", 0)
+                # 从 CACHE 读取当前持仓市值：W16 总资产或 live_quotes 算市值
+                import json as _json
+                pnl = CACHE.get("pnl") or {}
+                total_asset = pnl.get("总资产", 0) or 0
+                if total_asset > 0 and total_deposit > 0:
+                    nav = round(total_asset / total_deposit, 6)
+                elif last_nav and last_nav != 1.0:
+                    nav = last_nav
+                # 仓位百分比：有持仓 > 0 则根据总资产和可用资金算
+                available = pnl.get("可用资金", 0) or 0
+                if total_asset > 0 and available >= 0:
+                    pos_pct = round((total_asset - available) / total_asset * 100, 2) if total_asset > 0 else 0
+            # 读取 dashboard_data.json 的 risk 域获取当日盈亏
+            data_file = ROOT / "data" / "dashboard_data.json"
+            if data_file.exists():
+                with open(data_file) as f:
+                    dd = _json.load(f)
+                risk = dd.get("risk", {})
+                pnl_pct_val = risk.get("当日盈亏", 0)
+                if isinstance(pnl_pct_val, (int, float)) and pnl_pct_val != 0:
+                    pnl_pct = float(pnl_pct_val)
+        except Exception:
+            pass
+
         cur.execute("""INSERT OR REPLACE INTO intraday_snapshots
             (ts, date, pnl_pct, nav, sh_pct, sz_pct, cy_pct, pos_pct, mv, total_asset)
-            VALUES (?, ?, 0, 1.0, ?, ?, ?, 0, 0, 0)""",
-            (now.strftime("%Y-%m-%dT%H:%M:%S"), now.strftime("%Y-%m-%d"), sh_pct, sz_pct, cy_pct))
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (now.strftime("%Y-%m-%dT%H:%M:%S"), now.strftime("%Y-%m-%d"),
+             pnl_pct, nav, sh_pct, sz_pct, cy_pct, pos_pct, mv, total_asset))
         conn.commit()
     except Exception as e:
         print(f"  [quotes] log_pnl_snapshot error: {e}", file=sys.stderr)

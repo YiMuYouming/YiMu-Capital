@@ -381,18 +381,19 @@ def _judge_auction(snap):
     """
     sentiment_val = 0
     sentiment = snap.get("情绪指标", {})
-    for s in (sentiment if isinstance(sentiment, list) else [sentiment]):
-        if isinstance(s, dict) and "竞价情绪" in str(s.get("名称", "")):
-            try:
-                sentiment_val = float(str(s.get("值", "0")).replace("%", ""))
-            except (ValueError, TypeError):
-                pass
+    # 直接从情绪指标 dict 读取情绪值
+    if isinstance(sentiment, dict):
+        raw = sentiment.get("情绪值", "")
+        try:
+            sentiment_val = float(str(raw).replace("%", ""))
+        except (ValueError, TypeError):
+            pass
 
-    # 从涨跌家数兜底
+    # 从涨跌家数兜底（键名为 上涨/下跌，非 涨/跌）
     if sentiment_val == 0:
         ud = snap.get("涨跌家数", {})
-        up = ud.get("涨", 0)
-        dn = ud.get("跌", 0)
+        up = ud.get("上涨", 0) or ud.get("涨", 0)
+        dn = ud.get("下跌", 0) or ud.get("跌", 0)
         if up + dn > 0:
             sentiment_val = round(up / (up + dn) * 100)
 

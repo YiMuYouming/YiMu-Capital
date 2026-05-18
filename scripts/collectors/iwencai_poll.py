@@ -73,7 +73,7 @@ def poll_iwencai_sentiment():
             if zb is not None: results["炸板率"] = zb
             break
 
-        # Q2: 晋级率 + 连板股数 + 最高板
+        # Q2: 晋级率 + 连板股数 + 最高板 + 分层晋级率
         r2 = _iwencai_query("涨停晋级率 连板股数", limit=5)
         for row in r2.get("datas", []):
             jj = _get_val(row, "晋级率", clean=True)
@@ -81,6 +81,34 @@ def poll_iwencai_sentiment():
             if jj is not None: results["晋级率"] = jj
             if lb_count is not None: results["连板股数"] = lb_count
             break
+
+        # Q2b-Q2d: 分层晋级率（一进二/二进三/三进四）
+        for layer_q, layer_key in [
+            ("昨日首板今日涨停", "一进二晋级率"),
+            ("昨日二板今日涨停", "二进三晋级率"),
+            ("昨日三板及以上今日涨停", "三进四晋级率"),
+        ]:
+            try:
+                r_layer = _iwencai_query(layer_q, limit=5)
+                for row in r_layer.get("datas", []):
+                    v = _get_val(row, "晋级率", clean=True)
+                    if v is None:
+                        # 手动计算：红盘数/总数
+                        pcts = []
+                        total = 0
+                        for k in row:
+                            if "涨跌幅" in str(k):
+                                pv = _clean(row[k])
+                                if isinstance(pv, (int, float)):
+                                    pcts.append(pv)
+                        total = len(pcts)
+                        green = sum(1 for p in pcts if p > 0)
+                        v = round(green / total, 4) if total > 0 else None
+                    if v is not None:
+                        results[layer_key] = v
+                    break
+            except Exception:
+                pass
 
         # Q3: 最高板 — 从连板个股中取 max
         r3 = _iwencai_query("连板股票 最高板", limit=20)
@@ -111,10 +139,13 @@ def poll_iwencai_sentiment():
             # 赚钱效应：均涨幅 >2% 为好，<0 为差
             results["赚钱效应"] = "好" if avg_zt > 2 else ("差" if avg_zt < 0 else "一般")
 
-        # Q5: 连板风险值 — 从晋级率反推（1 - 晋级率，晋级率越低风险越高）
+        # Q5: 连板风险值 = 1 − 晋级率（iwencai 口径）
+        # 注意：此公式与复盘笔记 frontmatter 中的连板风险值口径不同。
+        # 复盘笔记（弈沐哥/稳米）使用 style_detect.py 的多因子综合公式（含涨停收益/炸板收益等），
+        # 结果通常更低（如 0.27 vs 此处的 0.77）。此值供盘中预警参考，不以复盘笔记为准。
         jj_now = results.get("晋级率")
         if jj_now is not None and isinstance(jj_now, (int, float)):
-            rate = jj_now if jj_now <= 1 else jj_now / 100  # iwencai 返回小数（0-1）
+            rate = jj_now if jj_now <= 1 else jj_now / 100
             results["连板风险值"] = round(1.0 - rate, 2)
 
         # Q6: 连板收益 — 连板股今日涨跌幅均值
