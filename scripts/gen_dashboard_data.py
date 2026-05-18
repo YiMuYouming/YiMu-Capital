@@ -17,7 +17,7 @@ from pathlib import Path
 ROOT_DIR = Path(__file__).resolve().parent.parent  # live-dashboard/
 TRADING_DIR = Path.home() / "Documents/YouMingVault/10_⚡Now/01_💰弈沐资本"  # 交易系统根 (复盘笔记在此)
 REVIEW_DIR = TRADING_DIR / "复盘笔记"
-STYLE_DETECT = Path.home() / "WorkBuddy/Tools/style_detect.py"
+STYLE_DETECT = ROOT_DIR / "scripts" / "style_detect.py"
 SECTOR_LOG = TRADING_DIR / "板块涨停日志.md"
 OUTPUT_FILE = ROOT_DIR / "data/dashboard_data.json"
 POOLS_FILE = ROOT_DIR / "data/pools.json"
