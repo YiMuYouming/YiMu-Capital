@@ -55,6 +55,11 @@ class InputPanelWidget extends YiMuWidget {
       } else {
         html += '<input type="'+f.type+'" id="in_'+f.id+'" value="'+(manual[f.id]||'')+'">';
       }
+      // 情绪值手动覆盖开关
+      if (f.id === '情绪值') {
+        var checked = manual['_情绪值_手动覆盖'] === 'true' ? ' checked' : '';
+        html += '<label class="manual-override-label"><input type="checkbox" id="in_情绪值_手动覆盖"'+checked+'> 手动覆盖自动计算</label>';
+      }
       html += '</div>';
     });
     html += '</div>';
@@ -85,6 +90,14 @@ class InputPanelWidget extends YiMuWidget {
       }
     });
 
+    // 情绪值手动覆盖 checkbox
+    var overrideCb = body.querySelector('#in_情绪值_手动覆盖');
+    if (overrideCb) {
+      overrideCb.addEventListener('change', function() {
+        DataStore.manualData.set('_情绪值_手动覆盖', overrideCb.checked ? 'true' : 'false');
+      });
+    }
+
     this.updateTimestamp();
   }
 
@@ -94,6 +107,9 @@ class InputPanelWidget extends YiMuWidget {
       var el = document.getElementById('in_'+f);
       if (el) DataStore.manualData.set(f, el.value);
     });
+    // 保存手动覆盖 checkbox 状态
+    var overrideCb = document.getElementById('in_情绪值_手动覆盖');
+    if (overrideCb) DataStore.manualData.set('_情绪值_手动覆盖', overrideCb.checked ? 'true' : 'false');
 
     // PnL 基线同步到 bridge
     _bridgeSyncPnl(

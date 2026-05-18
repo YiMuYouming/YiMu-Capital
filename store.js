@@ -100,38 +100,8 @@ const DataStore = (function() {
     var d = deepClone(src);
 
     // Step 2: manualData 覆盖（报数面板手动录入）
+    // 注：情绪值/涨跌家数的优先级逻辑已移至 Step 3 之后（T3实时→T2校验→T4覆盖）
     if (manualData) {
-      // 情绪值：只覆盖如果 baseData 没有情绪值（日报SSOT优先，防旧缓存覆盖）
-      if (manualData['情绪值'] && (!src.sentiment || !src.sentiment['情绪值'])) {
-        d.sentiment = d.sentiment || {};
-        var sv = parseFloat(manualData['情绪值']) || d.sentiment['情绪值'];
-        d.sentiment['情绪值'] = sv;
-        d.sentiment['情绪区间'] = sv < 20 ? '冰点' : sv < 40 ? '低迷' : sv < 60 ? '主升' : sv < 80 ? '强势' : '高潮';
-      }
-      // 涨跌家数 → 反推情绪值
-      var up = parseInt(manualData['上涨']) || 0;
-      var dn = parseInt(manualData['下跌']) || 0;
-      if (up && dn) {
-        d.sentiment = d.sentiment || {};
-        d.sentiment['上涨家数'] = up;
-        d.sentiment['下跌家数'] = dn;
-        var total = up + dn;
-        if (total > 0) {
-          d.sentiment['情绪值'] = Math.round(up / total * 100);
-          d.sentiment['情绪区间'] = d.sentiment['情绪值'] < 20 ? '冰点'
-            : d.sentiment['情绪值'] < 40 ? '低迷'
-            : d.sentiment['情绪值'] < 60 ? '主升'
-            : d.sentiment['情绪值'] < 80 ? '强势'
-            : '高潮';
-        }
-      } else if (up) {
-        d.sentiment = d.sentiment || {};
-        d.sentiment['上涨家数'] = up;
-      } else if (dn) {
-        d.sentiment = d.sentiment || {};
-        d.sentiment['下跌家数'] = dn;
-      }
-
       // 涨停收益 → 赚钱效应判定
       var zsStr = manualData['涨停收益'] || '';
       if (zsStr) {
@@ -218,6 +188,45 @@ const DataStore = (function() {
         });
       }
     }
+
+    // === Step 4: 情绪值优先级 T3 实时 > T2 校验 > T4 手工覆盖 ===
+    var autoEmotion = null;
+    var emotionSource = 'none';
+
+    // T3 优先：实时涨跌家数比（来自 live_index 或 manualData）
+    var upAdv = (manualData && parseInt(manualData['上涨'])) || (d.live_index && d.live_index['上涨家数']) || 0;
+    var dnAdv = (manualData && parseInt(manualData['下跌'])) || (d.live_index && d.live_index['下跌家数']) || 0;
+    if (upAdv + dnAdv > 0) {
+      autoEmotion = Math.round(upAdv / (upAdv + dnAdv) * 100);
+      emotionSource = 'T3:live_breadth';
+    }
+
+    // T2 校验：iwencai 情绪值（来自 liveData 或 baseData）
+    var iwencaiEmotion = (liveData && liveData._iwencai_情绪值) || (d.sentiment && d.sentiment['_iwencai_情绪值']);
+    if (iwencaiEmotion != null && (autoEmotion == null || Math.abs(autoEmotion - parseFloat(iwencaiEmotion)) > 15)) {
+      // iwencai 与 T3 偏差 >15% 时记录，但不覆盖 T3（T3 主源更实时）
+      if (autoEmotion == null) {
+        autoEmotion = parseFloat(iwencaiEmotion);
+        emotionSource = 'T2:iwencai(fallback)';
+      }
+    }
+
+    // T4 覆盖：仅当手工明确录入且勾选了手动覆盖 checkbox
+    var manualEmotion = manualData && manualData['情绪值'] || '';
+    var isManualOverride = manualEmotion && manualData && manualData['_情绪值_手动覆盖'] === 'true';
+
+    var finalEmotion = isManualOverride ? parseFloat(manualEmotion)
+      : autoEmotion != null ? autoEmotion
+      : iwencaiEmotion != null ? parseFloat(iwencaiEmotion)
+      : (d.sentiment && d.sentiment['情绪值']) || 0;
+
+    if (isManualOverride) emotionSource = 'T4:manual_override';
+
+    d.sentiment = d.sentiment || {};
+    d.sentiment['情绪值'] = finalEmotion;
+    d.sentiment['情绪区间'] = finalEmotion < 20 ? '冰点' : finalEmotion < 40 ? '低迷'
+      : finalEmotion < 60 ? '主升' : finalEmotion < 80 ? '强势' : '高潮';
+    d.sentiment['_emotion_source'] = emotionSource;
 
     setMerged(d);
     return d;
@@ -392,7 +401,7 @@ const DataStore = (function() {
         'style.总分':           { source: 'style_detect.py → dashboard_data.json', freq: '每日复盘后', owner: '稳米' },
         'style.风格':           { source: 'style_detect.py → dashboard_data.json', freq: '每日复盘后', owner: '稳米' },
         'style.总仓位上限':      { source: 'trading-core.md §第一层 优先级检查', freq: '实时', owner: '规则引擎（自动）' },
-        'sentiment.情绪值':      { source: '同花顺APP→手工录入 / 涨跌家数反推', freq: '盘中随录', owner: '弈沐哥' },
+        'sentiment.情绪值':      { source: 'T3涨跌家数比(主) / T2 iwencai(校验) / T4手工覆盖(需checkbox)', freq: '5s/2min/随录', owner: 'store.js merge()' },
         'sentiment.竞价情绪值':   { source: '同花顺APP→手工录入', freq: '9:25', owner: '弈沐哥' },
         'market.封板率':         { source: '同花顺APP→手工录入', freq: '盘中随录', owner: '弈沐哥' },
         'live_index.*':          { source: 'PyTDX → poll_live.py', freq: '5s', owner: 'poll_live.py' },
