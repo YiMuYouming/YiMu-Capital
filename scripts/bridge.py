@@ -516,9 +516,10 @@ if __name__ == '__main__':
     port = int(sys.argv[1]) if len(sys.argv) > 1 else 8080
 
     # === APScheduler 启动 ===
-    from scripts.collectors import iwencai_poll, market_data
+    from scripts.collectors import iwencai_poll, market_data, sentiment_snapshot
     iwencai_poll.CACHE = CACHE
     market_data.CACHE = CACHE
+    sentiment_snapshot.CACHE = CACHE
 
     scheduler = BackgroundScheduler()
     scheduler.add_job(iwencai_poll.poll_iwencai_sentiment, 'interval', minutes=2,
@@ -527,8 +528,10 @@ if __name__ == '__main__':
                       id='sector_inflow_5min', next_run_time=datetime.now())
     scheduler.add_job(market_data.poll_news, 'interval', minutes=5,
                       id='news_5min', next_run_time=datetime.now())
+    scheduler.add_job(sentiment_snapshot.take_sentiment_snapshot, 'cron', minute='0,30',
+                      id='sentiment_snapshot_30min')
     scheduler.start()
-    print(f'[bridge] APScheduler started: iwencai 2min + sector_inflow 5min + news 5min')
+    print(f'[bridge] APScheduler started: 4 jobs registered')
 
     server = HTTPServer(('', port), BridgeHandler)
     print(f'[bridge] 看板桥接服务启动 → http://localhost:{port}')
