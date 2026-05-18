@@ -117,6 +117,48 @@ def poll_iwencai_sentiment():
             rate = jj_now if jj_now <= 1 else jj_now / 100  # iwencai 返回小数（0-1）
             results["连板风险值"] = round(1.0 - rate, 2)
 
+        # Q6: 连板收益 — 连板股今日涨跌幅均值
+        r6 = _iwencai_query("连板股票 今日涨跌幅", limit=30)
+        lb_pcts = []
+        for row in r6.get("datas", []):
+            pct = _get_val(row, "涨跌幅", clean=True)
+            if pct is not None and isinstance(pct, (int, float)):
+                lb_pcts.append(pct)
+        if lb_pcts:
+            results["连板收益"] = round(sum(lb_pcts) / len(lb_pcts), 2)
+
+        # Q7: 炸板收益 — 炸板股今日涨跌幅均值
+        r7 = _iwencai_query("炸板股票 今日涨跌幅", limit=30)
+        zb_pcts = []
+        for row in r7.get("datas", []):
+            pct = _get_val(row, "涨跌幅", clean=True)
+            if pct is not None and isinstance(pct, (int, float)):
+                zb_pcts.append(pct)
+        if zb_pcts:
+            results["炸板收益"] = round(sum(zb_pcts) / len(zb_pcts), 2)
+
+        # Q8: 连板股列表（供涨停结构和连板股表格使用）
+        r8 = _iwencai_query("连续涨停天数>=2 股票代码 股票简称 所属行业 连续涨停天数 封板时间 换手率", limit=50)
+        lb_stocks = []
+        for row in r8.get("datas", []):
+            code = _get_val(row, "股票代码") or ""
+            name = _get_val(row, "股票简称") or ""
+            days = _get_val(row, "连续涨停天数", clean=True)
+            sector = _get_val(row, "所属行业") or ""
+            ft = _get_val(row, "封板时间") or ""
+            hs = _get_val(row, "换手率", clean=True)
+            if code:
+                lb_stocks.append({
+                    "代码": str(code).split(".")[0] if "." in str(code) else str(code),
+                    "名称": str(name),
+                    "连板数": int(days) if days else 0,
+                    "板块": str(sector),
+                    "封板时间": str(ft),
+                    "换手率": round(float(hs), 2) if hs else None,
+                })
+        if lb_stocks:
+            results["连板股列表"] = lb_stocks
+
         if results:
             results["_updated"] = datetime.now().strftime("%Y-%m-%dT%H:%M:%S+08:00")
             CACHE["iwencai"] = results
