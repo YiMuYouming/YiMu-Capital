@@ -25,7 +25,7 @@ def is_trading_time():
     if now.weekday() >= 5:
         return False
     t = now.time()
-    return (time(9, 25) <= t <= time(11, 30)) or (time(13, 0) <= t <= time(15, 2))
+    return (time(9, 25) <= t <= time(11, 30)) or (time(13, 0) <= t <= time(15, 10))
 
 
 def _clean(val):

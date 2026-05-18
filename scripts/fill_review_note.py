@@ -50,13 +50,22 @@ def load_close_snapshot(date_str):
     return None
 
 
-def load_sentiment_auto():
-    """读 30min 情绪快照"""
+def load_sentiment_auto(date_str=None):
+    """读 30min 情绪快照，返回指定日期的快照列表
+
+    新版格式: {"2026-05-18": [{...}, ...], "2026-05-19": [...]}
+    兼容旧版格式: [{...}, {...}] (平铺数组)
+    """
     path = DATA_DIR / "sentiment_auto.json"
-    if path.exists():
-        with open(path) as f:
-            return json.load(f)
-    return []
+    if not path.exists():
+        return []
+    with open(path) as f:
+        data = json.load(f)
+    if isinstance(data, list):
+        return data  # 旧版兼容
+    if date_str is None:
+        date_str = _date.today().strftime("%Y-%m-%d")
+    return data.get(date_str, [])
 
 
 def load_auction_snapshot():
@@ -314,13 +323,12 @@ def _get_fm(snapshot, pools, auction):
 # ═══════════════════════════════════════════════════════════════
 
 def _best_snapshot_for_node(snapshots, node_name):
-    """从 30min 快照列表中找最匹配 node_name 的那条"""
-    today = _date.today().strftime("%Y-%m-%d")
+    """从指定日期的快照列表中找最匹配 node_name 的那条
+
+    snapshots 已由 load_sentiment_auto(date_str) 过滤为当天列表 [{...}]
+    """
     candidates = []
     for s in snapshots:
-        t = s.get("time", "")
-        if today not in t:
-            continue
         snap_node = s.get("node", "")
         mapped = SNAP_NODE_TO_TABLE.get(snap_node)
         if mapped == node_name:
@@ -573,7 +581,7 @@ def fill_note(date_str=None, dry_run=False):
 
     # 2. 读管线数据
     snapshot = load_close_snapshot(date_str)
-    snapshots = load_sentiment_auto()
+    snapshots = load_sentiment_auto(date_str)
     auction = load_auction_snapshot()
     pools = load_pools()
     pnl = load_pnl(date_str)

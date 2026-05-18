@@ -36,7 +36,7 @@ def take_sentiment_snapshot():
     if now.weekday() >= 5:
         return
     t = now.time()
-    if not (_time_module(9, 25) <= t <= _time_module(15, 5)):
+    if not (_time_module(9, 25) <= t <= _time_module(15, 10)):
         return
     iwencai = CACHE.get("iwencai", {})
     live_index = CACHE.get("live_index", {})
@@ -68,29 +68,34 @@ def take_sentiment_snapshot():
         "深证涨幅": live_index.get("深证指数涨幅"),
         "创业板涨幅": live_index.get("创业板指涨幅"),
         "成交额": live_index.get("成交额"),
-        # 新增：涨跌家数（breadth / live_index）
-        "上涨家数": breadth.get("上涨") or live_index.get("上涨家数"),
-        "下跌家数": breadth.get("下跌") or live_index.get("下跌家数"),
+        # 新增：涨跌家数（live_index 有上涨家数/下跌家数；breadth 只有分档没有这个键）
+        "上涨家数": live_index.get("上涨家数"),
+        "下跌家数": live_index.get("下跌家数"),
     }
 
-    # 加载已有快照
-    snapshots = []
+    # 加载已有快照（按日期分组: {"2026-05-18": [{...}, ...]}）
+    date_key = now.strftime("%Y-%m-%d")
+    all_snapshots = {}
     if OUTPUT.exists():
         try:
             with open(OUTPUT) as f:
-                snapshots = json.load(f)
+                all_snapshots = json.load(f)
         except Exception:
-            snapshots = []
+            all_snapshots = {}
 
-    snapshots.append(snap)
+    day_snapshots = all_snapshots.get(date_key, [])
+    day_snapshots.append(snap)
+    all_snapshots[date_key] = day_snapshots
 
-    # 保留最近 90 天（约 14条/天 × 90 = 1260）
-    max_entries = 1260
-    if len(snapshots) > max_entries:
-        snapshots = snapshots[-max_entries:]
+    # 保留最近 90 天
+    max_days = 90
+    if len(all_snapshots) > max_days:
+        sorted_keys = sorted(all_snapshots.keys())
+        keep_keys = sorted_keys[-max_days:]
+        all_snapshots = {k: all_snapshots[k] for k in keep_keys}
 
     # 原子写入
     tmp = OUTPUT.with_suffix('.tmp')
     with open(tmp, 'w', encoding='utf-8') as f:
-        json.dump(snapshots, f, ensure_ascii=False, indent=2)
+        json.dump(all_snapshots, f, ensure_ascii=False, indent=2)
     os.replace(tmp, OUTPUT)
