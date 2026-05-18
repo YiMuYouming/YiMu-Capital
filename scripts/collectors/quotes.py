@@ -69,14 +69,43 @@ def collect_sectors():
     """30s: 板块涨跌幅/MA5/20/方向"""
     if not is_trading_time():
         return
+    # 从 pools 或 sectors 缓存取板块名列表
+    names = _get_sector_names()
+    if not names:
+        return
     try:
-        r = _pipeline_fetch("sector_index")
+        r = _pipeline_fetch("sector_index", names=names)
         if r:
-            if isinstance(r, dict): r.pop('_meta', None)
+            if isinstance(r, dict):
+                r.pop('_meta', None)
+                r.pop('error', None)
             CACHE["live_sectors"] = r
             CACHE["live_sectors"]["_updated"] = datetime.now().strftime("%Y-%m-%dT%H:%M:%S+08:00")
     except Exception as e:
         print(f"  [quotes] collect_sectors error: {e}", file=sys.stderr)
+
+
+def _get_sector_names():
+    """从 pools.json 和 sectors 缓存拼板块名列表"""
+    names = set()
+    # 从 pools CACHE
+    pools = CACHE.get("pools", {})
+    for s in pools.get("sectors", []):
+        if s.get("板块"):
+            names.add(s["板块"])
+    # 从 dashboard_data.json 兜底
+    if not names:
+        try:
+            import json
+            ROOT = Path(__file__).resolve().parent.parent.parent
+            with open(ROOT / "data" / "dashboard_data.json") as f:
+                dd = json.load(f)
+            for s in dd.get("sectors", []):
+                if s.get("板块"):
+                    names.add(s["板块"])
+        except Exception:
+            pass
+    return sorted(names) if names else []
 
 
 def collect_hot_list():

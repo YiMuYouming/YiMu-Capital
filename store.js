@@ -295,22 +295,32 @@ const DataStore = (function() {
       if (tier === 'tick') _refreshCount++;
       var reloadBase = (_refreshCount % 12 === 0);
       var chain = reloadBase ? adapter.fetchBase() : new Promise(function(r){r(baseData);});
-      chain.then(function(base) {
-        if (reloadBase && base) baseData = base;
-        return adapter.fetchLive();
-      }).then(function(live) {
-        if (live) { liveData = live; connectionStatus = 'live'; }
-        merge();
-        notifyAll();
-        notifyConnListeners();
-      }).catch(function() {
-        connectionStatus = 'dead';
-        if (!baseData && fallback) {
-          setMerged(deepClone(fallback));
+      // SSE 连接时跳过 fetchLive（SSE 推送接管实时数据）
+      if (_sseClient && _sseClient.readyState === EventSource.OPEN) {
+        chain.then(function(base) {
+          if (reloadBase && base) baseData = base;
+          merge();
           notifyAll();
-        }
-        notifyConnListeners();
-      });
+          notifyConnListeners();
+        });
+      } else {
+        chain.then(function(base) {
+          if (reloadBase && base) baseData = base;
+          return adapter.fetchLive();
+        }).then(function(live) {
+          if (live) { liveData = live; connectionStatus = 'live'; }
+          merge();
+          notifyAll();
+          notifyConnListeners();
+        }).catch(function() {
+          connectionStatus = 'dead';
+          if (!baseData && fallback) {
+            setMerged(deepClone(fallback));
+            notifyAll();
+          }
+          notifyConnListeners();
+        });
+      }
     }
   }
 
@@ -319,6 +329,8 @@ const DataStore = (function() {
     if (fallback) {
               setMerged(deepClone(fallback));
     }
+    // 启动 SSE 实时推送（非 file:// 协议）
+    connectSSE();
   }
 
   function fetchAll() {
