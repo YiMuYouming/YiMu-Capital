@@ -273,6 +273,12 @@ html,body{
   letter-spacing:0.3px;
 }
 .data-timestamp--stale{color:var(--warn);background:var(--warn-bg)}
+.data-timestamp--dead{color:var(--danger);background:var(--danger-bg)}
+
+/* v3.0: widget freshness gray-out (Phase 0.7) */
+.widget--stale{opacity:0.7}
+.widget--dead{opacity:0.45;filter:grayscale(60%)}
+
 
 .widget-actions{display:flex;gap:1px}
 .widget-btn{

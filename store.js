@@ -228,6 +228,9 @@ const DataStore = (function() {
       : finalEmotion < 60 ? '主升' : finalEmotion < 80 ? '强势' : '高潮';
     d.sentiment['_emotion_source'] = emotionSource;
 
+    // 保留 API 响应的 _freshness（优先 liveData 实时源，其次 baseData 基线源）
+    d._freshness = (liveData && liveData._freshness) || d._freshness || null;
+
     setMerged(d);
     return d;
   }

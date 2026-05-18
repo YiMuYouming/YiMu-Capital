@@ -255,23 +255,44 @@ class YiMuWidget {
     return this._container && this._container.querySelector('.widget-header');
   }
 
-  /** 更新数据时间戳 */
+  /** 更新数据时间戳 + 新鲜度状态 */
   updateTimestamp(time) {
     var ts = this._container && this._container.querySelector('.data-timestamp');
+    var freshness = null;
+    // 尝试从合并数据中读取 _freshness
+    try {
+      var merged = DataStore.getMerged ? DataStore.getMerged() : null;
+      if (merged && merged._freshness) freshness = merged._freshness;
+    } catch (e) {}
+
     if (ts) {
       var d = time || new Date();
       ts.textContent = d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+      // 清除旧状态类
+      ts.classList.remove('data-timestamp--stale', 'data-timestamp--dead');
       // 超过 2 倍刷新间隔则变 warn 色
       var tierConfig = DataStore.tiers[this.tier];
       if (tierConfig && tierConfig.interval && this._lastRender) {
         var elapsed = Date.now() - this._lastRender;
         if (elapsed > tierConfig.interval * 2) {
           ts.classList.add('data-timestamp--stale');
-        } else {
-          ts.classList.remove('data-timestamp--stale');
         }
       }
+      // API _freshness 覆盖：stale 或 dead 级别加对应类
+      if (freshness) {
+        if (freshness.level === 'stale') ts.classList.add('data-timestamp--stale');
+        if (freshness.level === 'dead') ts.classList.add('data-timestamp--dead');
+      }
     }
+
+    // 组件容器整体灰显
+    var widget = this._container && this._container.closest('.grid-stack-item');
+    if (widget) {
+      widget.classList.remove('widget--stale', 'widget--dead');
+      if (freshness && freshness.level === 'dead') widget.classList.add('widget--dead');
+      else if (freshness && freshness.level === 'stale') widget.classList.add('widget--stale');
+    }
+
     this._lastRender = Date.now();
   }
 

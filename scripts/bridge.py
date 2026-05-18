@@ -188,6 +188,56 @@ def _call_llm_api(prompt_text):
     except Exception as e:
         return {"ok": False, "error": str(e)[:300]}
 
+def _add_freshness(data, data_type, fetched_at=None):
+    """为 API 响应附加 _freshness 字段（live/delayed/stale/dead）"""
+    from datetime import datetime as _dt, time as _time, timedelta as _td
+    now = _dt.now()
+    if fetched_at:
+        age = (now - _dt.fromisoformat(fetched_at)).total_seconds()
+    else:
+        age = 0
+
+    freshness_rules = {
+        'live_quote':   {'live': 15, 'delayed': 60, 'stale': 300},
+        'iwencai':      {'live': 180, 'delayed': 600, 'stale': 1800},
+        'auction':      None,  # 特殊处理：基于时段时间
+        'baseline':     None,  # 特殊处理：基于天数
+        'pnl':          {'live': 300, 'delayed': 3600, 'stale': 86400},
+        'llm':          {'live': 1200, 'delayed': 3600, 'stale': 86400},
+    }
+
+    if data_type == 'auction':
+        today = _dt.now().date()
+        t = now.time()
+        if fetched_at:
+            d = _dt.fromisoformat(fetched_at).date()
+        else:
+            d = today
+        if d == today and _time(9, 25) <= t <= _time(10, 0):
+            level = 'live'
+        elif d == today and t <= _time(15, 0):
+            level = 'delayed'
+        elif d == today:
+            level = 'stale'
+        else:
+            level = 'dead'
+    elif data_type == 'baseline':
+        today = _dt.now().date()
+        if fetched_at:
+            d = _dt.fromisoformat(fetched_at).date()
+        else:
+            d = today
+        diff = (today - d).days
+        level = 'live' if diff == 0 else ('delayed' if diff <= 1 else ('stale' if diff <= 2 else 'dead'))
+    else:
+        rule = freshness_rules.get(data_type, {'live': 300, 'delayed': 3600, 'stale': 86400})
+        level = 'live' if age < rule['live'] else ('delayed' if age < rule['delayed'] else ('stale' if age < rule['stale'] else 'dead'))
+
+    if isinstance(data, dict):
+        data['_freshness'] = {'level': level, 'type': data_type, 'age_seconds': int(age)}
+    return data
+
+
 class BridgeHandler(SimpleHTTPRequestHandler):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=str(ROOT), **kwargs)
@@ -200,6 +250,7 @@ class BridgeHandler(SimpleHTTPRequestHandler):
             index_val = qs.get('index', ['sh'])[0]
             try:
                 result = query_pnl(range_val, index_val)
+                result = _add_freshness(result, 'pnl')
                 body = json.dumps(result, ensure_ascii=False).encode()
                 self.send_response(200)
                 self.send_header('Content-Type', 'application/json')
@@ -213,6 +264,7 @@ class BridgeHandler(SimpleHTTPRequestHandler):
         elif parsed.path == '/api/pnl/summary':
             try:
                 result = query_pnl_summary()
+                result = _add_freshness(result, 'pnl')
                 body = json.dumps(result, ensure_ascii=False).encode()
                 self.send_response(200)
                 self.send_header('Content-Type', 'application/json')
@@ -226,6 +278,7 @@ class BridgeHandler(SimpleHTTPRequestHandler):
         elif parsed.path == '/api/trades':
             try:
                 result = query_trades(limit=50)
+                result = _add_freshness(result, 'pnl')
                 body = json.dumps(result, ensure_ascii=False).encode()
                 self.send_response(200)
                 self.send_header('Content-Type', 'application/json')
