@@ -9,10 +9,15 @@ LLM Hook: POST /api/llm → Anthropic API → 研判文本
 import json, os, sys
 from http.server import HTTPServer, SimpleHTTPRequestHandler
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, time as _time
 from urllib.parse import parse_qs, urlparse
 
+from apscheduler.schedulers.background import BackgroundScheduler
+
 ROOT = Path(__file__).resolve().parent.parent
+
+# 内存缓存（APScheduler 采集线程写入，HTTP handler 读取）
+CACHE = {}
 DATA_FILE = ROOT / "data/dashboard_data.json"
 LLM_INSIGHTS_FILE = ROOT / "data/llm_insights.json"
 
@@ -289,6 +294,15 @@ class BridgeHandler(SimpleHTTPRequestHandler):
                 self.end_headers()
                 self.wfile.write(json.dumps({'error': str(e)}).encode())
             return
+        elif parsed.path == '/api/live/iwencai':
+            result = CACHE.get('iwencai', {})
+            result = _add_freshness(result, 'iwencai')
+            body = json.dumps(result, ensure_ascii=False).encode()
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.end_headers()
+            self.wfile.write(body)
+            return
         super().do_GET()
 
     def end_headers(self):
@@ -482,10 +496,22 @@ class BridgeHandler(SimpleHTTPRequestHandler):
 
 if __name__ == '__main__':
     port = int(sys.argv[1]) if len(sys.argv) > 1 else 8080
+
+    # === APScheduler 启动 ===
+    from scripts.collectors import iwencai_poll
+    iwencai_poll.CACHE = CACHE
+
+    scheduler = BackgroundScheduler()
+    scheduler.add_job(iwencai_poll.poll_iwencai_sentiment, 'interval', minutes=2,
+                      id='iwencai_2min', next_run_time=datetime.now())
+    scheduler.start()
+    print(f'[bridge] APScheduler started: iwencai 2min poll')
+
     server = HTTPServer(('', port), BridgeHandler)
     print(f'[bridge] 看板桥接服务启动 → http://localhost:{port}')
     print(f'[bridge] W15 记流水自动同步到 {DATA_FILE}')
     try:
         server.serve_forever()
     except KeyboardInterrupt:
+        scheduler.shutdown(wait=False)
         print('\n[bridge] 已停止')
