@@ -36,18 +36,65 @@ const DataStore = (function() {
   var connectionStatus = 'polling'; // 'live' | 'polling' | 'dead'
   var errors = [];
 
-  // === 数据适配器（v2.0 新增，预留 Dify 替换点）===
+  // === 数据适配器（v3.0: API 优先 + file:// 降级 + SSE）===
+  var _isFileProtocol = (typeof location !== 'undefined' && location.protocol === 'file:');
+  var _sseClient = null;
+
   var adapter = {
     fetchBase: function() {
-      return fetch('data/dashboard_data.json?t=' + Date.now() + Math.random())
-        .then(function(r) { if (!r.ok) throw new Error('base fetch failed'); return r.json(); });
+      if (_isFileProtocol) {
+        return fetch('data/dashboard_data.json?t=' + Date.now() + Math.random())
+          .then(function(r) { if (!r.ok) throw new Error('base fetch failed'); return r.json(); });
+      }
+      return fetch('/api/baseline')
+        .then(function(r) { if (!r.ok) throw new Error('base fetch failed'); return r.json(); })
+        .catch(function() {
+          // API 失败降级到直接读文件
+          return fetch('data/dashboard_data.json?t=' + Date.now() + Math.random())
+            .then(function(r) { return r.ok ? r.json() : null; });
+        });
     },
     fetchLive: function() {
-      return fetch('data/dashboard_live.json?t=' + Date.now() + Math.random())
+      if (_isFileProtocol) {
+        return fetch('data/dashboard_live.json?t=' + Date.now() + Math.random())
+          .then(function(r) { return r.ok ? r.json() : null; })
+          .catch(function() { return null; });
+      }
+      return fetch('/api/live/quotes')
         .then(function(r) { return r.ok ? r.json() : null; })
-        .catch(function() { return null; });
+        .catch(function() {
+          // API 失败降级到直接读文件
+          return fetch('data/dashboard_live.json?t=' + Date.now() + Math.random())
+            .then(function(r) { return r.ok ? r.json() : null; })
+            .catch(function() { return null; });
+        });
     }
   };
+
+  /** SSE 实时推送（降级到 fetch 轮询） */
+  function connectSSE() {
+    if (_isFileProtocol || typeof EventSource === 'undefined') return;
+    try {
+      _sseClient = new EventSource('/api/live/stream');
+      _sseClient.onmessage = function(e) {
+        try {
+          var live = JSON.parse(e.data);
+          if (live) liveData = live;
+          merge();
+          notifyAll();
+          connectionStatus = 'live';
+          notifyConnListeners();
+        } catch (ex) {}
+      };
+      _sseClient.onerror = function() {
+        connectionStatus = 'polling';
+        notifyConnListeners();
+        // SSE 断开则降级到 fetch 轮询（由 refresh() 的 tick 驱动）
+      };
+    } catch (e) {
+      connectionStatus = 'polling';
+    }
+  }
 
   // === 工具函数 ===
   function deepClone(obj) {

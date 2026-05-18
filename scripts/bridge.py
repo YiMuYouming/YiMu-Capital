@@ -249,7 +249,25 @@ class BridgeHandler(SimpleHTTPRequestHandler):
 
     def do_GET(self):
         parsed = urlparse(self.path)
-        if parsed.path == '/api/pnl':
+        if parsed.path == '/api/baseline':
+            try:
+                if DATA_FILE.exists():
+                    with open(DATA_FILE) as f:
+                        result = json.load(f)
+                else:
+                    result = {}
+                result = _add_freshness(result, 'baseline')
+                body = json.dumps(result, ensure_ascii=False).encode()
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/json')
+                self.end_headers()
+                self.wfile.write(body)
+            except Exception as e:
+                self.send_response(500)
+                self.end_headers()
+                self.wfile.write(json.dumps({'error': str(e)}).encode())
+            return
+        elif parsed.path == '/api/pnl':
             qs = parse_qs(parsed.query)
             range_val = qs.get('range', ['today'])[0]
             index_val = qs.get('index', ['sh'])[0]
@@ -336,6 +354,33 @@ class BridgeHandler(SimpleHTTPRequestHandler):
             self.send_header('Content-Type', 'application/json')
             self.end_headers()
             self.wfile.write(body)
+            return
+        elif parsed.path == '/api/live/stream':
+            self.send_response(200)
+            self.send_header('Content-Type', 'text/event-stream')
+            self.send_header('Cache-Control', 'no-cache')
+            self.send_header('Connection', 'keep-alive')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            try:
+                while True:
+                    import time as _time_lib
+                    result = {
+                        'live_index': CACHE.get('live_index', {}),
+                        'live_quotes': CACHE.get('live_quotes', {}),
+                        'breadth': CACHE.get('breadth', {}),
+                        'live_sectors': CACHE.get('live_sectors', {}),
+                        'hot_list': CACHE.get('hot_list', {}),
+                        'sector_inflow': CACHE.get('sector_inflow', {}),
+                        'iwencai': CACHE.get('iwencai', {}),
+                    }
+                    result['_freshness'] = {'level': 'live', 'type': 'sse_stream'}
+                    data = json.dumps(result, ensure_ascii=False)
+                    self.wfile.write(f"data: {data}\n\n".encode())
+                    self.wfile.flush()
+                    _time_lib.sleep(5)
+            except (BrokenPipeError, ConnectionResetError, OSError):
+                pass
             return
         super().do_GET()
 
