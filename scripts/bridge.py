@@ -303,6 +303,24 @@ class BridgeHandler(SimpleHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(body)
             return
+        elif parsed.path == '/api/live/sectors':
+            result = CACHE.get('sector_inflow', {})
+            result = _add_freshness(result, 'iwencai')
+            body = json.dumps(result, ensure_ascii=False).encode()
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.end_headers()
+            self.wfile.write(body)
+            return
+        elif parsed.path == '/api/live/news':
+            result = CACHE.get('news', {})
+            result = _add_freshness(result, 'llm')
+            body = json.dumps(result, ensure_ascii=False).encode()
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.end_headers()
+            self.wfile.write(body)
+            return
         super().do_GET()
 
     def end_headers(self):
@@ -498,14 +516,19 @@ if __name__ == '__main__':
     port = int(sys.argv[1]) if len(sys.argv) > 1 else 8080
 
     # === APScheduler 启动 ===
-    from scripts.collectors import iwencai_poll
+    from scripts.collectors import iwencai_poll, market_data
     iwencai_poll.CACHE = CACHE
+    market_data.CACHE = CACHE
 
     scheduler = BackgroundScheduler()
     scheduler.add_job(iwencai_poll.poll_iwencai_sentiment, 'interval', minutes=2,
                       id='iwencai_2min', next_run_time=datetime.now())
+    scheduler.add_job(market_data.poll_sector_inflow, 'interval', minutes=5,
+                      id='sector_inflow_5min', next_run_time=datetime.now())
+    scheduler.add_job(market_data.poll_news, 'interval', minutes=5,
+                      id='news_5min', next_run_time=datetime.now())
     scheduler.start()
-    print(f'[bridge] APScheduler started: iwencai 2min poll')
+    print(f'[bridge] APScheduler started: iwencai 2min + sector_inflow 5min + news 5min')
 
     server = HTTPServer(('', port), BridgeHandler)
     print(f'[bridge] 看板桥接服务启动 → http://localhost:{port}')
