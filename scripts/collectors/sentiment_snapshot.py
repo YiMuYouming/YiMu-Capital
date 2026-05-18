@@ -39,14 +39,17 @@ def take_sentiment_snapshot():
     if not (_time_module(9, 25) <= t <= _time_module(15, 5)):
         return
     iwencai = CACHE.get("iwencai", {})
+    live_index = CACHE.get("live_index", {})
+    breadth = CACHE.get("breadth", {})
 
     # 从 CACHE 取数据（1.3 后会由 quotes collector 填充更多字段）
     snap = {
         "time": now.strftime("%Y-%m-%dT%H:%M:%S+08:00"),
         "node": _current_node(),
+        # 情绪核心
         "情绪值": iwencai.get("情绪值"),
-        "涨停家数": CACHE.get("breadth", {}).get("涨停"),
-        "跌停家数": CACHE.get("breadth", {}).get("跌停"),
+        "涨停家数": breadth.get("涨停") or live_index.get("涨停"),
+        "跌停家数": breadth.get("跌停") or live_index.get("跌停"),
         "涨停收益": iwencai.get("昨日涨停收益"),
         "封板率": iwencai.get("封板率"),
         "炸板率": iwencai.get("炸板率"),
@@ -55,6 +58,19 @@ def take_sentiment_snapshot():
         "连板风险值": iwencai.get("连板风险值"),
         "赚钱效应": iwencai.get("赚钱效应"),
         "涨停溢价率": iwencai.get("涨停溢价率"),
+        # 新增：连板/炸板收益（iwencai Q6/Q7）
+        "连板收益": iwencai.get("连板收益"),
+        "炸板收益": iwencai.get("炸板收益"),
+        "连板股数": iwencai.get("连板股数"),
+        # 新增：大盘指数（live_index 5s）
+        "上证指数": live_index.get("上证指数"),
+        "上证涨幅": live_index.get("上证指数涨幅"),
+        "深证涨幅": live_index.get("深证指数涨幅"),
+        "创业板涨幅": live_index.get("创业板指涨幅"),
+        "成交额": live_index.get("成交额"),
+        # 新增：涨跌家数（breadth / live_index）
+        "上涨家数": breadth.get("上涨") or live_index.get("上涨家数"),
+        "下跌家数": breadth.get("下跌") or live_index.get("下跌家数"),
     }
 
     # 加载已有快照
