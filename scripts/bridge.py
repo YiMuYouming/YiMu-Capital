@@ -323,7 +323,7 @@ class BridgeHandler(SimpleHTTPRequestHandler):
             return
         elif parsed.path == '/api/live/sectors':
             result = CACHE.get('sector_inflow', {})
-            result = _add_freshness(result, 'iwencai')
+            result = _add_freshness(result, 'live_quote')
             body = json.dumps(result, ensure_ascii=False).encode()
             self.send_response(200)
             self.send_header('Content-Type', 'application/json')

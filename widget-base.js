@@ -260,7 +260,7 @@ class YiMuWidget {
     var ts = this._container && this._container.querySelector('.data-timestamp');
     var freshness = null;
     try {
-      var merged = DataStore.getMerged ? DataStore.getMerged() : null;
+      var merged = DataStore.merged || null;
       if (merged && merged._freshness) freshness = merged._freshness;
     } catch (e) {}
 

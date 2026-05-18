@@ -1,7 +1,12 @@
-// widgets/market-overview.js — W04 市场全景 (v2.2 实时涨幅/涨跌家数/成交额差)
+// widgets/market-overview.js — W04 市场全景 v2.5 (品牌级视觉升级)
 'use strict';
 
 class MarketOverviewWidget extends YiMuWidget {
+  constructor(config) {
+    super(config);
+    this._baselineOpen = false;
+  }
+
   render(data) {
     var body = this.getBody();
     if (!body) return;
@@ -9,95 +14,138 @@ class MarketOverviewWidget extends YiMuWidget {
     var li = d.live_index || {};
     var m = d.market || {};
 
-    var initBase = DataStore.getInitialBase();
-    var closeM = (initBase && initBase.market) || {};
-    var closeS = (initBase && initBase.sentiment) || {};
+    var html = '<div style="display:flex;flex-direction:column;gap:6px;height:100%">';
 
-    // 三大指数卡片
-    var html = '<div style="display:flex;gap:var(--sp-md);flex-wrap:wrap">';
+    // === 顶层行：三大指数 KPI (紧凑，视觉吸睛) ===
+    html += '<div style="display:flex;gap:6px">';
     [
       {name:'上证', price:li['上证指数']||'—', chg:String(li['上证指数涨幅']||'—')},
       {name:'深证', price:li['深证指数']||'—', chg:String(li['深证指数涨幅']||'—')},
       {name:'创业', price:li['创业指数']||'—', chg:String(li['创业指数涨幅']||'—')}
     ].forEach(function(idx) {
       var dir = idx.chg.charAt(0) === '+' ? 'up' : idx.chg.charAt(0) === '-' ? 'down' : '';
-      html += '<div class="kpi-card" style="flex:1;min-width:100px">' +
-        '<div class="kpi-label" style="font-size:12px">' + idx.name + '</div>' +
-        '<div class="kpi-value ' + dir + '" style="font-size:18px">' + idx.price + '</div>' +
-        '<div class="kpi-verdict ' + dir + '" style="font-size:13px">' + idx.chg + '</div>' +
+      var pctNum = parseFloat(idx.chg.replace('+','').replace('%',''));
+      var arrow = pctNum > 0 ? '▲' : pctNum < 0 ? '▼' : '—';
+      html += '<div class="kpi-card" style="flex:1;padding:8px 10px">' +
+        '<div class="kpi-label" style="margin-bottom:2px">' + idx.name + '</div>' +
+        '<div class="kpi-value ' + dir + '" style="font-size:20px">' + idx.price + '</div>' +
+        '<div class="kpi-verdict ' + dir + '">' + arrow + ' ' + idx.chg + '</div>' +
         '</div>';
     });
     html += '</div>';
 
-    // 成交额 / 涨跌比 / 涨停 / 跌停
+    // === 第二行：关键指标 (4 个紧凑卡片) ===
     var amtDiff = li['成交额差'] || '';
     var amtDir = amtDiff.charAt(0) === '+' ? 'up' : amtDiff.charAt(0) === '-' ? 'down' : '';
     var upCnt = li['上涨家数'];
     var dnCnt = li['下跌家数'];
     var udHtml = (upCnt != null && dnCnt != null)
-      ? '<span style="color:var(--up);font-weight:600">' + upCnt + '</span>/<span style="color:var(--down);font-weight:600">' + dnCnt + '</span>'
+      ? '<span class="up">' + upCnt + '</span>/<span class="down">' + dnCnt + '</span>'
       : (m['涨跌比'] || '—');
-
-    html += '<div style="display:flex;gap:var(--sp-md);margin-top:var(--sp-sm);flex-wrap:wrap;font-size:12px">';
-    html += '<div class="kpi-card" style="flex:1;min-width:80px"><div class="kpi-label" style="font-size:12px">成交额</div><div class="kpi-value" style="font-size:15px">'+(li['成交额']||'—')+'</div><div class="kpi-verdict ' + amtDir + '" style="font-size:12px">'+(amtDiff||'')+'</div></div>';
-    html += '<div class="kpi-card" style="flex:1;min-width:80px"><div class="kpi-label" style="font-size:12px">涨跌比</div><div class="kpi-value" style="font-size:15px">'+udHtml+'</div></div>';
     var amp = li['上证指数振幅'] || '—';
-    html += '<div class="kpi-card" style="flex:1;min-width:60px"><div class="kpi-label" style="font-size:12px">振幅</div><div class="kpi-value" style="font-size:15px;color:var(--warn)">'+amp+'</div></div>';
     var vr = li['量比'];
     var vrStr = vr != null ? vr.toFixed(2) + 'x' : '—';
-    var vrColor = vr != null ? (vr >= 1 ? 'var(--up)' : 'var(--down)') : '';
-    html += '<div class="kpi-card" style="flex:1;min-width:60px"><div class="kpi-label" style="font-size:12px">量比</div><div class="kpi-value" style="font-size:15px;color:'+vrColor+'">'+vrStr+'</div></div>';
+    var vrCls = vr != null ? (vr >= 1 ? 'up' : 'down') : '';
+
+    html += '<div style="display:flex;gap:6px">';
+    html += '<div class="kpi-card" style="flex:1;padding:6px 8px"><div class="kpi-label">成交额</div><div class="kpi-value" style="font-size:14px">'+(li['成交额']||'—')+'</div><div class="kpi-verdict ' + amtDir + '">'+(amtDiff||'')+'</div></div>';
+    html += '<div class="kpi-card" style="flex:1;padding:6px 8px"><div class="kpi-label">涨跌比</div><div class="kpi-value" style="font-size:14px">'+udHtml+'</div></div>';
+    html += '<div class="kpi-card" style="flex:1;padding:6px 8px"><div class="kpi-label">振幅</div><div class="kpi-value" style="font-size:14px;color:var(--warn)">'+amp+'</div></div>';
+    html += '<div class="kpi-card" style="flex:1;padding:6px 8px"><div class="kpi-label">量比</div><div class="kpi-value" style="font-size:14px;color:'+(vrCls?'var(--'+vrCls+')':'')+'">'+vrStr+'</div></div>';
     html += '</div>';
 
-    // 涨跌分布
+    // === 涨跌分布条 (更宽，更醒目) ===
     var br = d.live_breadth || {};
     var bt = br['_total'] || 0;
     if (bt > 0) {
       var upCats = ['涨停', '>7%', '5~7%', '3~5%', '0~3%'];
       var dnCats = ['-0~-3%', '-3~-5%', '-5~-7%', '<-7%', '跌停'];
-      var upColors = ['#ff2d55', '#ff3b30', '#ff6b6b', '#ff8a80', '#ffcdd2'];
-      var dnColors = ['#b9f5d8', '#7bed9f', '#2ed573', '#1abc4e', '#0a8f32'];
+      var upColors = ['#DC2626', '#EF4444', '#F87171', '#FCA5A5', '#FEE2E2'];
+      var dnColors = ['#D1FAE5', '#A7F3D0', '#6EE7B7', '#34D399', '#059669'];
       var allCats = upCats.concat(dnCats);
       var allColors = upColors.concat(dnColors);
-      html += '<div style="margin-top:var(--sp-sm);display:flex;align-items:center;gap:2px;height:14px">';
+      html += '<div style="flex:1;display:flex;flex-direction:column;justify-content:center">';
+      // 色条
+      html += '<div style="display:flex;align-items:center;gap:1px;height:16px;border-radius:3px;overflow:hidden">';
       allCats.forEach(function(cat, i) {
         var n = br[cat] || 0;
         var pct = (n / bt * 100);
-        if (pct > 0.5) {
-          html += '<div title="' + cat + ': ' + n + '只 (' + pct.toFixed(1) + '%)" style="width:' + pct.toFixed(1) + '%;height:100%;background:' + allColors[i] + ';border-radius:1px;cursor:pointer;min-width:2px"></div>';
+        if (pct > 0.3) {
+          html += '<div title="' + cat + ': ' + n + ' (' + pct.toFixed(1) + '%)" style="width:' + pct.toFixed(1) + '%;height:100%;background:' + allColors[i] + ';cursor:pointer;min-width:2px;transition:opacity .15s" onmouseover="this.style.opacity=\'.7\'" onmouseout="this.style.opacity=\'1\'"></div>';
         }
       });
       html += '</div>';
-      html += '<div style="display:flex;justify-content:space-between;font-size:8px;color:var(--text-disabled);margin-top:1px">';
+      // 计数标签
+      html += '<div style="display:flex;justify-content:space-between;font-size:8px;color:var(--text-disabled);margin-top:2px">';
       upCats.forEach(function(c) { html += '<span>' + (br[c]||0) + '</span>'; });
-      html += '<span style="width:4px"></span>';
+      html += '<span style="width:6px"></span>';
       dnCats.forEach(function(c) { html += '<span>' + (br[c]||0) + '</span>'; });
-      html += '<span style="color:var(--text-secondary);font-weight:600">共' + bt + '只</span>';
+      html += '<span style="color:var(--text-secondary);font-weight:600">' + bt + '只</span>';
+      html += '</div>';
       html += '</div>';
     }
 
-    // 昨日收盘基线（来自TDX日线）
+    // === 北向资金 (60s 实时) ===
+    var nb = d.northbound || {};
+    if (nb.hgt_yi != null || nb.sgt_yi != null) {
+      var hgt = nb.hgt_yi || 0;
+      var sgt = nb.sgt_yi || 0;
+      var total_nb = hgt + sgt;
+      var nbCls = total_nb >= 0 ? 'up' : 'down';
+      var nbSign = total_nb >= 0 ? '+' : '';
+      html += '<div style="display:flex;gap:6px;padding:4px 0">' +
+        '<div class="kpi-card" style="flex:1;padding:4px 8px">' +
+        '<span style="font-size:9px;color:var(--text-disabled)">北向资金</span> ' +
+        '<span class="' + nbCls + '" style="font-weight:600;font-size:14px">' + nbSign + total_nb.toFixed(1) + '亿</span>' +
+        '</div></div>';
+    }
+
+    // === 昨日收盘基线 (折叠式，点击展开) ===
     var yb = d.yesterday_baseline || {};
     var yestIndexes = [
       {name:'上证', chg:yb['上证昨涨幅']||'—', amt:yb['上证昨成交额']||'—', up:yb['上证昨上涨'], dn:yb['上证昨下跌']},
       {name:'深证', chg:yb['深证昨涨幅']||'—', amt:yb['深证昨成交额']||'—', up:yb['深证昨上涨'], dn:yb['深证昨下跌']},
       {name:'创业', chg:yb['创业昨涨幅']||'—', amt:yb['创业昨成交额']||'—', up:yb['创业昨上涨'], dn:yb['创业昨下跌']}
     ];
-    html += '<div style="margin-top:var(--sp-md);padding-top:var(--sp-sm);border-top:1px solid var(--border-light)">' +
-      '<div class="kpi-label" style="margin-bottom:var(--sp-xs);color:var(--text-secondary);font-size:12px">昨日收盘基线</div>';
-    html += '<div style="display:flex;flex-wrap:wrap;gap:var(--sp-xs) var(--sp-lg);font-size:12px">';
-    yestIndexes.forEach(function(yi) {
-      var ydir = yi.chg.charAt(0) === '+' ? 'up' : yi.chg.charAt(0) === '-' ? 'down' : '';
-      html += '<span><strong style="color:var(--text-primary)">' + yi.name + '</strong> <span style="color:var(--' + ydir + ')">' + yi.chg + '</span> <span style="color:var(--text-secondary)">成交' + yi.amt + '</span>';
-      if (yi.up != null && yi.dn != null) {
-        html += ' <span style="color:var(--up)">' + yi.up + '</span>/<span style="color:var(--down)">' + yi.dn + '</span>';
-      }
-      html += '</span>';
-    });
-    html += '</div></div>';
+    var hasYest = yestIndexes.some(function(yi) { return yi.chg !== '—' || yi.amt !== '—'; });
+    if (hasYest) {
+      var yestBody = '';
+      yestIndexes.forEach(function(yi) {
+        var ydir = yi.chg.charAt(0) === '+' ? 'up' : yi.chg.charAt(0) === '-' ? 'down' : '';
+        yestBody += '<span style="display:inline-flex;align-items:center;gap:4px;padding:2px 8px;background:var(--bg-base);border-radius:4px;font-size:11px">' +
+          '<strong style="color:var(--text-primary);font-size:12px">' + yi.name + '</strong> ' +
+          '<span class="' + ydir + '" style="font-weight:600">' + yi.chg + '</span>' +
+          '<span style="color:var(--text-disabled)">' + yi.amt + '</span>';
+        if (yi.up != null && yi.dn != null) {
+          yestBody += ' <span class="up">' + yi.up + '</span>/<span class="down">' + yi.dn + '</span>';
+        }
+        yestBody += '</span>';
+      });
+
+      html += '<div style="border-top:1px solid var(--border-light);padding-top:4px">' +
+        '<div id="w04_baseline_toggle" style="display:flex;align-items:center;gap:4px;cursor:pointer;user-select:none;font-size:9px;color:var(--text-disabled);text-transform:uppercase;letter-spacing:0.5px">' +
+        '<span style="font-size:8px;transition:transform .2s" id="w04_baseline_arrow">▶</span> 昨日收盘基线</div>' +
+        '<div id="w04_baseline_body" style="display:none;margin-top:4px;gap:6px;flex-wrap:wrap">' + yestBody + '</div>' +
+        '</div>';
+    }
+
+    html += '</div>';
 
     body.innerHTML = html;
     this.updateTimestamp();
+
+    // 绑定基线折叠
+    var toggle = body.querySelector('#w04_baseline_toggle');
+    var arrow = body.querySelector('#w04_baseline_arrow');
+    var bBody = body.querySelector('#w04_baseline_body');
+    if (toggle && bBody) {
+      if (this._baselineOpen) bBody.style.display = 'flex';
+      toggle.addEventListener('click', function() {
+        bBody.style.display = bBody.style.display === 'none' ? 'flex' : 'none';
+        this._baselineOpen = bBody.style.display !== 'none';
+        if (arrow) arrow.style.transform = bBody.style.display !== 'none' ? 'rotate(90deg)' : '';
+      }.bind(this));
+    }
   }
 }
 

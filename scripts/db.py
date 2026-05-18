@@ -16,8 +16,9 @@ def get_conn():
     """模块级连接复用，全进程共享一个 sqlite3 连接"""
     global _conn
     if _conn is None:
-        _conn = sqlite3.connect(str(DB_PATH))
+        _conn = sqlite3.connect(str(DB_PATH), check_same_thread=False)
         _conn.row_factory = sqlite3.Row
+        _conn.execute("PRAGMA journal_mode=WAL")
     return _conn
 
 

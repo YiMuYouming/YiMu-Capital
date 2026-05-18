@@ -161,7 +161,8 @@ class LLMMonitorWidget extends YiMuWidget {
       熔断触发: risk['熔断触发'] || false,
       sectors: sectorSummary,
       '趋势自选': trendSignals,
-      持仓: posSummary
+      持仓: posSummary,
+      news: (d.news && d.news.data || []).slice(0, 10).map(function(n) { return n.title || ''; })
     };
   }
 

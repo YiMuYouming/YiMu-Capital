@@ -909,8 +909,8 @@ def build_dashboard_data(review_path):
             "周回撤触发": fm.get("周回撤触发", False),
         },
         "positions": appendix.get("positions", []) or _fallback_appendix(review_path, "positions"),
-        "lianban_pool": appendix.get("lianban_pool", []) or _fallback_appendix(review_path, "lianban_pool"),
-        "trend_pool": appendix.get("trend_pool", []) or _fallback_appendix(review_path, "trend_pool"),
+        "lianban_pool": _filter_excluded(appendix.get("lianban_pool", []) or _fallback_appendix(review_path, "lianban_pool")),
+        "trend_pool": _filter_excluded(appendix.get("trend_pool", []) or _fallback_appendix(review_path, "trend_pool")),
         "sectors": appendix.get("sectors", []) or _fallback_appendix(review_path, "sectors"),
         "上证15min": [],
         "live_index": {},
@@ -942,6 +942,20 @@ def build_dashboard_data(review_path):
     _preserve_cleared(data)
 
     return data
+
+
+def _filter_excluded(pool):
+    """从 pools.json 读取 excluded 列表，过滤池中不应出现的标的"""
+    try:
+        if POOLS_FILE.exists():
+            with open(POOLS_FILE) as f:
+                pools = json.load(f)
+            excluded = set(pools.get("excluded", []))
+            if excluded:
+                return [s for s in pool if s.get("标的", "") not in excluded]
+    except Exception:
+        pass
+    return pool
 
 
 def _preserve_cleared(new_data):
