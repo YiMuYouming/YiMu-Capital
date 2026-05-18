@@ -8,6 +8,10 @@ LLM Hook: POST /api/llm → Anthropic API → 研判文本
 
 import json, os, sys
 from http.server import HTTPServer, SimpleHTTPRequestHandler
+from socketserver import ThreadingMixIn
+
+class ThreadingHTTPServer(ThreadingMixIn, HTTPServer):
+    daemon_threads = True
 from pathlib import Path
 from datetime import datetime, time as _time
 from urllib.parse import parse_qs, urlparse
@@ -630,7 +634,7 @@ if __name__ == '__main__':
     scheduler.start()
     print(f'[bridge] APScheduler started: 10 jobs registered')
 
-    server = HTTPServer(('', port), BridgeHandler)
+    server = ThreadingHTTPServer(('', port), BridgeHandler)
     print(f'[bridge] 看板桥接服务启动 → http://localhost:{port}')
     print(f'[bridge] W15 记流水自动同步到 {DATA_FILE}')
     try:
