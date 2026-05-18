@@ -21,9 +21,9 @@ def is_trading_time():
     return (_time_module(9, 15) <= t <= _time_module(11, 30)) or (_time_module(13, 0) <= t <= _time_module(15, 2))
 
 
-def collect_quotes():
+def collect_quotes(force=False):
     """5s: 个股行情（从 CACHE 中的 codes 列表获取）"""
-    if not is_trading_time():
+    if not force and not is_trading_time():
         return
     codes = CACHE.get("_stock_codes", [])
     if not codes:
@@ -38,9 +38,9 @@ def collect_quotes():
         print(f"  [quotes] collect_quotes error: {e}", file=sys.stderr)
 
 
-def collect_index():
+def collect_index(force=False):
     """5s: 三大指数 + 涨跌家数 + 成交额"""
-    if not is_trading_time():
+    if not force and not is_trading_time():
         return
     try:
         r = _pipeline_fetch("index")
@@ -52,9 +52,9 @@ def collect_index():
         print(f"  [quotes] collect_index error: {e}", file=sys.stderr)
 
 
-def collect_breadth():
+def collect_breadth(force=False):
     """30s: 全市场涨跌分布（10档 + 涨停跌停数）"""
-    if not is_trading_time():
+    if not force and not is_trading_time():
         return
     try:
         r = _pipeline_fetch("breadth")
@@ -66,9 +66,9 @@ def collect_breadth():
         print(f"  [quotes] collect_breadth error: {e}", file=sys.stderr)
 
 
-def collect_sectors():
+def collect_sectors(force=False):
     """30s: 板块涨跌幅/MA5/20/方向"""
-    if not is_trading_time():
+    if not force and not is_trading_time():
         return
     # 从 pools 或 sectors 缓存取板块名列表
     names = _get_sector_names()
@@ -109,9 +109,9 @@ def _get_sector_names():
     return sorted(names) if names else []
 
 
-def collect_northbound():
+def collect_northbound(force=False):
     """60s: 北向资金实时累计净买入"""
-    if not is_trading_time():
+    if not force and not is_trading_time():
         return
     try:
         r = _pipeline_fetch("northbound")
@@ -125,9 +125,9 @@ def collect_northbound():
         print(f"  [quotes] collect_northbound error: {e}", file=sys.stderr)
 
 
-def collect_hot_list():
+def collect_hot_list(force=False):
     """5min: 同花顺热榜 + 题材归因"""
-    if not is_trading_time():
+    if not force and not is_trading_time():
         return
     try:
         r = _pipeline_fetch("ths_hot")
@@ -139,7 +139,7 @@ def collect_hot_list():
 
 def log_pnl_snapshot():
     """300s: P&L 快照写入 pnl.db"""
-    if not is_trading_time():
+    if not force and not is_trading_time():
         return
     try:
         from scripts.db import get_conn, init_db

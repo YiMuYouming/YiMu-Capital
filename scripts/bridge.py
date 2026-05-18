@@ -634,6 +634,14 @@ if __name__ == '__main__':
     scheduler.start()
     print(f'[bridge] APScheduler started: 10 jobs registered')
 
+    # 冷启动：强制执行一次初始采集填充缓存（不受 is_trading_time 限制）
+    print(f'[bridge] Cold-start bootstrap: running initial collection...')
+    for bootstrap_fn in [quotes.collect_index, quotes.collect_quotes, quotes.collect_sectors]:
+        try:
+            bootstrap_fn(force=True)
+        except Exception as e:
+            print(f'  [bridge] bootstrap warning: {e}')
+
     server = ThreadingHTTPServer(('', port), BridgeHandler)
     print(f'[bridge] 看板桥接服务启动 → http://localhost:{port}')
     print(f'[bridge] W15 记流水自动同步到 {DATA_FILE}')
