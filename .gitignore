@@ -14,3 +14,5 @@ Thumbs.db
 *.bak
 *.bak_*
 __pycache__/
+pnl.db-shm
+pnl.db-wal
