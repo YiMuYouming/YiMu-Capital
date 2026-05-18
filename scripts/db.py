@@ -10,11 +10,20 @@ from datetime import datetime
 ROOT = Path(__file__).resolve().parent.parent
 DB_PATH = ROOT / "data" / "pnl.db"
 
+_conn = None
+
+def get_conn():
+    """模块级连接复用，全进程共享一个 sqlite3 连接"""
+    global _conn
+    if _conn is None:
+        _conn = sqlite3.connect(str(DB_PATH))
+        _conn.row_factory = sqlite3.Row
+    return _conn
+
 
 def _exec(sql, params=None):
-    """便捷执行：连接 → cursor → execute → fetchall → 关闭"""
-    conn = sqlite3.connect(str(DB_PATH))
-    conn.row_factory = sqlite3.Row
+    """便捷执行：连接 → cursor → execute → fetchall（复用连接，不关闭）"""
+    conn = get_conn()
     cur = conn.cursor()
     if params:
         cur.execute(sql, params)
@@ -22,21 +31,19 @@ def _exec(sql, params=None):
         cur.execute(sql)
     rows = cur.fetchall()
     conn.commit()
-    conn.close()
     return rows
 
 
 def _exec_write(sql, params=None):
-    conn = sqlite3.connect(str(DB_PATH))
+    conn = get_conn()
     cur = conn.cursor()
     if params: cur.execute(sql, params)
     else: cur.execute(sql)
     conn.commit()
-    conn.close()
 
 
 def init_db():
-    conn = sqlite3.connect(str(DB_PATH))
+    conn = get_conn()
     conn.executescript("""
         CREATE TABLE IF NOT EXISTS intraday_snapshots (
             ts          TEXT PRIMARY KEY,
@@ -98,7 +105,6 @@ def init_db():
         CREATE INDEX IF NOT EXISTS idx_llm_date ON llm_insights(date);
     """)
     conn.commit()
-    conn.close()
 
 
 # ===== PnL 操作 =====
@@ -264,7 +270,7 @@ def query_llm(date_str=None, limit=20):
 # ===== 历史导入 =====
 
 def import_daily_history(records):
-    conn = sqlite3.connect(str(DB_PATH))
+    conn = get_conn()
     cur = conn.cursor()
     for r in records:
         cur.execute("""INSERT OR REPLACE INTO daily_summary (date, nav, pnl_pct, sh_pct, sz_pct, cy_pct, pos_pct, deposit)
@@ -273,11 +279,10 @@ def import_daily_history(records):
              r.get('sh_pct', 0), r.get('sz_pct', 0), r.get('cy_pct', 0),
              r.get('pos_pct', 0), r.get('deposit', 0)))
     conn.commit()
-    conn.close()
 
 
 def import_trade_history(trades):
-    conn = sqlite3.connect(str(DB_PATH))
+    conn = get_conn()
     cur = conn.cursor()
     for t in trades:
         cur.execute("""INSERT INTO trade_records (trade_date, action, code, name, price, qty, realized_pnl, fee)
@@ -286,12 +291,11 @@ def import_trade_history(trades):
              t.get('name', ''), t.get('price'), t.get('qty', 0),
              t.get('realized_pnl', 0), t.get('fee', 0)))
     conn.commit()
-    conn.close()
 
 
 if __name__ == '__main__':
     init_db()
-    conn = sqlite3.connect(str(DB_PATH))
+    conn = get_conn()
     conn.row_factory = sqlite3.Row
     cur = conn.cursor()
     cur.execute("SELECT name FROM sqlite_master WHERE type='table'")
