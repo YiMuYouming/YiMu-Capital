@@ -631,6 +631,10 @@ if __name__ == '__main__':
     # T2 定时快照
     scheduler.add_job(sentiment_snapshot.take_sentiment_snapshot, 'cron', minute='0,30', id='sentiment_snap',
                       max_instances=1, misfire_grace_time=300)
+    # 收盘数据包（15:02 dump CACHE 全量快照）
+    from scripts.snapshot_close import run_snapshot_close
+    scheduler.add_job(lambda: run_snapshot_close(CACHE, ROOT), 'cron', hour=15, minute=2,
+                      id='snapshot_close_1502', max_instances=1, misfire_grace_time=300)
     # T4 基线刷新（盘前 + 盘后）
     def run_gen_baseline():
         import subprocess
@@ -642,7 +646,7 @@ if __name__ == '__main__':
                       max_instances=1, misfire_grace_time=600)
 
     scheduler.start()
-    print(f'[bridge] APScheduler started: 12 jobs registered')
+    print(f'[bridge] APScheduler started: 13 jobs registered')
 
     # 冷启动：强制执行一次初始采集填充缓存（不受 is_trading_time 限制）
     print(f'[bridge] Cold-start bootstrap: running initial collection...')
