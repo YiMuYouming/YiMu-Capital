@@ -7,6 +7,8 @@ import json, os, sys
 from pathlib import Path
 from datetime import datetime, time as _time_module
 
+from scripts.file_utils import atomic_write_json
+
 ROOT = Path(__file__).resolve().parent.parent.parent
 OUTPUT = ROOT / "data" / "sentiment_auto.json"
 CACHE = {}
@@ -105,8 +107,4 @@ def take_sentiment_snapshot(force=False):
         keep_keys = sorted_keys[-max_days:]
         all_snapshots = {k: all_snapshots[k] for k in keep_keys}
 
-    # 原子写入
-    tmp = OUTPUT.with_suffix('.tmp')
-    with open(tmp, 'w', encoding='utf-8') as f:
-        json.dump(all_snapshots, f, ensure_ascii=False, indent=2)
-    os.replace(tmp, OUTPUT)
+    atomic_write_json(OUTPUT, all_snapshots)

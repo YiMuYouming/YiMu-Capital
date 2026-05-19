@@ -18,6 +18,7 @@ class YiMuWidget {
     this._container = null;    // GridStack 分配的 DOM 容器
     this._unsubscribers = [];  // DataStore 订阅清理函数
     this._timers = [];          // setInterval/setTimeout 清理
+    this._domListeners = [];    // DOM 事件监听清理
     this._lastRender = null;   // 上次渲染时间戳
     this._fsState = 0;         // 0=普通 1=内容适配 2=全屏铺满
   }
@@ -60,12 +61,16 @@ class YiMuWidget {
     }
   }
 
-  /** GridStack 卸载：取消订阅 → 清除定时器 */
+  /** GridStack 卸载：取消订阅 → 清除定时器 → 清理 DOM 事件 */
   unmount() {
     this._unsubscribers.forEach(function(fn) { if (typeof fn === 'function') fn(); });
     this._unsubscribers = [];
     this._timers.forEach(function(t) { clearInterval(t); clearTimeout(t); });
     this._timers = [];
+    this._domListeners.forEach(function(d) {
+      if (d.el && d.event && d.fn) d.el.removeEventListener(d.event, d.fn);
+    });
+    this._domListeners = [];
     this._container = null;
   }
 
@@ -106,12 +111,19 @@ class YiMuWidget {
     this._bindShellEvents();
   }
 
+  /** 绑定 DOM 事件（自动追踪，unmount 时清理） */
+  _on(el, event, fn) {
+    if (!el) return;
+    el.addEventListener(event, fn);
+    this._domListeners.push({ el: el, event: event, fn: fn });
+  }
+
   /** 绑定标题栏按钮事件 */
   _bindShellEvents() {
     if (!this._container) return;
     var self = this;
 
-    self._container.addEventListener('click', function(e) {
+    self._on(self._container, 'click', function(e) {
       var btn = e.target.closest('.widget-btn');
       if (!btn) return;
       var action = btn.dataset.action;

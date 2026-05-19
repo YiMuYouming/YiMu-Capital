@@ -7,6 +7,8 @@ import sys, json, threading
 from pathlib import Path
 from datetime import datetime, time as _time_module
 
+from scripts.file_utils import atomic_write_json
+
 sys.path.insert(0, "/Users/YouMing/Documents/YM_Capital/YM-data-pipeline")
 from ym_stock_data.fetch import fetch as _pipeline_fetch
 
@@ -220,7 +222,8 @@ def collect_hot_list(force=False):
     try:
         r = _pipeline_fetch("ths_hot")
         if r:
-            CACHE["hot_list"] = {"data": r, "_updated": datetime.now().strftime("%Y-%m-%dT%H:%M:%S+08:00")}
+            CACHE["hot_list"] = r
+            CACHE["hot_list"]["_updated"] = datetime.now().strftime("%Y-%m-%dT%H:%M:%S+08:00")
     except Exception as e:
         print(f"  [quotes] collect_hot_list error: {e}", file=sys.stderr)
 
@@ -333,11 +336,7 @@ def log_pnl_snapshot():
                     day_start_asset = total_asset
                     ph["meta"]["day_start_asset"] = day_start_asset
                     ph["meta"]["day_start_date"] = today_str
-                    tmp = pnl_hist_file.with_suffix('.tmp')
-                    with open(tmp, 'w') as f:
-                        json.dump(ph, f, ensure_ascii=False)
-                    import os as _os
-                    _os.replace(tmp, pnl_hist_file)
+                    atomic_write_json(pnl_hist_file, ph)
 
             if day_start_asset > 0:
                 pnl_pct = round((total_asset - day_start_asset) / day_start_asset * 100, 2)
@@ -354,11 +353,7 @@ def log_pnl_snapshot():
                     ph_data["meta"]["last_total_asset"] = total_asset
                     ph_data["meta"]["last_twr_nav"] = nav
                     ph_data["meta"]["last_updated"] = now.strftime("%Y-%m-%dT%H:%M:%S")
-                    tmp = pnl_hist_file.with_suffix('.tmp')
-                    with open(tmp, 'w') as f:
-                        json.dump(ph_data, f, ensure_ascii=False)
-                    import os as _os
-                    _os.replace(tmp, pnl_hist_file)
+                    atomic_write_json(pnl_hist_file, ph_data)
                 except Exception:
                     pass
         except Exception:

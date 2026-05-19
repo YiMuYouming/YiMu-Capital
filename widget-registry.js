@@ -33,7 +33,7 @@ const WidgetRegistry = (function() {
     { id:'W18', type:'anchor-stocks', title:'锚定股状态',   category:'decision', tier:'tick',   defaultSize:{w:6,h:3}, dataPaths:['decision.锚定股状态','live_quotes'], priority:'P1' },
     { id:'W19', type:'midday-review',title:'午盘复核',     category:'decision', tier:'manual', defaultSize:{w:4,h:4}, dataPaths:['decision.盘中'], priority:'P1' },
     { id:'W20', type:'llm-monitor',  title:'AI盯盘',       category:'decision', tier:'manual', defaultSize:{w:8,h:7}, dataPaths:[], priority:'P1' },
-    { id:'W21', type:'zt-echelon',  title:'涨停梯队',   category:'data',     tier:'tick',   defaultSize:{w:8,h:7}, dataPaths:['hot_list'], priority:'P1' },
+    { id:'W21', type:'zt-echelon',  title:'涨停梯队',   category:'data',     tier:'tick',   defaultSize:{w:8,h:7}, dataPaths:['hot_list','iwencai.连板股列表'], priority:'P1' },
     { id:'W22', type:'pnl-curve',   title:'账户收益曲线', category:'data',     tier:'fast',   defaultSize:{w:12,h:10}, dataPaths:['live_quotes'], priority:'P1' },
   ];
 

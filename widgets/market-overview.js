@@ -161,17 +161,17 @@ class MarketOverviewWidget extends YiMuWidget {
     // 异步加载 LLM 研判
     this._loadLLM(body);
 
-    // 绑定基线折叠
+    // 绑定基线折叠（DOM 随 render 重建，用 onclick 天然防重复绑定）
     var toggle = body.querySelector('#w04_baseline_toggle');
     var arrow = body.querySelector('#w04_baseline_arrow');
     var bBody = body.querySelector('#w04_baseline_body');
     if (toggle && bBody) {
       if (this._baselineOpen) bBody.style.display = 'flex';
-      toggle.addEventListener('click', function() {
+      toggle.onclick = function() {
         bBody.style.display = bBody.style.display === 'none' ? 'flex' : 'none';
         this._baselineOpen = bBody.style.display !== 'none';
         if (arrow) arrow.style.transform = bBody.style.display !== 'none' ? 'rotate(90deg)' : '';
-      }.bind(this));
+      }.bind(this);
     }
   }
 

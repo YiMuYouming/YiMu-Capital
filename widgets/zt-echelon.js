@@ -138,8 +138,34 @@ class ZtEchelonWidget extends YiMuWidget {
 
     var hotList = (data && data.hot_list) || {};
     var reasonStats = hotList.reason_stats || {};
-    var ztStocks = hotList.zt_stocks || [];
+    // zt_stocks 优先（涨停精选），空则回退 stocks（热榜全量）
+    var rawStocks = (hotList.zt_stocks && hotList.zt_stocks.length > 0) ? hotList.zt_stocks : (hotList.stocks || []);
+    // 过滤 ST 股票
+    var ztStocks = rawStocks.filter(function(s) {
+      var name = s.name || '';
+      return !/ST/.test(name);
+    });
+
+    // 从 iwencai 连板股列表构建 code→连板数 映射（真实涨停数据，优先使用）
+    var iwencaiBoardMap = {};
+    try {
+      var iwencaiList = (data && data.iwencai && data.iwencai['连板股列表']) || [];
+      iwencaiList.forEach(function(s) {
+        if (s['代码']) iwencaiBoardMap[s['代码']] = parseInt(s['连板数']) || 1;
+      });
+    } catch(e) {}
+
+    // 合并服务端 zt_history + 客户端 localStorage 缓存
     var ztHistory = hotList.zt_history || {};
+    if (Object.keys(ztHistory).length === 0) {
+      ztHistory = self._loadLocalHistory();
+    } else {
+      var localHist = self._loadLocalHistory();
+      Object.keys(localHist).forEach(function(d) {
+        if (!ztHistory[d]) ztHistory[d] = localHist[d];
+      });
+    }
+    self._saveLocalHistory(ztStocks);
 
     // Build date list
     var dates = this._buildDateList(ztStocks, ztHistory);
@@ -151,9 +177,13 @@ class ZtEchelonWidget extends YiMuWidget {
     var stocks = this._getStocksForDate(this._selectedDate, ztStocks, ztHistory);
     var isToday = (this._selectedDate === new Date().toISOString().substring(0, 10));
 
-    // Compute 连板性质
+    // Compute 连板性质：iwencai 连板股列表优先，其次 ztHistory，最后回退首板
     stocks.forEach(function(s) {
-      s._nature = self._computeNature(s.code, self._selectedDate, ztHistory);
+      if (iwencaiBoardMap[s.code]) {
+        s._nature = iwencaiBoardMap[s.code] + '连板';
+      } else {
+        s._nature = self._computeNature(s.code, self._selectedDate, ztHistory);
+      }
       s._natureRank = self._natureRank(s._nature);
     });
 
@@ -193,11 +223,14 @@ class ZtEchelonWidget extends YiMuWidget {
       var n = s._nature || '首板';
       natureCount[n] = (natureCount[n] || 0) + 1;
     });
-    var maxBoard = 0;
+    var boardLevels = [];
     Object.keys(natureCount).forEach(function(k) {
       var m = k.match(/^(\d+)连板/);
-      if (m) maxBoard = Math.max(maxBoard, parseInt(m[1]));
+      if (m) boardLevels.push(parseInt(m[1]));
     });
+    boardLevels.sort(function(a, b) { return b - a; });
+    var maxBoard = boardLevels[0] || 0;
+    var secondBoard = boardLevels[1] || 0;
 
     var stats_首板 = natureCount['首板'] || 0;
     var stats_二连 = 0, stats_三连 = 0, stats_四板 = 0;
@@ -213,10 +246,11 @@ class ZtEchelonWidget extends YiMuWidget {
     });
     var statsHtml = '<div class="zt-stats">';
     statsHtml += '最高板: <b>' + (maxBoard > 0 ? maxBoard + '连板' : '—') + '</b>';
+    statsHtml += ' | 次高板: <b>' + (secondBoard > 0 ? secondBoard + '连板' : '—') + '</b>';
     statsHtml += ' | 首板:' + stats_首板;
     statsHtml += ' 二连:' + stats_二连;
     statsHtml += ' 三连:' + stats_三连;
-    statsHtml += ' 四板:' + stats_四板;
+    statsHtml += ' 四板+:' + stats_四板;
     statsHtml += ' | 共' + stocks.length + '只';
     statsHtml += '</div>';
 
@@ -350,34 +384,32 @@ class ZtEchelonWidget extends YiMuWidget {
     var startIdx = dates.indexOf(dateStr);
     if (startIdx < 0) return '首板';
 
-    // Count consecutive streak: today always counts (stock is in live ztStocks)
+    // 检查某日期是否包含该股票：兼容对象数组 [{code}] 和字符串数组 ["code"]
+    function _hasCode(dayData, c) {
+      if (!dayData || !dayData.length) return false;
+      return dayData.some(function(s) {
+        return (typeof s === 'string') ? s === c : s.code === c;
+      });
+    }
+
+    // Count consecutive streak backwards from dateStr
     var consecutive = 0;
     for (var i = startIdx; i < dates.length; i++) {
       var d = dates[i];
-      var stocks = ztHistory[d] || [];
-      var found = (isToday && i === startIdx) ? true : stocks.some(function(s) { return s.code === code; });
+      var found = (isToday && i === startIdx) ? true : _hasCode(ztHistory[d], code);
       if (found) consecutive++; else break;
     }
 
-    var totalApps = 0, firstApp = null, lastApp = null;
-    for (var j = dates.length - 1; j >= 0; j--) {
+    // Count total appearances
+    var totalApps = 0;
+    for (var j = 0; j < dates.length; j++) {
       var day = dates[j];
-      var dayStocks = ztHistory[day] || [];
-      var inDay = (isToday && j === startIdx) ? true : dayStocks.some(function(s) { return s.code === code; });
-      if (inDay) {
-        totalApps++;
-        if (firstApp === null) firstApp = day;
-        lastApp = day;
-      }
+      var inDay = (isToday && j === startIdx) ? true : _hasCode(ztHistory[day], code);
+      if (inDay) totalApps++;
     }
 
     if (consecutive >= 2) {
       return consecutive + '连板';
-    } else if (consecutive === 1 && totalApps >= 2) {
-      var firstIdx = dates.indexOf(firstApp);
-      var lastIdx = dates.indexOf(lastApp);
-      var daySpan = lastIdx >= 0 && firstIdx >= 0 ? firstIdx - lastIdx + 1 : totalApps;
-      return daySpan + '天' + totalApps + '板';
     }
     return '首板';
   }
@@ -390,6 +422,35 @@ class ZtEchelonWidget extends YiMuWidget {
     if (m2) return parseInt(m2[1]) * 10 + parseInt(m2[2]);
     if (nature === '首板') return 1;
     return 0;
+  }
+
+  // === 客户端涨停历史缓存（跨日连板判定用）===
+
+  _historyKey() {
+    return 'zt_history_cache_v2';
+  }
+
+  _loadLocalHistory() {
+    try {
+      return JSON.parse(localStorage.getItem(this._historyKey()) || '{}');
+    } catch(e) { return {}; }
+  }
+
+  _saveLocalHistory(ztStocks) {
+    var today = new Date().toISOString().substring(0, 10);
+    var hist = this._loadLocalHistory();
+    // 保存今日出现的涨停股票 code
+    hist[today] = ztStocks.map(function(s) { return s.code; });
+    // 保留最近 30 天
+    var keys = Object.keys(hist).sort().reverse();
+    if (keys.length > 30) {
+      var trimmed = {};
+      keys.slice(0, 30).forEach(function(k) { trimmed[k] = hist[k]; });
+      hist = trimmed;
+    }
+    try {
+      localStorage.setItem(this._historyKey(), JSON.stringify(hist));
+    } catch(e) {}
   }
 
   _fmtAmt(val) {

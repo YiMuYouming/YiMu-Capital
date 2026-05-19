@@ -153,6 +153,64 @@ gen_dashboard_data.py
 - [ ] `poll_iwencai.py` 盘中轮询配置 cron/launchd
 - [ ] W10 板块 LLM 槽位接上更多研判上下文
 
+## API 参考 (bridge.py)
+
+bridge.py 在 `http://localhost:8088` 提供以下 API 端点，所有响应均为 `application/json`，带 `Cache-Control: no-cache` 头。
+
+### 基线数据
+
+| 端点 | 方法 | 说明 | 刷新频率 |
+|------|------|------|----------|
+| `/api/baseline` | GET | dashboard_data.json 全量基线（Layer 1） | 每 60s 重读文件 |
+| `/api/pnl?range=today&index=sh` | GET | PnL 曲线数据。range: today/week/month/quarter/year/all，index: sh/sz/cy | 5min（日内）/每日（日级） |
+| `/api/pnl/summary` | GET | PnL 摘要：last_nav, daily_count, today_snapshots | 实时 |
+
+### 实时数据（从内存 CACHE 读取，APScheduler 写入）
+
+| 端点 | 方法 | 说明 | 刷新频率 |
+|------|------|------|----------|
+| `/api/live/quotes` | GET | 全部实时数据：live_index + live_quotes + breadth + sectors + hot_list + northbound + 15min K线 | 5s/30s 混合 |
+| `/api/live/iwencai` | GET | 问财情绪指标：涨停收益/连板收益/晋级率/封板率等 | 2min |
+| `/api/live/sectors` | GET | 行业板块资金流入数据 | 5min |
+| `/api/live/news` | GET | 市场快讯 | 5min |
+| `/api/live/stream` | GET | SSE 实时推送（EventSource），5s 间隔推送全量实时数据 | 5s |
+
+### 写入端点
+
+| 端点 | 方法 | 说明 |
+|------|------|------|
+| `/api/sync` | POST | W15 持仓同步。Body: `{"positions": [...], "今日操作": [...], "pnl": {...}}`。合并写入 dashboard_data.json + pnl.db，使用 filelock 进程安全。 |
+| `/api/refresh` | POST | 触发 gen_dashboard_data.py 重跑。Body 可空。 |
+| `/api/llm` | POST | AI 盯盘研判。Body: `{"node": "10:00", "data_snapshot": {...}}`。响应含 text（研判文本）+ signals（结构化信号+交叉验证）。结果持久化到 llm_insights.json + pnl.db。 |
+
+所有 `_freshness` 字段：`{level: "live"|"delayed"|"stale"|"dead", type: str, age_seconds: int}`
+
+### pnl.db 表结构
+
+```sql
+-- 日内快照（5分钟粒度）
+intraday_snapshots (ts TEXT PK, date TEXT, pnl_pct REAL, nav REAL, sh_pct, sz_pct, cy_pct, pos_pct, mv, total_asset)
+
+-- 每日汇总（收盘后写入）
+daily_summary (date TEXT PK, nav REAL, pnl_pct REAL, sh_pct, sz_pct, cy_pct, pos_pct, deposit, max_dd, max_dd_start, max_dd_end)
+
+-- 交易记录
+trade_records (id INTEGER PK, trade_date TEXT, trade_time TEXT, action TEXT, code, name, price, qty, window, reason, realized_pnl, fee)
+
+-- AI 研判
+llm_insights (id INTEGER PK, date TEXT, node TEXT, text TEXT, signals_json TEXT, verified INTEGER, warnings INTEGER)
+```
+
+### 故障排查
+
+| 症状 | 排查步骤 |
+|------|----------|
+| 看板白屏 | 1. 检查 bridge.py 是否运行 2. 检查 data/ 目录 JSON 文件完整性 3. 浏览器 console 查看 fetch 错误 |
+| 数据不更新 | 1. 检查 APScheduler job 日志（stdout）2. 检查 data/dashboard_live.json mtime 3. 检查 CACHE dump 是否正常 |
+| SQLite 报错 | 1. 确认 WAL 模式已开启 2. 确认 threading.local() 每线程独立连接 3. 检查 pnl.db 文件权限 |
+| 文件写入冲突 | file_utils.py 的 FileLock 会在 `.lock` 文件残留时自动超时（5s），删除 `.lock` 文件可手动解锁 |
+| LLM 研判不触发 | 1. 确认 `~/.claude/settings.json` 中 ANTHROPIC_BASE_URL 和 ANTHROPIC_AUTH_TOKEN 已配置 2. 检查 bridge.py 日志中的 LLM error |
+
 ## 会话上下文
 
 - 独立 Git 仓库：`live-dashboard/.git`，60+ commits

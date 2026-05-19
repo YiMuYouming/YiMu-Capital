@@ -10,6 +10,14 @@ from datetime import datetime
 ROOT = Path(__file__).resolve().parent.parent
 DB_PATH = ROOT / "data" / "pnl.db"
 
+# 交易时段常量
+TRADING_HOUR_START = (9, 30)
+TRADING_HOUR_END = (15, 0)
+TRADING_SLOTS = [(h, m)
+    for h in (9, 10, 11, 12, 13, 14)
+    for m in (0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55)
+    if not (h == 15 and m > 0) and not (h == 9 and m < 30)]
+
 _local = threading.local()
 
 def get_conn():
@@ -150,12 +158,7 @@ def query_pnl(range='today', index='sh'):
                     (today,))
 
         # 生成完整时段标签 9:30-15:00（每5分钟），数据填充到对应位置
-        full_labels = []
-        for h in (9, 10, 11, 12, 13, 14):
-            for m in (0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55):
-                if h == 15 and m > 0: break
-                if h == 9 and m < 30: continue
-                full_labels.append(f"{h:02d}:{m:02d}")
+        full_labels = [f"{h:02d}:{m:02d}" for h, m in TRADING_SLOTS]
 
         # 行数据按时间索引（对齐到5分钟槽，超过15:00的卡到14:55）
         row_map = {}

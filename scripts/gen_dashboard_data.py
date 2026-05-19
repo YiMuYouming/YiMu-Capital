@@ -14,6 +14,8 @@ import json, os, sys, re, subprocess
 from datetime import datetime
 from pathlib import Path
 
+from scripts.file_utils import atomic_write_json
+
 ROOT_DIR = Path(__file__).resolve().parent.parent  # live-dashboard/
 TRADING_DIR = Path.home() / "Documents/YouMingVault/10_⚡Now/01_💰弈沐资本"  # 交易系统根 (复盘笔记在此)
 REVIEW_DIR = TRADING_DIR / "复盘笔记"
@@ -615,14 +617,16 @@ def get_style_data(review_path=None):
         print(f"[warn] style_detect.py failed: {e}")
     return {}
 
+# 风格总分 → 总仓位上限映射 (score_threshold, cap)
+_TOTAL_CAP_BRACKETS = [(80, 60), (60, 50), (40, 40), (20, 20)]
+
 def _compute_total_cap(sd):
     """根据总分计算总仓位上限"""
     total = sd.get("total", 50) or 50
-    if total >= 80: return 60
-    elif total >= 60: return 50
-    elif total >= 40: return 40
-    elif total >= 20: return 20
-    else: return 10
+    for threshold, cap in _TOTAL_CAP_BRACKETS:
+        if total >= threshold:
+            return cap
+    return 10
 
 def compute_style_execution(fm, style):
     """规则引擎：根据 trading-core.md 计算 style.实际执行
@@ -1017,10 +1021,7 @@ def watch_mode(review_path, interval=10):
         try:
             data = build_dashboard_data(review_path)
             OUTPUT_FILE.parent.mkdir(parents=True, exist_ok=True)
-            tmp = OUTPUT_FILE.with_suffix('.tmp')
-            with open(tmp, 'w', encoding='utf-8') as f:
-                json.dump(data, f, ensure_ascii=False, indent=2)
-            os.replace(tmp, OUTPUT_FILE)
+            atomic_write_json(OUTPUT_FILE, data)
             print(f"  → {len(json.dumps(data, ensure_ascii=False))} bytes written")
             # 同步输出 pools.json（今天空则回退昨天）
             pools = parse_appendix_a(review_path)
@@ -1034,10 +1035,7 @@ def watch_mode(review_path, interval=10):
                 pools["version"] = 1
                 pools["updated"] = datetime.now().strftime("%Y-%m-%dT%H:%M:%S+08:00")
                 pools["source"] = f"复盘笔记 附录A ({'fallback' if used_fallback else os.path.basename(review_path)})"
-                tmp_pools = POOLS_FILE.with_suffix('.tmp')
-                with open(tmp_pools, 'w', encoding='utf-8') as f:
-                    json.dump(pools, f, ensure_ascii=False, indent=2)
-                os.replace(tmp_pools, POOLS_FILE)
+                atomic_write_json(POOLS_FILE, pools)
         except Exception as e:
             print(f"  [ERROR] {e}")
 
@@ -1062,10 +1060,7 @@ def main():
     data = build_dashboard_data(review_path)
 
     OUTPUT_FILE.parent.mkdir(parents=True, exist_ok=True)
-    tmp = OUTPUT_FILE.with_suffix('.tmp')
-    with open(tmp, 'w', encoding='utf-8') as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
-    os.replace(tmp, OUTPUT_FILE)
+    atomic_write_json(OUTPUT_FILE, data)
     print(f"[done] Written {len(json.dumps(data, ensure_ascii=False))} bytes → {OUTPUT_FILE}")
 
     # 输出 pools.json（附录A SSOT，今天空则回退昨天）
@@ -1080,10 +1075,7 @@ def main():
         pools["version"] = 1
         pools["updated"] = datetime.now().strftime("%Y-%m-%dT%H:%M:%S+08:00")
         pools["source"] = f"复盘笔记 {'fallback' if used_fallback else '附录A'} ({os.path.basename(review_path)})"
-        tmp_pools = POOLS_FILE.with_suffix('.tmp')
-        with open(tmp_pools, 'w', encoding='utf-8') as f:
-            json.dump(pools, f, ensure_ascii=False, indent=2)
-        os.replace(tmp_pools, POOLS_FILE)
+        atomic_write_json(POOLS_FILE, pools)
         print(f"[done] Written pools → {POOLS_FILE}")
 
 if __name__ == "__main__":

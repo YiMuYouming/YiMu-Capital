@@ -19,9 +19,14 @@ from threading import Lock
 
 from apscheduler.schedulers.background import BackgroundScheduler
 
-from scripts.file_utils import atomic_write_json
-
 ROOT = Path(__file__).resolve().parent.parent
+
+try:
+    from scripts.file_utils import atomic_write_json
+except ImportError:
+    _s = str(ROOT)
+    if _s not in sys.path: sys.path.insert(0, _s)
+    from scripts.file_utils import atomic_write_json
 
 # 内存缓存（APScheduler 采集线程写入，HTTP handler 读取）
 CACHE = {}
@@ -43,7 +48,13 @@ def _load_cache():
                 saved = json.load(f)
             for k in _PERSIST_KEYS:
                 if k in saved:
-                    CACHE[k] = saved[k]
+                    v = saved[k]
+                    # 向后兼容：hot_list 旧格式 {"data": {...}} → 直接取 data
+                    if k == 'hot_list' and isinstance(v, dict) and 'data' in v and 'reason_stats' not in v:
+                        if isinstance(v['data'], dict):
+                            v = v['data']
+                            v['_updated'] = saved[k].get('_updated', '')
+                    CACHE[k] = v
             print(f'[bridge] Cache restored from disk ({len(saved)} keys)')
         except Exception:
             pass
@@ -58,20 +69,19 @@ def _dump_cache():
             if v is not None and (isinstance(v, (dict, list))):
                 dump[k] = v
         if dump:
-            tmp = CACHE_FILE.with_suffix('.tmp')
-            with open(tmp, 'w', encoding='utf-8') as f:
-                json.dump(dump, f, ensure_ascii=False, indent=2)
-            os.replace(tmp, CACHE_FILE)
+            atomic_write_json(CACHE_FILE, dump)
     except Exception:
         pass
 
 # SQLite db
 try:
-    from scripts.db import query_pnl, query_trades, query_pnl_summary
+    from scripts.db import init_db, query_pnl, query_trades, query_pnl_summary
+    init_db()
 except ImportError:
     _s = str(ROOT)
     if _s not in sys.path: sys.path.insert(0, _s)
-    from scripts.db import query_pnl, query_trades, query_pnl_summary
+    from scripts.db import init_db, query_pnl, query_trades, query_pnl_summary
+    init_db()
 
 # === LLM System Prompt ===
 SYSTEM_PROMPT = """你是洋米盯盘助手，为弈沐哥的A股短线+趋势混合交易提供实时研判。
@@ -291,6 +301,15 @@ class BridgeHandler(SimpleHTTPRequestHandler):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=str(ROOT), **kwargs)
 
+    def _serve_cached(self, key, data_type):
+        result = CACHE.get(key, {})
+        result = _add_freshness(result, data_type)
+        body = json.dumps(result, ensure_ascii=False).encode()
+        self.send_response(200)
+        self.send_header('Content-Type', 'application/json')
+        self.end_headers()
+        self.wfile.write(body)
+
     def do_GET(self):
         parsed = urlparse(self.path)
         if parsed.path == '/api/baseline':
@@ -357,31 +376,13 @@ class BridgeHandler(SimpleHTTPRequestHandler):
                 self.wfile.write(json.dumps({'error': str(e)}).encode())
             return
         elif parsed.path == '/api/live/iwencai':
-            result = CACHE.get('iwencai', {})
-            result = _add_freshness(result, 'iwencai')
-            body = json.dumps(result, ensure_ascii=False).encode()
-            self.send_response(200)
-            self.send_header('Content-Type', 'application/json')
-            self.end_headers()
-            self.wfile.write(body)
+            self._serve_cached('iwencai', 'iwencai')
             return
         elif parsed.path == '/api/live/sectors':
-            result = CACHE.get('sector_inflow', {})
-            result = _add_freshness(result, 'live_quote')
-            body = json.dumps(result, ensure_ascii=False).encode()
-            self.send_response(200)
-            self.send_header('Content-Type', 'application/json')
-            self.end_headers()
-            self.wfile.write(body)
+            self._serve_cached('sector_inflow', 'live_quote')
             return
         elif parsed.path == '/api/live/news':
-            result = CACHE.get('news', {})
-            result = _add_freshness(result, 'llm')
-            body = json.dumps(result, ensure_ascii=False).encode()
-            self.send_response(200)
-            self.send_header('Content-Type', 'application/json')
-            self.end_headers()
-            self.wfile.write(body)
+            self._serve_cached('news', 'llm')
             return
         elif parsed.path == '/api/live/quotes':
             result = {
@@ -585,8 +586,7 @@ class BridgeHandler(SimpleHTTPRequestHandler):
                         insights[today] = {}
                     insights[today][node] = insight
                     LLM_INSIGHTS_FILE.parent.mkdir(parents=True, exist_ok=True)
-                    with open(LLM_INSIGHTS_FILE, 'w') as f:
-                        json.dump(insights, f, ensure_ascii=False, indent=2)
+                    atomic_write_json(LLM_INSIGHTS_FILE, insights)
 
                     # 同步写入 SQLite
                     try:
@@ -732,7 +732,7 @@ if __name__ == '__main__':
 
     # 冷启动：强制执行一次初始采集填充缓存（不受 is_trading_time 限制）
     print(f'[bridge] Cold-start bootstrap: running initial collection...')
-    for bootstrap_fn in [quotes.collect_index, quotes.collect_quotes, quotes.collect_sectors, iwencai_poll.poll_iwencai_sentiment, quotes.collect_yesterday_compare, quotes.collect_kline_15m, quotes.log_pnl_snapshot]:
+    for bootstrap_fn in [quotes.collect_index, quotes.collect_quotes, quotes.collect_sectors, iwencai_poll.poll_iwencai_sentiment, quotes.collect_yesterday_compare, quotes.collect_kline_15m, quotes.log_pnl_snapshot, quotes.collect_hot_list]:
         try:
             bootstrap_fn(force=True)
         except Exception as e:
