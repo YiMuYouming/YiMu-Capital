@@ -15,8 +15,11 @@ class ThreadingHTTPServer(ThreadingMixIn, HTTPServer):
 from pathlib import Path
 from datetime import datetime, time as _time
 from urllib.parse import parse_qs, urlparse
+from threading import Lock
 
 from apscheduler.schedulers.background import BackgroundScheduler
+
+from scripts.file_utils import atomic_write_json
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -493,12 +496,9 @@ class BridgeHandler(SimpleHTTPRequestHandler):
                     db_error = str(e)
                     print(f"  [bridge] SQLite trade insert error: {e}")
 
-                # 原子写入 JSON（tmp + os.replace）
+                # 进程安全原子写入 JSON（filelock + atomic_write）
                 if not db_error:
-                    tmp = DATA_FILE.with_suffix('.tmp')
-                    with open(tmp, 'w') as f:
-                        json.dump(data, f, ensure_ascii=False, indent=2)
-                    os.replace(tmp, DATA_FILE)
+                    atomic_write_json(DATA_FILE, data)
 
                 self.send_response(200)
                 self.send_header('Content-Type', 'application/json')

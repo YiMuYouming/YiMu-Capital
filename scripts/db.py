@@ -3,23 +3,24 @@
 
 四张表：intraday_snapshots / daily_summary / trade_records / llm_insights
 """
-import sqlite3, json
+import sqlite3, json, threading
 from pathlib import Path
 from datetime import datetime
 
 ROOT = Path(__file__).resolve().parent.parent
 DB_PATH = ROOT / "data" / "pnl.db"
 
-_conn = None
+_local = threading.local()
 
 def get_conn():
-    """模块级连接复用，全进程共享一个 sqlite3 连接"""
-    global _conn
-    if _conn is None:
-        _conn = sqlite3.connect(str(DB_PATH), check_same_thread=False)
-        _conn.row_factory = sqlite3.Row
-        _conn.execute("PRAGMA journal_mode=WAL")
-    return _conn
+    """线程本地连接，每个线程独立连接"""
+    conn = getattr(_local, 'conn', None)
+    if conn is None:
+        conn = sqlite3.connect(str(DB_PATH))
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA journal_mode=WAL")
+        _local.conn = conn
+    return conn
 
 
 def _exec(sql, params=None):
