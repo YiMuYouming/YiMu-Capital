@@ -12,9 +12,12 @@ OUTPUT = ROOT / "data" / "sentiment_auto.json"
 CACHE = {}
 
 NODE_NAMES = {
-    (9, 0): "早盘", (9, 30): "早盘", (10, 0): "早盘", (10, 30): "午盘前",
-    (11, 0): "午盘前", (11, 30): "午盘",
-    (13, 0): "下午", (13, 30): "下午", (14, 0): "尾盘", (14, 30): "尾盘",
+    # 5个关键节点 + 中间映射
+    (9, 0): "早盘", (9, 25): "竞价", (9, 30): "早盘",
+    (10, 0): "早盘", (10, 30): "早盘",
+    (11, 0): "午盘", (11, 30): "午盘",
+    (13, 0): "午盘", (13, 30): "尾盘",
+    (14, 0): "尾盘", (14, 30): "尾盘",
     (15, 0): "收盘", (15, 30): "收盘",
 }
 
@@ -29,14 +32,11 @@ def _current_node():
     return NODE_NAMES.get((h, m_rounded), f"{h:02d}:{m_rounded:02d}")
 
 
-def take_sentiment_snapshot():
-    """采集当前情绪指标快照，追加到 sentiment_auto.json"""
+def take_sentiment_snapshot(force=False):
+    """采集当前情绪指标快照，追加到 sentiment_auto.json
+    时间控制由 APScheduler cron 负责，函数内仅跳过周末"""
     now = datetime.now()
-    # 非交易时段跳过（包含午休 11:30-13:00）
-    if now.weekday() >= 5:
-        return
-    t = now.time()
-    if not (_time_module(9, 25) <= t <= _time_module(11, 30)) and not (_time_module(13, 0) <= t <= _time_module(15, 10)):
+    if not force and now.weekday() >= 5:
         return
     iwencai = CACHE.get("iwencai", {})
     live_index = CACHE.get("live_index", {})
@@ -57,8 +57,8 @@ def take_sentiment_snapshot():
         "node": _current_node(),
         # 情绪核心
         "情绪值": emotion_val,
-        "涨停家数": breadth.get("涨停") if breadth else None,
-        "跌停家数": breadth.get("跌停") if breadth else None,
+        "涨停家数": iwencai.get("涨停家数") if iwencai.get("涨停家数") else (breadth.get("涨停") if breadth else None),
+        "跌停家数": iwencai.get("跌停家数") if iwencai.get("跌停家数") else (breadth.get("跌停") if breadth else None),
         "涨停收益": iwencai.get("昨日涨停收益"),
         "封板率": fbr,
         "炸板率": zbr,
@@ -92,6 +92,9 @@ def take_sentiment_snapshot():
         except Exception:
             all_snapshots = {}
 
+    # 兼容旧格式（list → dict 自动迁移）
+    if isinstance(all_snapshots, list):
+        all_snapshots = {}
     day_snapshots = all_snapshots.get(date_key, [])
     day_snapshots.append(snap)
     all_snapshots[date_key] = day_snapshots

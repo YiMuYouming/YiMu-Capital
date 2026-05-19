@@ -631,7 +631,12 @@ if __name__ == '__main__':
     scheduler.add_job(quotes.collect_hot_list, 'interval', minutes=5, id='hot_list_5min',
                       max_instances=1, misfire_grace_time=600)
     # T2 定时快照
-    scheduler.add_job(sentiment_snapshot.take_sentiment_snapshot, 'cron', minute='0,30', id='sentiment_snap',
+    # 5个关键节点快照（9:25竞价 10:00早盘 11:30午盘 14:00尾盘 15:00收盘）
+    for node_h, node_m, node_id in [(9,25,'auction'),(10,0,'morning'),(11,30,'midday'),(14,0,'afternoon'),(15,0,'close')]:
+        scheduler.add_job(sentiment_snapshot.take_sentiment_snapshot, 'cron', hour=node_h, minute=node_m,
+                          id=f'sentiment_{node_id}', max_instances=1, misfire_grace_time=300)
+    # 每30分钟兜底（bridge重启后也能抓到数据）
+    scheduler.add_job(sentiment_snapshot.take_sentiment_snapshot, 'cron', minute='0,30', id='sentiment_periodic',
                       max_instances=1, misfire_grace_time=300)
     # 收盘数据包（15:02 dump CACHE 全量快照）— 暂停，LLM 方案将替代
     # from scripts.snapshot_close import run_snapshot_close
