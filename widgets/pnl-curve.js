@@ -422,12 +422,14 @@ class PnLCurveWidget extends YiMuWidget {
     }
 
     var now = new Date();
-    var dow = now.getDay();
-    var weekStart = new Date(now); weekStart.setDate(now.getDate() + (dow === 0 ? -6 : 1 - dow));
+    // 周=最近5个交易日, 月=最近22个交易日
+    var dates = ad.dates || [];
+    var weekStart = dates.length >= 5 ? dates[dates.length - 5] : (dates[0] || '2020-01-01');
+    var monthStart = dates.length >= 22 ? dates[dates.length - 22] : (dates[0] || '2020-01-01');
     var fromDates = {
       today:     now.toISOString().slice(0, 10),
-      week:      weekStart.toISOString().slice(0, 10),
-      month:     new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10),
+      week:      weekStart,
+      month:     monthStart,
       quarter:   new Date(now.getFullYear(), now.getMonth() - 3, 1).toISOString().slice(0, 10),
       year:      now.getFullYear() + '-01-01',
     };
@@ -452,7 +454,6 @@ class PnLCurveWidget extends YiMuWidget {
           result = { pnl: (tP - 1) * 100, bm: (tB - 1) * 100, dd: tDD };
         }
       }
-      if (!result && p === 'week') result = fallbackWeek(fromDates[p]);
       if (!result) result = computePeriod(fromDates[p]);
 
       if (!result) {
