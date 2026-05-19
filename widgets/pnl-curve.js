@@ -439,7 +439,7 @@ class PnLCurveWidget extends YiMuWidget {
       year:      now.getFullYear() + '-01-01',
     };
     var periods = ['today', 'week', 'month', 'quarter', 'year'];
-    var labels  = ['日', '周', '月', '近三月', '近一年'];
+    var labels  = ['日', '近一周', '近一月', '近三月', '近一年'];
 
     var html = '';
     var self = this;
