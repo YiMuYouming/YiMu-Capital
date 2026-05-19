@@ -22,8 +22,44 @@ ROOT = Path(__file__).resolve().parent.parent
 
 # 内存缓存（APScheduler 采集线程写入，HTTP handler 读取）
 CACHE = {}
+CACHE_FILE = ROOT / "data" / "cache_dump.json"
 DATA_FILE = ROOT / "data/dashboard_data.json"
 LLM_INSIGHTS_FILE = ROOT / "data/llm_insights.json"
+
+# 可持久化的 CACHE key 列表
+_PERSIST_KEYS = ['live_index','live_quotes','breadth','live_sectors','iwencai',
+                 'northbound','hot_list','sector_inflow','yesterday_baseline','pools']
+
+
+def _load_cache():
+    """冷启动：从磁盘恢复 CACHE，避免重启后短暂空白"""
+    if CACHE_FILE.exists():
+        try:
+            with open(CACHE_FILE) as f:
+                saved = json.load(f)
+            for k in _PERSIST_KEYS:
+                if k in saved:
+                    CACHE[k] = saved[k]
+            print(f'[bridge] Cache restored from disk ({len(saved)} keys)')
+        except Exception:
+            pass
+
+
+def _dump_cache():
+    """定期落盘：将 CACHE 中可序列化的 key 写入磁盘"""
+    try:
+        dump = {}
+        for k in _PERSIST_KEYS:
+            v = CACHE.get(k)
+            if v is not None and isinstance(v, dict):
+                dump[k] = v
+        if dump:
+            tmp = CACHE_FILE.with_suffix('.tmp')
+            with open(tmp, 'w', encoding='utf-8') as f:
+                json.dump(dump, f, ensure_ascii=False, indent=2)
+            os.replace(tmp, CACHE_FILE)
+    except Exception:
+        pass
 
 # SQLite db
 try:
@@ -582,6 +618,9 @@ class BridgeHandler(SimpleHTTPRequestHandler):
 if __name__ == '__main__':
     port = int(sys.argv[1]) if len(sys.argv) > 1 else 8080
 
+    # === 冷启动：从磁盘恢复 CACHE →
+    _load_cache()
+
     # === APScheduler 启动 ===
     from scripts.collectors import iwencai_poll, market_data, sentiment_snapshot, quotes
     iwencai_poll.CACHE = CACHE
@@ -614,6 +653,9 @@ if __name__ == '__main__':
                       max_instances=1, misfire_grace_time=60, coalesce=True)
     scheduler.add_job(quotes.collect_sectors, 'interval', seconds=30, id='sectors_30s',
                       max_instances=1, misfire_grace_time=60, coalesce=True)
+    # 缓存落盘（30s，防重启丢数据）
+    scheduler.add_job(_dump_cache, 'interval', seconds=30, id='cache_dump_30s',
+                      max_instances=1, misfire_grace_time=60)
     # T1 慢周期（300s）
     scheduler.add_job(quotes.log_pnl_snapshot, 'interval', seconds=300, id='pnl_snap_300s',
                       max_instances=1, misfire_grace_time=600)
