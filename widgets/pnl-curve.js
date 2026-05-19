@@ -160,7 +160,7 @@ class PnLCurveWidget extends YiMuWidget {
         '<div class="pnl-kpi-card"><div class="pnl-kpi-lbl">当前资产</div><div class="pnl-kpi-val" id="pnl_asset">—</div><div class="pnl-kpi-sub" id="pnl_asset_sub">—</div></div>' +
         '<div class="pnl-kpi-card"><div class="pnl-kpi-lbl">TWR累计</div><div class="pnl-kpi-val" id="pnl_twr">—</div><div class="pnl-kpi-sub" id="pnl_twr_sub">—</div></div>' +
         '<div class="pnl-kpi-card"><div class="pnl-kpi-lbl">基准累计</div><div class="pnl-kpi-val" id="pnl_bm_twr">—</div><div class="pnl-kpi-sub" id="pnl_bm_twr_sub">—</div></div>' +
-        '<div class="pnl-kpi-card"><div class="pnl-kpi-lbl">累计超额</div><div class="pnl-kpi-val" id="pnl_alpha">—</div><div class="pnl-kpi-sub" id="pnl_alpha_sub">—</div></div>' +
+        '<div class="pnl-kpi-card"><div class="pnl-kpi-lbl">累计超额 α</div><div class="pnl-kpi-val" id="pnl_alpha">—</div><div class="pnl-kpi-sub" id="pnl_alpha_sub">—</div></div>' +
         '<div class="pnl-kpi-card"><div class="pnl-kpi-lbl">历史最大回撤</div><div class="pnl-kpi-val" id="pnl_maxdd">—</div><div class="pnl-kpi-sub" id="pnl_maxdd_sub">—</div></div>' +
       '</div>' +
       // KPI row 2: 今日（实时变）
@@ -168,7 +168,7 @@ class PnLCurveWidget extends YiMuWidget {
         '<div class="pnl-kpi-card pnl-kpi-dyn"><div class="pnl-kpi-lbl">今日浮动盈亏</div><div class="pnl-kpi-val" id="pnl_pnl">—</div><div class="pnl-kpi-sub" id="pnl_pnl_sub">—</div></div>' +
         '<div class="pnl-kpi-card pnl-kpi-dyn"><div class="pnl-kpi-lbl">今日仓位</div><div class="pnl-kpi-val" id="pnl_pos">—</div><div class="pnl-kpi-sub" id="pnl_pos_sub">—</div></div>' +
         '<div class="pnl-kpi-card pnl-kpi-dyn"><div class="pnl-kpi-lbl" id="pnl_period_label">今日TWR</div><div class="pnl-kpi-val" id="pnl_period_val">—</div><div class="pnl-kpi-sub" id="pnl_period_sub">—</div></div>' +
-        '<div class="pnl-kpi-card pnl-kpi-dyn"><div class="pnl-kpi-lbl">今日超额</div><div class="pnl-kpi-val" id="pnl_today_alpha">—</div><div class="pnl-kpi-sub" id="pnl_today_alpha_sub">—</div></div>' +
+        '<div class="pnl-kpi-card pnl-kpi-dyn"><div class="pnl-kpi-lbl">今日超额 α</div><div class="pnl-kpi-val" id="pnl_today_alpha">—</div><div class="pnl-kpi-sub" id="pnl_today_alpha_sub">—</div></div>' +
         '<div class="pnl-kpi-card pnl-kpi-dyn"><div class="pnl-kpi-lbl" id="pnl_dd_label">今日回撤</div><div class="pnl-kpi-val" id="pnl_dd_val">—</div><div class="pnl-kpi-sub" id="pnl_dd_sub">—</div></div>' +
       '</div>' +
       // Controls
@@ -369,7 +369,7 @@ class PnLCurveWidget extends YiMuWidget {
     }
     document.getElementById('pnl_dd_val').style.color = 'var(--down)';
 
-    // 今日超额 α
+    // 今日超额 α α
     var todayAlphaEl = document.getElementById('pnl_today_alpha');
     if (todayAlphaEl && chartData && chartData.portfolio && chartData.benchmark) {
       var lastP = chartData.portfolio[chartData.portfolio.length - 1];
