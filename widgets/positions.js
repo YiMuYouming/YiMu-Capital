@@ -141,6 +141,9 @@ class PositionsWidget extends YiMuWidget {
 
     body.innerHTML = html;
     this._bindEvents(active);
+
+    // 自动更新 总资产 = pv + af
+    DataStore.manualData.set('总资产', pv + af);
     this.updateTimestamp();
 
     if (!PositionsWidget._synced && location.protocol !== 'file:') {
@@ -342,6 +345,13 @@ class PositionsWidget extends YiMuWidget {
       var entry = {'时间':g('f_time'),'动作':act,'标的':stock,'代码':code,'价格':price,'数量':qty,'窗口':buy?g('f_win'):'—','原因':reason};
       if (isEdit) ops[editIdx] = entry; else ops.push(entry);
       DataStore.manualData.set('_今日操作', JSON.stringify(ops));
+
+      // 买入 → 扣可用资金 / 卖出 → 加可用资金
+      var af = parseFloat(DataStore.manualData.getAll()['可用资金']) || 0;
+      var tradeAmt = price * qty;
+      if (buy) af = Math.max(0, af - tradeAmt);
+      else af = af + tradeAmt;
+      DataStore.manualData.set('可用资金', af);
 
       // 更新持仓
       var pos = []; try{pos=JSON.parse(DataStore.manualData.getAll()['_positions']||'null')}catch(e){}
