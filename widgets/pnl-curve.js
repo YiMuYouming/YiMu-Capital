@@ -307,7 +307,7 @@ class PnLCurveWidget extends YiMuWidget {
     document.getElementById('pnl_pos_sub').textContent = (s.positions||[]).filter(function(p){return (p['状态']||'').indexOf('清')<0&&(p['状态']||'').indexOf('删除')<0}).length + ' 只持仓';
 
     // Period KPI — 标签联动
-    var periodLabel = { today:'今日', week:'本周', month:'本月', quarter:'近三月', year:'近一年' };
+    var periodLabel = { today:'今日', week:'近一周', month:'近一月', quarter:'近三月', year:'近一年' };
     var perStr = periodLabel[s.period] || s.period;
     var pnlLabelEl = document.getElementById('pnl_period_label');
     if (pnlLabelEl) pnlLabelEl.textContent = perStr + ' TWR';
