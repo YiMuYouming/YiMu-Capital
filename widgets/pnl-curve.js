@@ -543,12 +543,9 @@ class PnLCurveWidget extends YiMuWidget {
     var ddSub = document.getElementById('pnl_maxdd_sub');
     if (ddSub) ddSub.textContent = '历史最大';
 
-    // 也更新抽屉底部汇总（保留兼容）
+    // 抽屉底部汇总已移至 KPI 行，此处清空
     var el = document.getElementById('pnl_summary_' + this.id);
-    if (el) {
-      el.innerHTML =
-        '<div class="pnl-sum-cell"><div class="pnl-sum-lbl">数据起点</div><div class="pnl-sum-val">2026-03-30</div></div>';
-    }
+    if (el) { el.innerHTML = ''; }
   }
 
   // 仓位子图
