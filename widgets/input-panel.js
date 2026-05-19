@@ -22,7 +22,6 @@ class InputPanelWidget extends YiMuWidget {
     var fields = [
       {id:'可用资金',type:'number',label:'可用资金(元)'},
       {id:'累计入金',type:'number',label:'累计入金(元)'},
-      {id:'总盈亏',type:'number',label:'总盈亏(元)'},
       {id:'情绪值',type:'number',label:'情绪值(%)'},
       {id:'上涨',type:'number',label:'上涨家数'},
       {id:'下跌',type:'number',label:'下跌家数'},
@@ -80,9 +79,11 @@ class InputPanelWidget extends YiMuWidget {
       });
     } catch(e) {}
     var totalAsset = afAuto + mv;
-    html += '<div style="margin-top:var(--sp-xs);padding:6px 10px;background:var(--bg-base);border-radius:var(--radius-sm);display:flex;justify-content:space-between;font-size:var(--fs-body)">' +
-      '<span style="color:var(--text-secondary)">总资产（自动）</span>' +
-      '<span style="font-family:var(--font-mono);font-weight:700;font-size:var(--fs-subtitle)">' + totalAsset.toLocaleString() + '</span></div>';
+    var totalPnL = parseFloat(manual['总盈亏']) || 0;
+    var pnlColor = totalPnL >= 0 ? 'var(--up)' : 'var(--down)';
+    html += '<div style="margin-top:var(--sp-xs);padding:6px 10px;background:var(--bg-base);border-radius:var(--radius-sm);display:flex;justify-content:space-between;font-size:var(--fs-body);gap:var(--sp-md)">' +
+      '<span><span style="color:var(--text-secondary)">总资产</span> <span style="font-family:var(--font-mono);font-weight:700;font-size:var(--fs-subtitle)">' + totalAsset.toLocaleString() + '</span></span>' +
+      '<span><span style="color:var(--text-secondary)">总盈亏</span> <span style="font-family:var(--font-mono);font-weight:700;font-size:var(--fs-subtitle);color:'+pnlColor+'">'+(totalPnL>=0?'+':'')+totalPnL.toLocaleString()+'</span></span></div>';
 
     html += '<div style="margin-top:var(--sp-sm);display:flex;align-items:center;gap:var(--sp-md)">' +
       '<button class="input-refresh" id="btnRefresh">刷新数据</button>' +
@@ -122,7 +123,7 @@ class InputPanelWidget extends YiMuWidget {
   }
 
   _saveAndRefresh() {
-    var fields = ['可用资金','总盈亏','情绪值','上涨','下跌','涨停收益','连板收益','炸板收益','风险值','晋级率','封板率','涨停家数','跌停家数','赚钱效应','最高板','次高板','梯队','累计入金'];
+    var fields = ['可用资金','情绪值','上涨','下跌','涨停收益','连板收益','炸板收益','风险值','晋级率','封板率','涨停家数','跌停家数','赚钱效应','最高板','次高板','梯队','累计入金'];
     fields.forEach(function(f) {
       var el = document.getElementById('in_'+f);
       if (el) DataStore.manualData.set(f, el.value);

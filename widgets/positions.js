@@ -50,12 +50,24 @@ class PositionsWidget extends YiMuWidget {
       p['_pct'] = c>0?((pr-c)/c*100):0;
     });
 
+    // 今日已清仓的已实现盈亏
+    var today = new Date().toISOString().slice(0, 10);
+    var realizedPnL = 0;
+    cleared.forEach(function(p) {
+      if ((p['清仓日期']||'').slice(0,10) === today || !p['清仓日期']) {
+        var sellPrice = parseFloat(p['卖出价']||p['现价']) || 0;
+        var cost = parseFloat(p['成本']) || 0;
+        var qty = parseFloat(String(p['数量']||'0').replace('股','')) || 0;
+        realizedPnL += Math.round((sellPrice - cost) * qty);
+      }
+    });
+
     var html = '';
 
     // 汇总卡片
     var ta = parseFloat(manual['总资产'])||0;
     var pv=0, pc=0; active.forEach(function(p){pv+=p['_mv']||0;pc+=Math.round((parseFloat(p['成本'])||0)*(p['_qty']||0));});
-    var tp = pv - pc;
+    var tp = pv - pc + realizedPnL;  // 浮动 + 今日已实现
     var af = (manual['可用资金']!=null) ? parseFloat(manual['可用资金']) : ta-pv;
     if (!ta || ta <= 0) ta = pv + af;
     var tc=tp>0?'up':tp<0?'down':'', pp=pc>0?(tp/pc*100):0, pr=ta>0?Math.round(pv/ta*100):0;
@@ -142,8 +154,10 @@ class PositionsWidget extends YiMuWidget {
     body.innerHTML = html;
     this._bindEvents(active);
 
-    // 自动更新 总资产 = pv + af
+    // 自动更新 总资产 / 总盈亏
     DataStore.manualData.set('总资产', pv + af);
+    DataStore.manualData.set('总盈亏', tp);   // tp = 浮动盈亏 + 今日已实现
+    DataStore.manualData.set('_realized_pnl', realizedPnL);
     this.updateTimestamp();
 
     if (!PositionsWidget._synced && location.protocol !== 'file:') {
