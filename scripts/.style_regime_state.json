@@ -1,6 +1,6 @@
 {
   "current_regime": "混合（均衡）",
-  "days_in_regime": 5,
+  "days_in_regime": 6,
   "last_update": "2026-05-19",
   "history": [
     {
@@ -31,6 +31,14 @@
       "date": "2026-05-19",
       "style": "混合（均衡）",
       "total": 54,
+      "lianban_conf": 54,
+      "trend_conf": 46,
+      "confidence": 54
+    },
+    {
+      "date": "2026-05-19",
+      "style": "混合（均衡）",
+      "total": 55,
       "lianban_conf": 54,
       "trend_conf": 46,
       "confidence": 54
