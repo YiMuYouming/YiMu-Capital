@@ -1,18 +1,18 @@
 #!/usr/bin/env python3
 """snapshot_auction.py — 竞价5维快照 (9:25 跑一次)
 
-从问财抓取竞价全景数据 → dashboard_live.json 的 auction 域
-用法: python3 snapshot_auction.py [--output json]
+从问财 OpenAPI 抓取竞价全景数据（每天仅 9:26 跑一次，~8 queries）
+输出: data/auction_snapshot.json
 
-数据源: 问财 OpenAPI (5-6次查询)
-输出: 写入 data/dashboard_live.json 的 auction 字段
+注意：盘中情绪数据请用 iwencai_poll (pywencai 零额度)。
+      此处仅做竞价时刻定格快照。
 """
 
 import json, os, sys, time, re
 from pathlib import Path
 from datetime import datetime
 
-# 统一走 ym_stock_data
+# OpenAPI（仅在此处使用，用量极低）
 sys.path.insert(0, "/Users/YouMing/Documents/YM_Capital/YM-data-pipeline")
 from ym_stock_data.sources.iwencai import query as _iwencai_query
 
@@ -22,7 +22,7 @@ DASHBOARD_DATA = ROOT_DIR / "data" / "dashboard_data.json"
 
 
 def q(query_str, limit=100):
-    """调用 ym_stock_data 问财查询，返回原始 JSON"""
+    """调用 OpenAPI 查询"""
     try:
         return _iwencai_query(query_str, limit=limit)
     except Exception:

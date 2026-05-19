@@ -1,23 +1,41 @@
 """iwencai_poll.py — T2 情绪数据定时轮询（每 2min）
 
-从 iwencai 采集情绪指标，写入 bridge 内存缓存 CACHE['iwencai']。
-非交易时段自动跳过以节省 API 配额。
+通过 pywencai 网页抓取（零 API 额度消耗），采集情绪指标写入 bridge CACHE。
+非交易时段自动跳过。
 
-查询策略（实测验证）:
-  - 封板率/炸板率: "封板率 炸板率" → 1 row aggregate
-  - 晋级率/连板股数: "涨停晋级率 连板股数" → 1 row aggregate
-  - 最高板: 从 "连板股票 最高板" 个股中取 max
-  - 赚钱效应: "昨日涨停今日表现" → 计算平均涨幅
+数据源: pywencai (同花顺问财网页版)
 """
-import sys, json, re
+import sys, json, warnings
 from datetime import datetime, time
 from pathlib import Path
 
-sys.path.insert(0, "/Users/YouMing/Documents/YM_Capital/YM-data-pipeline")
-from ym_stock_data.sources.iwencai import query as _iwencai_query
+# pywencai venv
+_VENV = "/Users/YouMing/WorkBuddy/Tools/iwencai-venv/lib/python3.14/site-packages"
+if _VENV not in sys.path:
+    sys.path.insert(0, _VENV)
 
-# bridge.py 设置
+import pandas as pd
+import pywencai
+
+warnings.filterwarnings("ignore")
+
 CACHE = {}
+
+
+def _native(val):
+    """numpy/int64 → Python native type"""
+    if val is None:
+        return None
+    try:
+        import numpy as np
+        if isinstance(val, (np.integer,)): return int(val)
+        if isinstance(val, (np.floating,)): return float(val)
+        if isinstance(val, np.ndarray): return val.tolist()
+    except ImportError:
+        pass
+    if isinstance(val, float) and (val != val):  # NaN
+        return None
+    return val
 
 
 def is_trading_time():
@@ -28,170 +46,173 @@ def is_trading_time():
     return (time(9, 25) <= t <= time(11, 30)) or (time(13, 0) <= t <= time(15, 10))
 
 
-def _clean(val):
-    """清洗值：去 % 转 float"""
-    if val is None:
-        return None
-    s = str(val).replace('%', '').strip()
+def _q(query_str, limit=50):
+    """pywencai 查询 → DataFrame（失败返回空）"""
     try:
-        return float(s)
-    except ValueError:
-        return val
+        df = pywencai.get(query=query_str, loop_first=True)
+        if df is None or df.empty:
+            return pd.DataFrame()
+        return df
+    except Exception:
+        return pd.DataFrame()
 
 
-def _find_key(row, keyword):
-    for k in row:
-        if keyword in str(k):
-            return k
+def _col(df, keyword):
+    """找包含关键字的列名"""
+    for c in df.columns:
+        if keyword in str(c):
+            return c
     return None
 
 
-def _get_val(row, keyword, clean=False):
-    """从 iwencai row 中取值，自动匹配带日期后缀的 key"""
-    k = _find_key(row, keyword)
-    if k and k in row:
-        v = row[k]
-        return _clean(v) if clean else v
-    if keyword in row:
-        v = row[keyword]
-        return _clean(v) if clean else v
-    return None
+def _num(series):
+    """转数值"""
+    return pd.to_numeric(series, errors="coerce")
 
 
-def poll_iwencai_sentiment():
-    if not is_trading_time():
+def _avg_pct(df, col_keyword):
+    """从 DataFrame 中提取涨跌幅列并算均值"""
+    c = _col(df, col_keyword)
+    if c is None:
+        return None
+    vals = _num(df[c]).dropna()
+    if len(vals) == 0:
+        return None
+    return round(float(vals.mean()), 2)
+
+
+def _max_board(df):
+    """提取最高板 + 次高板"""
+    c = _col(df, "连续涨停天数")
+    if c is None:
+        return None, None
+    vals = _num(df[c]).dropna()
+    vals = vals[vals >= 2].astype(int)
+    if len(vals) == 0:
+        return None, None
+    uniq = sorted(vals.unique(), reverse=True)
+    return uniq[0], uniq[1] if len(uniq) >= 2 else None
+
+
+def poll_iwencai_sentiment(force=False):
+    if not force and not is_trading_time():
         return
 
     results = {}
     try:
-        # Q1: 封板率 + 炸板率
-        r1 = _iwencai_query("封板率 炸板率", limit=5)
-        for row in r1.get("datas", []):
-            fb = _get_val(row, "封板率", clean=True)
-            zb = _get_val(row, "炸板率", clean=True)
-            if fb is not None: results["封板率"] = fb
-            if zb is not None: results["炸板率"] = zb
-            break
+        # === 涨停收益 + 赚钱效应 ===
+        df = _q("昨日涨停 今日涨跌幅 非st", limit=100)
+        avg = _avg_pct(df, "涨跌幅")
+        if avg is not None:
+            results["昨日涨停收益"] = avg
+            c = _col(df, "涨跌幅")
+            vals = _num(df[c]).dropna()
+            green = (vals > 0).sum()
+            results["涨停溢价率"] = round(green / len(vals) * 100, 1) if len(vals) else None
+            results["赚钱效应"] = "好" if avg > 2 else ("差" if avg < 0 else "一般")
 
-        # Q2: 晋级率 + 连板股数 + 最高板 + 分层晋级率
-        r2 = _iwencai_query("涨停晋级率 连板股数", limit=5)
-        for row in r2.get("datas", []):
-            jj = _get_val(row, "晋级率", clean=True)
-            lb_count = _get_val(row, "连板股数")
-            if jj is not None: results["晋级率"] = jj
-            if lb_count is not None: results["连板股数"] = lb_count
-            break
+        # === 连板收益 ===
+        avg = _avg_pct(_q("昨日连续涨停天数>=2 今日涨跌幅 非st", limit=30), "涨跌幅")
+        if avg is not None:
+            results["连板收益"] = avg
 
-        # Q2b-Q2d: 分层晋级率（一进二/二进三/三进四）
+        # === 炸板收益 ===
+        avg = _avg_pct(_q("昨日炸板 今日涨跌幅 非st", limit=30), "涨跌幅")
+        if avg is not None:
+            results["炸板收益"] = avg
+
+        # === 最高板 + 次高板 + 晋级率 + 连板股列表 ===
+        df = _q("连续涨停天数>=2 非st 连续涨停天数 所属行业 封板时间 换手率", limit=50)
+        max_b, sub_b = _max_board(df)
+        if max_b is not None:
+            results["最高板"] = max_b
+        if sub_b is not None:
+            results["次高板"] = sub_b
+
+        # 连板股数
+        results["连板股数"] = len(df) if not df.empty else None
+
+        # 晋级率 = 连板股数 / 昨日涨停股数
+        zt_df = _q("昨日涨停 非st", limit=200)
+        yest_zt = len(zt_df) if not zt_df.empty else 0
+        if yest_zt > 0 and results.get("连板股数") is not None:
+            rate = results["连板股数"] / yest_zt
+            results["晋级率"] = round(rate, 4) if rate <= 1 else round(rate / 100, 4)
+
+        # 分层晋级率
         for layer_q, layer_key in [
-            ("昨日首板今日涨停", "一进二晋级率"),
-            ("昨日二板今日涨停", "二进三晋级率"),
-            ("昨日三板及以上今日涨停", "三进四晋级率"),
+            ("昨日首板 今日涨跌幅 非st", "一进二晋级率"),
+            ("昨日二板 今日涨跌幅 非st", "二进三晋级率"),
+            ("昨日三板 今日涨跌幅 非st", "三进四晋级率"),
         ]:
             try:
-                r_layer = _iwencai_query(layer_q, limit=5)
-                for row in r_layer.get("datas", []):
-                    v = _get_val(row, "晋级率", clean=True)
-                    if v is None:
-                        # 手动计算：红盘数/总数
-                        pcts = []
-                        total = 0
-                        for k in row:
-                            if "涨跌幅" in str(k):
-                                pv = _clean(row[k])
-                                if isinstance(pv, (int, float)):
-                                    pcts.append(pv)
-                        total = len(pcts)
-                        green = sum(1 for p in pcts if p > 0)
-                        v = round(green / total, 4) if total > 0 else None
-                    if v is not None:
-                        results[layer_key] = v
-                    break
+                ldf = _q(layer_q, limit=100)
+                c = _col(ldf, "涨跌幅")
+                if c is not None:
+                    vals = _num(ldf[c]).dropna()
+                    if len(vals) > 0:
+                        up = (vals > 0).sum()
+                        results[layer_key] = round(up / len(vals), 4)
             except Exception:
                 pass
 
-        # Q3: 最高板 — 从连板个股中取 max + 次高板
-        r3 = _iwencai_query("连板股票 连续涨停天数", limit=20)
-        boards = []
-        for row in r3.get("datas", []):
-            days = _get_val(row, "连续涨停天数", clean=True)
-            if days is not None and isinstance(days, (int, float)) and days >= 2:
-                boards.append(int(days))
-            # 也检查 最高板 字段
-            gb = _get_val(row, "最高板", clean=True)
-            if gb is not None and isinstance(gb, (int, float)) and gb > 0 and gb not in boards:
-                boards.append(int(gb))
-        if boards:
-            boards.sort(reverse=True)
-            results["最高板"] = boards[0]
-            if len(boards) >= 2:
-                results["次高板"] = boards[1]
+        # === 连板股列表 ===
+        if not df.empty:
+            lb_stocks = []
+            name_c = _col(df, "股票简称")
+            code_c = _col(df, "股票代码")
+            days_c = _col(df, "连续涨停天数")
+            sector_c = _col(df, "所属行业")
+            ft_c = _col(df, "封板时间")
+            hs_c = _col(df, "换手率")
+            for _, row in df.iterrows():
+                code = str(row.get(code_c, "")) if code_c else ""
+                code = code.split(".")[0] if "." in code else code
+                name = str(row.get(name_c, "")) if name_c else ""
+                days = row.get(days_c) if days_c else 0
+                sector = str(row.get(sector_c, "")) if sector_c else ""
+                ft = str(row.get(ft_c, "")) if ft_c else ""
+                hs = row.get(hs_c)
+                if code and days:
+                    lb_stocks.append({
+                        "代码": code,
+                        "名称": name,
+                        "连板数": int(float(days)),
+                        "板块": sector,
+                        "封板时间": ft,
+                        "换手率": round(float(hs), 2) if hs and str(hs) != "nan" else None,
+                    })
+            if lb_stocks:
+                results["连板股列表"] = lb_stocks
 
-        # Q4: 涨停收益/赚钱效应 — 从昨日涨停今日表现计算
-        r4 = _iwencai_query("昨日涨停 今日涨跌幅", limit=30)
-        zt_pcts = []
-        for row in r4.get("datas", []):
-            pct = _get_val(row, "涨跌幅", clean=True)
-            if pct is not None and isinstance(pct, (int, float)):
-                zt_pcts.append(pct)
-        if zt_pcts:
-            avg_zt = round(sum(zt_pcts) / len(zt_pcts), 2)
-            results["昨日涨停收益"] = avg_zt
-            green_count = sum(1 for p in zt_pcts if p > 0)
-            results["涨停溢价率"] = round(green_count / len(zt_pcts) * 100, 1)
-            # 赚钱效应：均涨幅 >2% 为好，<0 为差
-            results["赚钱效应"] = "好" if avg_zt > 2 else ("差" if avg_zt < 0 else "一般")
+        # === 封板率 + 炸板率 ===
+        # 封板率 = 最终涨停数 / 今日涨停触及总数
+        # 跌停家数
+        zt_touch_df = _q("今日触及涨停 非st", limit=200)
+        zt_close_df = _q("今日涨停 非st", limit=200)
+        dt_df = _q("今日跌停 非st", limit=200)
+        touch_cnt = len(zt_touch_df) if not zt_touch_df.empty else 0
+        close_cnt = len(zt_close_df) if not zt_close_df.empty else 0
+        dt_cnt = len(dt_df) if not dt_df.empty else 0
+        if touch_cnt > 0:
+            results["封板率"] = round(close_cnt / touch_cnt, 4)
+            results["炸板率"] = round((touch_cnt - close_cnt) / touch_cnt, 4)
+        results["跌停家数"] = dt_cnt
 
-        # Q5: 连板风险值（多因子公式，对齐 THS 口径）
-        # THS 口径 = 约等于 1 - 晋级率×1.8（经2026-05-19校准）
-        jj_now = results.get("晋级率")
-        if jj_now is not None and isinstance(jj_now, (int, float)):
-            rate = jj_now if jj_now <= 1 else jj_now / 100
-            results["连板风险值"] = round(max(0, min(1, 1.0 - rate * 1.8)), 2)
-
-        # Q6: 连板收益 — 昨日连板股今日涨跌幅均值
-        r6 = _iwencai_query("昨日连续涨停天数>=2 今日涨跌幅", limit=30)
-        lb_pcts = []
-        for row in r6.get("datas", []):
-            pct = _get_val(row, "涨跌幅", clean=True)
-            if pct is not None and isinstance(pct, (int, float)):
-                lb_pcts.append(pct)
-        if lb_pcts:
-            results["连板收益"] = round(sum(lb_pcts) / len(lb_pcts), 2)
-
-        # Q7: 炸板收益 — 昨日炸板股今日涨跌幅均值
-        r7 = _iwencai_query("昨日炸板 今日涨跌幅", limit=30)
-        zb_pcts = []
-        for row in r7.get("datas", []):
-            pct = _get_val(row, "涨跌幅", clean=True)
-            if pct is not None and isinstance(pct, (int, float)):
-                zb_pcts.append(pct)
-        if zb_pcts:
-            results["炸板收益"] = round(sum(zb_pcts) / len(zb_pcts), 2)
-
-        # Q8: 连板股列表（供涨停结构和连板股表格使用）
-        r8 = _iwencai_query("连续涨停天数>=2 股票代码 股票简称 所属行业 连续涨停天数 封板时间 换手率", limit=50)
-        lb_stocks = []
-        for row in r8.get("datas", []):
-            code = _get_val(row, "股票代码") or ""
-            name = _get_val(row, "股票简称") or ""
-            days = _get_val(row, "连续涨停天数", clean=True)
-            sector = _get_val(row, "所属行业") or ""
-            ft = _get_val(row, "封板时间") or ""
-            hs = _get_val(row, "换手率", clean=True)
-            if code:
-                lb_stocks.append({
-                    "代码": str(code).split(".")[0] if "." in str(code) else str(code),
-                    "名称": str(name),
-                    "连板数": int(days) if days else 0,
-                    "板块": str(sector),
-                    "封板时间": str(ft),
-                    "换手率": round(float(hs), 2) if hs else None,
-                })
-        if lb_stocks:
-            results["连板股列表"] = lb_stocks
+        # === 连板风险值 ===
+        jj = results.get("晋级率")
+        if jj is not None:
+            results["连板风险值"] = round(max(0, min(1, 1.0 - jj * 1.8)), 2)
 
         if results:
+            # numpy → native 转换
+            for k in list(results.keys()):
+                results[k] = _native(results[k])
+            # 连板股列表特殊处理
+            if "连板股列表" in results:
+                for s in results["连板股列表"]:
+                    for sk in s:
+                        s[sk] = _native(s[sk])
             results["_updated"] = datetime.now().strftime("%Y-%m-%dT%H:%M:%S+08:00")
             CACHE["iwencai"] = results
     except Exception as e:
