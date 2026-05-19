@@ -28,7 +28,8 @@ LLM_INSIGHTS_FILE = ROOT / "data/llm_insights.json"
 
 # 可持久化的 CACHE key 列表
 _PERSIST_KEYS = ['live_index','live_quotes','breadth','live_sectors','iwencai',
-                 'northbound','hot_list','sector_inflow','yesterday_baseline','pools']
+                 'northbound','hot_list','sector_inflow','yesterday_baseline','pools',
+                 '上证15min','深证15min','创业15min']
 
 
 def _load_cache():
@@ -51,7 +52,7 @@ def _dump_cache():
         dump = {}
         for k in _PERSIST_KEYS:
             v = CACHE.get(k)
-            if v is not None and isinstance(v, dict):
+            if v is not None and (isinstance(v, (dict, list))):
                 dump[k] = v
         if dump:
             tmp = CACHE_FILE.with_suffix('.tmp')
@@ -388,6 +389,9 @@ class BridgeHandler(SimpleHTTPRequestHandler):
                 'hot_list': CACHE.get('hot_list', {}),
                 'sector_inflow': CACHE.get('sector_inflow', {}),
                 'northbound': CACHE.get('northbound', {}),
+                '上证15min': CACHE.get('上证15min', []),
+                '深证15min': CACHE.get('深证15min', []),
+                '创业15min': CACHE.get('创业15min', []),
             }
             result = _add_freshness(result, 'live_quote')
             body = json.dumps(result, ensure_ascii=False).encode()
@@ -415,6 +419,9 @@ class BridgeHandler(SimpleHTTPRequestHandler):
                         'sector_inflow': CACHE.get('sector_inflow', {}),
                         'northbound': CACHE.get('northbound', {}),
                         'iwencai': CACHE.get('iwencai', {}),
+                        '上证15min': CACHE.get('上证15min', []),
+                        '深证15min': CACHE.get('深证15min', []),
+                        '创业15min': CACHE.get('创业15min', []),
                     }
                     result['_freshness'] = {'level': 'live', 'type': 'sse_stream'}
                     data = json.dumps(result, ensure_ascii=False)
@@ -670,6 +677,8 @@ if __name__ == '__main__':
                       max_instances=1, misfire_grace_time=60)
     scheduler.add_job(quotes.collect_northbound, 'interval', seconds=60, id='northbound_60s',
                       max_instances=1, misfire_grace_time=120)
+    scheduler.add_job(quotes.collect_kline_15m, 'interval', seconds=60, id='kline_15m_60s',
+                      max_instances=1, misfire_grace_time=120)
     scheduler.add_job(quotes.collect_hot_list, 'interval', minutes=5, id='hot_list_5min',
                       max_instances=1, misfire_grace_time=600)
     # T2 定时快照
@@ -704,7 +713,7 @@ if __name__ == '__main__':
 
     # 冷启动：强制执行一次初始采集填充缓存（不受 is_trading_time 限制）
     print(f'[bridge] Cold-start bootstrap: running initial collection...')
-    for bootstrap_fn in [quotes.collect_index, quotes.collect_quotes, quotes.collect_sectors, iwencai_poll.poll_iwencai_sentiment, quotes.collect_yesterday_compare]:
+    for bootstrap_fn in [quotes.collect_index, quotes.collect_quotes, quotes.collect_sectors, iwencai_poll.poll_iwencai_sentiment, quotes.collect_yesterday_compare, quotes.collect_kline_15m]:
         try:
             bootstrap_fn(force=True)
         except Exception as e:

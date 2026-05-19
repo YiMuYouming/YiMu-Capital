@@ -225,6 +225,22 @@ def collect_hot_list(force=False):
         print(f"  [quotes] collect_hot_list error: {e}", file=sys.stderr)
 
 
+def collect_kline_15m(force=False):
+    """60s: 三大指数15分钟量价（同比昨日）"""
+    if not force and not is_trading_time():
+        return
+    try:
+        with _tdx_lock:
+            r = _pipeline_fetch("kline_15m")
+        if r and isinstance(r, dict):
+            r.pop('_meta', None)
+            if '上证15min' in r: CACHE['上证15min'] = r['上证15min']
+            if '深证15min' in r: CACHE['深证15min'] = r['深证15min']
+            if '创业15min' in r: CACHE['创业15min'] = r['创业15min']
+    except Exception as e:
+        print(f"  [quotes] collect_kline_15m error: {e}", file=sys.stderr)
+
+
 def log_pnl_snapshot():
     """300s: P&L 快照写入 pnl.db"""
     if not is_trading_time():
