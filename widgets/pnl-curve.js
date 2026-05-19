@@ -391,6 +391,23 @@ class PnLCurveWidget extends YiMuWidget {
       return { pnl: (tP - 1) * 100, bm: (tB - 1) * 100, dd: tDD };
     }
 
+    // 周无数据 → 回退到最近有数据的周一
+    function fallbackWeek(fd) {
+      var result = computePeriod(fd);
+      if (result) return result;
+      // 找最近有数据的周一
+      var dates = ad.dates || [];
+      if (!dates.length) return null;
+      var lastDate = dates[dates.length - 1];
+      var lastD = new Date(lastDate);
+      var dow = lastD.getDay() || 7;
+      var fallbackMon = new Date(lastD);
+      fallbackMon.setDate(lastD.getDate() - dow + 1);
+      var fbStr = fallbackMon.toISOString().slice(0, 10);
+      if (fbStr === fd) return null; // 避免死循环
+      return computePeriod(fbStr);
+    }
+
     var now = new Date();
     var dow = now.getDay();
     var weekStart = new Date(now); weekStart.setDate(now.getDate() + (dow === 0 ? -6 : 1 - dow));
@@ -407,7 +424,6 @@ class PnLCurveWidget extends YiMuWidget {
     var html = '';
     var self = this;
     periods.forEach(function(p, i) {
-      // 今日：优先用 _periodCache intraday 数据（5分钟粒度更精确），fallback 到 _allDailyData
       var result;
       if (p === 'today') {
         var ic = (self._periodCache || {})['today_' + self._state.index];
@@ -423,6 +439,7 @@ class PnLCurveWidget extends YiMuWidget {
           result = { pnl: (tP - 1) * 100, bm: (tB - 1) * 100, dd: tDD };
         }
       }
+      if (!result && p === 'week') result = fallbackWeek(fromDates[p]);
       if (!result) result = computePeriod(fromDates[p]);
 
       if (!result) {

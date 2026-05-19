@@ -156,11 +156,17 @@ def query_pnl(range='today', index='sh'):
                 if h == 9 and m < 30: continue
                 full_labels.append(f"{h:02d}:{m:02d}")
 
-        # 行数据按时间索引
+        # 行数据按时间索引（对齐到5分钟槽）
         row_map = {}
         for r in rows:
             ts = r['ts']
-            time_key = ts[-8:-3] if 'T' in ts else ts[-5:]
+            time_str = ts[-8:-3] if 'T' in ts else ts[-5:]
+            try:
+                h, m = int(time_str[:2]), int(time_str[3:5])
+                m = (m // 5) * 5  # 对齐到5分钟
+                time_key = f"{h:02d}:{m:02d}"
+            except (ValueError, IndexError):
+                time_key = time_str
             row_map[time_key] = r
 
         labels, pnl_vals, bm_vals, pos_vals, nav_vals = [], [], [], [], []
