@@ -95,8 +95,8 @@ class SentimentDashWidget extends YiMuWidget {
     var rows = [
       {key:'上证指数', label:'上证', fmt:function(v){return v||'—';}},
       {key:'情绪值', label:'情绪值', fmt:function(v){return v!=null ? v+'%' : '—';}},
-      {key:'涨跌比', label:'涨跌比', fmt:function(v,snap){var u=snap['上涨家数'],d=snap['下跌家数'];return u!=null&&d!=null ? u+'/'+d : '—';}},
-      {key:'涨跌停', label:'涨跌停', fmt:function(v,snap){var z=snap['涨停家数'],d=snap['跌停家数'];return z!=null&&d!=null ? '<span class=\"up\">'+z+'</span>/<span class=\"down\">'+d+'</span>' : '—';}},
+      {key:'涨跌比', label:'涨跌比', fmt:function(v,snap){var u=snap['上涨家数'],d=snap['下跌家数'];if(u==null&&d==null)return'—';return (u!=null?'<span class=\"up\">'+u+'</span>':'—')+'/'+(d!=null?'<span class=\"down\">'+d+'</span>':'—');}},
+      {key:'涨跌停', label:'涨跌停', fmt:function(v,snap){var z=snap['涨停家数'],d=snap['跌停家数'];if(z==null&&d==null)return'—';return (z!=null?'<span class=\"up\">'+z+'</span>':'—')+'/'+(d!=null?'<span class=\"down\">'+d+'</span>':'—');}},
       {key:'涨停收益', label:'涨停收益', fmt:function(v){return v!=null ? (v>=0?'+':'')+v+'%' : '—';}},
       {key:'连板收益', label:'连板收益', fmt:function(v){return v!=null ? (v>=0?'+':'')+v+'%' : '—';}},
       {key:'炸板收益', label:'炸板收益', fmt:function(v){return v!=null ? (v>=0?'+':'')+v+'%' : '—';}},
