@@ -624,6 +624,8 @@ if __name__ == '__main__':
                       max_instances=1, misfire_grace_time=600)
     scheduler.add_job(market_data.poll_news, 'interval', minutes=5, id='news_5min',
                       max_instances=1, misfire_grace_time=600)
+    scheduler.add_job(quotes.collect_yesterday_compare, 'interval', seconds=30, id='yesterday_compare_30s',
+                      max_instances=1, misfire_grace_time=60)
     scheduler.add_job(quotes.collect_northbound, 'interval', seconds=60, id='northbound_60s',
                       max_instances=1, misfire_grace_time=120)
     scheduler.add_job(quotes.collect_hot_list, 'interval', minutes=5, id='hot_list_5min',
@@ -646,11 +648,11 @@ if __name__ == '__main__':
                       max_instances=1, misfire_grace_time=600)
 
     scheduler.start()
-    print(f'[bridge] APScheduler started: 13 jobs registered')
+    print(f'[bridge] APScheduler started: 14 jobs registered')
 
     # 冷启动：强制执行一次初始采集填充缓存（不受 is_trading_time 限制）
     print(f'[bridge] Cold-start bootstrap: running initial collection...')
-    for bootstrap_fn in [quotes.collect_index, quotes.collect_quotes, quotes.collect_sectors, iwencai_poll.poll_iwencai_sentiment]:
+    for bootstrap_fn in [quotes.collect_index, quotes.collect_quotes, quotes.collect_sectors, iwencai_poll.poll_iwencai_sentiment, quotes.collect_yesterday_compare]:
         try:
             bootstrap_fn(force=True)
         except Exception as e:

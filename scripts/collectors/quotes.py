@@ -55,6 +55,89 @@ def collect_index(force=False):
         print(f"  [quotes] collect_index error: {e}", file=sys.stderr)
 
 
+def collect_yesterday_compare(force=False):
+    """30s: 成交额较昨日同时段对比"""
+    if not force and not is_trading_time():
+        return
+    try:
+        from datetime import datetime as _dt
+        now = _dt.now()
+        # 已交易分钟数（从9:30算起）
+        market_open = now.replace(hour=9, minute=30, second=0, microsecond=0)
+        minutes_traded = max(1, min(240, (now - market_open).total_seconds() / 60))
+        slot_count = int(minutes_traded / 15) + 1  # 多少个15分钟槽
+
+        # 从 PyTDX 获取昨日15分钟K线
+        api = _get_tdx_api()
+        if not api:
+            return
+
+        result = {}
+        for name, (mkt, code) in [("上证", (1, "000001")), ("深证", (0, "399001"))]:
+            try:
+                bars = api.get_index_bars(1, mkt, code, 0, 60)
+                if not bars:
+                    continue
+                today_str = now.strftime("%Y-%m-%d")
+                current_min = now.hour * 60 + now.minute
+
+                # 找到昨天日期
+                from datetime import timedelta
+                yesterday = (now - timedelta(days=1)).strftime("%Y-%m-%d")
+
+                yesterday_amt = 0
+                for b in bars:
+                    dt = str(b.get("datetime", ""))
+                    if yesterday not in dt:
+                        continue
+                    # 解析时间，只取到当前时刻对应的时段
+                    try:
+                        bar_time = dt.split(" ")[-1] if " " in dt else dt[-5:]
+                        h, m = bar_time.split(":")[0], bar_time.split(":")[1]
+                        bar_min = int(h) * 60 + int(m)
+                        if bar_min <= current_min:
+                            yesterday_amt += b.get("amount", 0)
+                    except (ValueError, IndexError):
+                        continue
+                yesterday_amt_yi = yesterday_amt / 1e8
+
+                # 从 live_index 取今日累计
+                li = CACHE.get("live_index", {})
+                today_amt_str = li.get(f"{name}指数成交额", "")
+                if today_amt_str:
+                    try:
+                        today_amt_yi = float(str(today_amt_str).replace("亿", "").replace("万亿", "e4"))
+                    except ValueError:
+                        today_amt_yi = 0
+                else:
+                    today_amt_yi = 0
+
+                if yesterday_amt_yi > 0:
+                    diff = today_amt_yi - yesterday_amt_yi
+                    pct = round(diff / yesterday_amt_yi * 100, 1)
+                    result[f"{name}昨成交额"] = f"{yesterday_amt_yi:.2f}亿"
+                    result[f"{name}成交额差"] = f"{diff:+.2f}亿"
+                    result[f"{name}成交额差百分比"] = f"{pct:+.1f}%"
+            except Exception:
+                continue
+
+        if result:
+            # 合并到 live_index
+            li = CACHE.get("live_index", {})
+            li.update(result)
+            CACHE["live_index"] = li
+    except Exception as e:
+        print(f"  [quotes] collect_yesterday_compare error: {e}", file=sys.stderr)
+
+
+def _get_tdx_api():
+    try:
+        from ym_stock_data.sources.pytdx import _get_api
+        return _get_api()
+    except Exception:
+        return None
+
+
 def collect_breadth(force=False):
     """30s: 全市场涨跌分布（10档 + 涨停跌停数）"""
     if not force and not is_trading_time():

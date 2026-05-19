@@ -35,7 +35,8 @@ class MarketOverviewWidget extends YiMuWidget {
     html += '</div>';
 
     // === 第二行：关键指标 (4 个紧凑卡片) ===
-    var amtDiff = li['成交额差'] || '';
+    var amtDiff = li['上证成交额差'] || '';
+    var amtPct = li['上证成交额差百分比'] || '';
     var amtDir = amtDiff.charAt(0) === '+' ? 'up' : amtDiff.charAt(0) === '-' ? 'down' : '';
     var upCnt = li['上涨家数'];
     var dnCnt = li['下跌家数'];
@@ -48,7 +49,7 @@ class MarketOverviewWidget extends YiMuWidget {
     var vrCls = vr != null ? (vr >= 1 ? 'up' : 'down') : '';
 
     html += '<div style="display:flex;gap:6px">';
-    html += '<div class="kpi-card" style="flex:1;padding:6px 8px"><div class="kpi-label">成交额</div><div class="kpi-value" style="font-size:14px">'+(li['成交额']||'—')+'</div><div class="kpi-verdict ' + amtDir + '">'+(amtDiff||'')+'</div></div>';
+    html += '<div class="kpi-card" style="flex:1;padding:6px 8px"><div class="kpi-label">成交额</div><div class="kpi-value" style="font-size:14px">'+(li['成交额']||'—')+'</div>'+(amtPct?'<div class="kpi-verdict ' + amtDir + '">较昨日此时 '+amtPct+'</div>':'')+'</div>';
     html += '<div class="kpi-card" style="flex:1;padding:6px 8px"><div class="kpi-label">涨跌比</div><div class="kpi-value" style="font-size:14px">'+udHtml+'</div></div>';
     html += '<div class="kpi-card" style="flex:1;padding:6px 8px"><div class="kpi-label">振幅</div><div class="kpi-value" style="font-size:14px;color:var(--warn)">'+amp+'</div></div>';
     html += '<div class="kpi-card" style="flex:1;padding:6px 8px"><div class="kpi-label">量比</div><div class="kpi-value" style="font-size:14px;color:'+(vrCls?'var(--'+vrCls+')':'')+'">'+vrStr+'</div></div>';
