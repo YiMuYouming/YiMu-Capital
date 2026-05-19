@@ -209,12 +209,10 @@ def query_pnl(range='today', index='sh'):
         from_date = f"{now.year}-{m:02d}-01"
     elif range == 'year':
         from_date = f"{now.year}-01-01"
-    elif range == 'all':
-        from_date = '2020-01-01'
     else:
-        from_date = from_date if 'from_date' in dir() else '2020-01-01'
+        from_date = '2020-01-01'
 
-    # week/month/quarter/year/all: 走 daily_summary → 累积 TWR
+    # 图表用 → 累积 TWR；抽屉用(all) → 保持原始日收益
     if range in ('week', 'month', 'quarter', 'year', 'all'):
         rows = _exec(f"""
             SELECT date, pnl_pct, {idx_field} AS bm_pct, pos_pct, nav
@@ -224,8 +222,22 @@ def query_pnl(range='today', index='sh'):
         labels = [r['date'][-5:] for r in rows_list]
         pnl_raw = [r['pnl_pct'] for r in rows_list]
         bm_raw = [r['bm_pct'] for r in rows_list]
+        pos_vals = [r['pos_pct'] for r in rows_list]
+        nav_vals = [r['nav'] for r in rows_list]
 
-        # 转为累积 TWR: cumP = Π(1+r/100)
+        # 'all' 给抽屉用 → 原始日收益（抽屉自己算 TWR）
+        if range == 'all':
+            return {
+                'type': 'daily',
+                'labels': labels,
+                'portfolio': pnl_raw,
+                'benchmark': bm_raw,
+                'position': pos_vals,
+                'nav': nav_vals,
+                'dates': [r['date'] for r in rows_list],
+            }
+
+        # 其他 → 累积 TWR 曲线
         def to_cumulative(vals):
             cum = 1.0
             result = []
@@ -239,8 +251,8 @@ def query_pnl(range='today', index='sh'):
             'labels': labels,
             'portfolio': to_cumulative(pnl_raw),
             'benchmark': to_cumulative(bm_raw),
-            'position': [r['pos_pct'] for r in rows_list],
-            'nav': [r['nav'] for r in rows_list],
+            'position': pos_vals,
+            'nav': nav_vals,
             'dates': [r['date'] for r in rows_list],
     }
 
