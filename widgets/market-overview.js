@@ -85,6 +85,19 @@ class MarketOverviewWidget extends YiMuWidget {
       html += '</div>';
     }
 
+    // === 第三行：实时情绪（iwencai 2min 轮询）===
+    var iw = d.iwencai || {};
+    var upCnt2 = li['上涨家数'];
+    var dnCnt2 = li['下跌家数'];
+    var emotionVal = (upCnt2 != null && dnCnt2 != null && upCnt2 + dnCnt2 > 0)
+      ? Math.round(upCnt2 / (upCnt2 + dnCnt2) * 100) : null;
+    html += '<div style="display:flex;gap:6px">';
+    html += '<div class="kpi-card" style="flex:1;padding:6px 8px"><div class="kpi-label">情绪值</div><div class="kpi-value" style="font-size:14px">'+ (emotionVal != null ? emotionVal + '%' : '—') +'</div></div>';
+    html += '<div class="kpi-card" style="flex:1;padding:6px 8px"><div class="kpi-label">涨停收益</div><div class="kpi-value ' + (parseFloat(iw['昨日涨停收益'])>0?'up':'down') + '" style="font-size:14px">'+ (iw['昨日涨停收益'] != null ? (parseFloat(iw['昨日涨停收益'])>0?'+':'')+iw['昨日涨停收益']+'%' : '—') +'</div></div>';
+    html += '<div class="kpi-card" style="flex:1;padding:6px 8px"><div class="kpi-label">连板收益</div><div class="kpi-value ' + (parseFloat(iw['连板收益'])>0?'up':'down') + '" style="font-size:14px">'+ (iw['连板收益'] != null ? (parseFloat(iw['连板收益'])>0?'+':'')+iw['连板收益']+'%' : '—') +'</div></div>';
+    html += '<div class="kpi-card" style="flex:1;padding:6px 8px"><div class="kpi-label">炸板收益</div><div class="kpi-value ' + (parseFloat(iw['炸板收益'])>0?'up':'down') + '" style="font-size:14px">'+ (iw['炸板收益'] != null ? (parseFloat(iw['炸板收益'])>0?'+':'')+iw['炸板收益']+'%' : '—') +'</div></div>';
+    html += '</div>';
+
     // === 北向资金 (60s 实时) ===
     var nb = d.northbound || {};
     if (nb.hgt_yi != null || nb.sgt_yi != null) {

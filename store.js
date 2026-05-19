@@ -211,6 +211,11 @@ const DataStore = (function() {
         d.live_breadth = d.live_breadth || {};
         for (var k in liveData.live_breadth) { d.live_breadth[k] = liveData.live_breadth[k]; }
       }
+      // iwencai 实时情绪数据（供 W04 等组件）
+      if (liveData.iwencai) {
+        d.iwencai = d.iwencai || {};
+        for (var k in liveData.iwencai) { d.iwencai[k] = liveData.iwencai[k]; }
+      }
       // ym-stock-data 新增字段
       if (liveData.sector_inflow) { d.sector_inflow = liveData.sector_inflow; }
       if (liveData.northbound) { d.northbound = liveData.northbound; }
