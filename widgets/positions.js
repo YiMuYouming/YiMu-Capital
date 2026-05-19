@@ -38,6 +38,7 @@ class PositionsWidget extends YiMuWidget {
 
     var active = [], cleared = [];
     P.forEach(function(p) {
+      if ((p['状态']||'').indexOf('删除')>=0) return;  // 跳过已删除
       if ((p['状态']||'').indexOf('清')>=0) cleared.push(p); else active.push(p);
     });
 
@@ -220,10 +221,20 @@ class PositionsWidget extends YiMuWidget {
     o.querySelector('#pe_cancel').onclick = function(){ o.remove(); };
     o.querySelector('#pe_del').onclick = function(){
       if (!confirm('确定删除 '+(p['标的']||'此持仓')+'？')) return;
+      // 从 localStorage _positions 中删除
       var pos = []; try{pos=JSON.parse(DataStore.manualData.getAll()['_positions']||'[]')}catch(e){}
       if (!pos.length) pos = JSON.parse(JSON.stringify((DataStore.merged&&DataStore.merged.positions)||[]));
-      var found = pos.findIndex(function(x){return x['标的']===p['标的']&&x['代码']===p['代码'];});
+      // 标的名匹配删除
+      var found = -1;
+      for (var i = pos.length-1; i >= 0; i--) {
+        if (pos[i]['标的'] === p['标的']) { found = i; break; }
+      }
       if (found >= 0) pos.splice(found, 1);
+      // 如果是从 baseline 来的（不在 _positions 里），标记为已删除
+      if (found < 0) {
+        p['状态'] = '已删除';
+        pos.push(p);
+      }
       DataStore.manualData.set('_positions', JSON.stringify(pos));
       o.remove(); self._renderBody();
     };
