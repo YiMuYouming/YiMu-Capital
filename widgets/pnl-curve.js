@@ -34,10 +34,6 @@
     '.pnl-leg-line{width:20px;height:3px;border-radius:2px;flex-shrink:0}' +
     // Drawer
     // 辅助功能
-    '.pnl-aux-row{padding:0 14px 6px;display:flex;gap:12px}' +
-    '.pnl-aux-label{font-size:11px;color:var(--text-secondary);cursor:pointer;display:flex;align-items:center;gap:4px}' +
-    '.pnl-pos-chart{margin:0 14px 4px}' +
-    '.pnl-pos-chart canvas{width:100%;height:90px;display:block}' +
     // Drawer
     '.pnl-drawer-trigger{padding:0 14px 10px}' +
     '.pnl-drawer-btn{width:100%;padding:9px 14px;border-radius:6px;font-size:13px;cursor:pointer;background:var(--bg-base);border:1px solid var(--border);color:var(--text);font-family:inherit;font-weight:600;transition:all .12s;display:flex;align-items:center;justify-content:center;gap:6px}' +
@@ -100,34 +96,24 @@ class PnLCurveWidget extends YiMuWidget {
       _pnlSummary: this._state && this._state._pnlSummary,
     };
 
-    // 统一预加载：一次 range=all 请求 → _posCache + _allDailyData + drawer + summary
+    // 统一预加载：一次 range=all 请求 → _allDailyData + drawer + summary
     if (location.protocol !== 'file:' && !this._allDataLoading && !this._allDataReady) {
       this._allDataLoading = true;
       var self = this;
       fetch('/api/pnl?range=all&index=' + self._state.index)
         .then(function(r) { return r.json(); })
         .then(function(d) {
-          self._posCache = d;
           self._allDailyData = d;
           self._allDataReady = true;
           self._allDataLoading = false;
           self._updateDrawer(d);
-          // 同时拉 summary（独立端点）
           return fetch('/api/pnl/summary').then(function(r) { return r.json(); });
         })
         .then(function(s) {
           if (s) { self._state._pnlSummary = s; self._updateSummary(); }
-          // 如果仓位图已勾选且有缓存，自动绘制
-          var tog = document.getElementById('pnl_pos_toggle_' + self.id);
-          if (tog && tog.checked) {
-            var ch = document.getElementById('pnl_pos_chart_' + self.id);
-            if (ch) ch.style.display = '';
-            self._drawPosChart();
-          }
         })
         .catch(function() { self._allDataLoading = false; });
     }
-    // 缓存已就绪时直接更新（后续 render 触发时）
     if (this._allDailyData) {
       this._updateDrawer(this._allDailyData);
       this._updateSummary();
@@ -137,7 +123,6 @@ class PnLCurveWidget extends YiMuWidget {
     self._fetchChartData(function(chartData) {
       self._updateKPI(chartData);
       self._drawChart(chartData);
-      self._drawPosChart();
     });
     // 恢复抽屉状态
     if (this._state.drawerOpen) {
@@ -203,14 +188,6 @@ class PnLCurveWidget extends YiMuWidget {
         '<div class="pnl-leg-item"><div class="pnl-leg-line" style="background:#DC2626"></div><span>账户收益(TWR)</span></div>' +
         '<div class="pnl-leg-item"><div class="pnl-leg-line" style="background:#2563EB"></div><span id="pnl_idx_label_' + this.id + '">上证指数</span></div>' +
         '<div class="pnl-leg-item" style="margin-left:auto;font-size:10px;color:var(--text-disabled)" id="pnl_ts_' + this.id + '">—</div>' +
-      '</div>' +
-      // 辅助功能行：仓位复选框
-      '<div class="pnl-aux-row">' +
-        '<label class="pnl-aux-label"><input type="checkbox" id="pnl_pos_toggle_' + this.id + '"> 显示仓位</label>' +
-      '</div>' +
-      // 仓位子图
-      '<div class="pnl-pos-chart" id="pnl_pos_chart_' + this.id + '" style="display:none">' +
-        '<canvas id="pnl_pos_canvas_' + this.id + '"></canvas>' +
       '</div>' +
       // Drawer trigger
       '<div class="pnl-drawer-trigger"><button class="pnl-drawer-btn" id="pnl_drawer_btn_' + this.id + '">📊 查看损益明细</button></div>' +
@@ -322,15 +299,7 @@ class PnLCurveWidget extends YiMuWidget {
 
     posEl.textContent = posPct.toFixed(0) + '%';
     posEl.style.color = posPct > 80 ? 'var(--danger)' : posPct > 50 ? 'var(--warn)' : 'var(--accent)';
-    // 时段平均仓位
-    var posSub = (s.positions||[]).filter(function(p){return (p['状态']||'').indexOf('清')<0}).length + ' 只持仓';
-    if (chartData && chartData.position && chartData.position.length) {
-      var sumPos = 0;
-      for (var pi = 0; pi < chartData.position.length; pi++) sumPos += chartData.position[pi];
-      var avgPos = (sumPos / chartData.position.length).toFixed(1);
-      posSub = '时段均值 ' + avgPos + '%';
-    }
-    document.getElementById('pnl_pos_sub').textContent = posSub;
+    document.getElementById('pnl_pos_sub').textContent = (s.positions||[]).filter(function(p){return (p['状态']||'').indexOf('清')<0&&(p['状态']||'').indexOf('删除')<0}).length + ' 只持仓';
 
     // Period KPI — 标签联动
     var periodLabel = { today:'今日', week:'本周', month:'本月', quarter:'近三月', year:'近一年' };
@@ -352,7 +321,7 @@ class PnLCurveWidget extends YiMuWidget {
       document.getElementById('pnl_period_val').style.color = pnlPct >= 0 ? 'var(--up)' : 'var(--down)';
       document.getElementById('pnl_period_sub').textContent = '浮动盈亏/总资产';
     } else {
-      var cache = this._posCache || this._allDailyData;
+      var cache = this._allDailyData;
       if (cache && cache.dates && cache.dates.length) {
       var now = new Date();
       var dmap = {
@@ -563,109 +532,6 @@ class PnLCurveWidget extends YiMuWidget {
     // 抽屉底部汇总已移至 KPI 行，此处清空
     var el = document.getElementById('pnl_summary_' + this.id);
     if (el) { el.innerHTML = ''; }
-  }
-
-  // 仓位子图
-  _drawPosChart() {
-    if (location.protocol === 'file:') return;
-    var self = this;
-    var canvas = document.getElementById('pnl_pos_canvas_' + this.id);
-    if (!canvas) return;
-    if (!self._posCache) return;   // 缓存未就绪，等统一预加载完成
-    // 用缓存数据绘制
-    var d = self._posCache;
-    if (!d.labels || !d.labels.length) return;
-        var now = new Date();
-        var fromDate;
-        switch(self._state.period) {
-          case 'today': fromDate = new Date(now); fromDate.setDate(now.getDate()-1); break;
-          case 'week': fromDate = new Date(now); fromDate.setDate(now.getDate() - (now.getDay()||7) + 1); break;
-          case 'month': fromDate = new Date(now.getFullYear(), now.getMonth(), 1); break;
-          case 'quarter': fromDate = new Date(now); fromDate.setMonth(now.getMonth()-3); break;
-          case 'year': fromDate = new Date(now.getFullYear(), 0, 1); break;
-          default: fromDate = new Date(2020,0,1);
-        }
-        var dates = [], posVals = [];
-        var fullDates = d.dates || [];
-        for (var i = 0; i < fullDates.length; i++) {
-          var dd = new Date(fullDates[i]);  // full dates "2026-03-30"
-          if (dd >= fromDate) {
-            dates.push(d.labels[i]);  // short labels "03-30"
-            posVals.push(d.position[i]);
-          }
-        }
-        if (dates.length < 2) return;
-
-        var rect2 = canvas.getBoundingClientRect();
-        var W = rect2.width, H = rect2.height || 90;
-        var DPR2 = window.devicePixelRatio || 1;
-        canvas.width = W * DPR2;
-        canvas.height = H * DPR2;
-        canvas.style.width = W + 'px';
-        canvas.style.height = H + 'px';
-        var ctx = canvas.getContext('2d');
-        ctx.scale(DPR2, DPR2);
-
-        var PAD = { t: 8, r: 12, b: 16, l: 30 };
-        var cw = W - PAD.l - PAD.r;
-        var ch = H - PAD.t - PAD.b;
-
-        ctx.clearRect(0, 0, W, H);
-        ctx.fillStyle = '#FAFAF9';
-        ctx.fillRect(0, 0, W, H);
-
-        var n = dates.length;
-        function xVal(i) { return PAD.l + (i / (n - 1)) * cw; }
-
-        // Y auto-scale
-        var posMin = Math.min.apply(null, posVals);
-        var posMax = Math.max.apply(null, posVals);
-        posMin = Math.floor(posMin / 10) * 10;
-        posMax = Math.ceil(posMax / 10) * 10;
-        if (posMax - posMin < 20) { posMax = posMin + 20; }
-        if (posMin < 0) posMin = 0;
-
-        function posY(v) { return PAD.t + ch - ((v - posMin) / (posMax - posMin)) * ch; }
-
-        // 面积填充
-        ctx.beginPath();
-        ctx.moveTo(xVal(0), posY(posMin));
-        for (var i = 0; i < n; i++) {
-          ctx.lineTo(xVal(i), posY(posVals[i]));
-        }
-        ctx.lineTo(xVal(n-1), posY(posMin));
-        ctx.closePath();
-        ctx.fillStyle = 'rgba(217,119,6,0.15)';
-        ctx.fill();
-
-        // 线
-        ctx.beginPath();
-        for (var i = 0; i < n; i++) {
-          var px = xVal(i), py = posY(posVals[i]);
-          if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
-        }
-        ctx.strokeStyle = '#D97706';
-        ctx.lineWidth = 2;
-        ctx.stroke();
-
-        // Y labels — 3档
-        ctx.fillStyle = '#8A8480';
-        ctx.font = '8px -apple-system,sans-serif';
-        ctx.textAlign = 'right';
-        ctx.textBaseline = 'middle';
-        ctx.fillText(posMin + '%', PAD.l - 4, posY(posMin));
-        ctx.fillText(Math.round((posMin+posMax)/2) + '%', PAD.l - 4, posY((posMin+posMax)/2));
-        ctx.fillText(posMax + '%', PAD.l - 4, posY(posMax));
-
-        // X labels — 只标日期
-        if (n > 0) {
-          ctx.textAlign = 'center';
-          ctx.textBaseline = 'top';
-          var labelStep = Math.max(1, Math.floor(n / 6));
-          for (var i = 0; i < n; i += labelStep) {
-            ctx.fillText(dates[i], xVal(i), PAD.t + ch + 2);
-          }
-        }
   }
 
   // ===== Chart =====
@@ -883,20 +749,6 @@ class PnLCurveWidget extends YiMuWidget {
   _bindEvents() {
     var self = this;
 
-    // 仓位子图切换
-    var posToggle = document.getElementById('pnl_pos_toggle_' + this.id);
-    if (posToggle) {
-      posToggle.addEventListener('change', function() {
-        var chart = document.getElementById('pnl_pos_chart_' + self.id);
-        if (this.checked) {
-          if (chart) chart.style.display = '';
-          // 有缓存直接画，没缓存等预加载回调
-          if (self._posCache) self._drawPosChart();
-        } else {
-          if (chart) chart.style.display = 'none';
-        }
-      });
-    }
     var root = document.getElementById('pnl_' + this.id);
     if (!root) return;
 
@@ -909,7 +761,6 @@ class PnLCurveWidget extends YiMuWidget {
         self._fetchChartData(function(chartData) {
           self._updateKPI(chartData);
           self._drawChart(chartData);
-          self._drawPosChart();
         });
       });
     });
@@ -929,11 +780,9 @@ class PnLCurveWidget extends YiMuWidget {
           .then(function(r) { return r.json(); })
           .then(function(d) {
             self._allDailyData = d;
-            self._posCache = d;
             self._allDataReady = true;
             self._updateDrawer(d);
             self._updateSummary();
-            self._drawPosChart();
           });
         self._fetchChartData(function(chartData) {
           self._updateKPI(chartData);
@@ -1021,7 +870,6 @@ class PnLCurveWidget extends YiMuWidget {
 
   onResize(w, h) {
     if (this._lastChartData) this._drawChart(this._lastChartData);
-    if (this._posCache) this._drawPosChart();
   }
 }
 
