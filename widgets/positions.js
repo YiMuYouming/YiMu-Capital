@@ -26,8 +26,9 @@ class PositionsWidget extends YiMuWidget {
       }
     } catch(e) {}
 
-    // 注入实时现价
+    // 保存昨收（今日盈亏基准），再注入实时现价
     P.forEach(function(p) {
+      p['昨收'] = p['昨收'] || p['现价'];  // 只有首次渲染时设置昨收
       var q = liveQ[p['代码']] || {};
       var livePrice = parseFloat(q['最新价']) || 0;
       if (livePrice > 0) p['现价'] = livePrice;
@@ -42,12 +43,16 @@ class PositionsWidget extends YiMuWidget {
       if ((p['状态']||'').indexOf('清')>=0) cleared.push(p); else active.push(p);
     });
 
+    // 今日盈亏基准：昨收价（dashboard_data.json 的现价 = 昨日收盘价）
     active.forEach(function(p) {
       var qty = parseFloat(String(p['数量']||'0').replace('股',''))||0;
-      var pr = parseFloat(p['现价'])||0, c = parseFloat(p['成本'])||0;
+      var pr = parseFloat(p['现价'])||0;
+      var yc = parseFloat(p['昨收']) || parseFloat(p['成本']) || pr;  // 昨收 > 成本 > 现价
       p['_qty'] = qty;
-      p['_mv'] = Math.round(pr*qty); p['_pnl'] = Math.round((pr-c)*qty);
-      p['_pct'] = c>0?((pr-c)/c*100):0;
+      p['_mv'] = Math.round(pr*qty);
+      // 今日浮动盈亏 = (现价 - 昨收) × 数量
+      p['_pnl'] = Math.round((pr - yc) * qty);
+      p['_pct'] = yc > 0 ? ((pr - yc) / yc * 100) : 0;
     });
 
     // 今日已清仓的已实现盈亏
@@ -56,9 +61,9 @@ class PositionsWidget extends YiMuWidget {
     cleared.forEach(function(p) {
       if ((p['清仓日期']||'').slice(0,10) === today || !p['清仓日期']) {
         var sellPrice = parseFloat(p['卖出价']||p['现价']) || 0;
-        var cost = parseFloat(p['成本']) || 0;
+        var yc = parseFloat(p['昨收']) || parseFloat(p['成本']) || sellPrice;
         var qty = parseFloat(String(p['数量']||'0').replace('股','')) || 0;
-        realizedPnL += Math.round((sellPrice - cost) * qty);
+        realizedPnL += Math.round((sellPrice - yc) * qty);
       }
     });
 
@@ -66,11 +71,13 @@ class PositionsWidget extends YiMuWidget {
 
     // 汇总卡片
     var ta = parseFloat(manual['总资产'])||0;
-    var pv=0, pc=0; active.forEach(function(p){pv+=p['_mv']||0;pc+=Math.round((parseFloat(p['成本'])||0)*(p['_qty']||0));});
-    var tp = pv - pc + realizedPnL;  // 浮动 + 今日已实现
+    var pv=0; active.forEach(function(p){pv+=p['_mv']||0;});
+    var tp = active.reduce(function(sum,p){return sum+(p['_pnl']||0);}, 0) + realizedPnL;  // 今日总盈亏
     var af = (manual['可用资金']!=null) ? parseFloat(manual['可用资金']) : ta-pv;
     if (!ta || ta <= 0) ta = pv + af;
-    var tc=tp>0?'up':tp<0?'down':'', pp=pc>0?(tp/pc*100):0, pr=ta>0?Math.round(pv/ta*100):0;
+    var tc=tp>0?'up':tp<0?'down':'';
+    var pp = ta > 0 ? (tp / (ta - tp) * 100) : 0;  // 今日盈亏%/昨日总资产
+    var pr=ta>0?Math.round(pv/ta*100):0;
 
     html += '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:var(--sp-xs) var(--sp-sm);margin-bottom:var(--sp-md);padding:var(--sp-sm);background:var(--bg-base);border-radius:var(--radius-md);font-size:var(--fs-body)">'+
       '<div style="text-align:center"><div class="kpi-label">总资产</div><div style="font-family:var(--font-mono);font-size:var(--fs-subtitle);font-weight:700">'+ta.toLocaleString()+'</div></div>'+
@@ -263,7 +270,9 @@ class PositionsWidget extends YiMuWidget {
       var entry = {
         '标的': g('pe_stock'), '代码': g('pe_code'), '方向': g('pe_dir'),
         '成本': parseFloat(g('pe_cost'))||0, '数量': parseInt(g('pe_qty'))||0,
-        '止损': g('pe_stop')||'—', '状态': '持有', '现价': p['现价']||parseFloat(g('pe_cost'))||0
+        '止损': g('pe_stop')||'—', '状态': '持有',
+        '昨收': p['昨收'] || p['现价'] || parseFloat(g('pe_cost'))||0,
+        '现价': p['现价']||parseFloat(g('pe_cost'))||0
       };
       if (found >= 0) pos[found] = entry; else pos.push(entry);
       DataStore.manualData.set('_positions', JSON.stringify(pos));
@@ -386,9 +395,9 @@ class PositionsWidget extends YiMuWidget {
         var e = pos.find(function(p){return p['标的']===stock;});
         if (e) {
           var oq=parseInt(e['数量'])||0, oc=parseFloat(e['成本'])||0, nq=oq+qty;
-          e['数量']=nq; e['成本']=oq>0?Math.round(((oc*oq)+(price*qty))/nq*100)/100:price; e['现价']=price; e['代码']=code||e['代码'];
+          e['数量']=nq; e['成本']=oq>0?Math.round(((oc*oq)+(price*qty))/nq*100)/100:price; e['现价']=price; e['代码']=code||e['代码']; e['昨收']=e['昨收']||price;
         } else {
-          pos.push({'标的':stock,'代码':code,'成本':price,'现价':price,'数量':qty,'止损':'—','状态':'持有'});
+          pos.push({'标的':stock,'代码':code,'成本':price,'现价':price,'昨收':price,'数量':qty,'止损':'—','状态':'持有'});
         }
       }
       DataStore.manualData.set('_positions', JSON.stringify(pos));
