@@ -125,7 +125,8 @@ class TodayOpsWidget extends YiMuWidget {
         '<td class="'+plCls+'" style="font-size:var(--fs-body);font-family:var(--font-mono);font-weight:600">'+(pl>=0?'+':'')+pl.toFixed(0)+'</td>' +
         '<td class="'+pctCls+'" style="font-size:var(--fs-body);font-family:var(--font-mono);font-weight:600">'+(plPct>=0?'+':'')+plPct.toFixed(2)+'%</td>' +
         '<td style="font-size:var(--fs-body);color:var(--text-secondary);max-width:120px;white-space:normal">'+(o['原因']||'')+'</td>' +
-        '<td><button class="w17_del" data-idx="'+idx+'" style="background:none;border:none;color:var(--danger);cursor:pointer;font-size:var(--fs-body)">×</button></td>' +
+        '<td><button class="w17_edit" data-idx="'+idx+'" style="background:none;border:none;color:var(--info);cursor:pointer;font-size:var(--fs-body)" title="编辑">✎</button>' +
+        '<button class="w17_del" data-idx="'+idx+'" style="background:none;border:none;color:var(--danger);cursor:pointer;font-size:var(--fs-body)" title="删除">×</button></td>' +
         '</tr>';
     });
 
@@ -142,6 +143,14 @@ class TodayOpsWidget extends YiMuWidget {
     var addBtn = body.querySelector('#w17_add');
     if (addBtn) addBtn.addEventListener('click', function() { self._showAddForm(ops); });
 
+    // 编辑按钮
+    body.querySelectorAll('.w17_edit').forEach(function(btn) {
+      btn.addEventListener('click', function() {
+        var idx = parseInt(this.dataset.idx);
+        self._showEditForm(ops, idx);
+      });
+    });
+
     // 删除按钮
     body.querySelectorAll('.w17_del').forEach(function(btn) {
       btn.addEventListener('click', function() {
@@ -153,20 +162,25 @@ class TodayOpsWidget extends YiMuWidget {
     });
   }
 
-  _showAddForm(ops) {
+  _showEditForm(ops, idx) {
+    var entry = ops[idx];
+    this._showAddForm(ops, idx, entry);
+  }
+
+  _showAddForm(ops, editIdx, prefill) {
     var self = this;
     var html = '<div id="w17_form" style="position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.6);z-index:3000;display:flex;align-items:center;justify-content:center">' +
       '<div style="background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-lg);padding:var(--sp-lg);width:90%;max-width:420px">' +
-      '<div style="font-size:var(--fs-subtitle);font-weight:700;margin-bottom:var(--sp-md)">添加操作</div>' +
+      '<div style="font-size:var(--fs-subtitle);font-weight:700;margin-bottom:var(--sp-md)">' + (editIdx != null ? '编辑操作' : '添加操作') + '</div>' +
       '<div class="input-grid" style="grid-template-columns:1fr 1fr">' +
-        '<div class="input-group"><label>时间</label><input id="w17_time" placeholder="9:35" style="width:100%"></div>' +
+        '<div class="input-group"><label>时间</label><input id="w17_time" placeholder="9:35" value="' + (prefill?prefill['时间']||'':'') + '" style="width:100%"></div>' +
         '<div class="input-group"><label>动作</label><select id="w17_act" style="width:100%"><option>W1追涨</option><option>W2买入</option><option>卖出</option><option>清仓</option></select></div>' +
-        '<div class="input-group"><label>标的</label><input id="w17_stock" placeholder="大业股份" style="width:100%"></div>' +
-        '<div class="input-group"><label>价格</label><input id="w17_price" type="number" step="0.01" style="width:100%"></div>' +
-        '<div class="input-group"><label>数量(股)</label><input id="w17_qty" type="number" value="100" style="width:100%"></div>' +
-        '<div class="input-group"><label>盈亏</label><input id="w17_pnl" type="number" step="0.01" style="width:100%"></div>' +
+        '<div class="input-group"><label>标的</label><input id="w17_stock" placeholder="大业股份" value="' + (prefill?prefill['标的']||'':'') + '" style="width:100%"></div>' +
+        '<div class="input-group"><label>价格</label><input id="w17_price" type="number" step="0.01" value="' + (prefill?prefill['价格']||'':'') + '" style="width:100%"></div>' +
+        '<div class="input-group"><label>数量(股)</label><input id="w17_qty" type="number" value="' + (prefill?prefill['数量']||'100':'100') + '" style="width:100%"></div>' +
+        '<div class="input-group"><label>盈亏</label><input id="w17_pnl" type="number" step="0.01" value="' + (prefill?prefill['盈亏']||'':'') + '" style="width:100%"></div>' +
       '</div>' +
-      '<div class="input-group" style="margin-top:var(--sp-sm)"><label>原因</label><input id="w17_reason" style="width:100%"></div>' +
+      '<div class="input-group" style="margin-top:var(--sp-sm)"><label>原因</label><input id="w17_reason" value="' + (prefill?prefill['原因']||'':'') + '" style="width:100%"></div>' +
       '<div style="display:flex;gap:var(--sp-sm);margin-top:var(--sp-md)">' +
         '<button id="w17_save" style="flex:1;background:var(--info);color:var(--text-inverse);border:none;padding:var(--sp-sm);border-radius:var(--radius-sm);cursor:pointer;font-size:var(--fs-body)">确认</button>' +
         '<button id="w17_cancel" style="flex:1;background:var(--bg-base);color:var(--text-primary);border:1px solid var(--border);padding:var(--sp-sm);border-radius:var(--radius-sm);cursor:pointer;font-size:var(--fs-body)">取消</button>' +
@@ -175,6 +189,14 @@ class TodayOpsWidget extends YiMuWidget {
     var overlay = document.createElement('div');
     overlay.innerHTML = html;
     document.body.appendChild(overlay);
+
+    // 编辑模式：select 回设值
+    if (prefill && prefill['动作']) {
+      var actSel = overlay.querySelector('#w17_act');
+      for (var ai = 0; ai < actSel.options.length; ai++) {
+        if (actSel.options[ai].value === prefill['动作']) { actSel.selectedIndex = ai; break; }
+      }
+    }
 
     overlay.querySelector('#w17_cancel').onclick = function() { overlay.remove(); };
     overlay.querySelector('#w17_save').onclick = function() {
@@ -192,9 +214,12 @@ class TodayOpsWidget extends YiMuWidget {
         '盈亏pct': price > 0 && qty > 0 ? (pnl / (price * qty) * 100) : 0,
         '原因': overlay.querySelector('#w17_reason').value
       };
-      ops.push(entry);
+      if (editIdx != null) {
+        ops[editIdx] = entry;
+      } else {
+        ops.push(entry);
+      }
       DataStore.manualData.set('_今日操作', JSON.stringify(ops));
-      // 同步更新 W15 持仓
       _syncPosition(entry);
       overlay.remove();
       self._renderBody();
