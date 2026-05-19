@@ -159,6 +159,7 @@ def poll_iwencai_sentiment(force=False):
         if touch_cnt > 0:
             results["封板率"] = round(close_cnt / touch_cnt, 4)
             results["炸板率"] = round((touch_cnt - close_cnt) / touch_cnt, 4)
+        results["涨停家数"] = close_cnt
         results["跌停家数"] = dt_cnt
 
         # === 连板风险值 ===

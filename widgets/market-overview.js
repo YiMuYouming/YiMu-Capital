@@ -44,15 +44,15 @@ class MarketOverviewWidget extends YiMuWidget {
       ? '<span class="up">' + upCnt + '</span>/<span class="down">' + dnCnt + '</span>'
       : (m['涨跌比'] || '—');
     var amp = li['上证指数振幅'] || '—';
-    var vr = li['量比'];
-    var vrStr = vr != null ? vr.toFixed(2) + 'x' : '—';
-    var vrCls = vr != null ? (vr >= 1 ? 'up' : 'down') : '';
+    var iw = d.iwencai || {};
+    var zt = iw['涨停家数'];
+    var dt = iw['跌停家数'];
 
     html += '<div style="display:flex;gap:6px">';
     html += '<div class="kpi-card" style="flex:1;padding:6px 8px"><div class="kpi-label">成交额</div><div class="kpi-value" style="font-size:14px">'+(li['成交额']||'—')+'</div>'+(amtPct?'<div class="kpi-verdict ' + amtDir + '">较昨日此时 '+amtPct+'</div>':'')+'</div>';
     html += '<div class="kpi-card" style="flex:1;padding:6px 8px"><div class="kpi-label">涨跌比</div><div class="kpi-value" style="font-size:14px">'+udHtml+'</div></div>';
     html += '<div class="kpi-card" style="flex:1;padding:6px 8px"><div class="kpi-label">振幅</div><div class="kpi-value" style="font-size:14px;color:var(--warn)">'+amp+'</div></div>';
-    html += '<div class="kpi-card" style="flex:1;padding:6px 8px"><div class="kpi-label">量比</div><div class="kpi-value" style="font-size:14px;color:'+(vrCls?'var(--'+vrCls+')':'')+'">'+vrStr+'</div></div>';
+    html += '<div class="kpi-card" style="flex:1;padding:6px 8px"><div class="kpi-label">涨跌停</div><div class="kpi-value" style="font-size:14px"><span class="up">'+(zt!=null?zt:'—')+'</span>/<span class="down">'+(dt!=null?dt:'—')+'</span></div></div>';
     html += '</div>';
 
     // === 涨跌分布条 (更宽，更醒目) ===
@@ -143,10 +143,23 @@ class MarketOverviewWidget extends YiMuWidget {
         '</div>';
     }
 
+    // === LLM 研判卡槽 ===
+    var llmHtml = '<span style="color:var(--text-disabled)">🤖 待研判</span>';
+    try {
+      var llmRaw = DataStore.manualData.getAll()['_llm_market'] || '';
+      if (llmRaw) {
+        llmHtml = '<span style="color:var(--info)">🤖 ' + (llmRaw.length > 150 ? llmRaw.substring(0, 150) + '...' : llmRaw) + '</span>';
+      }
+    } catch(e) {}
+    html += '<div style="margin-top:4px;padding:3px 8px;background:var(--bg-base);border-radius:var(--radius-sm);font-size:var(--fs-body);border:1px dashed var(--border-light)" id="w04-llm-text">' + llmHtml + '</div>';
+
     html += '</div>';
 
     body.innerHTML = html;
     this.updateTimestamp();
+
+    // 异步加载 LLM 研判
+    this._loadLLM(body);
 
     // 绑定基线折叠
     var toggle = body.querySelector('#w04_baseline_toggle');
@@ -160,6 +173,33 @@ class MarketOverviewWidget extends YiMuWidget {
         if (arrow) arrow.style.transform = bBody.style.display !== 'none' ? 'rotate(90deg)' : '';
       }.bind(this));
     }
+  }
+
+  _loadLLM(body) {
+    var self = this;
+    fetch('data/llm_insights.json?t=' + Date.now())
+      .then(function(r) { return r.ok ? r.json() : null; })
+      .then(function(data) {
+        if (!data) return;
+        // 找今天的研判
+        var today = new Date().toISOString().slice(0, 10);
+        var keys = Object.keys(data).filter(function(k) { return k.indexOf(today) === 0; }).sort().reverse();
+        var text = '';
+        keys.forEach(function(k) {
+          if (data[k] && data[k].text) text = data[k].text;
+        });
+        if (text) {
+          var el = body.querySelector('#w04-llm-text');
+          if (el) el.innerHTML = '🤖 ' + (text.length > 150 ? text.substring(0, 150) + '...' : text);
+        }
+      })
+      .catch(function() {});
+  }
+
+  _card(title, bodyContent) {
+    return '<div style="background:var(--bg-base);border-radius:var(--radius-md);padding:var(--sp-xs) var(--sp-sm)">' +
+      '<div style="font-size:var(--fs-label);font-weight:600;color:var(--text-primary);margin-bottom:var(--sp-xs);padding-bottom:2px;border-bottom:1px solid var(--border-light)">'+title+'</div>' +
+      bodyContent + '</div>';
   }
 }
 
