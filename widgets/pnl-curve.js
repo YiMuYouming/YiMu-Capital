@@ -498,11 +498,10 @@ class PnLCurveWidget extends YiMuWidget {
 
   _updateSummary() {
     var s = this._state;
-    var lastNav = (s._pnlSummary && s._pnlSummary.last_nav) || 1.0;
     var totalAsset = s.totalAsset || 0;
-    var cumReturn = (lastNav - 1) * 100;
 
-    var bmTWR = 0, histMaxDD = 0;
+    // 从 _allDailyData 实时算 TWR + 基准 + 回撤（和抽屉同源）
+    var cumReturn = 0, bmTWR = 0, histMaxDD = 0;
     if (this._allDailyData && this._allDailyData.portfolio && this._allDailyData.portfolio.length) {
       var ad = this._allDailyData;
       var cumB = 1.0, cumP = 1.0, pk = -Infinity, rp = 0;
@@ -513,7 +512,12 @@ class PnLCurveWidget extends YiMuWidget {
         if (rp > pk) pk = rp;
         if (rp - pk < histMaxDD) histMaxDD = rp - pk;
       }
+      cumReturn = (cumP - 1) * 100;
       bmTWR = (cumB - 1) * 100;
+    } else {
+      // fallback: summary API
+      var lastNav = (s._pnlSummary && s._pnlSummary.last_nav) || 1.0;
+      cumReturn = (lastNav - 1) * 100;
     }
     var alpha = cumReturn - bmTWR;
 
