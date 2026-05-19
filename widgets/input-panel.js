@@ -20,8 +20,8 @@ class InputPanelWidget extends YiMuWidget {
     if (!body) return;
 
     var fields = [
-      {id:'可用资金',type:'number',label:'可用资金(元)'},
       {id:'累计入金',type:'number',label:'累计入金(元)'},
+      {id:'可用资金',type:'number',label:'可用资金(元)'},
       {id:'情绪值',type:'number',label:'情绪值(%)'},
       {id:'上涨',type:'number',label:'上涨家数'},
       {id:'下跌',type:'number',label:'下跌家数'},
@@ -80,10 +80,14 @@ class InputPanelWidget extends YiMuWidget {
     } catch(e) {}
     var totalAsset = afAuto + mv;
     var totalPnL = parseFloat(manual['总盈亏']) || 0;
+    var deposit = parseFloat(manual['累计入金']) || 0;
+    var totalReturn = deposit > 0 ? ((totalAsset - deposit) / deposit * 100) : 0;
     var pnlColor = totalPnL >= 0 ? 'var(--up)' : 'var(--down)';
+    var retColor = totalReturn >= 0 ? 'var(--up)' : 'var(--down)';
     html += '<div style="margin-top:var(--sp-xs);padding:6px 10px;background:var(--bg-base);border-radius:var(--radius-sm);display:flex;justify-content:space-between;font-size:var(--fs-body);gap:var(--sp-md)">' +
       '<span><span style="color:var(--text-secondary)">总资产</span> <span style="font-family:var(--font-mono);font-weight:700;font-size:var(--fs-subtitle)">' + totalAsset.toLocaleString() + '</span></span>' +
-      '<span><span style="color:var(--text-secondary)">总盈亏</span> <span style="font-family:var(--font-mono);font-weight:700;font-size:var(--fs-subtitle);color:'+pnlColor+'">'+(totalPnL>=0?'+':'')+totalPnL.toLocaleString()+'</span></span></div>';
+      '<span><span style="color:var(--text-secondary)">累计入金</span> <span style="font-family:var(--font-mono);font-weight:700;font-size:var(--fs-subtitle)">' + deposit.toLocaleString() + '</span></span>' +
+      '<span><span style="color:var(--text-secondary)">累计收益</span> <span style="font-family:var(--font-mono);font-weight:700;font-size:var(--fs-subtitle);color:'+retColor+'">'+(totalReturn>=0?'+':'')+totalReturn.toFixed(2)+'%</span></span></div>';
 
     html += '<div style="margin-top:var(--sp-sm);display:flex;align-items:center;gap:var(--sp-md)">' +
       '<button class="input-refresh" id="btnRefresh">刷新数据</button>' +
