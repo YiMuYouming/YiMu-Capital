@@ -76,10 +76,18 @@ class PnLCurveWidget extends YiMuWidget {
     body.innerHTML = this._buildLayout();
 
     var liveQ = (data && data.live_quotes) || {};
-    var positions = (data && data.positions) || [];
+    // 和 W15 同源：优先用 manualData._positions，其次 baseline
+    var manual = DataStore.manualData.getAll();
+    var positions;
+    try {
+      positions = JSON.parse(manual['_positions'] || 'null');
+      if (!positions || !positions.length) positions = (data && data.positions) || [];
+    } catch(e) {
+      positions = (data && data.positions) || [];
+    }
     var pnlCfg = (data && data.pnl) || {};
-    var totalAsset = pnlCfg['总资产'] || (this._state && this._state.totalAsset) || 0;
-    var totalDeposit = pnlCfg['累计入金'] || (this._state && this._state.totalDeposit) || 0;
+    var totalAsset = manual['总资产'] || pnlCfg['总资产'] || (this._state && this._state.totalAsset) || 0;
+    var totalDeposit = manual['累计入金'] || pnlCfg['累计入金'] || (this._state && this._state.totalDeposit) || 0;
 
     this._state = {
       period: (this._state && this._state.period) || 'today',
@@ -295,7 +303,8 @@ class PnLCurveWidget extends YiMuWidget {
     // Position P&L
     var mv = 0, cost = 0;
     (s.positions || []).forEach(function(p) {
-      if ((p['状态']||'').indexOf('清') >= 0) return;
+      var st = p['状态'] || '';
+      if (st.indexOf('清') >= 0 || st.indexOf('删除') >= 0) return;
       var qty = parseFloat(String(p['数量']||'0').replace('股','')) || 0;
       var cp = parseFloat(p['成本']) || 0;
       var live = (s.liveQ || {})[p['代码']] || {};
