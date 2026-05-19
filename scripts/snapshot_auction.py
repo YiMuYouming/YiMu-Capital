@@ -225,84 +225,9 @@ def fetch_sector_auction():
     return result
 
 
-def find_today_review_note():
-    """找今天的复盘笔记（支持 2026-05-13 和 2026_5_13 两种日期格式）"""
-    review_dir = Path.home() / "Documents/YouMingVault/10_⚡Now/01_💰弈沐资本/复盘笔记"
-    now = datetime.now()
-    patterns = [
-        now.strftime("%Y-%m-%d"),                    # 2026-05-13
-        f"{now.year}_{now.month}_{now.day}",          # 2026_5_13
-        now.strftime("%Y_%m_%d"),                     # 2026_05_13
-    ]
-    for md in sorted(review_dir.glob("**/*.md"), reverse=True):
-        name = str(md)
-        for p in patterns:
-            if p in name:
-                return name
-    return None
-
-
-def fetch_thx_sentiment_from_note():
-    """获取 THS 竞价情绪数据，优先级：
-    1. bridge iwencai CACHE 实时数据 (http://localhost:8088/api/live/iwencai)
-    2. 今日复盘笔记 frontmatter (稳米 9:25 填入)
-    3. 昨日复盘笔记 frontmatter (回退)
-    """
-    # 优先从 bridge 的 iwencai 实时数据获取（9:26 竞价刚结束的定格数据）
-    result = _fetch_from_iwencai_api()
-    if result:
-        return result
-
-    # 回退到复盘笔记
-    note_path = find_today_review_note()
-    if not note_path:
-        return {}
-
-    def parse_fm(path):
-        try:
-            with open(path) as f:
-                content = f.read()
-        except Exception:
-            return {}
-
-        m = re.match(r'^---\s*\n(.*?)\n---', content, re.DOTALL)
-        if not m:
-            return {}
-
-        fm = {}
-        for line in m.group(1).split('\n'):
-            line = line.rstrip()
-            if not line or line.startswith('#'):
-                continue
-            m2 = re.match(r'^([\w一-鿿]+):\s*(.*)', line)
-            if not m2:
-                continue
-            key, raw = m2.group(1), m2.group(2).strip().strip('"').strip("'")
-            fm[key] = raw
-        return fm
-
-    def clean(v):
-        if not v or v.strip() == '':
-            return None
-        return v.strip()
-
-    def extract(result, fm):
-        for key in ["情绪值", "昨日涨停收益", "昨日连板收益", "昨日炸板收益",
-                    "连板风险值", "赚钱效应", "最高板"]:
-            val = clean(fm.get(key))
-            if val is not None and not result.get(key):
-                result[key] = val
-
-    result = {}
-    extract(result, parse_fm(note_path))
-
-    # 今天空 → 回退到昨天的复盘笔记
-    if not result:
-        yesterday = _find_previous_note(note_path)
-        if yesterday:
-            extract(result, parse_fm(yesterday))
-
-    return result
+def fetch_thx_sentiment():
+    """从 bridge iwencai CACHE 获取竞价情绪数据"""
+    return _fetch_from_iwencai_api()
 
 
 def _fetch_from_iwencai_api():
@@ -338,24 +263,6 @@ def _fetch_from_iwencai_api():
     return result
 
 
-def _find_previous_note(today_path):
-    """找前一天的复盘笔记"""
-    review_dir = Path(today_path).parent
-    # 同目录下按文件名排序，找前一个
-    siblings = sorted(Path(review_dir).glob("*ReviewNote.md"), reverse=True)
-    today_stem = Path(today_path).stem
-    for s in siblings:
-        if s.stem != today_stem:
-            return str(s)
-    # 跨周目录回退
-    parent = Path(review_dir).parent
-    all_notes = sorted(parent.glob("**/*ReviewNote.md"), reverse=True)
-    for s in all_notes:
-        if s.stem != today_stem:
-            return str(s)
-    return None
-
-
 def build_auction_snapshot():
     """组装竞价5维完整快照"""
     now = datetime.now()
@@ -382,15 +289,8 @@ def build_auction_snapshot():
     # 5. 板块竞价
     snapshot["板块竞价"] = fetch_sector_auction()
 
-    # 6. THS 竞价情绪指标（优先 iwencai API → 复盘笔记 → 涨跌比推算）
-    snapshot["情绪指标"] = fetch_thx_sentiment_from_note()
-    # 情绪值兜底：从涨跌家数推算
-    if not snapshot["情绪指标"].get("情绪值"):
-        ud = snapshot.get("涨跌家数", {})
-        up = ud.get("上涨", 0) or 0
-        dn = ud.get("下跌", 0) or 0
-        if up + dn > 0:
-            snapshot["情绪指标"]["情绪值"] = f"{round(up / (up + dn) * 100, 1)}%"
+    # 6. 竞价情绪指标（从 bridge iwencai CACHE）
+    snapshot["情绪指标"] = fetch_thx_sentiment()
 
     # 7. 自动判定
     snapshot["信号灯"] = _auto_lights(snapshot)
@@ -453,26 +353,17 @@ def _auto_lights(snap):
 
 
 def _judge_auction(snap):
-    """高潮保护判定（从 poll_iwencai.py 迁入）
+    """高潮保护判定
     根据竞价情绪值判定保护级别：>=90 极端/>=85 高潮/>=80 接近沸点/<80 正常
     """
     sentiment_val = 0
     sentiment = snap.get("情绪指标", {})
-    # 直接从情绪指标 dict 读取情绪值
     if isinstance(sentiment, dict):
         raw = sentiment.get("情绪值", "")
         try:
             sentiment_val = float(str(raw).replace("%", ""))
         except (ValueError, TypeError):
             pass
-
-    # 从涨跌家数兜底（键名为 上涨/下跌，非 涨/跌）
-    if sentiment_val == 0:
-        ud = snap.get("涨跌家数", {})
-        up = ud.get("上涨", 0) or ud.get("涨", 0)
-        dn = ud.get("下跌", 0) or ud.get("跌", 0)
-        if up + dn > 0:
-            sentiment_val = round(up / (up + dn) * 100)
 
     if sentiment_val >= 90:
         level = "一级高潮保护"
