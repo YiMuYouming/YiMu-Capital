@@ -2,9 +2,13 @@
   "meta": {
     "version": "1.0",
     "currency": "CNY",
-    "total_deposit": 68707.55,
-    "last_twr_nav": 0.9858928414802732,
-    "updated": "2026-05-15T16:02:21.650483"
+    "total_deposit": 200000,
+    "last_twr_nav": 0.767805,
+    "updated": "2026-05-15T16:02:21.650483",
+    "day_start_asset": 0,
+    "day_start_date": "",
+    "last_total_asset": 153561.0,
+    "last_updated": "2026-05-19T15:27:05"
   },
   "intraday_histories": {},
   "daily": [

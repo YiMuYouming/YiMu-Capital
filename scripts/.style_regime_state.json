@@ -1,7 +1,7 @@
 {
-  "current_regime": "混合（偏连板）",
-  "days_in_regime": 1,
-  "last_update": "2026-05-18",
+  "current_regime": "混合（均衡）",
+  "days_in_regime": 5,
+  "last_update": "2026-05-19",
   "history": [
     {
       "date": "2026-05-18",
@@ -10,6 +10,38 @@
       "lianban_conf": 56,
       "trend_conf": 44,
       "confidence": 51
+    },
+    {
+      "date": "2026-05-19",
+      "style": "混合（均衡）",
+      "total": 54,
+      "lianban_conf": 54,
+      "trend_conf": 46,
+      "confidence": 54
+    },
+    {
+      "date": "2026-05-19",
+      "style": "混合（均衡）",
+      "total": 35,
+      "lianban_conf": 50,
+      "trend_conf": 50,
+      "confidence": 50
+    },
+    {
+      "date": "2026-05-19",
+      "style": "混合（均衡）",
+      "total": 54,
+      "lianban_conf": 54,
+      "trend_conf": 46,
+      "confidence": 54
+    },
+    {
+      "date": "2026-05-19",
+      "style": "混合（均衡）",
+      "total": 55,
+      "lianban_conf": 54,
+      "trend_conf": 46,
+      "confidence": 54
     }
   ]
 }
