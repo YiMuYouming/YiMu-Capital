@@ -96,7 +96,7 @@ class PnLCurveWidget extends YiMuWidget {
     if (location.protocol !== 'file:' && !this._allDataLoading && !this._allDataReady) {
       this._allDataLoading = true;
       var self = this;
-      fetch('/api/pnl?range=all&index=sh')
+      fetch('/api/pnl?range=all&index=' + self._state.index)
         .then(function(r) { return r.json(); })
         .then(function(d) {
           self._posCache = d;
@@ -858,10 +858,22 @@ class PnLCurveWidget extends YiMuWidget {
         self._state.index = this.dataset.idx;
         var label = document.getElementById('pnl_idx_label_' + self.id);
         if (label) label.textContent = this.textContent + '指数';
+        // 重新拉 all 数据更新抽屉
+        self._allDataReady = false;
+        self._allDataLoading = false;
+        fetch('/api/pnl?range=all&index=' + self._state.index)
+          .then(function(r) { return r.json(); })
+          .then(function(d) {
+            self._allDailyData = d;
+            self._posCache = d;
+            self._allDataReady = true;
+            self._updateDrawer(d);
+            self._updateSummary();
+            self._drawPosChart();
+          });
         self._fetchChartData(function(chartData) {
           self._updateKPI(chartData);
           self._drawChart(chartData);
-          self._drawPosChart();
         });
       });
     });
