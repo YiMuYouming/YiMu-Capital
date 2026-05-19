@@ -10,7 +10,7 @@
   style.textContent =
     '.pnl-root{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}' +
     // KPI
-    '.pnl-kpi{display:grid;grid-template-columns:repeat(5,1fr);gap:1px;background:var(--border);margin-bottom:0}' +
+    '.pnl-kpi{display:grid;grid-template-columns:repeat(5,1fr);gap:1px;background:var(--border);margin-bottom:2px}' +
     '.pnl-kpi-card{background:var(--bg-card);padding:12px 16px;min-height:70px}' +
     '.pnl-kpi-lbl{font-size:10px;text-transform:uppercase;letter-spacing:.3px;color:var(--text-secondary);margin-bottom:3px;font-weight:500}' +
     '.pnl-kpi-val{font-size:24px;font-weight:700;font-family:var(--font-mono);line-height:1.2}' +
@@ -155,19 +155,21 @@ class PnLCurveWidget extends YiMuWidget {
   // ===== Layout =====
   _buildLayout() {
     return '<div class="pnl-root" id="pnl_' + this.id + '">' +
-      // KPI row 1: 资产概览
+      // KPI row 1: 累计（慢变）
       '<div class="pnl-kpi" id="pnl_kpi1_' + this.id + '">' +
         '<div class="pnl-kpi-card"><div class="pnl-kpi-lbl">当前资产</div><div class="pnl-kpi-val" id="pnl_asset">—</div><div class="pnl-kpi-sub" id="pnl_asset_sub">—</div></div>' +
-        '<div class="pnl-kpi-card"><div class="pnl-kpi-lbl">浮动盈亏</div><div class="pnl-kpi-val" id="pnl_pnl">—</div><div class="pnl-kpi-sub" id="pnl_pnl_sub">—</div></div>' +
-        '<div class="pnl-kpi-card"><div class="pnl-kpi-lbl">仓位</div><div class="pnl-kpi-val" id="pnl_pos">—</div><div class="pnl-kpi-sub" id="pnl_pos_sub">—</div></div>' +
         '<div class="pnl-kpi-card"><div class="pnl-kpi-lbl">TWR累计</div><div class="pnl-kpi-val" id="pnl_twr">—</div><div class="pnl-kpi-sub" id="pnl_twr_sub">—</div></div>' +
+        '<div class="pnl-kpi-card"><div class="pnl-kpi-lbl">基准累计</div><div class="pnl-kpi-val" id="pnl_bm_twr">—</div><div class="pnl-kpi-sub" id="pnl_bm_twr_sub">—</div></div>' +
+        '<div class="pnl-kpi-card"><div class="pnl-kpi-lbl">累计超额α</div><div class="pnl-kpi-val" id="pnl_alpha">—</div><div class="pnl-kpi-sub" id="pnl_alpha_sub">—</div></div>' +
+        '<div class="pnl-kpi-card"><div class="pnl-kpi-lbl">历史最大回撤</div><div class="pnl-kpi-val" id="pnl_maxdd">—</div><div class="pnl-kpi-sub" id="pnl_maxdd_sub">—</div></div>' +
       '</div>' +
-      // KPI row 2: 收益/回撤/超额
+      // KPI row 2: 今日（实时变）
       '<div class="pnl-kpi" id="pnl_kpi2_' + this.id + '">' +
-        '<div class="pnl-kpi-card pnl-kpi-dyn"><div class="pnl-kpi-lbl" id="pnl_period_label">日收益</div><div class="pnl-kpi-val" id="pnl_period_val">—</div><div class="pnl-kpi-sub" id="pnl_period_sub">—</div></div>' +
-        '<div class="pnl-kpi-card pnl-kpi-dyn"><div class="pnl-kpi-lbl" id="pnl_dd_label">日回撤</div><div class="pnl-kpi-val" id="pnl_dd_val">—</div><div class="pnl-kpi-sub" id="pnl_dd_sub">—</div></div>' +
-        '<div class="pnl-kpi-card"><div class="pnl-kpi-lbl">超额α</div><div class="pnl-kpi-val" id="pnl_alpha">—</div><div class="pnl-kpi-sub" id="pnl_alpha_sub">—</div></div>' +
-        '<div class="pnl-kpi-card"><div class="pnl-kpi-lbl">最大回撤</div><div class="pnl-kpi-val" id="pnl_maxdd">—</div><div class="pnl-kpi-sub" id="pnl_maxdd_sub">—</div></div>' +
+        '<div class="pnl-kpi-card pnl-kpi-dyn"><div class="pnl-kpi-lbl">今日浮动盈亏</div><div class="pnl-kpi-val" id="pnl_pnl">—</div><div class="pnl-kpi-sub" id="pnl_pnl_sub">—</div></div>' +
+        '<div class="pnl-kpi-card pnl-kpi-dyn"><div class="pnl-kpi-lbl">今日仓位</div><div class="pnl-kpi-val" id="pnl_pos">—</div><div class="pnl-kpi-sub" id="pnl_pos_sub">—</div></div>' +
+        '<div class="pnl-kpi-card pnl-kpi-dyn"><div class="pnl-kpi-lbl" id="pnl_period_label">今日TWR</div><div class="pnl-kpi-val" id="pnl_period_val">—</div><div class="pnl-kpi-sub" id="pnl_period_sub">—</div></div>' +
+        '<div class="pnl-kpi-card pnl-kpi-dyn"><div class="pnl-kpi-lbl">今日超额</div><div class="pnl-kpi-val" id="pnl_today_alpha">—</div><div class="pnl-kpi-sub" id="pnl_today_alpha_sub">—</div></div>' +
+        '<div class="pnl-kpi-card pnl-kpi-dyn"><div class="pnl-kpi-lbl" id="pnl_dd_label">今日回撤</div><div class="pnl-kpi-val" id="pnl_dd_val">—</div><div class="pnl-kpi-sub" id="pnl_dd_sub">—</div></div>' +
       '</div>' +
       // Controls
       '<div class="pnl-ctrl">' +
@@ -367,6 +369,25 @@ class PnLCurveWidget extends YiMuWidget {
     }
     document.getElementById('pnl_dd_val').style.color = 'var(--down)';
 
+    // 今日超额 α
+    var todayAlphaEl = document.getElementById('pnl_today_alpha');
+    if (todayAlphaEl && chartData && chartData.portfolio && chartData.benchmark) {
+      var lastP = chartData.portfolio[chartData.portfolio.length - 1];
+      var lastB = chartData.benchmark[chartData.benchmark.length - 1];
+      if (lastP != null && lastB != null) {
+        var ta = lastP - lastB;
+        todayAlphaEl.textContent = (ta >= 0 ? '+' : '') + ta.toFixed(2) + '%';
+        todayAlphaEl.style.color = ta >= 0 ? 'var(--up)' : 'var(--down)';
+      }
+    }
+    var taSub = document.getElementById('pnl_today_alpha_sub');
+    if (taSub) taSub.textContent = 'TWR−基准';
+
+    // Row 1 标签联动
+    var idxName2 = {sh:'上证', sz:'深证', cy:'创业'}[s.index] || '上证';
+    var bmSub2 = document.getElementById('pnl_bm_twr_sub');
+    if (bmSub2) bmSub2.textContent = idxName2 + '指数同期';
+
   }
 
   }
@@ -496,28 +517,25 @@ class PnLCurveWidget extends YiMuWidget {
     }
     var alpha = cumReturn - bmTWR;
 
-    // 更新 KPI 卡
+    // Row 1: 累计 KPI
     var twrEl = document.getElementById('pnl_twr');
-    if (twrEl) {
-      twrEl.textContent = (cumReturn >= 0 ? '+' : '') + cumReturn.toFixed(2) + '%';
-      twrEl.style.color = cumReturn >= 0 ? 'var(--up)' : 'var(--down)';
-    }
+    if (twrEl) { twrEl.textContent = (cumReturn >= 0 ? '+' : '') + cumReturn.toFixed(2) + '%'; twrEl.style.color = cumReturn >= 0 ? 'var(--up)' : 'var(--down)'; }
     var twrSub = document.getElementById('pnl_twr_sub');
-    if (twrSub) twrSub.textContent = '数据起点 2026-03-30';
+    if (twrSub) twrSub.textContent = '数据 ' + (this._allDailyData && this._allDailyData.dates && this._allDailyData.dates.length ? this._allDailyData.dates[0] : '2026-03-30') + ' 起';
+
+    var bmEl = document.getElementById('pnl_bm_twr');
+    if (bmEl) { bmEl.textContent = (bmTWR >= 0 ? '+' : '') + bmTWR.toFixed(2) + '%'; bmEl.style.color = bmTWR >= 0 ? 'var(--up)' : 'var(--down)'; }
+    var bmSub = document.getElementById('pnl_bm_twr_sub');
+    var idxName = {sh:'上证', sz:'深证', cy:'创业'}[this._state.index] || '上证';
+    if (bmSub) bmSub.textContent = idxName + '指数同期';
 
     var aEl = document.getElementById('pnl_alpha');
-    if (aEl) {
-      aEl.textContent = (alpha >= 0 ? '+' : '') + alpha.toFixed(2) + '%';
-      aEl.style.color = alpha >= 0 ? 'var(--up)' : 'var(--down)';
-    }
+    if (aEl) { aEl.textContent = (alpha >= 0 ? '+' : '') + alpha.toFixed(2) + '%'; aEl.style.color = alpha >= 0 ? 'var(--up)' : 'var(--down)'; }
     var aSub = document.getElementById('pnl_alpha_sub');
-    if (aSub) aSub.textContent = 'vs 基准';
+    if (aSub) aSub.textContent = 'TWR−基准';
 
     var ddEl = document.getElementById('pnl_maxdd');
-    if (ddEl) {
-      ddEl.textContent = histMaxDD.toFixed(2) + '%';
-      ddEl.style.color = 'var(--down)';
-    }
+    if (ddEl) { ddEl.textContent = histMaxDD.toFixed(2) + '%'; ddEl.style.color = 'var(--down)'; }
     var ddSub = document.getElementById('pnl_maxdd_sub');
     if (ddSub) ddSub.textContent = '历史最大';
 
