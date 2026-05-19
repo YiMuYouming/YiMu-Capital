@@ -292,6 +292,13 @@ def build_auction_snapshot():
     # 6. 竞价情绪指标（从 bridge iwencai CACHE）
     snapshot["情绪指标"] = fetch_thx_sentiment()
 
+    # 情绪值：竞价涨跌家数比（上涨/全市场）
+    ud = snapshot.get("涨跌家数", {})
+    up = ud.get("上涨", 0) or 0
+    dn = ud.get("下跌", 0) or 0
+    if up + dn > 0:
+        snapshot["情绪指标"]["情绪值"] = str(round(up / (up + dn) * 100, 1))
+
     # 7. 自动判定
     snapshot["信号灯"] = _auto_lights(snapshot)
 
