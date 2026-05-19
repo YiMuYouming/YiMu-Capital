@@ -213,10 +213,9 @@ def query_pnl(range='today', index='sh'):
     elif range == 'month':
         limit = 22  # 最近约1个月交易日
     elif range == 'quarter':
-        m = ((now.month - 1) // 3) * 3 + 1
-        from_date = f"{now.year}-{m:02d}-01"
+        limit = 60  # 近3个月≈60个交易日
     elif range == 'year':
-        from_date = f"{now.year}-01-01"
+        limit = 250  # 近1年≈250个交易日
     else:
         from_date = '2020-01-01'
 
