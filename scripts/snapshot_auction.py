@@ -243,8 +243,17 @@ def find_today_review_note():
 
 
 def fetch_thx_sentiment_from_note():
-    """从今日复盘笔记 frontmatter 读取 THS 竞价情绪数据（稳米 9:25 填入）
-    今日无数据则回退到昨日笔记（昨日收盘数据在盘前仍有效）"""
+    """获取 THS 竞价情绪数据，优先级：
+    1. bridge iwencai CACHE 实时数据 (http://localhost:8088/api/live/iwencai)
+    2. 今日复盘笔记 frontmatter (稳米 9:25 填入)
+    3. 昨日复盘笔记 frontmatter (回退)
+    """
+    # 优先从 bridge 的 iwencai 实时数据获取（9:26 竞价刚结束的定格数据）
+    result = _fetch_from_iwencai_api()
+    if result:
+        return result
+
+    # 回退到复盘笔记
     note_path = find_today_review_note()
     if not note_path:
         return {}
@@ -296,6 +305,39 @@ def fetch_thx_sentiment_from_note():
     return result
 
 
+def _fetch_from_iwencai_api():
+    """从 bridge /api/live/iwencai 获取实时情绪数据"""
+    try:
+        import urllib.request
+        url = "http://localhost:8088/api/live/iwencai"
+        req = urllib.request.Request(url)
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            data = json.loads(resp.read())
+    except Exception:
+        return {}
+
+    if not data or not data.get("_updated"):
+        return {}
+
+    # 字段映射: iwencai CACHE → 竞价情绪指标
+    result = {}
+    field_map = {
+        "情绪值": "情绪值",
+        "昨日涨停收益": "昨日涨停收益",
+        "连板收益": "昨日连板收益",
+        "炸板收益": "昨日炸板收益",
+        "连板风险值": "连板风险值",
+        "赚钱效应": "赚钱效应",
+        "最高板": "最高板",
+    }
+    for src_key, dst_key in field_map.items():
+        val = data.get(src_key)
+        if val is not None and val != "":
+            result[dst_key] = str(val)
+
+    return result
+
+
 def _find_previous_note(today_path):
     """找前一天的复盘笔记"""
     review_dir = Path(today_path).parent
@@ -340,8 +382,15 @@ def build_auction_snapshot():
     # 5. 板块竞价
     snapshot["板块竞价"] = fetch_sector_auction()
 
-    # 6. THS 竞价情绪指标（从今日复盘笔记 frontmatter，稳米 9:25 填入）
+    # 6. THS 竞价情绪指标（优先 iwencai API → 复盘笔记 → 涨跌比推算）
     snapshot["情绪指标"] = fetch_thx_sentiment_from_note()
+    # 情绪值兜底：从涨跌家数推算
+    if not snapshot["情绪指标"].get("情绪值"):
+        ud = snapshot.get("涨跌家数", {})
+        up = ud.get("上涨", 0) or 0
+        dn = ud.get("下跌", 0) or 0
+        if up + dn > 0:
+            snapshot["情绪指标"]["情绪值"] = f"{round(up / (up + dn) * 100, 1)}%"
 
     # 7. 自动判定
     snapshot["信号灯"] = _auto_lights(snapshot)
