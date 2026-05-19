@@ -205,23 +205,13 @@ def query_pnl(range='today', index='sh'):
             'nav': nav_vals,
         }
 
-    # 计算 from_date
+    # 计算 from_date / limit
     now = datetime.now()
-    day_of_week = now.weekday()
+    limit = None
     if range == 'week':
-        d = now.day - day_of_week
-        from_date = now.replace(day=max(d, 1)).strftime('%Y-%m-%d')
-        # 本周无数据 → 回退到最近完整周
-        check = _exec("SELECT date FROM daily_summary WHERE date >= ? LIMIT 1", (from_date,))
-        if not check:
-            last = _exec("SELECT date FROM daily_summary ORDER BY date DESC LIMIT 1")
-            if last:
-                from datetime import timedelta as _td
-                ld2 = datetime.strptime(last[0]['date'], '%Y-%m-%d')
-                dow2 = ld2.weekday()
-                from_date = (ld2 - _td(days=dow2)).strftime('%Y-%m-%d')
+        limit = 5   # 最近5个交易日
     elif range == 'month':
-        from_date = now.strftime('%Y-%m-01')
+        limit = 22  # 最近约1个月交易日
     elif range == 'quarter':
         m = ((now.month - 1) // 3) * 3 + 1
         from_date = f"{now.year}-{m:02d}-01"
@@ -232,10 +222,17 @@ def query_pnl(range='today', index='sh'):
 
     # 图表用 → 累积 TWR；抽屉用(all) → 保持原始日收益
     if range in ('week', 'month', 'quarter', 'year', 'all'):
-        rows = _exec(f"""
-            SELECT date, pnl_pct, {idx_field} AS bm_pct, pos_pct, nav
-            FROM daily_summary WHERE date >= ? ORDER BY date
-        """, (from_date,))
+        if limit:
+            rows = _exec(f"""
+                SELECT date, pnl_pct, {idx_field} AS bm_pct, pos_pct, nav
+                FROM daily_summary ORDER BY date DESC LIMIT ?
+            """, (limit,))
+            rows = list(reversed(rows))  # 倒回日期升序
+        else:
+            rows = _exec(f"""
+                SELECT date, pnl_pct, {idx_field} AS bm_pct, pos_pct, nav
+                FROM daily_summary WHERE date >= ? ORDER BY date
+            """, (from_date,))
         rows_list = [dict(r) for r in rows]
         labels = [r['date'][-5:] for r in rows_list]
         pnl_raw = [r['pnl_pct'] for r in rows_list]
