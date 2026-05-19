@@ -631,9 +631,10 @@ if __name__ == '__main__':
     scheduler.add_job(quotes.collect_hot_list, 'interval', minutes=5, id='hot_list_5min',
                       max_instances=1, misfire_grace_time=600)
     # T2 定时快照
-    # 5个关键节点快照（9:25竞价 10:00早盘 11:30午盘 14:00尾盘 15:00收盘）
-    for node_h, node_m, node_id in [(9,25,'auction'),(10,0,'morning'),(11,30,'midday'),(14,0,'afternoon'),(15,0,'close')]:
-        scheduler.add_job(sentiment_snapshot.take_sentiment_snapshot, 'cron', hour=node_h, minute=node_m,
+    # 5个关键节点快照（竞价9:25:30等iwencai刷新，其余整点）
+    for node_h, node_m, node_s, node_id in [(9,25,30,'auction'),(10,0,0,'morning'),(11,30,0,'midday'),(14,0,0,'afternoon'),(15,0,0,'close')]:
+        scheduler.add_job(sentiment_snapshot.take_sentiment_snapshot, 'cron',
+                          hour=node_h, minute=node_m, second=node_s,
                           id=f'sentiment_{node_id}', max_instances=1, misfire_grace_time=300)
     # 每30分钟兜底（bridge重启后也能抓到数据）
     scheduler.add_job(sentiment_snapshot.take_sentiment_snapshot, 'cron', minute='0,30', id='sentiment_periodic',
