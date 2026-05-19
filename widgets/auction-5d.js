@@ -12,10 +12,23 @@ class Auction5DWidget extends YiMuWidget {
     if (!body) return;
 
     var snap = this._snapshot;
-    var sent = (snap && snap['情绪指标']) || {};  // 9:25 实时 THS 数据
+    // 情绪数据来源：快照 > iwencai实时 > 复盘笔记baseline
+    var sent = (snap && snap['情绪指标']) || {};
+    var iwen = this._iwencai || (data && data._iwencai) || {};
     var sty = (data && data.style) || {};
     var mkt = (data && data.market) || {};
-    var sen = (data && data.sentiment) || {};     // 复盘笔记 baseline 兜底
+    var sen = (data && data.sentiment) || {};
+
+    // iwencai 实时数据覆盖 情绪指标的空字段
+    if (iwen && typeof iwen === 'object') {
+      if (!sent['情绪值'] && iwen['_iwencai_情绪值']) sent['情绪值'] = iwen['_iwencai_情绪值'];
+      if (!sent['昨日涨停收益'] && iwen['昨日涨停收益']) sent['昨日涨停收益'] = iwen['昨日涨停收益'];
+      if (!sent['连板收益'] && iwen['连板收益']) sent['连板收益'] = iwen['连板收益'];
+      if (!sent['昨日炸板收益'] && iwen['炸板收益']) sent['昨日炸板收益'] = iwen['炸板收益'];
+      if (!sent['连板风险值'] && iwen['连板风险值']) sent['连板风险值'] = iwen['连板风险值'];
+      if (!sent['最高板'] && iwen['最高板']) sent['最高板'] = iwen['最高板'];
+      if (!sent['赚钱效应'] && iwen['赚钱效应']) sent['赚钱效应'] = iwen['赚钱效应'];
+    }
 
     // 情绪指标空 → 从 baseline + 高潮保护兜底
     if (!sent['情绪值'] && snap && snap['高潮保护']) {
@@ -23,15 +36,29 @@ class Auction5DWidget extends YiMuWidget {
       if (ev) sent['情绪值'] = ev;
     }
 
-    // 首次加载：异步获取竞价快照
+    // 首次加载：异步获取竞价快照 + iwencai 实时数据
     if (!snap) {
       this._loadSnapshot(body);
+      this._loadIwen();
       this._renderPlaceholder(body, sent, sty, mkt, sen);
       return;
     }
 
     // 合并渲染
     this._renderFull(body, snap, sent, sty, mkt, sen);
+  }
+
+  _loadIwen() {
+    var self = this;
+    fetch('/api/live/iwencai')
+      .then(function(r) { return r.ok ? r.json() : null; })
+      .then(function(iwen) {
+        if (iwen) {
+          self._iwencai = iwen;
+          self._renderBody();
+        }
+      })
+      .catch(function() {});
   }
 
   _loadSnapshot(body) {

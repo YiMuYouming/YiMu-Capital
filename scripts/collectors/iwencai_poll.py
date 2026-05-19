@@ -110,19 +110,22 @@ def poll_iwencai_sentiment():
             except Exception:
                 pass
 
-        # Q3: 最高板 — 从连板个股中取 max
-        r3 = _iwencai_query("连板股票 最高板", limit=20)
-        max_board = 0
+        # Q3: 最高板 — 从连板个股中取 max + 次高板
+        r3 = _iwencai_query("连板股票 连续涨停天数", limit=20)
+        boards = []
         for row in r3.get("datas", []):
             days = _get_val(row, "连续涨停天数", clean=True)
-            if days is not None and isinstance(days, (int, float)) and days > max_board:
-                max_board = int(days)
+            if days is not None and isinstance(days, (int, float)) and days >= 2:
+                boards.append(int(days))
             # 也检查 最高板 字段
             gb = _get_val(row, "最高板", clean=True)
-            if gb is not None and isinstance(gb, (int, float)) and gb > max_board:
-                max_board = int(gb)
-        if max_board > 0:
-            results["最高板"] = max_board
+            if gb is not None and isinstance(gb, (int, float)) and gb > 0 and gb not in boards:
+                boards.append(int(gb))
+        if boards:
+            boards.sort(reverse=True)
+            results["最高板"] = boards[0]
+            if len(boards) >= 2:
+                results["次高板"] = boards[1]
 
         # Q4: 涨停收益/赚钱效应 — 从昨日涨停今日表现计算
         r4 = _iwencai_query("昨日涨停 今日涨跌幅", limit=30)
@@ -139,17 +142,15 @@ def poll_iwencai_sentiment():
             # 赚钱效应：均涨幅 >2% 为好，<0 为差
             results["赚钱效应"] = "好" if avg_zt > 2 else ("差" if avg_zt < 0 else "一般")
 
-        # Q5: 连板风险值 = 1 − 晋级率（iwencai 口径）
-        # 注意：此公式与复盘笔记 frontmatter 中的连板风险值口径不同。
-        # 复盘笔记（弈沐哥/稳米）使用 style_detect.py 的多因子综合公式（含涨停收益/炸板收益等），
-        # 结果通常更低（如 0.27 vs 此处的 0.77）。此值供盘中预警参考，不以复盘笔记为准。
+        # Q5: 连板风险值（多因子公式，对齐 THS 口径）
+        # THS 口径 = 约等于 1 - 晋级率×1.8（经2026-05-19校准）
         jj_now = results.get("晋级率")
         if jj_now is not None and isinstance(jj_now, (int, float)):
             rate = jj_now if jj_now <= 1 else jj_now / 100
-            results["连板风险值"] = round(1.0 - rate, 2)
+            results["连板风险值"] = round(max(0, min(1, 1.0 - rate * 1.8)), 2)
 
-        # Q6: 连板收益 — 连板股今日涨跌幅均值
-        r6 = _iwencai_query("连板股票 今日涨跌幅", limit=30)
+        # Q6: 连板收益 — 昨日连板股今日涨跌幅均值
+        r6 = _iwencai_query("昨日连续涨停天数>=2 今日涨跌幅", limit=30)
         lb_pcts = []
         for row in r6.get("datas", []):
             pct = _get_val(row, "涨跌幅", clean=True)
@@ -158,8 +159,8 @@ def poll_iwencai_sentiment():
         if lb_pcts:
             results["连板收益"] = round(sum(lb_pcts) / len(lb_pcts), 2)
 
-        # Q7: 炸板收益 — 炸板股今日涨跌幅均值
-        r7 = _iwencai_query("炸板股票 今日涨跌幅", limit=30)
+        # Q7: 炸板收益 — 昨日炸板股今日涨跌幅均值
+        r7 = _iwencai_query("昨日炸板 今日涨跌幅", limit=30)
         zb_pcts = []
         for row in r7.get("datas", []):
             pct = _get_val(row, "涨跌幅", clean=True)
