@@ -3,7 +3,7 @@
 使用 YM-data-pipeline fetch() 统一接口，不再直接调 PyTDX/easyquotation。
 bridge.py APScheduler 调度：5s/30s/300s 三档频率。
 """
-import sys, json
+import sys, json, threading
 from pathlib import Path
 from datetime import datetime, time as _time_module
 
@@ -11,6 +11,7 @@ sys.path.insert(0, "/Users/YouMing/Documents/YM_Capital/YM-data-pipeline")
 from ym_stock_data.fetch import fetch as _pipeline_fetch
 
 CACHE = {}
+_tdx_lock = threading.Lock()  # PyTDX 共用连接保护锁
 
 
 def is_trading_time():
@@ -29,7 +30,8 @@ def collect_quotes(force=False):
     if not codes:
         return
     try:
-        r = _pipeline_fetch("quotes", codes=codes)
+        with _tdx_lock:
+            r = _pipeline_fetch("quotes", codes=codes)
         if r:
             if isinstance(r, dict): r.pop('_meta', None)
             CACHE["live_quotes"] = r
@@ -43,7 +45,8 @@ def collect_index(force=False):
     if not force and not is_trading_time():
         return
     try:
-        r = _pipeline_fetch("index")
+        with _tdx_lock:
+            r = _pipeline_fetch("index")
         if r:
             if isinstance(r, dict): r.pop('_meta', None)
             CACHE["live_index"] = r
@@ -57,7 +60,8 @@ def collect_breadth(force=False):
     if not force and not is_trading_time():
         return
     try:
-        r = _pipeline_fetch("breadth")
+        with _tdx_lock:
+            r = _pipeline_fetch("breadth")
         if r:
             if isinstance(r, dict): r.pop('_meta', None)
             CACHE["breadth"] = r
@@ -75,7 +79,8 @@ def collect_sectors(force=False):
     if not names:
         return
     try:
-        r = _pipeline_fetch("sector_index", names=names)
+        with _tdx_lock:
+            r = _pipeline_fetch("sector_index", names=names)
         if r:
             if isinstance(r, dict):
                 r.pop('_meta', None)
