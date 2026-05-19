@@ -234,6 +234,26 @@ def query_pnl(range='today', index='sh'):
                 FROM daily_summary WHERE date >= ? ORDER BY date
             """, (from_date,))
         rows_list = [dict(r) for r in rows]
+
+        # 追加今天的日内数据（如果今天还没收盘，daily_summary 里没有）
+        if range != 'all' and not any(r['date'] == today for r in rows_list):
+            today_rows = _exec(
+                f"SELECT pnl_pct, {idx_field} AS bm_pct, pos_pct, nav FROM intraday_snapshots WHERE date = ? ORDER BY ts DESC LIMIT 1",
+                (today,))
+            if today_rows:
+                tr = dict(today_rows[0])
+                rows_list.append({
+                    'date': today,
+                    'pnl_pct': tr['pnl_pct'] or 0.0,
+                    'bm_pct': tr['bm_pct'] or 0.0,
+                    'pos_pct': tr['pos_pct'] or 0.0,
+                    'nav': tr['nav'] or 1.0,
+                })
+
+        # 维持 rolling 窗口大小（追加今天后去掉最早的）
+        if limit and len(rows_list) > limit:
+            rows_list = rows_list[-limit:]
+
         labels = [r['date'][-5:] for r in rows_list]
         pnl_raw = [r['pnl_pct'] for r in rows_list]
         bm_raw = [r['bm_pct'] for r in rows_list]
