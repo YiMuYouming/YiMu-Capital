@@ -202,6 +202,15 @@ def query_pnl(range='today', index='sh'):
     if range == 'week':
         d = now.day - day_of_week
         from_date = now.replace(day=max(d, 1)).strftime('%Y-%m-%d')
+        # 本周无数据 → 回退到最近完整周
+        check = _exec("SELECT date FROM daily_summary WHERE date >= ? LIMIT 1", (from_date,))
+        if not check:
+            last = _exec("SELECT date FROM daily_summary ORDER BY date DESC LIMIT 1")
+            if last:
+                from datetime import timedelta as _td
+                ld2 = datetime.strptime(last[0]['date'], '%Y-%m-%d')
+                dow2 = ld2.weekday()
+                from_date = (ld2 - _td(days=dow2)).strftime('%Y-%m-%d')
     elif range == 'month':
         from_date = now.strftime('%Y-%m-01')
     elif range == 'quarter':
