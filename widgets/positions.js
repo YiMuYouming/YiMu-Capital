@@ -69,7 +69,7 @@ class PositionsWidget extends YiMuWidget {
       '</div>';
 
     // ===== 持仓 =====
-    html += '<div style="font-size:var(--fs-body);font-weight:600;margin-bottom:var(--sp-xs)">持仓 <span style="font-weight:400;color:var(--text-disabled)">（点×删持仓）</span></div>';
+    html += '<div style="font-size:var(--fs-body);font-weight:600;margin-bottom:var(--sp-xs)">持仓 <span style="font-weight:400;color:var(--text-disabled)">（点✎编辑 / 删除）</span></div>';
     if (active.length) {
       html += '<table class="data-table"><thead><tr><th>标的</th><th>市值</th><th>数量</th><th>现价</th><th>成本</th><th>盈亏</th><th>盈亏%</th><th>止损</th><th></th></tr></thead><tbody>';
       active.forEach(function(p, pi) {
@@ -82,7 +82,7 @@ class PositionsWidget extends YiMuWidget {
           '<td class="'+pc+'" style="font-size:var(--fs-body);font-family:var(--font-mono);font-weight:600">'+(p['_pnl']>=0?'+':'')+(p['_pnl']||0).toLocaleString()+'</td>'+
           '<td class="'+pt+'" style="font-size:var(--fs-body);font-family:var(--font-mono);font-weight:600">'+(p['_pct']>=0?'+':'')+(p['_pct']||0).toFixed(2)+'%</td>'+
           '<td style="font-size:var(--fs-body)">'+(p['止损']||'—')+'</td>'+
-          '<td><button class="w15_pos_del" data-pname="'+(p['标的']||'')+'" data-pcode="'+(p['代码']||'')+'" style="background:none;border:none;color:var(--danger);cursor:pointer;font-size:var(--fs-body)" title="删除">×</button></td></tr>';
+          '<td><button class="w15_pos_edit" data-pidx="'+pi+'" style="background:none;border:none;color:var(--info);cursor:pointer;font-size:var(--fs-body)" title="编辑">✎</button></td></tr>';
       });
       html += '</tbody></table>';
     } else { html += '<div style="padding:var(--sp-sm);text-align:center;color:var(--text-disabled);font-size:var(--fs-body)">空仓</div>'; }
@@ -179,22 +179,69 @@ class PositionsWidget extends YiMuWidget {
       };
     });
 
-    // 删除持仓（按标的名称匹配）
-    body.querySelectorAll('.w15_pos_del').forEach(function(b) {
+    // 编辑持仓
+    body.querySelectorAll('.w15_pos_edit').forEach(function(b) {
       b.onclick = function() {
-        var name = this.dataset.pname;
-        var code = this.dataset.pcode;
-        var pos = []; try{pos=JSON.parse(DataStore.manualData.getAll()['_positions']||'[]')}catch(e){}
-        if (!pos.length) pos = JSON.parse(JSON.stringify((DataStore.merged&&DataStore.merged.positions)||[]));
-        var found = -1;
-        for (var i = 0; i < pos.length; i++) {
-          if (pos[i]['标的'] === name && (pos[i]['代码'] === code || !code)) { found = i; break; }
-        }
-        if (found >= 0) pos.splice(found, 1);
-        DataStore.manualData.set('_positions', JSON.stringify(pos));
-        self._renderBody();
+        var idx = parseInt(this.dataset.pidx);
+        if (active[idx]) self._showPosEdit(active[idx]);
       };
     });
+  }
+
+  _showPosEdit(p) {
+    var self = this;
+    var o = document.createElement('div');
+    o.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.6);z-index:3000;display:flex;align-items:center;justify-content:center';
+    o.innerHTML = '<div style="background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-lg);padding:var(--sp-lg);width:90%;max-width:360px">'+
+      '<div style="font-size:var(--fs-subtitle);font-weight:700;margin-bottom:var(--sp-md)">编辑持仓</div>'+
+      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:var(--sp-sm)">'+
+        '<div class="input-group" style="grid-column:1/-1"><label>标的名称</label><input id="pe_stock" value="'+(p['标的']||'')+'" style="width:100%"></div>'+
+        '<div class="input-group"><label>代码</label><input id="pe_code" value="'+(p['代码']||'')+'" style="width:100%"></div>'+
+        '<div class="input-group"><label>方向</label><select id="pe_dir" style="width:100%"><option>连板</option><option>趋势</option></select></div>'+
+        '<div class="input-group"><label>成本</label><input id="pe_cost" type="number" step="0.01" value="'+(p['成本']||'')+'" style="width:100%"></div>'+
+        '<div class="input-group"><label>数量(股)</label><input id="pe_qty" type="number" value="'+(p['数量']||0)+'" style="width:100%"></div>'+
+        '<div class="input-group"><label>止损</label><input id="pe_stop" value="'+(p['止损']||'—')+'" style="width:100%"></div>'+
+      '</div>'+
+      '<div style="display:flex;gap:var(--sp-sm);margin-top:var(--sp-md)">'+
+        '<button id="pe_save" style="flex:1;background:var(--info);color:var(--text-inverse);border:none;padding:var(--sp-sm);border-radius:var(--radius-sm);cursor:pointer;font-size:var(--fs-body)">保存</button>'+
+        '<button id="pe_del" style="flex:0;background:var(--danger);color:var(--text-inverse);border:none;padding:var(--sp-sm) 16px;border-radius:var(--radius-sm);cursor:pointer;font-size:var(--fs-body)">删除</button>'+
+        '<button id="pe_cancel" style="flex:1;background:var(--bg-base);color:var(--text-primary);border:1px solid var(--border);padding:var(--sp-sm);border-radius:var(--radius-sm);cursor:pointer;font-size:var(--fs-body)">取消</button>'+
+      '</div></div>';
+    document.body.appendChild(o);
+
+    // 预设方向
+    if (p['方向']) {
+      var ds = o.querySelector('#pe_dir');
+      for (var di = 0; di < ds.options.length; di++) {
+        if (ds.options[di].value === p['方向']) { ds.selectedIndex = di; break; }
+      }
+    }
+
+    o.querySelector('#pe_cancel').onclick = function(){ o.remove(); };
+    o.querySelector('#pe_del').onclick = function(){
+      if (!confirm('确定删除 '+(p['标的']||'此持仓')+'？')) return;
+      var pos = []; try{pos=JSON.parse(DataStore.manualData.getAll()['_positions']||'[]')}catch(e){}
+      if (!pos.length) pos = JSON.parse(JSON.stringify((DataStore.merged&&DataStore.merged.positions)||[]));
+      var found = pos.findIndex(function(x){return x['标的']===p['标的']&&x['代码']===p['代码'];});
+      if (found >= 0) pos.splice(found, 1);
+      DataStore.manualData.set('_positions', JSON.stringify(pos));
+      o.remove(); self._renderBody();
+    };
+    o.querySelector('#pe_save').onclick = function(){
+      var g = function(id){return (o.querySelector('#'+id)||{}).value||'';};
+      var pos = []; try{pos=JSON.parse(DataStore.manualData.getAll()['_positions']||'[]')}catch(e){}
+      if (!pos.length) pos = JSON.parse(JSON.stringify((DataStore.merged&&DataStore.merged.positions)||[]));
+      var found = pos.findIndex(function(x){return x['标的']===p['标的']&&x['代码']===p['代码'];});
+      var entry = {
+        '标的': g('pe_stock'), '代码': g('pe_code'), '方向': g('pe_dir'),
+        '成本': parseFloat(g('pe_cost'))||0, '数量': parseInt(g('pe_qty'))||0,
+        '止损': g('pe_stop')||'—', '状态': '持有', '现价': p['现价']||parseFloat(g('pe_cost'))||0
+      };
+      if (found >= 0) pos[found] = entry; else pos.push(entry);
+      DataStore.manualData.set('_positions', JSON.stringify(pos));
+      o.remove(); self._renderBody();
+    };
+    o.addEventListener('click', function(e){if(e.target===o)o.remove();});
   }
 
   _showForm(active, editIdx, prefill) {
