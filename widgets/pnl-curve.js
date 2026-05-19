@@ -155,13 +155,19 @@ class PnLCurveWidget extends YiMuWidget {
   // ===== Layout =====
   _buildLayout() {
     return '<div class="pnl-root" id="pnl_' + this.id + '">' +
-      // KPI row
-      '<div class="pnl-kpi" id="pnl_kpi_' + this.id + '">' +
+      // KPI row 1: 资产概览
+      '<div class="pnl-kpi" id="pnl_kpi1_' + this.id + '">' +
         '<div class="pnl-kpi-card"><div class="pnl-kpi-lbl">当前资产</div><div class="pnl-kpi-val" id="pnl_asset">—</div><div class="pnl-kpi-sub" id="pnl_asset_sub">—</div></div>' +
         '<div class="pnl-kpi-card"><div class="pnl-kpi-lbl">浮动盈亏</div><div class="pnl-kpi-val" id="pnl_pnl">—</div><div class="pnl-kpi-sub" id="pnl_pnl_sub">—</div></div>' +
         '<div class="pnl-kpi-card"><div class="pnl-kpi-lbl">仓位</div><div class="pnl-kpi-val" id="pnl_pos">—</div><div class="pnl-kpi-sub" id="pnl_pos_sub">—</div></div>' +
-        '<div class="pnl-kpi-card pnl-kpi-dyn"><div class="pnl-kpi-lbl" id="pnl_period_label">今日收益</div><div class="pnl-kpi-val" id="pnl_period_val">—</div><div class="pnl-kpi-sub" id="pnl_period_sub">—</div></div>' +
-        '<div class="pnl-kpi-card pnl-kpi-dyn"><div class="pnl-kpi-lbl" id="pnl_dd_label">今日回撤</div><div class="pnl-kpi-val" id="pnl_dd_val">—</div><div class="pnl-kpi-sub" id="pnl_dd_sub">—</div></div>' +
+        '<div class="pnl-kpi-card"><div class="pnl-kpi-lbl">TWR累计</div><div class="pnl-kpi-val" id="pnl_twr">—</div><div class="pnl-kpi-sub" id="pnl_twr_sub">—</div></div>' +
+      '</div>' +
+      // KPI row 2: 收益/回撤/超额
+      '<div class="pnl-kpi" id="pnl_kpi2_' + this.id + '">' +
+        '<div class="pnl-kpi-card pnl-kpi-dyn"><div class="pnl-kpi-lbl" id="pnl_period_label">日收益</div><div class="pnl-kpi-val" id="pnl_period_val">—</div><div class="pnl-kpi-sub" id="pnl_period_sub">—</div></div>' +
+        '<div class="pnl-kpi-card pnl-kpi-dyn"><div class="pnl-kpi-lbl" id="pnl_dd_label">日回撤</div><div class="pnl-kpi-val" id="pnl_dd_val">—</div><div class="pnl-kpi-sub" id="pnl_dd_sub">—</div></div>' +
+        '<div class="pnl-kpi-card"><div class="pnl-kpi-lbl">超额α</div><div class="pnl-kpi-val" id="pnl_alpha">—</div><div class="pnl-kpi-sub" id="pnl_alpha_sub">—</div></div>' +
+        '<div class="pnl-kpi-card"><div class="pnl-kpi-lbl">最大回撤</div><div class="pnl-kpi-val" id="pnl_maxdd">—</div><div class="pnl-kpi-sub" id="pnl_maxdd_sub">—</div></div>' +
       '</div>' +
       // Controls
       '<div class="pnl-ctrl">' +
@@ -470,14 +476,11 @@ class PnLCurveWidget extends YiMuWidget {
   }
 
   _updateSummary() {
-    var el = document.getElementById('pnl_summary_' + this.id);
-    if (!el) return;
     var s = this._state;
     var lastNav = (s._pnlSummary && s._pnlSummary.last_nav) || 1.0;
     var totalAsset = s.totalAsset || 0;
     var cumReturn = (lastNav - 1) * 100;
 
-    // 从 _allDailyData 算基准 TWR + 历史最大回撤
     var bmTWR = 0, histMaxDD = 0;
     if (this._allDailyData && this._allDailyData.portfolio && this._allDailyData.portfolio.length) {
       var ad = this._allDailyData;
@@ -493,12 +496,37 @@ class PnLCurveWidget extends YiMuWidget {
     }
     var alpha = cumReturn - bmTWR;
 
-    el.innerHTML =
-      '<div class="pnl-sum-cell"><div class="pnl-sum-lbl">当前资产</div><div class="pnl-sum-val">' + _pnlFmtMoney(totalAsset) + '</div></div>' +
-      '<div class="pnl-sum-cell"><div class="pnl-sum-lbl">TWR 累计收益</div><div class="pnl-sum-val" style="color:' + (cumReturn >= 0 ? 'var(--up)' : 'var(--down)') + '">' + (cumReturn >= 0 ? '+' : '') + cumReturn.toFixed(2) + '%</div></div>' +
-      '<div class="pnl-sum-cell"><div class="pnl-sum-lbl">超额 α</div><div class="pnl-sum-val" style="color:' + (alpha >= 0 ? 'var(--up)' : 'var(--down)') + '">' + (alpha >= 0 ? '+' : '') + alpha.toFixed(2) + '%</div></div>' +
-      '<div class="pnl-sum-cell"><div class="pnl-sum-lbl">最大回撤</div><div class="pnl-sum-val" style="color:var(--down)">' + histMaxDD.toFixed(2) + '%</div></div>' +
-      '<div class="pnl-sum-cell"><div class="pnl-sum-lbl">数据起点</div><div class="pnl-sum-val">2026-03-30</div></div>';
+    // 更新 KPI 卡
+    var twrEl = document.getElementById('pnl_twr');
+    if (twrEl) {
+      twrEl.textContent = (cumReturn >= 0 ? '+' : '') + cumReturn.toFixed(2) + '%';
+      twrEl.style.color = cumReturn >= 0 ? 'var(--up)' : 'var(--down)';
+    }
+    var twrSub = document.getElementById('pnl_twr_sub');
+    if (twrSub) twrSub.textContent = '数据起点 2026-03-30';
+
+    var aEl = document.getElementById('pnl_alpha');
+    if (aEl) {
+      aEl.textContent = (alpha >= 0 ? '+' : '') + alpha.toFixed(2) + '%';
+      aEl.style.color = alpha >= 0 ? 'var(--up)' : 'var(--down)';
+    }
+    var aSub = document.getElementById('pnl_alpha_sub');
+    if (aSub) aSub.textContent = 'vs 基准';
+
+    var ddEl = document.getElementById('pnl_maxdd');
+    if (ddEl) {
+      ddEl.textContent = histMaxDD.toFixed(2) + '%';
+      ddEl.style.color = 'var(--down)';
+    }
+    var ddSub = document.getElementById('pnl_maxdd_sub');
+    if (ddSub) ddSub.textContent = '历史最大';
+
+    // 也更新抽屉底部汇总（保留兼容）
+    var el = document.getElementById('pnl_summary_' + this.id);
+    if (el) {
+      el.innerHTML =
+        '<div class="pnl-sum-cell"><div class="pnl-sum-lbl">数据起点</div><div class="pnl-sum-val">2026-03-30</div></div>';
+    }
   }
 
   // 仓位子图
