@@ -164,15 +164,24 @@ def query_pnl(range='today', index='sh'):
             row_map[time_key] = r
 
         labels, pnl_vals, bm_vals, pos_vals, nav_vals = [], [], [], [], []
+        has_data = False
         for lbl in full_labels:
             labels.append(lbl)
             r = row_map.get(lbl)
             if r:
-                pnl_vals.append(r['pnl_pct'])
-                bm_vals.append(r['bm_pct'])
-                pos_vals.append(r['pos_pct'])
-                nav_vals.append(r['nav'])
+                has_data = True
+                pnl_vals.append(r['pnl_pct'] or 0.0)
+                bm_vals.append(r['bm_pct'] or 0.0)
+                pos_vals.append(r['pos_pct'] or 0.0)
+                nav_vals.append(r['nav'] or 1.0)
+            elif not has_data:
+                # 有数据之前：填0作为起点基线
+                pnl_vals.append(0.0)
+                bm_vals.append(0.0)
+                pos_vals.append(0.0)
+                nav_vals.append(1.0)
             else:
+                # 最后一笔数据之后：null = 未发生的未来时间
                 pnl_vals.append(None)
                 bm_vals.append(None)
                 pos_vals.append(None)
