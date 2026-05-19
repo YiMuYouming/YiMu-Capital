@@ -289,7 +289,7 @@ class PnLCurveWidget extends YiMuWidget {
     // Current asset
     var ta = s.totalAsset;
     var hasAsset = ta && ta > 0;
-    asset.textContent = hasAsset ? _pnlFmtMoney(ta) : '—';
+    asset.textContent = hasAsset ? ta.toLocaleString() : '—';
     document.getElementById('pnl_asset_sub').textContent = ta ? '累计入金 ' + _pnlFmtMoney(s.totalDeposit) : '—';
 
     // Position P&L
