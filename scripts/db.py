@@ -209,44 +209,39 @@ def query_pnl(range='today', index='sh'):
         from_date = f"{now.year}-{m:02d}-01"
     elif range == 'year':
         from_date = f"{now.year}-01-01"
-    else:
+    elif range == 'all':
         from_date = '2020-01-01'
+    else:
+        from_date = from_date if 'from_date' in dir() else '2020-01-01'
 
-    # week/month: 走 intraday_snapshots（5分钟粒度，平滑曲线）
-    # quarter/year/all: 走 daily_summary（日频，数据点太多走日内无意义）
-    if range in ('week', 'month'):
-        raw = _exec(f"""
-            SELECT ts, pnl_pct, {idx_field} AS bm_pct, pos_pct, nav
-            FROM intraday_snapshots WHERE date >= ? ORDER BY ts
+    # week/month/quarter/year/all: 走 daily_summary → 累积 TWR
+    if range in ('week', 'month', 'quarter', 'year', 'all'):
+        rows = _exec(f"""
+            SELECT date, pnl_pct, {idx_field} AS bm_pct, pos_pct, nav
+            FROM daily_summary WHERE date >= ? ORDER BY date
         """, (from_date,))
-        rows = [dict(r) for r in raw]
-        if not rows:
-            return {'type': 'intraday', 'labels': [], 'portfolio': [], 'benchmark': [], 'position': [], 'nav': []}
-        # 标签：周/月显示 "MM-DD HH:MM"
-        labels = [r['ts'][5:16].replace('T', ' ') for r in rows]
-        return {
-            'type': 'intraday',
-            'labels': labels,
-            'portfolio': [r['pnl_pct'] for r in rows],
-            'benchmark': [r['bm_pct'] for r in rows],
-            'position': [r['pos_pct'] for r in rows],
-            'nav': [r['nav'] for r in rows],
-        }
+        rows_list = [dict(r) for r in rows]
+        labels = [r['date'][-5:] for r in rows_list]
+        pnl_raw = [r['pnl_pct'] for r in rows_list]
+        bm_raw = [r['bm_pct'] for r in rows_list]
 
-    # quarter/year/all: 走 daily_summary（日频数据）
-    rows = _exec(f"""
-        SELECT date, pnl_pct, {idx_field} AS bm_pct, pos_pct, nav
-        FROM daily_summary WHERE date >= ? ORDER BY date
-    """, (from_date,))
-    rows_list = [dict(r) for r in rows]
-    return {
-        'type': 'daily',
-        'labels': [r['date'][-5:] for r in rows_list],
-        'portfolio': [r['pnl_pct'] for r in rows_list],
-        'benchmark': [r['bm_pct'] for r in rows_list],
-        'position': [r['pos_pct'] for r in rows_list],
-        'nav': [r['nav'] for r in rows_list],
-        'dates': [r['date'] for r in rows_list],
+        # 转为累积 TWR: cumP = Π(1+r/100)
+        def to_cumulative(vals):
+            cum = 1.0
+            result = []
+            for v in vals:
+                cum *= (1 + float(v or 0) / 100)
+                result.append(round((cum - 1) * 100, 4))
+            return result
+
+        return {
+            'type': 'daily',
+            'labels': labels,
+            'portfolio': to_cumulative(pnl_raw),
+            'benchmark': to_cumulative(bm_raw),
+            'position': [r['pos_pct'] for r in rows_list],
+            'nav': [r['nav'] for r in rows_list],
+            'dates': [r['date'] for r in rows_list],
     }
 
 

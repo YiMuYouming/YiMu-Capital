@@ -172,9 +172,9 @@ class PnLCurveWidget extends YiMuWidget {
           '<button class="pnl-idx-btn" data-idx="cy">创业板</button>' +
         '</div>' +
         '<div class="pnl-periods">' +
-          '<button class="pnl-period active" data-p="today">今日</button>' +
-          '<button class="pnl-period" data-p="week">本周</button>' +
-          '<button class="pnl-period" data-p="month">本月</button>' +
+          '<button class="pnl-period active" data-p="today">日</button>' +
+          '<button class="pnl-period" data-p="week">周</button>' +
+          '<button class="pnl-period" data-p="month">月</button>' +
           '<button class="pnl-period" data-p="quarter">近三月</button>' +
           '<button class="pnl-period" data-p="year">近一年</button>' +
           '' +
@@ -402,7 +402,7 @@ class PnLCurveWidget extends YiMuWidget {
       year:      now.getFullYear() + '-01-01',
     };
     var periods = ['today', 'week', 'month', 'quarter', 'year'];
-    var labels  = ['今日', '本周', '本月', '近三月', '近一年'];
+    var labels  = ['日', '周', '月', '近三月', '近一年'];
 
     var html = '';
     var self = this;
