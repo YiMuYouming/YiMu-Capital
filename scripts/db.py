@@ -134,14 +134,12 @@ def query_pnl(range='today', index='sh'):
     idx_field = idx_map.get(index, 'sh_pct')
     today = datetime.now().strftime('%Y-%m-%d')
 
-    # today: 走 intraday_snapshots（5分钟粒度）
-    # 非交易日自动回退到最近一个交易日的日内数据
+    # today: 走 intraday_snapshots（5分钟粒度），填充完整时段9:30-15:00
     if range == 'today':
         rows = _exec(
             f"SELECT ts, pnl_pct, {idx_field} AS bm_pct, pos_pct, nav FROM intraday_snapshots WHERE date = ? ORDER BY ts",
             (today,))
         if not rows:
-            # 回退到最近有数据的交易日
             last_date_row = _exec(
                 "SELECT date FROM intraday_snapshots ORDER BY date DESC LIMIT 1")
             if last_date_row:
@@ -149,13 +147,44 @@ def query_pnl(range='today', index='sh'):
                 rows = _exec(
                     f"SELECT ts, pnl_pct, {idx_field} AS bm_pct, pos_pct, nav FROM intraday_snapshots WHERE date = ? ORDER BY ts",
                     (today,))
+
+        # 生成完整时段标签 9:30-15:00（每5分钟），数据填充到对应位置
+        full_labels = []
+        for h in (9, 10, 11, 12, 13, 14):
+            for m in (0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55):
+                if h == 15 and m > 0: break
+                if h == 9 and m < 30: continue
+                full_labels.append(f"{h:02d}:{m:02d}")
+
+        # 行数据按时间索引
+        row_map = {}
+        for r in rows:
+            ts = r['ts']
+            time_key = ts[-8:-3] if 'T' in ts else ts[-5:]
+            row_map[time_key] = r
+
+        labels, pnl_vals, bm_vals, pos_vals, nav_vals = [], [], [], [], []
+        for lbl in full_labels:
+            labels.append(lbl)
+            r = row_map.get(lbl)
+            if r:
+                pnl_vals.append(r['pnl_pct'])
+                bm_vals.append(r['bm_pct'])
+                pos_vals.append(r['pos_pct'])
+                nav_vals.append(r['nav'])
+            else:
+                pnl_vals.append(None)
+                bm_vals.append(None)
+                pos_vals.append(None)
+                nav_vals.append(None)
+
         return {
             'type': 'intraday',
-            'labels': [r['ts'][-8:-3] if 'T' in r['ts'] else r['ts'] for r in rows],
-            'portfolio': [r['pnl_pct'] for r in rows],
-            'benchmark': [r['bm_pct'] for r in rows],
-            'position': [r['pos_pct'] for r in rows],
-            'nav': [r['nav'] for r in rows],
+            'labels': labels,
+            'portfolio': pnl_vals,
+            'benchmark': bm_vals,
+            'position': pos_vals,
+            'nav': nav_vals,
         }
 
     # 计算 from_date

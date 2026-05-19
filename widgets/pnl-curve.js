@@ -627,15 +627,46 @@ class PnLCurveWidget extends YiMuWidget {
     var pos = chartData.position;
     var n = p.length;
 
-    // Scale — 以零轴为中心，取整到 0.5% 的倍数
-    var allVals = p.concat(b);
+    // Scale — 跳过 null (未到时间的空槽)
+    var validP = p.filter(function(v){return v != null;});
+    var validB = b.filter(function(v){return v != null;});
+    var allVals = validP.concat(validB);
+    if (!allVals.length) { allVals = [0, 0]; }
     var absMax = Math.max(Math.abs(Math.min.apply(null, allVals)), Math.abs(Math.max.apply(null, allVals)));
     var step = absMax < 2 ? 0.5 : absMax < 5 ? 1 : 2;
     var maxY = Math.ceil(absMax / step) * step;
     var minY = -maxY;
 
-    function yVal(v) { return PAD.t + ch - ((v - minY) / (maxY - minY)) * ch; }
+    function yVal(v) { return v == null ? null : PAD.t + ch - ((v - minY) / (maxY - minY)) * ch; }
     function xVal(i) { return PAD.l + (i / (n - 1)) * cw; }
+
+    // 画线段（null 处断开）
+    function _drawSegments(vals, color, width, dash) {
+      ctx.beginPath(); var started = false;
+      if (dash) ctx.setLineDash(dash);
+      for (var segI = 0; segI < n; segI++) {
+        var sv = vals[segI], spy = yVal(sv);
+        if (sv == null || spy == null) { started = false; continue; }
+        if (!started) { ctx.moveTo(xVal(segI), spy); started = true; }
+        else { ctx.lineTo(xVal(segI), spy); }
+      }
+      ctx.strokeStyle = color; ctx.lineWidth = width || 2; ctx.stroke(); ctx.setLineDash([]);
+    }
+    // 面积填充（null 处断开）
+    function _fillArea(vals, grad) {
+      var zy = yVal(0);
+      for (var segI = 0; segI < n; segI++) {
+        var sv = vals[segI], spy = yVal(sv);
+        if (sv == null || spy == null) continue;
+        ctx.beginPath(); ctx.moveTo(xVal(segI), zy); ctx.lineTo(xVal(segI), spy);
+        var segEnd = segI;
+        while (segEnd + 1 < n && vals[segEnd + 1] != null && yVal(vals[segEnd + 1]) != null) segEnd++;
+        for (var j = segI + 1; j <= segEnd; j++) ctx.lineTo(xVal(j), yVal(vals[j]));
+        ctx.lineTo(xVal(segEnd), zy); ctx.closePath();
+        ctx.fillStyle = grad; ctx.fill();
+        segI = segEnd;
+      }
+    }
 
     // 最大回撤：高点→低点 L形标注
     if (ddInfo && ddInfo.peak && ddInfo.trough) {
@@ -710,7 +741,7 @@ class PnLCurveWidget extends YiMuWidget {
     if (isDaily) {
       labelStep = Math.max(1, Math.floor(n / 10));
     } else if (isToday) {
-      labelStep = 3;  // today: 每15分钟（3×5min）
+      labelStep = 6;  // today: 每30分钟（6×5min=66 slots）
     } else {
       labelStep = 48;  // week/month: 每天首条
       if (n <= 48) labelStep = Math.max(1, Math.floor(n / 8));
@@ -729,43 +760,24 @@ class PnLCurveWidget extends YiMuWidget {
     }
 
     // Benchmark line
-    ctx.beginPath();
-    for (var i = 0; i < n; i++) {
-      if (i === 0) ctx.moveTo(xVal(i), yVal(b[i]));
-      else ctx.lineTo(xVal(i), yVal(b[i]));
-    }
-    ctx.strokeStyle = '#2563EB';
-    ctx.lineWidth = 2;
-    ctx.setLineDash([6, 3]);
-    ctx.stroke();
-    ctx.setLineDash([]);
+    _drawSegments(b, '#2563EB', 2, [6, 3]);
 
     // Area fill
-    ctx.beginPath();
-    ctx.moveTo(xVal(0), zeroY);
-    for (var i = 0; i < n; i++) ctx.lineTo(xVal(i), yVal(p[i]));
-    ctx.lineTo(xVal(n-1), zeroY);
-    ctx.closePath();
     var grad = ctx.createLinearGradient(0, PAD.t, 0, PAD.t + ch);
     grad.addColorStop(0, 'rgba(220,38,38,0.12)');
     grad.addColorStop(1, 'rgba(220,38,38,0.01)');
-    ctx.fillStyle = grad;
-    ctx.fill();
+    _fillArea(p, grad);
 
     // Portfolio line
-    ctx.beginPath();
-    for (var i = 0; i < n; i++) {
-      if (i === 0) ctx.moveTo(xVal(i), yVal(p[i]));
-      else ctx.lineTo(xVal(i), yVal(p[i]));
-    }
-    ctx.strokeStyle = '#DC2626';
-    ctx.lineWidth = 2.5;
-    ctx.stroke();
+    _drawSegments(p, '#DC2626', 2.5);
 
-    // End labels — 错开避免重叠
-    var lastPX = xVal(n-1);
-    var lastP = p[n-1];
-    var lastB = b[n-1];
+    // End labels — 用最后一个有效值
+    var lastValidI = n - 1;
+    while (lastValidI >= 0 && p[lastValidI] == null) lastValidI--;
+    if (lastValidI < 0) lastValidI = n - 1;
+    var lastPX = xVal(lastValidI);
+    var lastP = p[lastValidI];
+    var lastB = b[lastValidI];
     var idxName = {sh:'上证', sz:'深证', cy:'创业'}[this._getIndexKey()] || '上证';
 
     // 账户收益率 — 放在曲线末端右侧
