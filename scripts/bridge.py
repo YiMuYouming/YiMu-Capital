@@ -631,8 +631,21 @@ class BridgeHandler(SimpleHTTPRequestHandler):
 if __name__ == '__main__':
     port = int(sys.argv[1]) if len(sys.argv) > 1 else 8080
 
-    # === 冷启动：从磁盘恢复 CACHE →
+    # === 冷启动：从磁盘恢复 CACHE + 加载 pnl 数据
     _load_cache()
+    try:
+        if DATA_FILE.exists():
+            with open(DATA_FILE) as f:
+                dd = json.load(f)
+            pnl_data = dd.get("pnl", {})
+            if pnl_data:
+                CACHE["pnl"] = CACHE.get("pnl", {})
+                for k in ["总资产", "累计入金", "可用资金"]:
+                    if k in pnl_data and pnl_data[k] is not None:
+                        CACHE["pnl"][k] = pnl_data[k]
+                print(f'[bridge] PnL data loaded from dashboard_data.json')
+    except Exception:
+        pass
 
     # === APScheduler 启动 ===
     from scripts.collectors import iwencai_poll, market_data, sentiment_snapshot, quotes
@@ -719,7 +732,7 @@ if __name__ == '__main__':
 
     # 冷启动：强制执行一次初始采集填充缓存（不受 is_trading_time 限制）
     print(f'[bridge] Cold-start bootstrap: running initial collection...')
-    for bootstrap_fn in [quotes.collect_index, quotes.collect_quotes, quotes.collect_sectors, iwencai_poll.poll_iwencai_sentiment, quotes.collect_yesterday_compare, quotes.collect_kline_15m]:
+    for bootstrap_fn in [quotes.collect_index, quotes.collect_quotes, quotes.collect_sectors, iwencai_poll.poll_iwencai_sentiment, quotes.collect_yesterday_compare, quotes.collect_kline_15m, quotes.log_pnl_snapshot]:
         try:
             bootstrap_fn(force=True)
         except Exception as e:

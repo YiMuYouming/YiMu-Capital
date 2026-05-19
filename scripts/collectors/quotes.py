@@ -295,18 +295,22 @@ def log_pnl_snapshot():
             # 读可用资金（优先 CACHE pnl，其次 pnl_history.json）
             available = 0
             pnl = CACHE.get("pnl") or {}
-            available = pnl.get("可用资金", 0) or 0
+            available = float(pnl.get("可用资金", 0) or 0)
 
-            # 读累计入金
+            # 读累计入金（优先 CACHE pnl，其次 dashboard_data.json，最后 pnl_history.json）
             pnl_hist_file = ROOT / "data" / "pnl_history.json"
-            if pnl_hist_file.exists():
-                with open(pnl_hist_file) as f:
-                    ph = json.load(f)
-                meta = ph.get("meta", {})
-                total_deposit = meta.get("total_deposit", 0) or 0
-                if not available:
-                    # 从历史记录推算可用资金
-                    last_asset = meta.get("last_total_asset", 0) or 0
+            total_deposit = float(pnl.get("累计入金", 0) or 0)
+            if not total_deposit:
+                if pnl_hist_file.exists():
+                    with open(pnl_hist_file) as f:
+                        ph = json.load(f)
+                    total_deposit = ph.get("meta", {}).get("total_deposit", 0) or 0
+            if not available:
+                # 从历史记录推算可用资金
+                if pnl_hist_file.exists():
+                    with open(pnl_hist_file) as f:
+                        ph = json.load(f)
+                    last_asset = ph.get("meta", {}).get("last_total_asset", 0) or 0
                     if last_asset > 0:
                         available = max(0, last_asset - mv)
 
@@ -362,7 +366,7 @@ def log_pnl_snapshot():
 
         cur.execute("""INSERT OR REPLACE INTO intraday_snapshots
             (ts, date, pnl_pct, nav, sh_pct, sz_pct, cy_pct, pos_pct, mv, total_asset)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (now.strftime("%Y-%m-%dT%H:%M:%S"), now.strftime("%Y-%m-%d"),
              pnl_pct, nav, sh_pct, sz_pct, cy_pct, pos_pct, mv, total_asset))
         conn.commit()
