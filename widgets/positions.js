@@ -82,7 +82,7 @@ class PositionsWidget extends YiMuWidget {
           '<td class="'+pc+'" style="font-size:var(--fs-body);font-family:var(--font-mono);font-weight:600">'+(p['_pnl']>=0?'+':'')+(p['_pnl']||0).toLocaleString()+'</td>'+
           '<td class="'+pt+'" style="font-size:var(--fs-body);font-family:var(--font-mono);font-weight:600">'+(p['_pct']>=0?'+':'')+(p['_pct']||0).toFixed(2)+'%</td>'+
           '<td style="font-size:var(--fs-body)">'+(p['止损']||'—')+'</td>'+
-          '<td><button class="w15_pos_del" data-pidx="'+pi+'" style="background:none;border:none;color:var(--danger);cursor:pointer;font-size:var(--fs-body)" title="删除">×</button></td></tr>';
+          '<td><button class="w15_pos_del" data-pname="'+(p['标的']||'')+'" data-pcode="'+(p['代码']||'')+'" style="background:none;border:none;color:var(--danger);cursor:pointer;font-size:var(--fs-body)" title="删除">×</button></td></tr>';
       });
       html += '</tbody></table>';
     } else { html += '<div style="padding:var(--sp-sm);text-align:center;color:var(--text-disabled);font-size:var(--fs-body)">空仓</div>'; }
@@ -179,13 +179,18 @@ class PositionsWidget extends YiMuWidget {
       };
     });
 
-    // 删除持仓
+    // 删除持仓（按标的名称匹配）
     body.querySelectorAll('.w15_pos_del').forEach(function(b) {
       b.onclick = function() {
-        var pidx = parseInt(this.dataset.pidx);
+        var name = this.dataset.pname;
+        var code = this.dataset.pcode;
         var pos = []; try{pos=JSON.parse(DataStore.manualData.getAll()['_positions']||'[]')}catch(e){}
         if (!pos.length) pos = JSON.parse(JSON.stringify((DataStore.merged&&DataStore.merged.positions)||[]));
-        if (pos[pidx]) pos.splice(pidx, 1);
+        var found = -1;
+        for (var i = 0; i < pos.length; i++) {
+          if (pos[i]['标的'] === name && (pos[i]['代码'] === code || !code)) { found = i; break; }
+        }
+        if (found >= 0) pos.splice(found, 1);
         DataStore.manualData.set('_positions', JSON.stringify(pos));
         self._renderBody();
       };
