@@ -242,7 +242,7 @@ def collect_kline_15m(force=False):
 
 
 def log_pnl_snapshot():
-    """300s: P&L 快照写入 pnl.db"""
+    """300s: P&L 快照写入 pnl.db（独立计算，不依赖前端组件）"""
     if not is_trading_time():
         return
     try:
@@ -251,47 +251,112 @@ def log_pnl_snapshot():
         conn = get_conn()
         cur = conn.cursor()
         now = datetime.now()
-        live_idx = CACHE.get("live_index") or {}
-        sh_pct = live_idx.get("上证指数涨幅", 0) or 0
-        sz_pct = live_idx.get("深证指数涨幅", 0) or 0
-        cy_pct = live_idx.get("创业板指涨幅", 0) or 0
+        ROOT = Path(__file__).resolve().parent.parent.parent
 
-        # NAV: 从 pnl_history.json 读取 last_twr_nav + total_deposit，按持仓市值计算
-        nav = 1.0
-        total_asset = 0
-        pnl_pct = 0
+        # 1. 指数涨跌（来自 PyTDX 实时采集）
+        live_idx = CACHE.get("live_index") or {}
+        sh_pct_str = live_idx.get("上证指数涨幅", "0") or "0"
+        sz_pct_str = live_idx.get("深证指数涨幅", "0") or "0"
+        cy_pct_str = live_idx.get("创业板指涨幅", "0") or "0"
+        sh_pct = float(str(sh_pct_str).replace("%","").replace("+","")) if sh_pct_str else 0
+        sz_pct = float(str(sz_pct_str).replace("%","").replace("+","")) if sz_pct_str else 0
+        cy_pct = float(str(cy_pct_str).replace("%","").replace("+","")) if cy_pct_str else 0
+
+        # 2. 从持仓+实时价计算总资产和仓位
+        mv = 0  # 持仓市值
         pos_pct = 0
-        mv = 0
+        total_asset = 0
+        nav = 1.0
+        total_deposit = 0
+        pnl_pct = 0
+
         try:
-            ROOT = Path(__file__).resolve().parent.parent.parent
+            # 读持仓（dashboard_data.json + pools.json）
+            data_file = ROOT / "data" / "dashboard_data.json"
+            positions = []
+            if data_file.exists():
+                with open(data_file) as f:
+                    dd = json.load(f)
+                positions = [p for p in dd.get("positions", []) if (p.get('状态','') or '').find('清') < 0]
+
+            # 读实时报价算市值
+            live_q = CACHE.get("live_quotes", {})
+            for p in positions:
+                code = str(p.get("代码", ""))
+                qty = float(str(p.get("数量", "0")).replace("股", "")) if p.get("数量") else 0
+                if not code or qty <= 0:
+                    continue
+                q = live_q.get(code, {})
+                price = float(q.get("最新价", 0)) if q else 0
+                if price <= 0:
+                    price = float(p.get("现价", 0)) if p.get("现价") else 0
+                mv += round(price * qty)
+
+            # 读可用资金（优先 CACHE pnl，其次 pnl_history.json）
+            available = 0
+            pnl = CACHE.get("pnl") or {}
+            available = pnl.get("可用资金", 0) or 0
+
+            # 读累计入金
             pnl_hist_file = ROOT / "data" / "pnl_history.json"
             if pnl_hist_file.exists():
                 with open(pnl_hist_file) as f:
                     ph = json.load(f)
                 meta = ph.get("meta", {})
-                last_nav = meta.get("last_twr_nav", 1.0)
-                total_deposit = meta.get("total_deposit", 0)
-                # 从 CACHE 读取当前持仓市值：W16 总资产或 live_quotes 算市值
-                import json as _json
-                pnl = CACHE.get("pnl") or {}
-                total_asset = pnl.get("总资产", 0) or 0
-                if total_asset > 0 and total_deposit > 0:
-                    nav = round(total_asset / total_deposit, 6)
-                elif last_nav and last_nav != 1.0:
-                    nav = last_nav
-                # 仓位百分比：有持仓 > 0 则根据总资产和可用资金算
-                available = pnl.get("可用资金", 0) or 0
-                if total_asset > 0 and available >= 0:
-                    pos_pct = round((total_asset - available) / total_asset * 100, 2) if total_asset > 0 else 0
-            # 读取 dashboard_data.json 的 risk 域获取当日盈亏
-            data_file = ROOT / "data" / "dashboard_data.json"
-            if data_file.exists():
-                with open(data_file) as f:
-                    dd = _json.load(f)
-                risk = dd.get("risk", {})
-                pnl_pct_val = risk.get("当日盈亏", 0)
-                if isinstance(pnl_pct_val, (int, float)) and pnl_pct_val != 0:
-                    pnl_pct = float(pnl_pct_val)
+                total_deposit = meta.get("total_deposit", 0) or 0
+                if not available:
+                    # 从历史记录推算可用资金
+                    last_asset = meta.get("last_total_asset", 0) or 0
+                    if last_asset > 0:
+                        available = max(0, last_asset - mv)
+
+            total_asset = mv + available
+            if total_asset > 0 and total_deposit > 0:
+                nav = round(total_asset / total_deposit, 6)
+                pos_pct = round(mv / total_asset * 100, 2)
+
+            # 当日盈亏：当日首笔快照锁定 day_start_asset，后续不再变
+            day_start_asset = 0
+            today_str = now.strftime("%Y-%m-%d")
+            if pnl_hist_file.exists():
+                with open(pnl_hist_file) as f:
+                    ph = json.load(f)
+                meta = ph.get("meta", {})
+                day_start_asset = meta.get("day_start_asset", 0) or 0
+                day_start_date = meta.get("day_start_date", "")
+                # 新的一天 / 首笔快照 → 锁定起始资产
+                if day_start_date != today_str and total_asset > 0:
+                    day_start_asset = total_asset
+                    ph["meta"]["day_start_asset"] = day_start_asset
+                    ph["meta"]["day_start_date"] = today_str
+                    tmp = pnl_hist_file.with_suffix('.tmp')
+                    with open(tmp, 'w') as f:
+                        json.dump(ph, f, ensure_ascii=False)
+                    import os as _os
+                    _os.replace(tmp, pnl_hist_file)
+
+            if day_start_asset > 0:
+                pnl_pct = round((total_asset - day_start_asset) / day_start_asset * 100, 2)
+
+            # 收盘时更新 last_total_asset（供第二天起始资产）和 last_twr_nav
+            if total_asset > 0 and now.hour >= 15:
+                try:
+                    if pnl_hist_file.exists():
+                        with open(pnl_hist_file) as f:
+                            ph_data = json.load(f)
+                    else:
+                        ph_data = {}
+                    ph_data["meta"] = ph_data.get("meta", {})
+                    ph_data["meta"]["last_total_asset"] = total_asset
+                    ph_data["meta"]["last_twr_nav"] = nav
+                    ph_data["meta"]["last_updated"] = now.strftime("%Y-%m-%dT%H:%M:%S")
+                    tmp = pnl_hist_file.with_suffix('.tmp')
+                    with open(tmp, 'w') as f:
+                        json.dump(ph_data, f, ensure_ascii=False)
+                    import os as _os
+                    _os.replace(tmp, pnl_hist_file)
+                except Exception:
+                    pass
         except Exception:
             pass
 

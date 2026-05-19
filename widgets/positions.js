@@ -413,10 +413,15 @@ function _nowTime() { var d=new Date(); return d.getHours()+':'+String(d.getMinu
 function _bridgeSync(positions, ops) {
   if (location.protocol === 'file:') return;
   try {
+    var m = DataStore.manualData.getAll();
     fetch('/api/sync', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({ positions: positions, '今日操作': ops })
+      body: JSON.stringify({
+        positions: positions,
+        '今日操作': ops,
+        pnl: { 总资产: m['总资产']||0, 可用资金: m['可用资金']||0, 累计入金: m['累计入金']||0 }
+      })
     }).catch(function(){});
   } catch(e) {}
 }

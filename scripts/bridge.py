@@ -462,9 +462,15 @@ class BridgeHandler(SimpleHTTPRequestHandler):
                 if 'pnl' in payload:
                     if 'pnl' not in data:
                         data['pnl'] = {}
-                    for key in ['总资产', '累计入金']:
+                    for key in ['总资产', '累计入金', '可用资金']:
                         if key in payload['pnl'] and payload['pnl'][key] is not None:
                             data['pnl'][key] = payload['pnl'][key]
+                    # 同步到内存 CACHE（供 log_pnl_snapshot 使用）
+                    if 'pnl' not in CACHE:
+                        CACHE['pnl'] = {}
+                    for key in ['总资产', '累计入金', '可用资金']:
+                        if key in payload['pnl'] and payload['pnl'][key] is not None:
+                            CACHE['pnl'][key] = payload['pnl'][key]
 
                 # 同步写入 SQLite 交易记录（先写 DB，成功后再原子写 JSON）
                 db_error = None
