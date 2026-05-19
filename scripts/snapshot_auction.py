@@ -82,7 +82,7 @@ def fetch_index_auction():
         chg = val(d, chg_field, 0)
         price = d.get("最新价", 0)
         # 简称标准化
-        short = str(name).replace("指数", "").replace("成指", "证")
+        short = str(name).replace("指数", "").replace("成指", "")
         result["指数"].append({
             "名称": short,
             "竞价涨幅": round(float(chg), 2) if chg else 0,
@@ -243,47 +243,75 @@ def find_today_review_note():
 
 
 def fetch_thx_sentiment_from_note():
-    """从今日复盘笔记 frontmatter 直接读取 THS 竞价情绪数据（稳米 9:25 填入）
-    不经过 gen_dashboard_data，不影响 baseline"""
+    """从今日复盘笔记 frontmatter 读取 THS 竞价情绪数据（稳米 9:25 填入）
+    今日无数据则回退到昨日笔记（昨日收盘数据在盘前仍有效）"""
     note_path = find_today_review_note()
     if not note_path:
         return {}
 
-    try:
-        with open(note_path) as f:
-            content = f.read()
-    except Exception:
-        return {}
+    def parse_fm(path):
+        try:
+            with open(path) as f:
+                content = f.read()
+        except Exception:
+            return {}
 
-    # 解析 YAML frontmatter
-    m = re.match(r'^---\s*\n(.*?)\n---', content, re.DOTALL)
-    if not m:
-        return {}
+        m = re.match(r'^---\s*\n(.*?)\n---', content, re.DOTALL)
+        if not m:
+            return {}
 
-    fm = {}
-    for line in m.group(1).split('\n'):
-        line = line.rstrip()
-        if not line or line.startswith('#'):
-            continue
-        m2 = re.match(r'^([\w一-鿿]+):\s*(.*)', line)
-        if not m2:
-            continue
-        key, raw = m2.group(1), m2.group(2).strip().strip('"').strip("'")
-        fm[key] = raw
+        fm = {}
+        for line in m.group(1).split('\n'):
+            line = line.rstrip()
+            if not line or line.startswith('#'):
+                continue
+            m2 = re.match(r'^([\w一-鿿]+):\s*(.*)', line)
+            if not m2:
+                continue
+            key, raw = m2.group(1), m2.group(2).strip().strip('"').strip("'")
+            fm[key] = raw
+        return fm
 
     def clean(v):
         if not v or v.strip() == '':
             return None
         return v.strip()
 
+    def extract(result, fm):
+        for key in ["情绪值", "昨日涨停收益", "昨日连板收益", "昨日炸板收益",
+                    "连板风险值", "赚钱效应", "最高板"]:
+            val = clean(fm.get(key))
+            if val is not None and not result.get(key):
+                result[key] = val
+
     result = {}
-    for key in ["情绪值", "昨日涨停收益", "昨日连板收益", "昨日炸板收益",
-                "连板风险值", "赚钱效应", "最高板"]:
-        val = clean(fm.get(key))
-        if val is not None:
-            result[key] = val
+    extract(result, parse_fm(note_path))
+
+    # 今天空 → 回退到昨天的复盘笔记
+    if not result:
+        yesterday = _find_previous_note(note_path)
+        if yesterday:
+            extract(result, parse_fm(yesterday))
 
     return result
+
+
+def _find_previous_note(today_path):
+    """找前一天的复盘笔记"""
+    review_dir = Path(today_path).parent
+    # 同目录下按文件名排序，找前一个
+    siblings = sorted(Path(review_dir).glob("*ReviewNote.md"), reverse=True)
+    today_stem = Path(today_path).stem
+    for s in siblings:
+        if s.stem != today_stem:
+            return str(s)
+    # 跨周目录回退
+    parent = Path(review_dir).parent
+    all_notes = sorted(parent.glob("**/*ReviewNote.md"), reverse=True)
+    for s in all_notes:
+        if s.stem != today_stem:
+            return str(s)
+    return None
 
 
 def build_auction_snapshot():

@@ -17,6 +17,12 @@ class Auction5DWidget extends YiMuWidget {
     var mkt = (data && data.market) || {};
     var sen = (data && data.sentiment) || {};     // 复盘笔记 baseline 兜底
 
+    // 情绪指标空 → 从 baseline + 高潮保护兜底
+    if (!sent['情绪值'] && snap && snap['高潮保护']) {
+      var ev = snap['高潮保护']['竞价情绪值'];
+      if (ev) sent['情绪值'] = ev;
+    }
+
     // 首次加载：异步获取竞价快照
     if (!snap) {
       this._loadSnapshot(body);
