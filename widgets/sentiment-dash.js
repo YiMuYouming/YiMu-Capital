@@ -35,41 +35,28 @@ class SentimentDashWidget extends YiMuWidget {
 
   _renderTable(body) {
     var NODES = [
-      {id:'auction', label:'9:25', time:'竞价'},
-      {id:'morning', label:'10:00', time:'早盘'},
-      {id:'midday', label:'11:30', time:'午盘'},
-      {id:'afternoon', label:'14:00', time:'尾盘'},
-      {id:'close', label:'15:00', time:'收盘'},
+      {id:'auction',    label:'9:25',  target:'竞价'},
+      {id:'morning',    label:'10:00', target:'早盘'},
+      {id:'morning2',   label:'10:30', target:'早盘2'},
+      {id:'midday',     label:'11:30', target:'午盘'},
+      {id:'afternoon1', label:'13:30', target:'尾盘1'},
+      {id:'afternoon',  label:'14:00', target:'尾盘'},
+      {id:'afternoon2', label:'14:30', target:'尾盘2'},
+      {id:'close',      label:'15:00', target:'收盘'},
     ];
 
-    // 找今天的快照，按节点匹配
     var today = new Date().toISOString().slice(0, 10);
     var allDay = this._data[today] || [];
-    // 也找昨天的（如果今天还没有）
-    var yesterday = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
-    if (!allDay.length) allDay = this._data[yesterday] || [];
+    if (!allDay.length) {
+      var yesterday = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
+      allDay = this._data[yesterday] || [];
+    }
 
-    // 每个节点找最接近的快照
     var nodeSnaps = {};
     NODES.forEach(function(nd) {
       var match = null;
       for (var i = allDay.length - 1; i >= 0; i--) {
-        var s = allDay[i];
-        var nodeName = s.node || '';
-        // 匹配：竞价/早盘/午盘/尾盘/收盘
-        if (nodeName.indexOf(nd.time) >= 0 || nd.time.indexOf(nodeName) >= 0) {
-          match = s; break;
-        }
-      }
-      // 模糊匹配
-      if (!match) {
-        var timeMap = {auction:'竞价', morning:'早盘', midday:'午盘', afternoon:'尾盘', close:'收盘'};
-        var targetNode = timeMap[nd.id];
-        for (var j = allDay.length - 1; j >= 0; j--) {
-          if ((allDay[j].node || '').indexOf(targetNode) >= 0) {
-            match = allDay[j]; break;
-          }
-        }
+        if (allDay[i].node === nd.target) { match = allDay[i]; break; }
       }
       nodeSnaps[nd.id] = match || {};
     });

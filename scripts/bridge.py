@@ -631,8 +631,12 @@ if __name__ == '__main__':
     scheduler.add_job(quotes.collect_hot_list, 'interval', minutes=5, id='hot_list_5min',
                       max_instances=1, misfire_grace_time=600)
     # T2 定时快照
-    # 5个关键节点快照（竞价9:25:30等iwencai刷新，其余整点）
-    for node_h, node_m, node_s, node_id in [(9,25,30,'auction'),(10,0,0,'morning'),(11,30,0,'midday'),(14,0,0,'afternoon'),(15,0,0,'close')]:
+    # 8个关键节点快照（竞价+30s等iwencai，其余整点）
+    for node_h, node_m, node_s, node_id in [
+        (9,25,30,'auction'), (10,0,0,'morning'), (10,30,0,'morning2'),
+        (11,30,0,'midday'), (13,30,0,'afternoon1'),
+        (14,0,0,'afternoon'), (14,30,0,'afternoon2'), (15,0,0,'close')
+    ]:
         scheduler.add_job(sentiment_snapshot.take_sentiment_snapshot, 'cron',
                           hour=node_h, minute=node_m, second=node_s,
                           id=f'sentiment_{node_id}', max_instances=1, misfire_grace_time=300)
