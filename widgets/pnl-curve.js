@@ -323,11 +323,19 @@ class PnLCurveWidget extends YiMuWidget {
     }
     document.getElementById('pnl_pos_sub').textContent = posSub;
 
-    // Period KPI
+    // Period KPI — 标签联动
     var periodLabel = { today:'今日', week:'本周', month:'本月', quarter:'近三月', year:'近一年' };
     var perStr = periodLabel[s.period] || s.period;
-    document.getElementById('pnl_period_label').textContent = perStr + '净值变化';
-    document.getElementById('pnl_dd_label').textContent = perStr + '回撤';
+    var pnlLabelEl = document.getElementById('pnl_period_label');
+    if (pnlLabelEl) pnlLabelEl.textContent = perStr + ' TWR';
+    var ddLabelEl = document.getElementById('pnl_dd_label');
+    if (ddLabelEl) ddLabelEl.textContent = perStr + ' 回撤';
+    // 超额 α 标签联动
+    var alphaEl = document.getElementById('pnl_today_alpha');
+    if (alphaEl) {
+      var alphaLbl = alphaEl.parentElement.querySelector('.pnl-kpi-lbl');
+      if (alphaLbl) alphaLbl.textContent = perStr + ' 超额 α';
+    }
 
     // 今日：用实时持仓浮动盈亏；周/月/季/年：用 all-data 缓存算 TWR
     if (s.period === 'today') {
