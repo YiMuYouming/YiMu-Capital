@@ -69,7 +69,12 @@ class PnLCurveWidget extends YiMuWidget {
   render(data) {
     var body = this.getBody();
     if (!body) return;
-    body.innerHTML = this._buildLayout();
+    // 首次渲染建 DOM + 绑定事件，后续只更新数据
+    var firstRender = !this._layoutBuilt;
+    if (firstRender) {
+      body.innerHTML = this._buildLayout();
+      this._layoutBuilt = true;
+    }
 
     var liveQ = (data && data.live_quotes) || {};
     // 和 W15 同源：优先用 manualData._positions，其次 baseline
@@ -141,7 +146,7 @@ class PnLCurveWidget extends YiMuWidget {
         el.classList.toggle('active', el.dataset.idx === this._state.index);
       }, this);
     }
-    this._bindEvents();
+    if (firstRender) this._bindEvents();
     this.updateTimestamp();
   }
 
