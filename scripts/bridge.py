@@ -658,7 +658,7 @@ if __name__ == '__main__':
                       max_instances=1, misfire_grace_time=600)
 
     scheduler.start()
-    print(f'[bridge] APScheduler started: 14 jobs registered')
+    print(f'[bridge] APScheduler started: {len(scheduler.get_jobs())} jobs registered')
 
     # 冷启动：强制执行一次初始采集填充缓存（不受 is_trading_time 限制）
     print(f'[bridge] Cold-start bootstrap: running initial collection...')
