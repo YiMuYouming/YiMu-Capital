@@ -33,12 +33,14 @@ class PositionCalcWidget extends YiMuWidget {
     // ===== Layer 1: 总仓位上限 =====
     var manual = DataStore.manualData.getAll();
     var totalCapital = parseFloat(manual['总资产']) || 0;
-    var availCash = parseFloat(manual['可用资金']) || 0;
-    if (!availCash && totalCapital) {
-      var pv=0; (data.positions||[]).forEach(function(p){pv+=Math.round((parseFloat(p['数量'])||0)*(parseFloat(p['现价'])||0));});
-      availCash = totalCapital - pv;
-    }
-    var currentPosVal = totalCapital - availCash;
+    // 已持仓市值：从实际持仓（状态=持有）实时计算
+    var currentPosVal = 0;
+    (data.positions||[]).forEach(function(p){
+      if (p['状态'] === '持有' || !p['状态']) {
+        currentPosVal += Math.round((parseFloat(p['数量'])||0)*(parseFloat(p['现价'])||0));
+      }
+    });
+    var availCash = parseFloat(manual['可用资金']) || (totalCapital - currentPosVal);
     var currentPosPct = totalCapital > 0 ? Math.round(currentPosVal / totalCapital * 100) : 0;
     var maxPosition = Math.round(totalCapital * (totalCap||0) / 100);
     var availPct = Math.max(0, totalCap - currentPosPct);
@@ -74,15 +76,9 @@ class PositionCalcWidget extends YiMuWidget {
       '</span></div>';
 
     // ===== 金额计算（规则: 总资金 × 总仓位上限% × 侧占比%）=====
-    availCash = availCash || (totalCapital - (function(){
-      var v=0; (data.positions||[]).forEach(function(p){v+=Math.round((parseFloat(p['数量'])||0)*(parseFloat(p['现价'])||0));}); return v;
-    })());
-    // 总仓位金额上限 = 总资产 × 总仓位上限%
     var maxPosition = Math.round(totalCapital * (totalCap||0) / 100);
-    // 现有持仓市值
-    var currentPos = totalCapital - availCash;
     // 可新开 = 总仓位上限 - 已持仓（不能为负）
-    var newCap = Math.max(0, maxPosition - currentPos);
+    var newCap = Math.max(0, maxPosition - currentPosVal);
     // 分配
     var lbMoney = blocked ? 0 : Math.round(newCap * lbActual / 100);
     var trMoney = blocked ? 0 : Math.round(newCap * trActual / 100);
@@ -90,7 +86,7 @@ class PositionCalcWidget extends YiMuWidget {
 
     html += '<div style="margin-top:var(--sp-sm);padding:var(--sp-sm);background:var(--bg-base);border-radius:var(--radius-sm)">' +
       '<div style="font-size:var(--fs-label);color:var(--text-disabled);margin-bottom:var(--sp-xs)">'+
-        '总仓位上限'+totalCap+'% = '+maxPosition.toLocaleString()+' | 已持仓'+currentPos.toLocaleString()+' | 可新开'+newCap.toLocaleString()+'</div>'+
+        '总仓位上限'+totalCap+'% = '+maxPosition.toLocaleString()+' | 已持仓'+currentPosVal.toLocaleString()+' | 可新开'+newCap.toLocaleString()+'</div>'+
       '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:2px">' +
         '<div><span style="font-size:var(--fs-body);color:var(--text-secondary)">连板可新开</span>' +
         '<div style="font-size:var(--fs-label);color:var(--text-disabled)">可新开'+newCap.toLocaleString()+'×'+lbActual+'%</div></div>' +
