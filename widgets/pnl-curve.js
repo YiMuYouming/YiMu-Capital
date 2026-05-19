@@ -667,13 +667,13 @@ class PnLCurveWidget extends YiMuWidget {
     ctx.lineTo(PAD.l + cw, zeroY);
     ctx.stroke();
 
-    // Y left labels
+    // Y left labels (g=0→top, g=4→bottom, val maps max→min)
     ctx.fillStyle = '#5C5652';
     ctx.font = '11px -apple-system,sans-serif';
     ctx.textAlign = 'right';
     ctx.textBaseline = 'middle';
     for (var g = 0; g <= 4; g++) {
-      var val = minY + (g/4) * (maxY - minY);
+      var val = maxY - (g/4) * (maxY - minY);
       ctx.fillText((val >= 0 ? '+' : '') + val.toFixed(2) + '%', PAD.l - 8, PAD.t + (g/4) * ch);
     }
 
