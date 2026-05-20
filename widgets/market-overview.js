@@ -44,9 +44,10 @@ class MarketOverviewWidget extends YiMuWidget {
       ? '<span class="up">' + upCnt + '</span>/<span class="down">' + dnCnt + '</span>'
       : (m['涨跌比'] || '—');
     var amp = li['上证指数振幅'] || '—';
-    var iw = d.iwencai || {};
-    var zt = iw['涨停家数'];
-    var dt = iw['跌停家数'];
+    var S = d.sentiment || {};
+    var M = d.market || {};
+    var zt = M['涨停家数'];
+    var dt = M['跌停家数'];
 
     html += '<div style="display:flex;gap:6px">';
     html += '<div class="kpi-card" style="flex:1;padding:6px 8px"><div class="kpi-label">成交额</div><div class="kpi-value" style="font-size:14px">'+(li['成交额']||'—')+'</div>'+(amtPct?'<div class="kpi-verdict ' + amtDir + '">较昨日此时 '+amtPct+'</div>':'')+'</div>';
@@ -86,17 +87,20 @@ class MarketOverviewWidget extends YiMuWidget {
       html += '</div>';
     }
 
-    // === 第三行：实时情绪（iwencai 2min 轮询）===
+    // === 第三行：情绪指标（iwencai实时优先，baseline兜底）===
     var iw = d.iwencai || {};
     var upCnt2 = li['上涨家数'];
     var dnCnt2 = li['下跌家数'];
     var emotionVal = (upCnt2 != null && dnCnt2 != null && upCnt2 + dnCnt2 > 0)
       ? Math.round(upCnt2 / (upCnt2 + dnCnt2) * 100) : null;
+    var ztSy = iw['昨日涨停收益'] != null ? iw['昨日涨停收益'] : S['昨日涨停收益'];
+    var lbSy = iw['连板收益'] != null ? iw['连板收益'] : S['连板收益'];
+    var zbSy = iw['炸板收益'] != null ? iw['炸板收益'] : S['炸板收益'];
     html += '<div style="display:flex;gap:6px">';
     html += '<div class="kpi-card" style="flex:1;padding:6px 8px"><div class="kpi-label">情绪值</div><div class="kpi-value" style="font-size:14px">'+ (emotionVal != null ? emotionVal + '%' : '—') +'</div></div>';
-    html += '<div class="kpi-card" style="flex:1;padding:6px 8px"><div class="kpi-label">涨停收益</div><div class="kpi-value ' + (parseFloat(iw['昨日涨停收益'])>0?'up':'down') + '" style="font-size:14px">'+ (iw['昨日涨停收益'] != null ? (parseFloat(iw['昨日涨停收益'])>0?'+':'')+iw['昨日涨停收益']+'%' : '—') +'</div></div>';
-    html += '<div class="kpi-card" style="flex:1;padding:6px 8px"><div class="kpi-label">连板收益</div><div class="kpi-value ' + (parseFloat(iw['连板收益'])>0?'up':'down') + '" style="font-size:14px">'+ (iw['连板收益'] != null ? (parseFloat(iw['连板收益'])>0?'+':'')+iw['连板收益']+'%' : '—') +'</div></div>';
-    html += '<div class="kpi-card" style="flex:1;padding:6px 8px"><div class="kpi-label">炸板收益</div><div class="kpi-value ' + (parseFloat(iw['炸板收益'])>0?'up':'down') + '" style="font-size:14px">'+ (iw['炸板收益'] != null ? (parseFloat(iw['炸板收益'])>0?'+':'')+iw['炸板收益']+'%' : '—') +'</div></div>';
+    html += '<div class="kpi-card" style="flex:1;padding:6px 8px"><div class="kpi-label">涨停收益</div><div class="kpi-value ' + (parseFloat(ztSy)>0?'up':'down') + '" style="font-size:14px">'+ (ztSy != null ? (parseFloat(ztSy)>0?'+':'')+ztSy+'%' : '—') +'</div></div>';
+    html += '<div class="kpi-card" style="flex:1;padding:6px 8px"><div class="kpi-label">连板收益</div><div class="kpi-value ' + (parseFloat(lbSy)>0?'up':'down') + '" style="font-size:14px">'+ (lbSy != null ? (parseFloat(lbSy)>0?'+':'')+lbSy+'%' : '—') +'</div></div>';
+    html += '<div class="kpi-card" style="flex:1;padding:6px 8px"><div class="kpi-label">炸板收益</div><div class="kpi-value ' + (parseFloat(zbSy)>0?'up':'down') + '" style="font-size:14px">'+ (zbSy != null ? (parseFloat(zbSy)>0?'+':'')+zbSy+'%' : '—') +'</div></div>';
     html += '</div>';
 
     // === 北向资金 (60s 实时) ===

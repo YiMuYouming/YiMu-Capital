@@ -43,35 +43,50 @@ def take_sentiment_snapshot(force=False):
     live_index = CACHE.get("live_index", {})
     breadth = CACHE.get("breadth", {})
 
+    # baseline 兜底：iwencai 轮询关闭时用 dashboard_data.json 的 sentiment/market
+    baseline = {}
+    try:
+        dd_file = Path(__file__).resolve().parent.parent.parent / "data" / "dashboard_data.json"
+        if dd_file.exists():
+            with open(dd_file) as f:
+                dd = json.load(f)
+            baseline = {**(dd.get("sentiment", {})), **(dd.get("market", {}))}
+    except Exception:
+        pass
+    def _v(key):
+        v = iwencai.get(key)
+        if v is not None: return v
+        return baseline.get(key)
+
     # 情绪值：T3 实时计算（涨跌家数比），与 store.js 逻辑一致
     up = live_index.get("上涨家数", 0) or 0
     dn = live_index.get("下跌家数", 0) or 0
     emotion_val = round(up / (up + dn) * 100, 1) if (up + dn) > 0 else None
 
-    # 炸板率：从封板率反推（iwencai 返回的炸板率字段定义与复盘口径不一致，约 72% vs 真实 ~30%）
-    fbr = iwencai.get("封板率")
+    # 炸板率：从封板率反推
+    fbr = _v("封板率")
     zbr = round(1 - fbr, 4) if fbr is not None else None
 
-    # 从 CACHE 取数据
+    # 从 CACHE 取数据，None 时回退 baseline
     snap = {
         "time": now.strftime("%Y-%m-%dT%H:%M:%S+08:00"),
         "node": _current_node(),
         # 情绪核心
         "情绪值": emotion_val,
-        "涨停家数": iwencai.get("涨停家数") if iwencai.get("涨停家数") else (breadth.get("涨停") if breadth else None),
-        "跌停家数": iwencai.get("跌停家数") if iwencai.get("跌停家数") else (breadth.get("跌停") if breadth else None),
-        "涨停收益": iwencai.get("昨日涨停收益"),
+        "涨停家数": _v("涨停家数") or (breadth.get("涨停") if breadth else None),
+        "跌停家数": _v("跌停家数") or (breadth.get("跌停") if breadth else None),
+        "涨停收益": _v("昨日涨停收益"),
         "封板率": fbr,
         "炸板率": zbr,
-        "晋级率": iwencai.get("晋级率"),
-        "最高板": iwencai.get("最高板"),
-        "连板风险值": iwencai.get("连板风险值"),
-        "赚钱效应": iwencai.get("赚钱效应"),
-        "涨停溢价率": iwencai.get("涨停溢价率"),
-        # 连板/炸板收益（iwencai Q6/Q7）
-        "连板收益": iwencai.get("连板收益"),
-        "炸板收益": iwencai.get("炸板收益"),
-        "连板股数": iwencai.get("连板股数"),
+        "晋级率": _v("晋级率"),
+        "最高板": _v("最高板"),
+        "连板风险值": _v("连板风险值"),
+        "赚钱效应": _v("赚钱效应"),
+        "涨停溢价率": _v("涨停溢价率"),
+        # 连板/炸板收益
+        "连板收益": _v("连板收益"),
+        "炸板收益": _v("炸板收益"),
+        "连板股数": _v("连板股数"),
         # 大盘指数（live_index 5s）
         "上证指数": live_index.get("上证指数"),
         "上证涨幅": live_index.get("上证指数涨幅"),
