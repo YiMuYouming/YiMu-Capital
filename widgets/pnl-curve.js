@@ -448,15 +448,21 @@ class PnLCurveWidget extends YiMuWidget {
       if (p === 'today') {
         var ic = (self._periodCache || {})['today_' + self._state.index];
         if (ic && ic.portfolio && ic.portfolio.length >= 2) {
-          var tP = 1.0, tB = 1.0, tPk = -Infinity, tDD = 0, tRP = 0;
-          for (var j = 0; j < ic.portfolio.length; j++) {
-            tP *= (1 + ic.portfolio[j] / 100);
-            tB *= (1 + ic.benchmark[j] / 100);
-            tRP = (tP - 1) * 100;
-            if (tRP > tPk) tPk = tRP;
-            if (tRP - tPk < tDD) tDD = tRP - tPk;
+          // intraday portfolio 是累计值（非单期收益率），取末值作为今日收益
+          var lastI = ic.portfolio.length - 1;
+          while (lastI >= 0 && ic.portfolio[lastI] == null) lastI--;
+          if (lastI >= 0 && ic.portfolio[lastI] != null) {
+            var todayPnl = ic.portfolio[lastI];
+            var todayBm  = ic.benchmark[lastI] != null ? ic.benchmark[lastI] : 0;
+            // 最大回撤：从累计序列中找峰谷差
+            var pk = -Infinity, dd = 0;
+            for (var j = 0; j <= lastI; j++) {
+              if (ic.portfolio[j] == null) continue;
+              if (ic.portfolio[j] > pk) pk = ic.portfolio[j];
+              if (ic.portfolio[j] - pk < dd) dd = ic.portfolio[j] - pk;
+            }
+            result = { pnl: todayPnl, bm: todayBm, dd: dd };
           }
-          result = { pnl: (tP - 1) * 100, bm: (tB - 1) * 100, dd: tDD };
         }
       }
       if (!result) result = computePeriod(fromDates[p]);
