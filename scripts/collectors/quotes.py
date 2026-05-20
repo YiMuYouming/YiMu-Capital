@@ -322,7 +322,7 @@ def log_pnl_snapshot(force=False):
                 nav = round(total_asset / total_deposit, 6)
                 pos_pct = round(mv / total_asset * 100, 2)
 
-            # 当日盈亏：当日首笔快照锁定 day_start_asset，后续不再变
+            # 当日盈亏：用昨日收盘总资产作为基准，不受盘前无市值影响
             day_start_asset = 0
             today_str = now.strftime("%Y-%m-%d")
             if pnl_hist_file.exists():
@@ -331,9 +331,12 @@ def log_pnl_snapshot(force=False):
                 meta = ph.get("meta", {})
                 day_start_asset = meta.get("day_start_asset", 0) or 0
                 day_start_date = meta.get("day_start_date", "")
-                # 新的一天 / 首笔快照 → 锁定起始资产
-                if day_start_date != today_str and total_asset > 0:
-                    day_start_asset = total_asset
+                # 新的一天 → 用昨日收盘资产（last_total_asset）做基准
+                if day_start_date != today_str:
+                    day_start_asset = meta.get("last_total_asset", 0) or 0
+                    if day_start_asset <= 0 and total_asset > 0:
+                        # 首次运行无历史，用当前资产兜底
+                        day_start_asset = total_asset
                     ph["meta"]["day_start_asset"] = day_start_asset
                     ph["meta"]["day_start_date"] = today_str
                     atomic_write_json(pnl_hist_file, ph)
