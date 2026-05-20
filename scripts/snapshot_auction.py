@@ -117,13 +117,8 @@ def fetch_high_grade_auction():
         code = d.get("股票代码", "").split(".")[0] if "." in str(d.get("股票代码", "")) else d.get("股票代码", "")
         board = int(val(d, find_field(d.keys(), "连续涨停天数"), 0) or 0)
         chg = val(d, find_field(d.keys(), "竞价涨幅"), 0)
-        rating = d.get("竞价评级", d.get("竞价评级[2026", "")) or "—"
-        # 处理嵌套的竞价评级
-        if isinstance(rating, dict):
-            rating = str(rating)
-        anomaly = d.get("竞价异动类型", d.get("竞价异动类型[2026", "")) or ""
-        if isinstance(anomaly, dict):
-            anomaly = str(anomaly)
+        rating = val(d, find_field(d.keys(), "竞价评级"), "—") or "—"
+        anomaly = val(d, find_field(d.keys(), "竞价异动类型"), "") or ""
         vol_field = find_field(d.keys(), "竞价量")
         match_vol = int(val(d, vol_field, 0) or 0)
 
@@ -158,12 +153,8 @@ def fetch_pool_auction(codes):
         returned_codes.add(code)
         name = d.get("股票简称", "")
         chg = val(d, find_field(d.keys(), "竞价涨幅"), 0)
-        rating = d.get("竞价评级", d.get("竞价评级[2026", "")) or "—"
-        if isinstance(rating, dict):
-            rating = "—"
-        anomaly = d.get("竞价异动类型", d.get("竞价异动类型[2026", "")) or ""
-        if isinstance(anomaly, dict):
-            anomaly = ""
+        rating = val(d, find_field(d.keys(), "竞价评级"), "—") or "—"
+        anomaly = val(d, find_field(d.keys(), "竞价异动类型"), "") or ""
         vol_field = find_field(d.keys(), "竞价量")
         match_vol = int(val(d, vol_field, 0) or 0)
 
