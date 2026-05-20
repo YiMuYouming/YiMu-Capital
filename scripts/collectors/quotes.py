@@ -51,8 +51,10 @@ def collect_index(force=False):
             r = _pipeline_fetch("index")
         if r:
             if isinstance(r, dict): r.pop('_meta', None)
-            CACHE["live_index"] = r
-            CACHE["live_index"]["_updated"] = datetime.now().strftime("%Y-%m-%dT%H:%M:%S+08:00")
+            li = CACHE.get("live_index", {})
+            li.update(r)
+            li["_updated"] = datetime.now().strftime("%Y-%m-%dT%H:%M:%S+08:00")
+            CACHE["live_index"] = li
     except Exception as e:
         print(f"  [quotes] collect_index error: {e}", file=sys.stderr)
 
