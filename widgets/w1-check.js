@@ -24,6 +24,7 @@ class W1CheckWidget extends YiMuWidget {
     if (!body) return;
     var S = (data && data.sentiment) || {};
     var M = (data && data.market) || {};
+    var iw = (data && data.iwencai) || {};  // T2 iwencai 2min实时，优先
     var li = (data && data.live_index) || {};
     var liveQ = (data && data.live_quotes) || {};
     var lbPoolAll = (data && data.lianban_pool) || [];
@@ -57,14 +58,25 @@ class W1CheckWidget extends YiMuWidget {
     }
     var openQ = this._openSnapshot || liveQ;  // 开盘数据优先，无快照时用实时
 
-    // ===== 数值 =====
+    // ===== 数值：T2 iwencai 实时优先，baseline 回退 =====
     var qx = parseFloat(S['情绪值']) || 0;
     var yestQx = parseFloat(closeS['情绪值']) || 0;
-    var ztProfit = parseFloat(String(S['昨日涨停收益']||'0').replace('%','').replace('+','')) || 0;
-    var fbRate = parseFloat(String(M['炸板率']||'0').replace('%','')) || 0;
-    var ztCount = parseInt(M['涨停家数']) || 0;
-    var topN = parseInt(String(S['最高板']||'').replace('板','')) || 0;
-    var topName = String(S['最高板']||'');
+    var ztProfit = parseFloat(String(iw['昨日涨停收益'] != null ? iw['昨日涨停收益'] : S['昨日涨停收益']||'0').replace('%','').replace('+','')) || 0;
+    var fbRate = parseFloat(String(iw['炸板率'] != null ? iw['炸板率'] : M['炸板率']||'0').replace('%','')) || 0;
+    var ztCount = parseInt(iw['涨停家数'] != null ? iw['涨停家数'] : M['涨停家数']) || 0;
+    var topBoard = iw['最高板'] != null ? iw['最高板'] : parseInt(String(S['最高板']||'').replace('板','')) || 0;
+    var topName = iw['最高板'] ? iw['最高板']+'板' : String(S['最高板']||'');
+    // 晋级率：iwencai实时优先（iwencai存小数0.38=38%，需×100对齐baseline的百分数格式）
+    function _pct(iwVal, sVal) {
+      if (iwVal != null) return Math.round(parseFloat(iwVal) * 100);
+      if (sVal != null) return parseFloat(String(sVal).replace('%',''));
+      return null;
+    }
+    var jjl1 = _pct(iw['一进二晋级率'], S['一进二晋级率']);
+    var jjl2 = _pct(iw['二进三晋级率'], S['二进三晋级率']);
+    var jjl3 = _pct(iw['三进四晋级率'], S['三进四晋级率']);
+    // 赚钱效应
+    var profitEffect = iw['赚钱效应'] || S['赚钱效应'] || '—';
 
     // ===== 环境阻断 =====
     var blocks = [];
@@ -183,7 +195,7 @@ class W1CheckWidget extends YiMuWidget {
       'border:2px solid '+sigColor+';margin:0 auto">'+
       '<div style="font-size:16px;font-weight:800;color:'+sigColor+';letter-spacing:3px">'+sigText+'</div>'+
       '<div style="font-size:11px;color:var(--text-secondary);margin-top:2px">'+
-        '涨停'+ztCount+'家 | 最高'+topN+'板'+topName+' | 晋级1进2:'+fmtPct(S['一进二晋级率']||S['晋级率'])+' 2进3:'+fmtPct(S['二进三晋级率'])+' 3进4:'+fmtPct(S['三进四晋级率'])+
+        '涨停'+ztCount+'家 | 最高'+topBoard+'板 | 晋级1进2:'+fmtPct(jjl1)+' 2进3:'+fmtPct(jjl2)+' 3进4:'+fmtPct(jjl3)+
       '</div>'+
       '</div>';
 
@@ -385,7 +397,7 @@ class W1CheckWidget extends YiMuWidget {
     html += '<div style="font-size:10px;color:var(--text-disabled);padding:4px 0;text-align:center;border-top:1px solid var(--border-light);margin-top:4px">'+
       (inW1?'W1 '+(min<45?'前半段 9:30-9:45':'后半段 9:45-10:00'):'非W1时段')+
       ' | 情绪区间 '+zoneName(qx)+
-      ' | 赚钱效应 '+(S['赚钱效应']||'—')+
+      ' | 赚钱效应 '+profitEffect+
       ' | 上证 '+(li['上证指数涨幅']||'—')+
       '</div>';
 

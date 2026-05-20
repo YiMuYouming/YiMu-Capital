@@ -393,6 +393,7 @@ class BridgeHandler(SimpleHTTPRequestHandler):
                 'hot_list': CACHE.get('hot_list', {}),
                 'sector_inflow': CACHE.get('sector_inflow', {}),
                 'northbound': CACHE.get('northbound', {}),
+                'iwencai': CACHE.get('iwencai', {}),
                 '上证15min': CACHE.get('上证15min', []),
                 '深证15min': CACHE.get('深证15min', []),
                 '创业15min': CACHE.get('创业15min', []),
