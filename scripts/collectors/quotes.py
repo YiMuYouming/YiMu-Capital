@@ -108,7 +108,11 @@ def collect_yesterday_compare(force=False):
                 today_amt_str = li.get(f"{name}指数成交额", "")
                 if today_amt_str:
                     try:
-                        today_amt_yi = float(str(today_amt_str).replace("亿", "").replace("万亿", "e4"))
+                        s = str(today_amt_str)
+                        if '万亿' in s:
+                            today_amt_yi = float(s.replace('万亿', '')) * 10000
+                        else:
+                            today_amt_yi = float(s.replace('亿', ''))
                     except ValueError:
                         today_amt_yi = 0
                 else:
