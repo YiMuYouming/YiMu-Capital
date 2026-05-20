@@ -963,8 +963,60 @@ def build_dashboard_data(review_path):
     _preserve_cleared(data)
     # 保留 pnl 字段（可用资金/总资产由 W15 记流水实时维护，gen 不覆盖）
     _preserve_pnl(data)
+    # 从 pnl.db 自动计算风控指标（连亏天数/周回撤/月回撤，笔记不用维护）
+    _compute_risk_from_pnl(data)
 
     return data
+
+
+def _compute_risk_from_pnl(data):
+    """从 pnl.db daily_summary 自动计算连亏天数/周回撤/月回撤"""
+    import sqlite3
+    from datetime import datetime, timedelta
+    pnl_db = OUTPUT_FILE.parent / "pnl.db"
+    if not pnl_db.exists():
+        return
+    try:
+        conn = sqlite3.connect(str(pnl_db))
+        cur = conn.cursor()
+        cur.execute("SELECT date, pnl_pct FROM daily_summary ORDER BY date")
+        rows = cur.fetchall()
+        conn.close()
+        if not rows:
+            return
+
+        risk = data.setdefault("risk", {})
+
+        # 连亏天数
+        streak = 0
+        for _, pnl in reversed(rows):
+            if (pnl or 0) < 0:
+                streak += 1
+            else:
+                break
+        risk["连亏天数"] = streak
+
+        # 周回撤 / 月回撤
+        now = datetime.now()
+        periods = {
+            "周累计回撤": now - timedelta(days=now.weekday()),
+            "月累计回撤": datetime(now.year, now.month, 1),
+        }
+        for key, since in periods.items():
+            cum = 1.0; peak = 1.0; max_dd = 0.0
+            since_str = since.strftime("%Y-%m-%d")
+            for _, dp in rows:
+                if _ < since_str:
+                    continue
+                cum *= (1 + (dp or 0) / 100)
+                if cum > peak:
+                    peak = cum
+                dd = (cum - peak) / peak * 100
+                if dd < max_dd:
+                    max_dd = dd
+            risk[key] = round(max_dd, 2)
+    except Exception:
+        pass
 
 
 def _filter_excluded(pool):

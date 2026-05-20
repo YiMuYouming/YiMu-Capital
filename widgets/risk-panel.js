@@ -31,7 +31,7 @@ class RiskPanelWidget extends YiMuWidget {
 
     // 计算实时盈亏
     var totalMV = 0, totalCost = 0;
-    var activePos = P.filter(function(p) { return (p['状态']||'').indexOf('清') < 0; });
+    var activePos = P.filter(function(p) { var s=p['状态']||''; return s.indexOf('清')<0 && s.indexOf('删')<0; });
     activePos.forEach(function(p) {
       var qty = parseFloat(p['数量']) || 0;
       var cost = parseFloat(p['成本']) || 0;
