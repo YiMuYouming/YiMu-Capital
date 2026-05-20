@@ -654,9 +654,13 @@ class PnLCurveWidget extends YiMuWidget {
       // 标注
       ctx.fillStyle = '#D97706';
       ctx.font = 'bold 11px -apple-system,sans-serif';
-      ctx.textAlign = 'left';
       ctx.textBaseline = 'bottom';
-      ctx.fillText('最大回撤 ' + ddInfo.dd.toFixed(2) + '%', troughX + 6, peakY - 4);
+      var label = '最大回撤 ' + ddInfo.dd.toFixed(2) + '%';
+      var labelW = ctx.measureText(label).width;
+      var lx = troughX + 6;
+      if (lx + labelW > PAD.l + cw) { ctx.textAlign = 'right'; lx = troughX - 6; }
+      else { ctx.textAlign = 'left'; }
+      ctx.fillText(label, lx, Math.max(PAD.t + 14, peakY - 4));
     }
 
     // Grid
