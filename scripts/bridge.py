@@ -988,7 +988,9 @@ if __name__ == '__main__':
     scheduler.add_job(quotes.log_pnl_snapshot, 'interval', seconds=300, id='pnl_snap_300s',
                       max_instances=1, misfire_grace_time=600)
     # T2 阶段（2min-5min）
-    # iwencai 2min轮询已停用（保护 OpenAPI 额度）。情绪数据走 baseline 每日 gen + auction 9:28 快照
+    # iwencai 10min轮询（仅涨停收益/连板收益/炸板收益，PyTDX不可替代）
+    scheduler.add_job(iwencai_poll.poll_iwencai_sentiment, 'interval', minutes=10, id='iwencai_10min',
+                      max_instances=1, misfire_grace_time=300)
     scheduler.add_job(market_data.poll_sector_inflow, 'interval', minutes=5, id='sector_inflow_5min',
                       max_instances=1, misfire_grace_time=600)
     scheduler.add_job(market_data.poll_news, 'interval', minutes=5, id='news_5min',
@@ -1173,7 +1175,7 @@ if __name__ == '__main__':
 
     # 冷启动：强制执行一次初始采集填充缓存（不受 is_trading_time 限制）
     print(f'[bridge] Cold-start bootstrap: running initial collection...')
-    for bootstrap_fn in [quotes.collect_index, quotes.collect_quotes, quotes.collect_sectors, quotes.collect_yesterday_compare, quotes.collect_kline_15m, quotes.log_pnl_snapshot, quotes.collect_hot_list]:
+    for bootstrap_fn in [quotes.collect_index, quotes.collect_quotes, quotes.collect_sectors, iwencai_poll.poll_iwencai_sentiment, quotes.collect_yesterday_compare, quotes.collect_kline_15m, quotes.log_pnl_snapshot, quotes.collect_hot_list]:
         try:
             bootstrap_fn(force=True)
         except Exception as e:
