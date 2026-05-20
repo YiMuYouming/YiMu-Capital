@@ -331,7 +331,10 @@ class LlmChatWidget extends YiMuWidget {
     if (this._panelOverlay) this._panelOverlay.classList.add('show');
     window._llmBadgeCount = 0;
     if (typeof window._updateLlmBadge === 'function') window._updateLlmBadge();
-    this._msgEl && this._msgEl.focus();
+    if (this._msgEl) {
+      this._msgEl.focus();
+      requestAnimationFrame(function() { this._msgEl.scrollTop = this._msgEl.scrollHeight; }.bind(this));
+    }
   }
 
   hide() {
