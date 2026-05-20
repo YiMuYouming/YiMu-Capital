@@ -53,10 +53,12 @@ def take_sentiment_snapshot(force=False):
             baseline = {**(dd.get("sentiment", {})), **(dd.get("market", {}))}
     except Exception:
         pass
-    def _v(key):
+    def _v(key, alt_key=None):
         v = iwencai.get(key)
         if v is not None: return v
-        return baseline.get(key)
+        v = baseline.get(key)
+        if v is not None: return v
+        return baseline.get(alt_key) if alt_key else None
 
     # 情绪值：T3 实时计算（涨跌家数比），与 store.js 逻辑一致
     up = live_index.get("上涨家数", 0) or 0
@@ -83,9 +85,9 @@ def take_sentiment_snapshot(force=False):
         "连板风险值": _v("连板风险值"),
         "赚钱效应": _v("赚钱效应"),
         "涨停溢价率": _v("涨停溢价率"),
-        # 连板/炸板收益
-        "连板收益": _v("连板收益"),
-        "炸板收益": _v("炸板收益"),
+        # 连板/炸板收益（baseline 存 昨日连板收益/昨日炸板收益）
+        "连板收益": _v("连板收益", "昨日连板收益"),
+        "炸板收益": _v("炸板收益", "昨日炸板收益"),
         "连板股数": _v("连板股数"),
         # 大盘指数（live_index 5s）
         "上证指数": live_index.get("上证指数"),
