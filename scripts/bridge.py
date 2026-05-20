@@ -785,6 +785,10 @@ class BridgeHandler(SimpleHTTPRequestHandler):
                         })
 
                 # ── Prompt 拼接 ───────────────────────────────────────
+                now_dt = datetime.now()
+                weekday_cn = ['周一','周二','周三','周四','周五','周六','周日'][now_dt.weekday()]
+                time_ctx = f"{now_dt.strftime('%Y-%m-%d')} {weekday_cn} {node}"
+
                 w1_hint = ''
                 if '09:' in str(node) or '10:0' in str(node):
                     w1_hint = ('\n\n⚠️ 当前是W1早盘时段(9:30-10:00)。'
@@ -792,12 +796,12 @@ class BridgeHandler(SimpleHTTPRequestHandler):
                                '连板池中标的的操作信号优先输出。')
 
                 if mode == 'manual' and question:
-                    prompt = (f"用户提问时间: {node}\n"
+                    prompt = (f"当前时间: {time_ctx}\n"
                               f"用户问题: {question}\n\n"
                               f"全盘数据:\n{json.dumps(snapshot, ensure_ascii=False, indent=2)}\n\n"
                               f"请针对用户问题给出研判。回答要具体，引用实时数据。")
                 else:
-                    prompt = f"当前时间: {node}{w1_hint}\n\n全盘数据:\n{json.dumps(snapshot, ensure_ascii=False, indent=2)}"
+                    prompt = f"当前时间: {time_ctx}{w1_hint}\n\n全盘数据:\n{json.dumps(snapshot, ensure_ascii=False, indent=2)}"
 
                 messages.append({"role": "user", "content": prompt})
                 result = _call_llm_api(messages)
@@ -1055,6 +1059,8 @@ if __name__ == '__main__':
             CACHE.setdefault('_llm_rate', {})['auto'] = recent + [now_s]
         # 直接调用内部 LLM 流程（复用 POST /api/llm 的逻辑，不走 HTTP）
         node = now.strftime('%H:%M:%S')
+        weekday_cn = ['周一','周二','周三','周四','周五','周六','周日'][now.weekday()]
+        time_ctx = f"{now.strftime('%Y-%m-%d')} {weekday_cn} {node}"
         try:
             snapshot = _build_full_snapshot()
 
@@ -1078,7 +1084,7 @@ if __name__ == '__main__':
                 w1_hint = ('\n\n⚠️ 当前是W1早盘时段(9:30-10:00)。'
                            '请按W1特别关注4项评估：龙头状态、板块合力、候选标的、竞价三件套。'
                            '连板池中标的的操作信号优先输出。')
-            prompt = f"当前时间: {node}{w1_hint}\n\n全盘数据:\n{json.dumps(snapshot, ensure_ascii=False, indent=2)}"
+            prompt = f"当前时间: {time_ctx}{w1_hint}\n\n全盘数据:\n{json.dumps(snapshot, ensure_ascii=False, indent=2)}"
             messages.append({"role": "user", "content": prompt})
             result = _call_llm_api(messages)
             if not result.get('ok'):
