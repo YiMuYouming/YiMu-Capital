@@ -350,7 +350,7 @@ def log_pnl_snapshot(force=False):
             if day_start_asset > 0:
                 pnl_pct = round((total_asset - day_start_asset) / day_start_asset * 100, 2)
 
-            # 收盘时更新 last_total_asset（供第二天起始资产）和 last_twr_nav
+            # 收盘时更新 last_total_asset + 写入 daily_summary（供 W22 累计TWR）
             if total_asset > 0 and now.hour >= 15:
                 try:
                     if pnl_hist_file.exists():
@@ -363,6 +363,15 @@ def log_pnl_snapshot(force=False):
                     ph_data["meta"]["last_twr_nav"] = nav
                     ph_data["meta"]["last_updated"] = now.strftime("%Y-%m-%dT%H:%M:%S")
                     atomic_write_json(pnl_hist_file, ph_data)
+                except Exception:
+                    pass
+                # 写入 daily_summary（每日一行，供 W22 累计曲线）
+                try:
+                    cur.execute("""INSERT OR REPLACE INTO daily_summary
+                        (date, nav, pnl_pct, sh_pct, sz_pct, cy_pct, pos_pct, deposit)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                        (today_str, nav, pnl_pct, sh_pct, sz_pct, cy_pct, pos_pct, total_deposit))
+                    conn.commit()
                 except Exception:
                     pass
         except Exception:
