@@ -60,6 +60,9 @@ def clean_value(val, field_name=""):
     if val is None:
         return None
     s = str(val).strip()
+    # 占位符 —/--/… 等同空值，触发回退逻辑
+    if s in ('—', '--', '…', '...', '??', '待收盘'):
+        return None
 
     # 去掉括号内注释： "一般（涨停收益2.92%一般）" → "一般"
     # 但保留标签型字段的括号内容
@@ -763,6 +766,14 @@ def _fallback_appendix(current_path, key):
             pass
     return []
 
+def _fm_has_data(fm, key):
+    """检查 frontmatter 字段是否有实质数据（排除占位符）"""
+    v = fm.get(key)
+    if v is None:
+        return False
+    s = str(v).strip()
+    return s not in ('', '—', '--', '…', '...', '??', '待收盘')
+
 def _fallback_frontmatter(current_path):
     """当今天笔记 frontmatter 为空时，回退到最近一个完整笔记的 frontmatter"""
     review_dir = Path(current_path).parent.parent
@@ -774,7 +785,7 @@ def _fallback_frontmatter(current_path):
             continue
         fm = parse_frontmatter(str(f))
         # 检查是否有实质数据（情绪值不为空）
-        if fm.get("情绪值") is not None and fm.get("情绪值") != "":
+        if _fm_has_data(fm, "情绪值"):
             print(f"[info] Fallback frontmatter: using {f.name}")
             return fm
     return {}
@@ -817,7 +828,7 @@ def build_dashboard_data(review_path):
     fm = parse_frontmatter(review_path)
     prev_fm = _fallback_frontmatter(review_path)  # 今天空字段用昨天的值
     style_review_path = review_path
-    if fm.get("情绪值") is None or fm.get("情绪值") == "":
+    if not _fm_has_data(fm, "情绪值"):
         fallback_path = _fallback_review_path(review_path)
         if fallback_path:
             print(f"[info] Fallback style_detect: using {Path(fallback_path).name}")
