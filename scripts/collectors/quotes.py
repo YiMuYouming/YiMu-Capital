@@ -280,7 +280,7 @@ def log_pnl_snapshot(force=False):
             if data_file.exists():
                 with open(data_file) as f:
                     dd = json.load(f)
-                positions = [p for p in dd.get("positions", []) if (p.get('状态','') or '').find('清') < 0]
+                positions = [p for p in dd.get("positions", []) if (p.get('状态','') or '').find('清') < 0 and (p.get('状态','') or '').find('删') < 0]
 
             # 读实时报价算市值
             live_q = CACHE.get("live_quotes", {})

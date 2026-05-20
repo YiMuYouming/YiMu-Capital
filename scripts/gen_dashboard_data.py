@@ -961,6 +961,8 @@ def build_dashboard_data(review_path):
 
     # 保留现有 dashboard_data.json 中的清仓持仓（bridge sync 写入，复盘笔记不含）
     _preserve_cleared(data)
+    # 保留 pnl 字段（可用资金/总资产由 W15 记流水实时维护，gen 不覆盖）
+    _preserve_pnl(data)
 
     return data
 
@@ -1011,6 +1013,20 @@ def _preserve_cleared(new_data):
     for p in cleared:
         if p.get("标的") not in existing_names:
             new_data.setdefault("positions", []).append(p)
+
+
+def _preserve_pnl(new_data):
+    """保留现有 dashboard_data.json 中的 pnl 字段（可用资金/总资产由W15实时维护）"""
+    if not OUTPUT_FILE.exists():
+        return
+    try:
+        with open(OUTPUT_FILE) as f:
+            old = json.load(f)
+    except Exception:
+        return
+    old_pnl = old.get("pnl", {})
+    if old_pnl:
+        new_data["pnl"] = old_pnl
 
 
 def watch_mode(review_path, interval=10):
