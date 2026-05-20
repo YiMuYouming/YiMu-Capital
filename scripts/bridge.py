@@ -81,37 +81,36 @@ except ImportError:
     init_db()
 
 # === LLM System Prompt ===
-SYSTEM_PROMPT = """你是洋米盯盘助手，为弈沐哥的A股短线+趋势混合交易提供实时研判。
+SYSTEM_PROMPT_HEADER = """你是弈沐盯盘助手，严格遵循弈沐交易规则做研判。
+每次研判你会收到: ①交易规则(LLM_RULES) ②项目约定(CLAUDE) ③全盘实时数据。
+结论优先，引用具体数据点。操作建议必须对照规则逐条验证。"""
 
-## 交易规则摘要
-- W1(9:30-10:00): 连板追涨 + 趋势强回踩买入(60分钟MA10)
-- W2(14:00-14:50): 连板尾盘低吸 + 趋势弱回踩确认
-- 核心指标: 60分钟MA10回踩(方向↑,距≤1%) + 缩量(量比<0.8) + 未大跌(>-5%)
-- 情绪: <20%冰点, 20-40%低迷, 40-60%主升, 60-80%强势, >80%高潮
-- 涨停收益>2%可操作, 赚钱效应好/较好可做
-- 单日熔断-3%, 连亏2天空仓
-
-## W1 早盘特别关注
-W1时段(9:30-10:00)额外评估以下项目，在研判中优先回答：
-1. 连板龙头状态: 检查连板池中各板块龙头是否封板/断板，封板量能是否健康
-2. 板块合力: 各板块有多少只标的涨幅>3%，合力是否形成(≥3只)
-3. W1候选标的: 华电辽能(3进4)/万控智造(2进3)/韶能股份(1进2)各自条件是否满足
-4. 竞价三件套: 情绪是否≥60%? 涨停收益是否>2%? W1标的是否有高开3-7%?
-
-## 输出格式
-你必须输出两个部分，用 [TEXT] 和 [SIGNALS] 标记分隔：
-
+OUTPUT_FORMAT = """## 输出格式
 [TEXT]
 3-5句中文研判。结论优先，简洁直白。W1时段优先回答龙头和合力问题。
 [SIGNALS]
 每行一个信号，格式: 类型 | 标的 | 方向 | 置信度
-类型: BUY(买入信号)/WATCH(关注)/RISK(风险)/INFO(信息)
-方向: 多/空/—
-置信度: 高/中/低
-示例:
-BUY | 华电辽能 | 多 | 中
-WATCH | CPO板块 | 多 | 高
-RISK | 北方华创 | — | 低"""
+类型: BUY/WATCH/RISK/INFO 方向: 多/空/— 置信度: 高/中/低"""
+
+
+def _build_system_prompt():
+    """每次研判前动态读 LLM_RULES.md + CLAUDE.md，拼成完整 system prompt"""
+    parts = [SYSTEM_PROMPT_HEADER]
+    for name, rel_path in [("LLM_RULES", "LLM_RULES.md"), ("CLAUDE", "CLAUDE.md")]:
+        path = ROOT / rel_path
+        try:
+            with open(path) as f:
+                content = f.read()
+            # 总和截断保护（~6000 chars ≈ 1500 tokens，留足给快照和对话）
+            total = sum(len(p) for p in parts)
+            remaining = 8000 - total
+            if len(content) > remaining:
+                content = content[:remaining] + "\n...(truncated)"
+            parts.append(f"\n=== {name} ===\n{content}")
+        except Exception:
+            pass
+    parts.append("\n---\n" + OUTPUT_FORMAT)
+    return "\n".join(parts)
 
 
 def _load_api_config():
@@ -215,8 +214,8 @@ def _verify_signals(signals_raw, snapshot):
     return verified
 
 
-def _call_llm_api(prompt_text):
-    """调用 DeepSeek Anthropic-compatible API"""
+def _call_llm_api(messages):
+    """调用 DeepSeek Anthropic-compatible API。messages 为对话数组（含历史+当前快照）"""
     cfg = _load_api_config()
     if not cfg.get("token"):
         return {"error": "API token not found in ~/.claude/settings.json"}
@@ -226,8 +225,8 @@ def _call_llm_api(prompt_text):
     body = json.dumps({
         "model": cfg["model"],
         "max_tokens": 2000,
-        "system": SYSTEM_PROMPT,
-        "messages": [{"role": "user", "content": prompt_text}],
+        "system": _build_system_prompt(),
+        "messages": messages,
     }).encode()
 
     req = urllib.request.Request(url, data=body, headers={
@@ -764,6 +763,27 @@ class BridgeHandler(SimpleHTTPRequestHandler):
                 # ── 快照（后端统一构建）─────────────────────────────────
                 snapshot = _build_full_snapshot()
 
+                # ── 对话记忆：加载今日历史，取最近3轮 ──────────────────
+                today = datetime.now().strftime('%Y-%m-%d')
+                insights = {}
+                if LLM_INSIGHTS_FILE.exists():
+                    try:
+                        with open(LLM_INSIGHTS_FILE) as f:
+                            insights = json.load(f)
+                    except Exception:
+                        pass
+                day_data = insights.get(today, {})
+                conversation = day_data.get('conversation', [])
+
+                messages = []
+                recent = conversation[-6:]  # 最近3轮 = 6条 user+assistant
+                for m in recent:
+                    if m.get('role') in ('user', 'assistant') and m.get('text', '').strip():
+                        messages.append({
+                            "role": m['role'],
+                            "content": m['text'].strip()
+                        })
+
                 # ── Prompt 拼接 ───────────────────────────────────────
                 w1_hint = ''
                 if '09:' in str(node) or '10:0' in str(node):
@@ -779,7 +799,8 @@ class BridgeHandler(SimpleHTTPRequestHandler):
                 else:
                     prompt = f"当前时间: {node}{w1_hint}\n\n全盘数据:\n{json.dumps(snapshot, ensure_ascii=False, indent=2)}"
 
-                result = _call_llm_api(prompt)
+                messages.append({"role": "user", "content": prompt})
+                result = _call_llm_api(messages)
 
                 if not result.get('ok'):
                     err = result.get('error', 'unknown')
@@ -833,15 +854,7 @@ class BridgeHandler(SimpleHTTPRequestHandler):
                     'warning_count': warning_count,
                 }
 
-                # ── 持久化 → llm_insights.json（v2 conversation 格式） ──
-                today = datetime.now().strftime('%Y-%m-%d')
-                insights = {}
-                if LLM_INSIGHTS_FILE.exists():
-                    try:
-                        with open(LLM_INSIGHTS_FILE) as f:
-                            insights = json.load(f)
-                    except Exception:
-                        pass
+                # ── 持久化 → llm_insights.json（v2 conversation 格式，复用上方的 insights） ──
                 if today not in insights:
                     insights[today] = {'meta': {}, 'conversation': []}
 
@@ -1042,13 +1055,30 @@ if __name__ == '__main__':
         node = now.strftime('%H:%M:%S')
         try:
             snapshot = _build_full_snapshot()
+
+            # ── 对话记忆：加载今日历史 ──
+            today_str = now.strftime('%Y-%m-%d')
+            insights = {}
+            if LLM_INSIGHTS_FILE.exists():
+                try:
+                    with open(LLM_INSIGHTS_FILE) as f:
+                        insights = json.load(f)
+                except Exception:
+                    pass
+            conversation = insights.get(today_str, {}).get('conversation', [])
+            messages = []
+            for m in conversation[-6:]:
+                if m.get('role') in ('user', 'assistant') and m.get('text', '').strip():
+                    messages.append({"role": m['role'], "content": m['text'].strip()})
+
             w1_hint = ''
             if '09:' in node or '10:0' in node:
                 w1_hint = ('\n\n⚠️ 当前是W1早盘时段(9:30-10:00)。'
                            '请按W1特别关注4项评估：龙头状态、板块合力、候选标的、竞价三件套。'
                            '连板池中标的的操作信号优先输出。')
             prompt = f"当前时间: {node}{w1_hint}\n\n全盘数据:\n{json.dumps(snapshot, ensure_ascii=False, indent=2)}"
-            result = _call_llm_api(prompt)
+            messages.append({"role": "user", "content": prompt})
+            result = _call_llm_api(messages)
             if not result.get('ok'):
                 print(f"  [bridge] LLM auto error: {str(result.get('error',''))[:80]}")
                 return
@@ -1078,23 +1108,15 @@ if __name__ == '__main__':
                 'verified_count': verified_count,
                 'warning_count': warning_count,
             }
-            # 持久化（与 POST /api/llm 完全相同的写入逻辑）
-            today = now.strftime('%Y-%m-%d')
-            insights = {}
-            if LLM_INSIGHTS_FILE.exists():
-                try:
-                    with open(LLM_INSIGHTS_FILE) as f:
-                        insights = json.load(f)
-                except Exception:
-                    pass
-            if today not in insights:
-                insights[today] = {'meta': {}, 'conversation': []}
-            meta = insights[today].setdefault('meta', {})
+            # 持久化（复用上方已加载的 insights）
+            if today_str not in insights:
+                insights[today_str] = {'meta': {}, 'conversation': []}
+            meta = insights[today_str].setdefault('meta', {})
             if 'started_at' not in meta:
                 meta['started_at'] = node
             meta['last_assistant_ts'] = node
             meta['auto_trigger_count'] = meta.get('auto_trigger_count', 0) + 1
-            insights[today]['conversation'].append({
+            insights[today_str]['conversation'].append({
                 'role': 'assistant',
                 'ts': node,
                 'text': text_part,
@@ -1105,7 +1127,7 @@ if __name__ == '__main__':
             atomic_write_json(LLM_INSIGHTS_FILE, insights)
             try:
                 from scripts.db import insert_llm
-                insert_llm(today, node, text_part, verified_signals,
+                insert_llm(today_str, node, text_part, verified_signals,
                            verified_count, warning_count)
             except Exception as e:
                 print(f"  [bridge] SQLite LLM insert error: {e}")
