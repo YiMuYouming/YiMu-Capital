@@ -6,7 +6,7 @@ W15 记流水时自动 POST 到 /api/sync，实时写入 JSON
 LLM Hook: POST /api/llm → Anthropic API → 研判文本
 """
 
-import json, os, sys
+import json, os, sys, time
 from http.server import HTTPServer, SimpleHTTPRequestHandler
 from socketserver import ThreadingMixIn
 
@@ -228,7 +228,7 @@ def _call_llm_api(prompt_text):
     url = cfg["base_url"] + "/v1/messages"
     body = json.dumps({
         "model": cfg["model"],
-        "max_tokens": 600,
+        "max_tokens": 2000,
         "system": SYSTEM_PROMPT,
         "messages": [{"role": "user", "content": prompt_text}],
     }).encode()
@@ -242,7 +242,11 @@ def _call_llm_api(prompt_text):
         with urllib.request.urlopen(req, timeout=30) as resp:
             result = json.loads(resp.read())
             content = result.get("content", [])
-            text = "".join(c.get("text", "") for c in content if c.get("type") == "text")
+            # 只取 text 类型 block（忽略 thinking）
+            text = "".join(
+                c.get("text", "") for c in content
+                if c.get("type") == "text" and c.get("text", "").strip()
+            )
             return {"ok": True, "text": text}
     except Exception as e:
         return {"ok": False, "error": str(e)[:300]}
@@ -591,6 +595,40 @@ class BridgeHandler(SimpleHTTPRequestHandler):
             except (BrokenPipeError, ConnectionResetError, OSError):
                 pass
             return
+        elif parsed.path == '/api/llm/history':
+            today = datetime.now().strftime('%Y-%m-%d')
+            insights = {}
+            if LLM_INSIGHTS_FILE.exists():
+                try:
+                    with open(LLM_INSIGHTS_FILE) as f:
+                        insights = json.load(f)
+                except Exception:
+                    pass
+            day_data = insights.get(today, {})
+            # 旧格式兼容 → v2
+            if 'conversation' not in day_data:
+                conv = []
+                for node, entry in sorted(day_data.items()):
+                    if isinstance(entry, dict) and 'text' in entry:
+                        conv.append({
+                            'role': 'assistant',
+                            'ts': entry.get('timestamp', ''),
+                            'text': entry['text'],
+                            'signals': entry.get('signals', []),
+                            'auto': True,
+                        })
+                day_data = {'meta': {}, 'conversation': conv}
+            result = {
+                'today': today,
+                'meta': day_data.get('meta', {}),
+                'conversation': day_data.get('conversation', []),
+            }
+            body = json.dumps(result, ensure_ascii=False).encode()
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.end_headers()
+            self.wfile.write(body)
+            return
         super().do_GET()
 
     def end_headers(self):
@@ -697,73 +735,159 @@ class BridgeHandler(SimpleHTTPRequestHandler):
             body = self.rfile.read(length)
             try:
                 payload = json.loads(body)
-                node = payload.get('node', '盘中')
-                data_snapshot = payload.get('data_snapshot', {})
+                mode = payload.get('mode', 'auto')   # auto | manual
+                question = payload.get('question', '')
 
-                # W1时段加专属提示
+                # 服务端生成时间节点，不再信任前端
+                now_ts = datetime.now().strftime('%H:%M:%S')
+                node = payload.get('node', now_ts)
+
+                # ── Rate Limit（仅手动模式）─────────────────────────────
+                if mode == 'manual':
+                    if '_llm_rate' not in CACHE:
+                        CACHE['_llm_rate'] = {}
+                    now_s = time.time()
+                    recent = [t for t in CACHE['_llm_rate'].get('manual', [])
+                              if now_s - t < 60]
+                    if len(recent) >= 10:
+                        self.send_response(429)
+                        self.send_header('Content-Type', 'application/json')
+                        self.end_headers()
+                        self.wfile.write(json.dumps({
+                            'ok': False,
+                            'error_type': 'rate_limit',
+                            'error': '请求太频繁，请30秒后再试'
+                        }, ensure_ascii=False).encode())
+                        print(f"  [bridge] Rate limited: manual mode")
+                        return
+                    CACHE['_llm_rate']['manual'] = recent + [now_s]
+
+                # ── 快照（后端统一构建）─────────────────────────────────
+                snapshot = _build_full_snapshot()
+
+                # ── Prompt 拼接 ───────────────────────────────────────
                 w1_hint = ''
-                if node and '09:' in str(node) or '10:0' in str(node):
-                    w1_hint = '\n\n⚠️ 当前是W1早盘时段(9:30-10:00)。请按W1特别关注4项评估：龙头状态、板块合力、候选标的、竞价三件套。连板池中标的的操作信号优先输出。'
-                prompt = f"当前时间: {node}{w1_hint}\n\n全盘数据:\n{json.dumps(data_snapshot, ensure_ascii=False, indent=2)}"
+                if '09:' in str(node) or '10:0' in str(node):
+                    w1_hint = ('\n\n⚠️ 当前是W1早盘时段(9:30-10:00)。'
+                               '请按W1特别关注4项评估：龙头状态、板块合力、候选标的、竞价三件套。'
+                               '连板池中标的的操作信号优先输出。')
+
+                if mode == 'manual':
+                    prompt = (f"用户提问时间: {node}\n"
+                              f"用户问题: {question}\n\n"
+                              f"全盘数据:\n{json.dumps(snapshot, ensure_ascii=False, indent=2)}\n\n"
+                              f"请针对用户问题给出研判。回答要具体，引用实时数据。")
+                else:
+                    prompt = f"当前时间: {node}{w1_hint}\n\n全盘数据:\n{json.dumps(snapshot, ensure_ascii=False, indent=2)}"
+
                 result = _call_llm_api(prompt)
 
-                if result.get('ok'):
-                    raw_text = result['text']
-
-                    # 解析结构化输出 [TEXT]...[SIGNALS]...
-                    text_part = raw_text
-                    signals_part = ''
-                    if '[TEXT]' in raw_text and '[SIGNALS]' in raw_text:
-                        parts = raw_text.split('[SIGNALS]')
-                        text_part = parts[0].replace('[TEXT]', '').strip()
-                        signals_part = parts[1].strip() if len(parts) > 1 else ''
-
-                    # ReAct 验证
-                    verified_signals = _verify_signals(signals_part, data_snapshot) if signals_part else []
-
-                    insight = {
-                        'timestamp': datetime.now().strftime('%H:%M:%S'),
-                        'node': node,
-                        'text': text_part,
-                        'signals': verified_signals,
-                        'verified_count': sum(1 for v in verified_signals if v['status'] == '✅'),
-                        'warning_count': sum(1 for v in verified_signals if v['status'] == '⚠️'),
-                    }
-                    # 持久化写入
-                    today = datetime.now().strftime('%Y-%m-%d')
-                    insights = {}
-                    if LLM_INSIGHTS_FILE.exists():
-                        try:
-                            with open(LLM_INSIGHTS_FILE) as f:
-                                insights = json.load(f)
-                        except Exception:
-                            pass
-                    if today not in insights:
-                        insights[today] = {}
-                    insights[today][node] = insight
-                    LLM_INSIGHTS_FILE.parent.mkdir(parents=True, exist_ok=True)
-                    atomic_write_json(LLM_INSIGHTS_FILE, insights)
-
-                    # 同步写入 SQLite
-                    try:
-                        from scripts.db import insert_llm
-                        insert_llm(today, node, text_part, verified_signals,
-                                   insight['verified_count'], insight['warning_count'])
-                    except Exception as e:
-                        print(f"  [bridge] SQLite LLM insert error: {e}")
-
-                    self.send_response(200)
+                if not result.get('ok'):
+                    err = result.get('error', 'unknown')
+                    if 'token' in err.lower() or 'auth' in err.lower() or '401' in str(err):
+                        err_type, status = 'auth', 502
+                    elif 'timeout' in err.lower() or 'timed out' in err.lower():
+                        err_type, status = 'timeout', 504
+                    else:
+                        err_type, status = 'api_error', 502
+                    self.send_response(status)
                     self.send_header('Content-Type', 'application/json')
                     self.end_headers()
-                    self.wfile.write(json.dumps({'ok': True, **insight}).encode())
-                    print(f"  [bridge] LLM insight: {node} ({len(text_part)} chars, {insight['verified_count']}✓/{insight['warning_count']}⚠)")
+                    self.wfile.write(json.dumps({
+                        'ok': False,
+                        'error_type': err_type,
+                        'error': err
+                    }, ensure_ascii=False).encode())
+                    print(f"  [bridge] LLM error [{err_type}]: {str(err)[:100]}")
+                    return
+
+                raw_text = result['text']
+
+                # ── 解析 [TEXT] / [SIGNALS] 结构 ───────────────────────
+                text_part = raw_text
+                signals_part = ''
+                if '[TEXT]' in raw_text and '[SIGNALS]' in raw_text:
+                    parts = raw_text.split('[SIGNALS]')
+                    text_part = parts[0].replace('[TEXT]', '').strip()
+                    signals_part = parts[1].strip() if len(parts) > 1 else ''
+                elif not raw_text.strip():
+                    text_part = '(模型返回为空，请重试)'
+
+                # ── ReAct 验证 ─────────────────────────────────────────
+                verified_signals = []
+                if signals_part:
+                    try:
+                        verified_signals = _verify_signals(signals_part, snapshot)
+                    except Exception as e:
+                        print(f"  [bridge] signal verify error: {e}")
+
+                verified_count = sum(1 for v in verified_signals if v.get('status') == '\u2705')
+                warning_count = sum(1 for v in verified_signals if v.get('status') == '\u26a0\ufe0f')
+
+                insight = {
+                    'timestamp': now_ts,
+                    'node': node,
+                    'mode': mode,
+                    'text': text_part,
+                    'signals': verified_signals,
+                    'verified_count': verified_count,
+                    'warning_count': warning_count,
+                }
+
+                # ── 持久化 → llm_insights.json（v2 conversation 格式） ──
+                today = datetime.now().strftime('%Y-%m-%d')
+                insights = {}
+                if LLM_INSIGHTS_FILE.exists():
+                    try:
+                        with open(LLM_INSIGHTS_FILE) as f:
+                            insights = json.load(f)
+                    except Exception:
+                        pass
+                if today not in insights:
+                    insights[today] = {'meta': {}, 'conversation': []}
+
+                meta = insights[today].setdefault('meta', {})
+                if 'started_at' not in meta:
+                    meta['started_at'] = now_ts
+                meta['last_assistant_ts'] = now_ts
+                if mode == 'auto':
+                    meta['auto_trigger_count'] = meta.get('auto_trigger_count', 0) + 1
                 else:
-                    self.send_response(502)
-                    self.end_headers()
-                    self.wfile.write(json.dumps(result).encode())
-                    print(f"  [bridge] LLM error: {result.get('error', 'unknown')}")
+                    meta['manual_question_count'] = meta.get('manual_question_count', 0) + 1
+
+                insights[today]['conversation'].append({
+                    'role': 'assistant',
+                    'ts': now_ts,
+                    'text': text_part,
+                    'signals': verified_signals,
+                    'auto': mode == 'auto',
+                })
+
+                LLM_INSIGHTS_FILE.parent.mkdir(parents=True, exist_ok=True)
+                atomic_write_json(LLM_INSIGHTS_FILE, insights)
+
+                # ── 持久化 → pnl.db ────────────────────────────────────
+                try:
+                    from scripts.db import insert_llm
+                    insert_llm(today, node, text_part, verified_signals,
+                               verified_count, warning_count)
+                except Exception as e:
+                    print(f"  [bridge] SQLite LLM insert error: {e}")
+
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/json')
+                self.end_headers()
+                self.wfile.write(json.dumps({'ok': True, **insight}, ensure_ascii=False).encode())
+                print(f"  [bridge] LLM [{mode}] {node}: {len(text_part)} chars, {verified_count}\u2705/{warning_count}\u26a0\ufe0f")
+
+            except json.JSONDecodeError:
+                self.send_response(400)
+                self.send_header('Content-Type', 'application/json')
+                self.end_headers()
+                self.wfile.write(json.dumps({'ok': False, 'error': 'Invalid JSON'}).encode())
             except Exception as e:
                 self.send_response(500)
+                self.send_header('Content-Type', 'application/json')
                 self.end_headers()
                 self.wfile.write(json.dumps({'ok': False, 'error': str(e)}).encode())
                 print(f"  [bridge] LLM exception: {e}")
