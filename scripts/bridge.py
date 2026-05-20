@@ -713,6 +713,13 @@ if __name__ == '__main__':
     # 每30分钟兜底（bridge重启后也能抓到数据）
     scheduler.add_job(sentiment_snapshot.take_sentiment_snapshot, 'cron', minute='0,30', id='sentiment_periodic',
                       max_instances=1, misfire_grace_time=300)
+    # 竞价5维快照：9:26（滞后iwencai轮询30s，确保CACHE就绪）
+    def run_auction_snapshot():
+        import subprocess
+        snap_script = ROOT / "scripts" / "snapshot_auction.py"
+        subprocess.run(["python3", str(snap_script)], capture_output=True, timeout=120, cwd=str(ROOT))
+    scheduler.add_job(run_auction_snapshot, 'cron', hour=9, minute=26, id='auction_0926',
+                      max_instances=1, misfire_grace_time=600)
     # 收盘数据包（15:02 dump CACHE 全量快照）— 暂停，LLM 方案将替代
     # from scripts.snapshot_close import run_snapshot_close
     # scheduler.add_job(lambda: run_snapshot_close(CACHE, ROOT), 'cron', hour=15, minute=2,
