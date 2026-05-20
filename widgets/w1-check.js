@@ -62,7 +62,12 @@ class W1CheckWidget extends YiMuWidget {
     var qx = parseFloat(S['情绪值']) || 0;
     var yestQx = parseFloat(closeS['情绪值']) || 0;
     var ztProfit = parseFloat(String(iw['昨日涨停收益'] != null ? iw['昨日涨停收益'] : S['昨日涨停收益']||'0').replace('%','').replace('+','')) || 0;
-    var fbRate = parseFloat(String(iw['炸板率'] != null ? iw['炸板率'] : M['炸板率']||'0').replace('%','')) || 0;
+    var fbRate = 0;
+    if (iw['炸板率'] != null) {
+      fbRate = parseFloat(iw['炸板率']) * 100;  // iwencai存小数
+    } else if (M['炸板率'] != null) {
+      fbRate = parseFloat(String(M['炸板率']).replace('%','')) || 0;
+    }
     var ztCount = parseInt(iw['涨停家数'] != null ? iw['涨停家数'] : M['涨停家数']) || 0;
     var topBoard = iw['最高板'] != null ? iw['最高板'] : parseInt(String(S['最高板']||'').replace('板','')) || 0;
     var topName = iw['最高板'] ? iw['最高板']+'板' : String(S['最高板']||'');

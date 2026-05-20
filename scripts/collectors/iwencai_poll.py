@@ -156,9 +156,10 @@ def poll_iwencai_sentiment(force=False):
         close_cnt = len(r.get("datas", []))
         r = _iwencai_query("今日跌停 非st", limit=200)
         dt_cnt = len(r.get("datas", []))
-        if touch_cnt > 0:
-            results["封板率"] = round(close_cnt / touch_cnt, 4)
-            results["炸板率"] = round((touch_cnt - close_cnt) / touch_cnt, 4)
+        if touch_cnt > 0 or close_cnt > 0:
+            base = max(touch_cnt, close_cnt)
+            results["封板率"] = round(min(close_cnt / base, 1.0), 4) if base > 0 else 0
+            results["炸板率"] = round(max((touch_cnt - close_cnt) / base, 0), 4)
         results["涨停家数"] = close_cnt
         results["跌停家数"] = dt_cnt
 
