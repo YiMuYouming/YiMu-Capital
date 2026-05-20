@@ -1120,9 +1120,34 @@ if __name__ == '__main__':
     scheduler.start()
     print(f'[bridge] APScheduler started: {len(scheduler.get_jobs())} jobs registered')
 
-    # 冷启动 gen：确保基线数据就位（今天笔记空则自动回退昨天）
-    print(f'[bridge] Cold-start: running gen_dashboard_data.py...')
-    run_gen_baseline()
+    # 冷启动 gen：每天只跑一次（盘中重启不覆盖 W15 同步的实时持仓/pnl）
+    today_str = datetime.now().strftime('%Y-%m-%d')
+    need_gen = True
+    try:
+        if DATA_FILE.exists():
+            with open(DATA_FILE) as f:
+                dd = json.load(f)
+            if dd.get('meta', {}).get('date') == today_str:
+                need_gen = False
+                print(f'[bridge] Gen already ran today, skipping cold-start to preserve live positions')
+    except Exception:
+        pass
+    if need_gen:
+        print(f'[bridge] Cold-start: running gen_dashboard_data.py...')
+        run_gen_baseline()
+    else:
+        # 即使跳过 gen，也要重新加载 pnl（W15 同步的值可能在冷启动恢复时丢失）
+        try:
+            with open(DATA_FILE) as f:
+                dd = json.load(f)
+            pnl = dd.get('pnl', {})
+            if pnl:
+                CACHE['pnl'] = CACHE.get('pnl', {})
+                for k in ['总资产', '累计入金', '可用资金']:
+                    if k in pnl and pnl[k] is not None:
+                        CACHE['pnl'][k] = pnl[k]
+        except Exception:
+            pass
 
     # 冷启动：强制执行一次初始采集填充缓存（不受 is_trading_time 限制）
     print(f'[bridge] Cold-start bootstrap: running initial collection...')
