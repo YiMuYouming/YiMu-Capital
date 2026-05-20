@@ -34,10 +34,7 @@ CACHE_FILE = ROOT / "data" / "cache_dump.json"
 DATA_FILE = ROOT / "data/dashboard_data.json"
 LLM_INSIGHTS_FILE = ROOT / "data/llm_insights.json"
 
-# 可持久化的 CACHE key 列表
-_PERSIST_KEYS = ['live_index','live_quotes','breadth','live_sectors','iwencai',
-                 'northbound','hot_list','sector_inflow','yesterday_baseline','pools',
-                 '上证15min','深证15min','创业15min']
+_llm_rate_lock = Lock()
 
 
 def _load_cache():
@@ -736,31 +733,33 @@ class BridgeHandler(SimpleHTTPRequestHandler):
             try:
                 payload = json.loads(body)
                 mode = payload.get('mode', 'auto')   # auto | manual
-                question = payload.get('question', '')
+                question = payload.get('question', None)  # None when "立即研判" has no user question
+                userMsg = payload.get('userMsg', None)  # P1-3: 用户消息，供后端写入 conversation
 
                 # 服务端生成时间节点，不再信任前端
                 now_ts = datetime.now().strftime('%H:%M:%S')
                 node = payload.get('node', now_ts)
 
-                # ── Rate Limit（仅手动模式）─────────────────────────────
+                # ── Rate Limit（仅手动模式，线程安全）────────────────────
                 if mode == 'manual':
-                    if '_llm_rate' not in CACHE:
-                        CACHE['_llm_rate'] = {}
                     now_s = time.time()
-                    recent = [t for t in CACHE['_llm_rate'].get('manual', [])
-                              if now_s - t < 60]
-                    if len(recent) >= 10:
-                        self.send_response(429)
-                        self.send_header('Content-Type', 'application/json')
-                        self.end_headers()
-                        self.wfile.write(json.dumps({
-                            'ok': False,
-                            'error_type': 'rate_limit',
-                            'error': '请求太频繁，请30秒后再试'
-                        }, ensure_ascii=False).encode())
-                        print(f"  [bridge] Rate limited: manual mode")
-                        return
-                    CACHE['_llm_rate']['manual'] = recent + [now_s]
+                    with _llm_rate_lock:
+                        if '_llm_rate' not in CACHE:
+                            CACHE['_llm_rate'] = {}
+                        recent = [t for t in CACHE['_llm_rate'].get('manual', [])
+                                  if now_s - t < 60]
+                        if len(recent) >= 10:
+                            self.send_response(429)
+                            self.send_header('Content-Type', 'application/json')
+                            self.end_headers()
+                            self.wfile.write(json.dumps({
+                                'ok': False,
+                                'error_type': 'rate_limit',
+                                'error': '请求太频繁，请30秒后再试'
+                            }, ensure_ascii=False).encode())
+                            print(f"  [bridge] Rate limited: manual mode")
+                            return
+                        CACHE['_llm_rate']['manual'] = recent + [now_s]
 
                 # ── 快照（后端统一构建）─────────────────────────────────
                 snapshot = _build_full_snapshot()
@@ -772,7 +771,7 @@ class BridgeHandler(SimpleHTTPRequestHandler):
                                '请按W1特别关注4项评估：龙头状态、板块合力、候选标的、竞价三件套。'
                                '连板池中标的的操作信号优先输出。')
 
-                if mode == 'manual':
+                if mode == 'manual' and question:
                     prompt = (f"用户提问时间: {node}\n"
                               f"用户问题: {question}\n\n"
                               f"全盘数据:\n{json.dumps(snapshot, ensure_ascii=False, indent=2)}\n\n"
@@ -854,6 +853,15 @@ class BridgeHandler(SimpleHTTPRequestHandler):
                     meta['auto_trigger_count'] = meta.get('auto_trigger_count', 0) + 1
                 else:
                     meta['manual_question_count'] = meta.get('manual_question_count', 0) + 1
+
+                # P1-3: 先写用户消息，再写 AI 回复，保证刷新后对话完整
+                if userMsg and isinstance(userMsg, dict) and userMsg.get('text'):
+                    insights[today]['conversation'].append({
+                        'role': 'user',
+                        'ts': userMsg.get('ts', now_ts),
+                        'text': userMsg.get('text', ''),
+                        'auto': False,
+                    })
 
                 insights[today]['conversation'].append({
                     'role': 'assistant',
@@ -1013,6 +1021,101 @@ if __name__ == '__main__':
                       max_instances=1, misfire_grace_time=600)
     scheduler.add_job(run_gen_baseline, 'cron', hour=15, minute=10, id='gen_baseline_1510',
                       max_instances=1, misfire_grace_time=600)
+
+    # T5 LLM 自动研判（15min，盘中时段，浏览器关闭也能运行）
+    def trigger_llm_auto():
+        now = datetime.now()
+        h, m = now.hour, now.minute
+        total_min = h * 60 + m
+        # 非交易时段跳过（9:25 - 15:05）
+        if total_min < 565 or total_min > 905:
+            return
+        # 速率限制（14min 冷却，900s）
+        now_s = time.time()
+        with _llm_rate_lock:
+            recent = [t for t in CACHE.get('_llm_rate', {}).get('auto', [])
+                      if now_s - t < 900]
+            if len(recent) >= 100:   # 宽松限制，避免占满手动额度
+                return
+            CACHE.setdefault('_llm_rate', {})['auto'] = recent + [now_s]
+        # 直接调用内部 LLM 流程（复用 POST /api/llm 的逻辑，不走 HTTP）
+        node = now.strftime('%H:%M:%S')
+        try:
+            snapshot = _build_full_snapshot()
+            w1_hint = ''
+            if '09:' in node or '10:0' in node:
+                w1_hint = ('\n\n⚠️ 当前是W1早盘时段(9:30-10:00)。'
+                           '请按W1特别关注4项评估：龙头状态、板块合力、候选标的、竞价三件套。'
+                           '连板池中标的的操作信号优先输出。')
+            prompt = f"当前时间: {node}{w1_hint}\n\n全盘数据:\n{json.dumps(snapshot, ensure_ascii=False, indent=2)}"
+            result = _call_llm_api(prompt)
+            if not result.get('ok'):
+                print(f"  [bridge] LLM auto error: {str(result.get('error',''))[:80]}")
+                return
+            raw_text = result['text']
+            text_part = raw_text
+            signals_part = ''
+            if '[TEXT]' in raw_text and '[SIGNALS]' in raw_text:
+                parts = raw_text.split('[SIGNALS]')
+                text_part = parts[0].replace('[TEXT]', '').strip()
+                signals_part = parts[1].strip() if len(parts) > 1 else ''
+            if not raw_text.strip():
+                text_part = '(模型返回为空，请重试)'
+            verified_signals = []
+            if signals_part:
+                try:
+                    verified_signals = _verify_signals(signals_part, snapshot)
+                except Exception as e:
+                    print(f"  [bridge] signal verify error: {e}")
+            verified_count = sum(1 for v in verified_signals if v.get('status') == '\u2705')
+            warning_count = sum(1 for v in verified_signals if v.get('status') == '\u26a0\ufe0f')
+            insight = {
+                'timestamp': node,
+                'node': node,
+                'mode': 'auto',
+                'text': text_part,
+                'signals': verified_signals,
+                'verified_count': verified_count,
+                'warning_count': warning_count,
+            }
+            # 持久化（与 POST /api/llm 完全相同的写入逻辑）
+            today = now.strftime('%Y-%m-%d')
+            insights = {}
+            if LLM_INSIGHTS_FILE.exists():
+                try:
+                    with open(LLM_INSIGHTS_FILE) as f:
+                        insights = json.load(f)
+                except Exception:
+                    pass
+            if today not in insights:
+                insights[today] = {'meta': {}, 'conversation': []}
+            meta = insights[today].setdefault('meta', {})
+            if 'started_at' not in meta:
+                meta['started_at'] = node
+            meta['last_assistant_ts'] = node
+            meta['auto_trigger_count'] = meta.get('auto_trigger_count', 0) + 1
+            insights[today]['conversation'].append({
+                'role': 'assistant',
+                'ts': node,
+                'text': text_part,
+                'signals': verified_signals,
+                'auto': True,
+            })
+            LLM_INSIGHTS_FILE.parent.mkdir(parents=True, exist_ok=True)
+            atomic_write_json(LLM_INSIGHTS_FILE, insights)
+            try:
+                from scripts.db import insert_llm
+                insert_llm(today, node, text_part, verified_signals,
+                           verified_count, warning_count)
+            except Exception as e:
+                print(f"  [bridge] SQLite LLM insert error: {e}")
+            print(f"  [bridge] LLM [auto-scheduler] {node}: {len(text_part)} chars, {verified_count}\u2705/{warning_count}\u26a0\ufe0f")
+        except Exception as e:
+            print(f"  [bridge] LLM auto-scheduler exception: {e}")
+
+    # 每14分钟触发一次（留1分钟缓冲，比前端的15min间隔略快以避免漂移）
+    scheduler.add_job(trigger_llm_auto, 'interval', seconds=840, id='llm_auto_14min',
+                      max_instances=1, misfire_grace_time=60, coalesce=True)
 
     scheduler.start()
     print(f'[bridge] APScheduler started: {len(scheduler.get_jobs())} jobs registered')

@@ -388,21 +388,10 @@ function _updateLlmBadge() {
 }
 
 function _notifyLLMAuto(text) {
-  // Toast 弹出
-  var summary = (text || '').substring(0, 80);
-      showToast('🤖 AI研判: ' + summary + (summary.length >= 80 ? '...' : ''));
-  // 红点（聊天框未聚焦时计数）
-  var panelBody = document.getElementById('llmPanelBody');
-  if (!panelBody || document.activeElement !== panelBody) {
-    _llmBadgeCount++;
-  }
-  _updateLlmBadge();
-}
-function _notifyLLMAuto(text) {
   var summary = (text || '').substring(0, 80);
   showToast('🤖 AI研判: ' + summary + (summary.length >= 80 ? '...' : ''));
   // 红点（聊天框未聚焦时计数）
-  var panelBody = document.getElementById('llmPanelBody');
+  var panelBody = document.getElementById('chatMessages');
   if (!panelBody || !panelBody.contains(document.activeElement)) {
     _llmBadgeCount++;
   }
