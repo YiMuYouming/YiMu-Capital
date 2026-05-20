@@ -730,6 +730,10 @@ if __name__ == '__main__':
     scheduler.start()
     print(f'[bridge] APScheduler started: {len(scheduler.get_jobs())} jobs registered')
 
+    # 冷启动 gen：确保基线数据就位（今天笔记空则自动回退昨天）
+    print(f'[bridge] Cold-start: running gen_dashboard_data.py...')
+    run_gen_baseline()
+
     # 冷启动：强制执行一次初始采集填充缓存（不受 is_trading_time 限制）
     print(f'[bridge] Cold-start bootstrap: running initial collection...')
     for bootstrap_fn in [quotes.collect_index, quotes.collect_quotes, quotes.collect_sectors, iwencai_poll.poll_iwencai_sentiment, quotes.collect_yesterday_compare, quotes.collect_kline_15m, quotes.log_pnl_snapshot, quotes.collect_hot_list]:
