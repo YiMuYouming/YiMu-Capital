@@ -41,7 +41,7 @@
     '.pnl-drawer-btn.pnl-drawer-btn-open{background:var(--accent-bg);border-color:var(--accent);color:var(--accent)}' +
     '.pnl-drawer-btn::after{content:"▼";font-size:9px;color:var(--text-disabled);transition:transform .2s}' +
     '.pnl-drawer-btn.pnl-drawer-btn-open::after{transform:rotate(180deg)}' +
-    '.pnl-drawer{display:none;margin:0 14px 14px;border-radius:8px;border:1px solid var(--border-light);overflow:hidden}' +
+    '.pnl-drawer{display:none;margin:0 14px 14px;border-radius:8px;border:1px solid var(--border-light);overflow-x:auto}' +
     '.pnl-drawer.pnl-drawer-open{display:block}' +
     // Table
     '.pnl-table{width:100%;border-collapse:collapse;font-size:12px}' +
