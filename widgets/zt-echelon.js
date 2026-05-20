@@ -337,8 +337,6 @@ class ZtEchelonWidget extends YiMuWidget {
     // LLM slot
     html += this._renderLLMSlot();
 
-    // Debug line
-
     body.innerHTML = html;
 
     // Bind events

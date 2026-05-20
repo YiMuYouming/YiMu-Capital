@@ -244,9 +244,9 @@ def collect_kline_15m(force=False):
         print(f"  [quotes] collect_kline_15m error: {e}", file=sys.stderr)
 
 
-def log_pnl_snapshot():
+def log_pnl_snapshot(force=False):
     """300s: P&L 快照写入 pnl.db（独立计算，不依赖前端组件）"""
-    if not is_trading_time():
+    if not force and not is_trading_time():
         return
     try:
         from scripts.db import get_conn, init_db
