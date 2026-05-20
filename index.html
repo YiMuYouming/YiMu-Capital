@@ -36,6 +36,7 @@
 <script src="widgets/anchor-stocks.js"></script>
 <script src="widgets/midday-review.js"></script>
 <script src="widgets/llm-monitor.js"></script>
+<script src="widgets/llm-chat.js"></script>
 <script src="widgets/zt-echelon.js"></script>
 <script src="widgets/pnl-curve.js"></script>
 <style>
@@ -154,6 +155,9 @@ body.ready{opacity:1}
 
 <!-- Toast -->
 <div class="toast" id="toast"></div>
+
+<!-- LLM Chat 浮动框容器 -->
+<div id="llmChatMount"></div>
 
 <script src="https://cdn.jsdelivr.net/npm/gridstack@12.0.0/dist/gridstack-all.min.js"></script>
 <script>
@@ -362,7 +366,10 @@ document.getElementById('widgetPanelClose').addEventListener('click', function()
 // 顶栏按钮
 document.getElementById('addWidgetBtn').addEventListener('click', _showWidgetPanel);
 document.getElementById('inputPanelBtn').addEventListener('click', _showInputPanel);
-document.getElementById('llmPanelBtn').addEventListener('click', _showLLMPanel);
+document.getElementById('llmPanelBtn').addEventListener('click', function() {
+  if (window._llmChat) window._llmChat.show();
+  else _showLLMPanel();  // fallback
+});
 document.getElementById('pnlCurveBtn').addEventListener('click', function() { _addWidgetToGrid('W22'); });
 
 // === W20 AI盯盘浮窗（红点+Toast）===
@@ -797,6 +804,12 @@ function waitForGridStack() {
     DataStore.init();
     // 初始化组件注册（widget 脚本已加载时自动注册见各 widget 文件末尾）
     initGrid();
+    // LlmChatWidget（浮动聊天框，独立于 GridStack）
+    if (window.LlmChatWidget) {
+      var chatEl = document.getElementById('llmChatMount');
+      window._llmChat = new LlmChatWidget({ id: 'LLM_CHAT' });
+      window._llmChat.mount(chatEl);
+    }
     // 尝试拉取基线数据（file:// 协议下会失败，降级到兜底数据）
     DataStore.fetchAll();
     // v2.0 PyTDX 实时管线：每个 tick 组件自带 5s 定时器刷新
