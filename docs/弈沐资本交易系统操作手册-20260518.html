@@ -1,0 +1,416 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>弈沐资本 交易系统操作手册 — 2026-05-20</title>
+<style>
+:root {
+  --bg: #F7F5F3;--card:#FFFFFF;--border:#E7E5E2;--border-l:#F0EEEA;
+  --t1:#2D2926;--t2:#5C5652;--t3:#8A8480;--t4:#FAFAF9;
+  --up:#DC2626;--up-bg:rgba(220,38,38,.06);--down:#059669;--down-bg:rgba(5,150,105,.06);
+  --warn:#D97706;--warn-bg:rgba(217,119,6,.06);--info:#2563EB;--info-bg:rgba(37,99,235,.06);
+  --special:#7C3AED;--special-bg:rgba(124,58,237,.06);
+  --r-sm:6px;--r-md:10px;--r-lg:16px;
+  --fs-xs:11px;--fs-sm:13px;--fs-body:14px;--fs-h4:15px;--fs-h3:17px;--fs-h2:20px;--fs-h1:26px;
+  --mono:'SF Mono','JetBrains Mono',ui-monospace,monospace;
+  --sans:-apple-system,'Noto Sans SC',system-ui,sans-serif;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:var(--sans);background:var(--bg);color:var(--t1);line-height:1.7;font-size:var(--fs-body)}
+.wrap{max-width:1000px;margin:0 auto;padding:32px 28px 80px}
+
+.hero{background:var(--card);border:1px solid var(--border);border-radius:var(--r-lg);padding:36px 40px;margin-bottom:28px;box-shadow:0 1px 3px rgba(0,0,0,.04)}
+.hero h1{font-size:var(--fs-h1);font-weight:800;letter-spacing:-.5px;margin-bottom:6px}
+.hero .sub{color:var(--t2);font-size:var(--fs-body);margin-bottom:12px}
+.hero .tags{display:flex;gap:12px;flex-wrap:wrap;font-size:var(--fs-xs);color:var(--t3)}
+.hero .tags span{padding:4px 12px;background:var(--bg);border-radius:20px}
+
+.section{margin-bottom:36px}
+.section h2{font-size:var(--fs-h2);font-weight:700;margin-bottom:14px;padding-bottom:8px;border-bottom:2px solid var(--border);letter-spacing:-.3px;display:flex;align-items:center;gap:10px}
+.section h2 .badge{font-family:var(--mono);font-size:var(--fs-xs);padding:2px 10px;border-radius:12px;font-weight:600}
+.section h2 .badge.ssot{background:var(--warn-bg);color:var(--warn)}
+
+/* Data flow */
+.flow{background:var(--card);border:1px solid var(--border);border-radius:var(--r-lg);padding:24px 28px;margin-bottom:20px;box-shadow:0 1px 3px rgba(0,0,0,.04)}
+.flow h3{font-size:var(--fs-h3);font-weight:700;margin-bottom:14px;display:flex;align-items:center;gap:8px}
+.flow-layer{margin-bottom:14px}
+.flow-label{font-size:var(--fs-xs);font-weight:700;color:var(--t3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px;padding-left:2px}
+.flow-box{border:1px dashed var(--border);border-radius:var(--r-md);padding:12px 16px;background:var(--card)}
+.flow-box.spot{border-style:solid;border-color:var(--border);background:rgba(37,99,235,.02)}
+.flow-row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:6px}.flow-row:last-child{margin-bottom:0}
+.fn{padding:6px 12px;border-radius:var(--r-sm);font-size:var(--fs-sm);font-weight:600;white-space:nowrap;line-height:1.4}
+.fn.t1{background:var(--down-bg);color:var(--down);border:1px solid #C9ECD9}
+.fn.t2{background:var(--info-bg);color:var(--info);border:1px solid #D1E3FA}
+.fn.t3{background:var(--warn-bg);color:var(--warn);border:1px solid #FDE8C8}
+.fn.t4{background:var(--special-bg);color:var(--special);border:1px solid #DDD0F5}
+.fn.api{background:#EFF6FF;color:var(--info);border:1px solid #B1CFF5}
+.fn.ssot{background:#FFF7ED;color:#9A5D0B;border:2px solid var(--warn)}
+.fn.llm{background:#F5F0FF;color:#7C3AED;border:1px solid #DDD0F5}
+.arrow{color:var(--t3);font-size:var(--fs-sm);margin:0 4px;flex-shrink:0}
+
+/* Timeline */
+.tl{background:var(--card);border:1px solid var(--border);border-radius:var(--r-lg);margin-bottom:16px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,.04)}
+.tl-h{padding:16px 24px;font-weight:700;font-size:var(--fs-body);display:flex;align-items:center;gap:10px}
+.tl-h .time{font-family:var(--mono);font-size:var(--fs-sm);padding:2px 10px;border-radius:4px;color:#fff;flex-shrink:0}
+.tl-h .time.m1{background:var(--down)}
+.tl-h .time.m2{background:var(--info)}
+.tl-h .time.m3{background:var(--warn)}
+.tl-h .time.m4{background:var(--special)}
+.tl-h .time.m5{background:var(--up)}
+.tl-b{padding:0 24px 16px;font-size:var(--fs-sm);color:var(--t2);line-height:1.7}
+.tl-b code{font-family:var(--mono);font-size:var(--fs-xs);background:var(--bg);padding:1px 6px;border-radius:3px}
+.tl-b .highlight{background:var(--down-bg);padding:8px 12px;border-radius:var(--r-sm);margin:6px 0;font-size:var(--fs-xs);color:var(--down)}
+
+/* SSOT table */
+.st{width:100%;border-collapse:collapse;font-size:var(--fs-sm)}
+.st th{background:var(--bg);padding:8px 10px;text-align:left;font-weight:700;font-size:var(--fs-xs);color:var(--t3);border-bottom:2px solid var(--border)}
+.st td{padding:7px 10px;border-bottom:1px solid var(--border-l);vertical-align:top}
+.st tr:hover td{background:var(--bg)}
+.tt{font-family:var(--mono);font-size:10px;font-weight:700;padding:1px 6px;border-radius:4px;color:#fff;white-space:nowrap}
+.tt.t1{background:var(--down)}.tt.t2{background:var(--info)}.tt.t3{background:var(--warn)}.tt.t4{background:var(--special)}
+.st .loc{font-family:var(--mono);font-size:var(--fs-xs);color:var(--t3)}
+.st .yes{color:var(--down);font-weight:600}
+
+/* Cards */
+.cg{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px;margin-bottom:20px}
+.cc{background:var(--card);border:1px solid var(--border);border-radius:var(--r-md);padding:16px 18px;box-shadow:0 1px 3px rgba(0,0,0,.04);border-top:3px solid}
+.cc .ct{font-weight:700;font-size:var(--fs-body);margin-bottom:4px}
+.cc .cd{font-size:var(--fs-sm);color:var(--t2);line-height:1.5}
+hr{border:none;border-top:1px solid var(--border);margin:28px 0}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<div class="hero">
+<h1>弈沐资本 交易系统操作手册</h1>
+<div class="sub">2026-05-20 — W20 AI 盯盘全线升级 + 全量 SSOT 审计 + 12 项 bug 修复。以下是你现在拥有的完整系统。</div>
+<div class="tags"><span>数据架构评估 92/100</span><span>31 commits 今天</span><span>22 组件 SSOT 一致性验证通过</span></div>
+</div>
+
+<!-- ====== 一、数据流架构 ====== -->
+<div class="section"><h2>一、现在数据是怎么流的</h2>
+<div class="flow">
+<h3>采集层 → 存储层 → 展示层</h3>
+
+<div class="flow-layer">
+<div class="flow-label">T1 实时采集（秒级）— PyTDX 通达信</div>
+<div class="flow-box">
+<div class="flow-row">
+<span class="fn t1">个股行情 5s</span><span class="arrow">→</span>
+<span class="fn t1">三大指数 5s</span><span class="arrow">→</span>
+<span class="fn t1">涨跌分布5000只 30s</span><span class="arrow">→</span>
+<span class="fn t1">板块行情 30s</span><span class="arrow">→</span>
+<span class="fn t1">15min量价 60s</span>
+</div>
+<div class="flow-row" style="margin-top:4px">
+<span class="fn ssot" style="font-size:10px">bridge CACHE 内存</span><span class="arrow">→</span>
+<span class="fn api">GET /api/live/quotes</span><span class="arrow">→</span>
+<span class="fn t1">W04 W08 W09 W10 W11 W12 W13 W14 W15 W18 W21 W22</span>
+</div>
+</div>
+</div>
+
+<div class="flow-layer">
+<div class="flow-label">T2 阶段采集（分钟级）— iwencai pywencai + 同花顺</div>
+<div class="flow-box">
+<div class="flow-row">
+<span class="fn t2">iwencai 情绪 10min</span>
+<span class="fn t2">ths_hot 热榜 5min</span>
+<span class="fn t2">northbound 北向 60s</span>
+<span class="fn t2">sector_inflow 5min</span>
+<span class="fn t2">auction 竞价快照 9:28</span>
+</div>
+<div class="flow-row" style="margin-top:4px">
+<span class="fn ssot" style="font-size:10px">bridge CACHE 内存</span><span class="arrow">→</span>
+<span class="fn api">GET /api/live/quotes (含 iwencai 字段)</span><span class="arrow">→</span>
+<span class="fn t2">W04 W05 W06 W07 W08 W21</span>
+</div>
+</div>
+</div>
+
+<div class="flow-layer">
+<div class="flow-label">T3 实时计算 — bridge + store.js</div>
+<div class="flow-box">
+<div class="flow-row">
+<span class="fn t3">情绪值 = 涨/(涨+跌)×100</span>
+<span class="fn t3">赚钱效应 = 涨停收益阈值判定</span>
+<span class="fn t3">浮盈 = (现价-成本)×数量</span>
+<span class="fn t3">PnL曲线 5min快照</span>
+<span class="fn t3">信号灯 = 自动判定</span>
+</div>
+</div>
+</div>
+
+<div class="flow-layer">
+<div class="flow-label">T4 每日基线 — 复盘笔记 (SSOT)</div>
+<div class="flow-box spot">
+<div class="flow-row">
+<span class="fn t4">自选池 连板+趋势</span>
+<span class="fn t4">风格检测</span>
+<span class="fn t4">持仓成本</span>
+<span class="fn t4">交易记录</span>
+<span class="fn t4">风控基线</span>
+</div>
+<div class="flow-row" style="margin-top:4px">
+<span class="arrow">gen_dashboard_data.py →</span>
+<span class="fn ssot" style="font-size:10px">dashboard_data.json</span>
+<span class="fn ssot" style="font-size:10px">pools.json</span>
+<span class="arrow">→ 消费</span>
+<span class="fn t4">W02 W03 W06 W08 W12 W13 W14 W15 W18</span>
+</div>
+<div class="flow-row"><div style="font-size:var(--fs-xs);color:var(--down);margin-top:2px;font-weight:600">🆕 gen 每天只跑一次（冷启动守护），防止盘中重启覆盖 W15 实时持仓</div></div>
+</div>
+</div>
+</div>
+</div>
+
+<!-- ====== 二、SSOT 表 ====== -->
+<div class="section"><h2>二、每个数据的唯一源头 (SSOT)</h2>
+<div style="overflow-x:auto">
+<table class="st">
+<thead><tr><th>数据域</th><th>SSOT</th><th>频率</th><th>位置</th><th>消费组件</th></tr></thead>
+<tbody>
+<tr><td>个股实时行情</td><td>PyTDX</td><td><span class="tt t1">5s</span></td><td class="loc">CACHE["live_quotes"]</td><td>W06 W08 W09 W10 W12 W13 W14 W15 W21 W22 PnL</td></tr>
+<tr><td>三大指数+涨跌家数</td><td>PyTDX</td><td><span class="tt t1">5s</span></td><td class="loc">CACHE["live_index"]</td><td>W04 W08 W09 W11</td></tr>
+<tr><td>全市场涨跌分布</td><td>PyTDX</td><td><span class="tt t1">30s</span></td><td class="loc">CACHE["breadth"]</td><td>W04</td></tr>
+<tr><td>板块涨跌幅/距MA5</td><td>PyTDX</td><td><span class="tt t1">30s</span></td><td class="loc">CACHE["live_sectors"]</td><td>W10</td></tr>
+<tr><td>15min量价</td><td>PyTDX</td><td><span class="tt t1">60s</span></td><td class="loc">CACHE["上证/深证/创业15min"]</td><td>W11</td></tr>
+<tr><td>成交额较昨日对比</td><td>PyTDX</td><td><span class="tt t1">30s</span></td><td class="loc">CACHE["live_index"] 差/百分比</td><td>W04</td></tr>
+<tr><td><b>情绪指标(涨停收益/连板收益/炸板收益/晋级率/最高板/赚钱效应)</b></td><td><b>iwencai pywencai</b></td><td><span class="tt t2">10min</span></td><td class="loc">CACHE["iwencai"]</td><td>W04 W05 W08 W21</td></tr>
+<tr><td>北向资金</td><td>同花顺 hsgtApi</td><td><span class="tt t2">60s</span></td><td class="loc">CACHE["northbound"]</td><td>W04</td></tr>
+<tr><td>行业净流入</td><td>akshare/同花顺</td><td><span class="tt t2">5min</span></td><td class="loc">CACHE["sector_inflow"]</td><td>W10</td></tr>
+<tr><td>同花顺热榜+题材归因</td><td>同花顺</td><td><span class="tt t2">5min</span></td><td class="loc">CACHE["hot_list"]</td><td>W21</td></tr>
+<tr><td>竞价5维快照</td><td>iwencai OpenAPI</td><td><span class="tt t2">9:28日次</span></td><td class="loc">auction_snapshot.json</td><td>W06 W07</td></tr>
+<tr><td>30min情绪节点快照</td><td>sentiment_snapshot</td><td><span class="tt t2">30min</span></td><td class="loc">sentiment_auto.json</td><td>W05</td></tr>
+<tr style="background:var(--warn-bg)"><td><b>自选池(连板+趋势+锚定)</b></td><td><b>复盘笔记 附录A</b></td><td><span class="tt t4">每日gen</span></td><td class="loc">data/pools.json</td><td>W08 W09 W10 W12 W13 W21</td></tr>
+<tr style="background:var(--down-bg)"><td><b>风格检测(四维度打分)</b></td><td><b>style_detect.py → gen</b></td><td><span class="tt t4">每日gen</span></td><td class="loc">d.style</td><td>W02 W03</td></tr>
+<tr><td>风控基线(连亏/回撤)</td><td>pnl.db → gen自动计算</td><td><span class="tt t4">每日gen</span></td><td class="loc">d.risk</td><td>W03 W08 W14</td></tr>
+<tr><td>PnL净值曲线</td><td>log_pnl_snapshot</td><td><span class="tt t3">5min/日结</span></td><td class="loc">pnl.db</td><td>W22</td></tr>
+<tr><td>持仓(盘前基线+盘中W15同步)</td><td>复盘笔记 + W16</td><td><span class="tt t4">每日+实时</span></td><td class="loc">d.positions</td><td>W14 W15 W22</td></tr>
+<tr><td>手工录入(总资产/可用资金)</td><td>W16 manualData</td><td><span class="tt t4">随录</span></td><td class="loc">localStorage → pnl_history</td><td>W03 W15 W22</td></tr>
+<tr style="background:var(--info-bg)"><td><b>AI 研判</b></td><td><b>/api/llm → DeepSeek V4</b></td><td><span class="tt t2">15min/手动</span></td><td class="loc">llm_insights.json</td><td>W04 W05 W08 W20</td></tr>
+</tbody>
+</table>
+</div>
+</div>
+
+<!-- ====== 三、工具 ====== -->
+<div class="section"><h2>三、你有哪些工具</h2>
+<div class="cg">
+<div class="cc" style="border-color:var(--down)">
+<div class="ct">📊 live-dashboard</div>
+<div class="cd">22 组件盘中实时看板。<br>启动：<code>python3 scripts/bridge.py 8088</code><br>打开：<code>http://localhost:8088</code></div>
+</div>
+<div class="cc" style="border-color:var(--info)">
+<div class="ct">🤖 AI 盯盘（浮动聊天框）</div>
+<div class="cd">点顶栏 🤖 按钮 → 弹出对话框<br>15min 自动研判 + 手动提问<br>读 LLM_RULES.md 你的交易规则<br>3 轮对话记忆，刷新不丢<br>后端 APScheduler 驱动，浏览器关了也跑</div>
+</div>
+<div class="cc" style="border-color:var(--warn)">
+<div class="ct">📝 复盘笔记 + gen 脚本</div>
+<div class="cd">SSOT — 自选池/持仓/风格全来自此<br>gen_dashboard_data.py 每日自动拉取<br>今天空字段自动回退昨天（占位符 — 识别）</div>
+</div>
+<div class="cc" style="border-color:var(--special)">
+<div class="ct">🌐 Portal 门户</div>
+<div class="cd">对外展示 → GitHub Pages 自动部署</div>
+</div>
+<div class="cc" style="border-color:var(--up)">
+<div class="ct">📋 LLM_RULES.md（AI 规则文件）</div>
+<div class="cd">蒸馏你的核心交易铁律 ~70行<br>AI 每次研判前动态读取<br>改 Vault 规则后手动同步到此文件</div>
+</div>
+</div>
+</div>
+
+<!-- ====== 四、每日流程 ====== -->
+<div class="section"><h2>四、一个交易日的完整流程</h2>
+
+<div class="tl">
+<div class="tl-h"><span class="time m1">8:30</span> 盘前准备</div>
+<div class="tl-b">
+<code>gen_baseline</code> APScheduler 自动跑 → dashboard_data.json 刷新<br>
+<code>bridge.py</code> 如没启动就 <code>python3 scripts/bridge.py 8088</code><br>
+打开浏览器 <code>http://localhost:8088</code> → 确认 22 Widget 全部在<br>
+<div class="highlight">你做的事：看一眼仪表盘，确认运行正常。今天笔记空则自动回退昨天数据。</div>
+</div>
+</div>
+
+<div class="tl">
+<div class="tl-h"><span class="time m2">9:25-9:28</span> 竞价结束</div>
+<div class="tl-b">
+<code>sentiment_snapshot 9:25:30</code> 情绪节点快照 → W05<br>
+<code>auction_snapshot 9:28</code> 竞价5维快照 → W06 面板更新<br>
+<div class="highlight">你做的事：看 W06 竞价5维（指数竞价/高标/自选池竞价/信号灯）→ 决定今天方向 / W08 三件套信号</div>
+</div>
+</div>
+
+<div class="tl">
+<div class="tl-h"><span class="time m3">9:30-10:00</span> W1 早盘窗口</div>
+<div class="tl-b">
+<code>PyTDX 5s</code> 个股+指数实时刷新<br>
+<code>iwencai 10min</code> 情绪数据自动轮询 → W04 情绪行 + W08 信号灯 + W21 涨停梯队<br>
+<code>W08</code> 三件套信号灯自动判定（情绪/涨停收益/标的高开）<br>
+<code>W20</code> AI 盯盘 15min 自动研判 + 浮动聊天框可用<br>
+<code>30min</code> 情绪节点快照持续 → W05<br>
+<div class="highlight">你做的事：看 W08 信号 → 决定是否出手 → 操作后在 W15 记流水</div>
+</div>
+</div>
+
+<div class="tl">
+<div class="tl-h"><span class="time m4">10:00-11:30</span> 上午观察</div>
+<div class="tl-b">
+<code>W13</code> 趋势池实时涨幅 + <code>W10</code> 板块净流入<br>
+<code>W20</code> 15min 持续研判<br>
+<code>W21</code> 涨停梯队（热榜+题材归因+连板性质）<br>
+<div class="highlight">纯看盘，不填表。有疑问点 🤖 问 AI。</div>
+</div>
+</div>
+
+<div class="tl">
+<div class="tl-h"><span class="time m3">11:30-13:00</span> 午休</div>
+<div class="tl-b">
+行情采集暂停<br>
+可以回顾 W19 午盘复核（V反+双冰判定）<br>
+<div class="highlight">W05 情绪节点保留午盘快照供参考</div>
+</div>
+</div>
+
+<div class="tl">
+<div class="tl-h"><span class="time m4">13:00-14:30</span> 下午盘</div>
+<div class="tl-b">
+行情恢复，PyTDX 30min 快照持续<br>
+<code>W20</code> 每 15min 自动研判（后端 APScheduler 840s，浏览器关了也跑）<br>
+<div class="highlight">看盘、和 AI 对话。输入自然语言问题：持仓分析、板块机会、个股研判</div>
+</div>
+</div>
+
+<div class="tl">
+<div class="tl-h"><span class="time m5">14:00-14:50</span> W2 尾盘窗口</div>
+<div class="tl-b">
+<code>W09</code> 60min MA10 回踩信号 + 缩量判定<br>
+<code>W14</code> 账户风控（熔断/周回撤/月回撤/连亏天数 均从 pnl.db 实时算）<br>
+<div class="highlight">决定是否 W2 低吸/减仓 → W15 记流水（买入/卖出自动扣可用资金）</div>
+</div>
+</div>
+
+<div class="tl">
+<div class="tl-h"><span class="time m1">15:00-15:10</span> 收盘</div>
+<div class="tl-b">
+<code>gen_baseline 15:10</code> 收盘基线刷新（含当日风控指标计算）<br>
+<code>sentiment_snapshot 15:00</code> 收盘节点存盘<br>
+<div class="highlight">收盘后笔记自动填完。看一遍，补策略心得和次日预案方向。</div>
+</div>
+</div>
+
+<div class="tl">
+<div class="tl-h"><span class="time m2">收盘后</span> 复盘 + 对抗</div>
+<div class="tl-b">
+稳米：在已自动填好的笔记基础上写次日预案、红方对抗<br>
+洋米：执行红方对抗（问财 6 查 + 五维清单 + 三回合）<br>
+你需要：看附录A 终稿 → 确认 → 明天直接用<br>
+<div class="highlight" style="background:var(--warn-bg);color:var(--warn)">🆕 改 Vault 核心规则后，手动同步到 LLM_RULES.md → AI 下次研判自动跟上</div>
+</div>
+</div>
+</div>
+
+<!-- ====== 五、vs 之前 ====== -->
+<div class="section"><h2>五、重构前 vs 现在</h2>
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">
+<div class="flow" style="border:1px solid var(--up)">
+<h3 style="color:var(--up)">重构前（76/100）</h3>
+<ul style="font-size:var(--fs-sm);color:var(--t2);line-height:2.2;padding-left:18px">
+<li>5 条管线各自为政</li>
+<li>1663 行上帝脚本</li>
+<li>情绪值三源竞态</li>
+<li>板块假实时</li>
+<li>18 个 .bak 残留</li>
+<li>硬编码路径 8 处</li>
+<li>SSOT 溯源 10/50+</li>
+<li>复盘笔记 45 分钟贴数据</li>
+</ul>
+</div>
+<div class="flow" style="border:2px solid var(--down)">
+<h3 style="color:var(--down)">现在（92/100）</h3>
+<ul style="font-size:var(--fs-sm);color:var(--t2);line-height:2.2;padding-left:18px">
+<li>1 个命令启动：<code>python3 bridge.py 8088</code></li>
+<li>APScheduler 20+ job 自动调度</li>
+<li>情绪值 T3 主源 > T2 校验 > T4 覆盖</li>
+<li>22 组件 SSOT 一致性验证通过</li>
+<li>W20 AI 浮动聊天框 15min 自动+手动</li>
+<li>AI 研判处动态读 LLM_RULES.md + CLAUDE.md</li>
+<li>PnL 日内基准+持仓过滤 3 bug 全修</li>
+<li>gen 冷启动守护，盘中重启不丢数据</li>
+<li>iwencai 10min 轮询（pywencai 降级）</li>
+<li>竞价自选池自动过滤已清仓/不追</li>
+<li>W05 情绪节点 baseline 兜底</li>
+<li>0 .bak 残留 · 0 硬编码路径</li>
+</ul>
+</div>
+</div>
+</div>
+
+<!-- ====== 六、常用命令 ====== -->
+<div class="section"><h2>六、常用命令速查</h2>
+<div class="flow">
+<table class="st">
+<thead><tr><th>操作</th><th>命令</th></tr></thead>
+<tbody>
+<tr><td>启动看板</td><td><code>cd ~/Documents/YM_Capital/live-dashboard && python3 scripts/bridge.py 8088</code></td></tr>
+<tr><td>打开看板</td><td>浏览器 → <code>http://localhost:8088</code></td></tr>
+<tr><td>重启 bridge</td><td><code>kill $(lsof -ti:8088) && cd ~/Documents/YM_Capital/live-dashboard && python3 scripts/bridge.py 8088 &</code></td></tr>
+<tr><td>刷新复盘基线</td><td><code>curl -X POST http://localhost:8088/api/refresh</code></td></tr>
+<tr><td>手动触发 AI 研判</td><td>浏览器 W20 浮动框 → 🔄 立即研判</td></tr>
+<tr><td>查看 AI 对话历史</td><td><code>curl http://localhost:8088/api/llm/history | python3 -m json.tool</code></td></tr>
+<tr><td>查看全盘快照</td><td><code>curl http://localhost:8088/api/debug/snapshot | python3 -m json.tool</code></td></tr>
+<tr><td>查看 SSOT 溯源</td><td><code>DataStore.getSSOT('sentiment.情绪值')</code> ← 浏览器 Console</td></tr>
+<tr><td>同步 LLM_RULES.md</td><td>改 Vault 核心规则后 → 手动同步到 <code>live-dashboard/LLM_RULES.md</code></td></tr>
+</tbody>
+</table>
+</div>
+</div>
+
+<!-- ====== 七、AI 研判架构 ====== -->
+<div class="section"><h2>七、AI 研判是怎么工作的</h2>
+<div class="flow">
+<h3>🤖 每次研判（自动/手动）→ 完整流水线</h3>
+<div class="flow-row" style="margin-bottom:10px">
+<span class="fn llm">1. 读 LLM_RULES.md</span><span class="arrow">+</span>
+<span class="fn llm">2. 读 CLAUDE.md</span><span class="arrow">→</span>
+<span class="fn ssot">动态拼 system prompt</span>
+</div>
+<div class="flow-row" style="margin-bottom:10px">
+<span class="fn t1">3. _build_full_snapshot()</span><span class="arrow">→</span>
+<span class="fn ssot">8域全盘实时数据</span>
+</div>
+<div class="flow-row" style="margin-bottom:10px">
+<span class="fn t2">4. llm_insights.json</span><span class="arrow">→</span>
+<span class="fn ssot">最近3轮对话记忆</span>
+</div>
+<div class="flow-row" style="margin-bottom:10px">
+<span class="fn api">POST /api/llm</span><span class="arrow">→</span>
+<span class="fn llm">DeepSeek V4-Flash</span><span class="arrow">→</span>
+<span class="fn t3">[TEXT] 研判 + [SIGNALS] 信号</span>
+</div>
+<div class="flow-row" style="margin-bottom:10px">
+<span class="fn t3">_verify_signals()</span><span class="arrow">→</span>
+<span class="fn t3">交叉验证 ✅/⚠️</span>
+</div>
+<div class="flow-row">
+<span class="fn t2">持久化</span><span class="arrow">→</span>
+<span class="fn ssot">llm_insights.json (v2 conversation)</span>
+<span class="fn ssot">pnl.db llm_insights 表</span>
+</div>
+<div style="margin-top:12px;font-size:var(--fs-xs);color:var(--t3)">
+<code>_build_full_snapshot()</code> 读取：指数(实时) + 情绪(wencai 10min) + 连板池(gen+实时) + 趋势池(gen+实时) + 持仓(gen+W15同步) + 板块(gen) + 涨停梯队(hot_list) + 风控(gen)
+</div>
+</div>
+</div>
+
+<hr>
+<div style="text-align:center;color:var(--t3);font-size:var(--fs-xs)">
+弈沐资本 交易数据系统 · 2026-05-20 · Phase 4 AI 系统就位 · 31 commits 今天
+</div>
+
+</div>
+</body>
+</html>
