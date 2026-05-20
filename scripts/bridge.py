@@ -297,6 +297,153 @@ def _add_freshness(data, data_type, fetched_at=None):
     return data
 
 
+# ===== 快照构建（供 LLM 和调试端点使用） =====
+
+def _load_dashboard_data():
+    """读取 dashboard_data.json，带缓存避免重复读盘"""
+    try:
+        if DATA_FILE.exists():
+            with open(DATA_FILE) as f:
+                return json.load(f)
+    except Exception:
+        pass
+    return {}
+
+
+def _build_full_snapshot():
+    """
+    聚合所有数据源，构建供 LLM 研判使用的全盘快照。
+    优先级：CACHE（实时） > dashboard_data.json（基线兜底）
+    """
+    dd = _load_dashboard_data()
+    risk = dd.get('risk', {})
+    live_quotes = CACHE.get('live_quotes', {})
+    live_index = CACHE.get('live_index', {})
+    iwencai = CACHE.get('iwencai', {}) or dd.get('sentiment', {})
+
+    # ── 1. 指数 ──────────────────────────────────────────────
+    def _idx(key, fallback=''):
+        return live_index.get(key, dd.get('market', {}).get(key, fallback))
+
+    def _idx_pct(key, fallback='—'):
+        raw = _idx(key, fallback)
+        if raw == '—':
+            return '—'
+        return str(raw)
+
+    index_snap = {
+        '上证': {'涨跌幅': _idx('上证指数涨幅', '—'), '成交额': _idx('上证指数成交额', '—')},
+        '深证': {'涨跌幅': _idx('深证指数涨幅', '—'), '成交额': _idx('深证指数成交额', '—')},
+        '创业': {'涨跌幅': _idx('创业指数涨幅', '—'), '成交额': _idx('创业指数成交额', '—')},
+    }
+
+    # ── 2. 情绪（实时 iwencai 优先，兜底 baseline sentiment） ──
+    sentiment_snap = {
+        '涨停收益':     iwencai.get('昨日涨停收益', 0),
+        '连板收益':     iwencai.get('连板收益', 0),
+        '炸板收益':     iwencai.get('炸板收益', 0),
+        '晋级率':       iwencai.get('晋级率', 0),
+        '赚钱效应':     iwencai.get('赚钱效应', '—'),
+        '最高板':       iwencai.get('最高板', '—'),
+        '封板率':       iwencai.get('封板率', '—'),
+        '情绪值':       iwencai.get('情绪值', '—'),
+    }
+
+    # ── 3. 连板池（基线 + 实时涨幅/量比） ──────────────────────
+    lianban_pool = []
+    for s in (dd.get('lianban_pool') or []):
+        code = str(s.get('代码', ''))
+        q = live_quotes.get(code, {})
+        pnl_str = str(q.get('涨幅', '—'))
+        lianban_pool.append({
+            '标的': s.get('标的', '—'),
+            '代码': code,
+            '板块': s.get('板块', '—'),
+            '角色': s.get('角色', '—'),
+            '涨幅': pnl_str,
+            '量比': q.get('量比', s.get('量比', '—')),
+            'MA10_60m': q.get('MA10_60m', '—'),
+        })
+
+    # ── 4. 趋势池（基线 + 实时涨幅/量比） ──────────────────────
+    trend_pool = []
+    for s in (dd.get('trend_pool') or []):
+        code = str(s.get('代码', ''))
+        q = live_quotes.get(code, {})
+        trend_pool.append({
+            '标的': s.get('标的', '—'),
+            '代码': code,
+            '板块': s.get('板块', '—'),
+            '角色': s.get('角色', '—'),
+            '涨幅': q.get('涨幅', '—'),
+            '量比': q.get('量比', s.get('量比', '—')),
+            'MA10_60m': q.get('MA10_60m', '—'),
+        })
+
+    # ── 5. 持仓（基线 + 实时现价/浮盈） ──────────────────────
+    positions = []
+    for p in (dd.get('positions') or []):
+        code = str(p.get('代码', ''))
+        q = live_quotes.get(code, {})
+        cost = p.get('成本', 0)
+        price = q.get('最新价') or p.get('现价') or 0
+        qty_str = str(p.get('数量', '0'))
+        try:
+            qty = int(''.join(filter(str.isdigit, qty_str)))
+        except Exception:
+            qty = 0
+        pnl_pct = ((price - cost) / cost * 100) if cost and price else 0
+        positions.append({
+            '标的': p.get('标的', '—'),
+            '代码': code,
+            '成本': cost,
+            '现价': price,
+            '数量': qty,
+            '浮盈%': round(pnl_pct, 2),
+            '状态': p.get('状态', '—'),
+        })
+
+    # ── 6. 板块（基线 sectors + hot_list 涨停梯队） ─────────
+    sectors = []
+    for sec in (dd.get('sectors') or []):
+        sectors.append({
+            '板块': sec.get('板块', '—'),
+            '类型': sec.get('类型', '—'),
+            '涨停数': sec.get('涨停数', 0),
+            '梯队': sec.get('梯队', '—'),
+            '龙头': sec.get('龙头', '—'),
+        })
+
+    # 附上 hot_list 涨停梯队 TOP5（精简字段）
+    hot_rank = []
+    for s in (CACHE.get('hot_list', {}).get('stocks') or [])[:5]:
+        hot_rank.append({
+            'name': s.get('name', '—'),
+            'code': s.get('code', '—'),
+            'reason': s.get('reason', '—'),
+        })
+
+    # ── 7. 风控（从 gen 算好的 risk 域读取） ─────────────────
+    risk_snap = {
+        '连亏天数':    risk.get('连亏天数', 0),
+        '周累计回撤':  risk.get('周累计回撤', 0),
+        '月累计回撤':  risk.get('月累计回撤', 0),
+        '仓位':        0,          # 实时仓位在 quotes + positions 实时算
+        '总资产':      dd.get('pnl', {}).get('总资产', 0),
+    }
+
+    return {
+        '指数': index_snap,
+        '情绪': sentiment_snap,
+        '连板池': lianban_pool,
+        '趋势池': trend_pool,
+        '持仓': positions,
+        '板块': sectors,
+        '涨停梯队TOP5': hot_rank,
+        '风控': risk_snap,
+    }
+
+
 class BridgeHandler(SimpleHTTPRequestHandler):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=str(ROOT), **kwargs)
@@ -312,7 +459,15 @@ class BridgeHandler(SimpleHTTPRequestHandler):
 
     def do_GET(self):
         parsed = urlparse(self.path)
-        if parsed.path == '/api/baseline':
+        if parsed.path == '/api/debug/snapshot':
+            snap = _build_full_snapshot()
+            body = json.dumps(snap, ensure_ascii=False, indent=2).encode()
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.end_headers()
+            self.wfile.write(body)
+            return
+        elif parsed.path == '/api/baseline':
             try:
                 if DATA_FILE.exists():
                     with open(DATA_FILE) as f:
