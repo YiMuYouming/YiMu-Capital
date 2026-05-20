@@ -662,7 +662,8 @@ if __name__ == '__main__':
         codes = list(set(
             [s.get('代码') for s in dd.get('lianban_pool', []) if s.get('代码')] +
             [s.get('代码') for s in dd.get('trend_pool', []) if s.get('代码')] +
-            [a.get('代码') for a in dd.get('decision', {}).get('锚定股状态', []) if a.get('代码')]
+            [a.get('代码') for a in dd.get('decision', {}).get('锚定股状态', []) if a.get('代码')] +
+            [p.get('代码') for p in dd.get('positions', []) if p.get('代码') and '清' in str(p.get('状态',''))]
         ))
         quotes.set_stock_codes(codes)
         print(f'[bridge] Stock codes loaded: {len(codes)}')
