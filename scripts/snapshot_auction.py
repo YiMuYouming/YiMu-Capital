@@ -54,11 +54,22 @@ def get_pool_codes():
             for s in data.get(pool_key, []):
                 code = str(s.get("代码", ""))
                 name = s.get("标的", "")
+                role = s.get("角色", "") or ""
+                op = s.get("操作", "") or ""
+                # 已清仓/已删除/已移除的不收竞价面板
+                if "清" in role or "删" in role or "清" in op or "删" in op:
+                    continue
                 if len(code) == 6:
                     codes[code] = {"name": name, "pool": "连板" if pool_key == "lianban_pool" else "趋势"}
         for a in data.get("decision", {}).get("锚定股状态", []):
             code = str(a.get("代码", ""))
             name = a.get("标的", "")
+            status = a.get("状态", "")
+            impact = a.get("影响", "")
+            lamp = a.get("灯", "")
+            # 已清仓/已删除/不追/灯灭(red)的不收竞价面板
+            if "清" in status or "删" in status or "清" in impact or "不追" in impact or lamp == "red":
+                continue
             if len(code) == 6 and code not in codes:
                 codes[code] = {"name": name, "pool": "锚定"}
     except Exception:
