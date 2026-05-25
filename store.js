@@ -186,8 +186,8 @@ const DataStore = (function() {
       var tdVal = manualData['梯队'] || '';
       if (tdVal) { d.sentiment = d.sentiment || {}; d.sentiment['连板梯队'] = tdVal; }
       // 账户头寸 → d.pnl（W22 收益曲线依赖）
-      var zcVal = manualData['总资产'] || '';
-      if (zcVal) { d.pnl = d.pnl || {}; d.pnl['总资产'] = parseFloat(zcVal) || 0; }
+      var zcVal = parseFloat(manualData['总资产']) || 0;
+      if (zcVal > 0) { d.pnl = d.pnl || {}; d.pnl['总资产'] = zcVal; }
       var rjVal = manualData['可用资金'] || '';
       if (rjVal) { d.pnl = d.pnl || {}; d.pnl['可用资金'] = parseFloat(rjVal) || 0; }
       var ykVal = manualData['总盈亏'] || '';
@@ -283,8 +283,20 @@ const DataStore = (function() {
     // 保留 API 响应的 _freshness（优先 liveData 实时源，其次 baseData 基线源）
     d._freshness = (liveData && liveData._freshness) || d._freshness || null;
 
+    // 注入 PnL 实时总资产（每 tick 从 bridge /api/pnl/summary 拉取）
+    if (_pnlLive) {
+      d.pnl_live = _pnlLive;
+    }
+
     setMerged(d);
     return d;
+  }
+
+  var _pnlLive = null;
+
+  function _fetchPnlSummary() {
+    if (location.protocol === 'file:') return Promise.resolve(null);
+    return fetch('/api/pnl/summary').then(function(r) { return r.ok ? r.json() : null; }).catch(function() { return null; });
   }
 
   // === 刷新数据（v2.0 多源实时管线）===
@@ -314,6 +326,10 @@ const DataStore = (function() {
           return adapter.fetchLive();
         }).then(function(live) {
           if (live) { liveData = live; connectionStatus = 'live'; }
+          return _fetchPnlSummary().then(function(pnlLive) {
+            if (pnlLive) _pnlLive = pnlLive;
+          });
+        }).then(function() {
           merge();
           notifyAll();
           notifyConnListeners();
@@ -355,6 +371,10 @@ const DataStore = (function() {
       return adapter.fetchLive();
     }).then(function(live) {
       if (live) { liveData = live; connectionStatus = 'live'; }
+      return _fetchPnlSummary().then(function(pnlLive) {
+        if (pnlLive) _pnlLive = pnlLive;
+      });
+    }).then(function() {
       merge();
       notifyAll();
       notifyConnListeners();
@@ -432,6 +452,11 @@ const DataStore = (function() {
         try {
           manualData = JSON.parse(localStorage.getItem(STORAGE_KEYS.inputs) || '{}');
         } catch(e) { manualData = {}; }
+        delete manualData['总资产'];
+        ['可用资金','总盈亏'].forEach(function(k) {
+          var v = manualData[k];
+          if (v === '0' || v === 0 || v === '' || v == null) delete manualData[k];
+        });
       },
       clear: function() {
         manualData = {};

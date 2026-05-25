@@ -961,6 +961,10 @@ def build_dashboard_data(review_path):
 
     # 保留现有 dashboard_data.json 中的清仓持仓（bridge sync 写入，复盘笔记不含）
     _preserve_cleared(data)
+    # 保留日内新增持仓（盘中 W15 sync 写入，复盘笔记不含，如沪电股份）
+    _preserve_active_positions(data)
+    # 保留活跃持仓的现价（复盘笔记只有成本，bridge live 报价盘前可能为 0）
+    _preserve_active_price(data)
     # 保留 pnl 字段（可用资金/总资产由 W15 记流水实时维护，gen 不覆盖）
     _preserve_pnl(data)
     # 从 pnl.db 自动计算风控指标（连亏天数/周回撤/月回撤，笔记不用维护）
@@ -1033,6 +1037,62 @@ def _filter_excluded(pool):
     return pool
 
 
+def _preserve_active_positions(new_data):
+    """保留旧文件中存在但新数据中没有的活跃持仓（盘中 W15 sync 新增的持仓不会被笔记覆盖）"""
+    if not OUTPUT_FILE.exists():
+        return
+    try:
+        with open(OUTPUT_FILE) as f:
+            old = json.load(f)
+    except Exception:
+        return
+    new_codes = {p.get("代码") for p in new_data.get("positions", []) if p.get("代码")}
+    for p in old.get("positions", []):
+        if p.get("状态", "").find("持有") < 0:
+            continue
+        if p.get("代码") and p.get("代码") not in new_codes:
+            new_data.setdefault("positions", []).append(p)
+
+
+def _preserve_active_price(new_data):
+    """保留活跃持仓现价：旧文件 > pnl_history 推算昨日收盘"""
+    old_price_map = {}
+    if OUTPUT_FILE.exists():
+        try:
+            with open(OUTPUT_FILE) as f:
+                old = json.load(f)
+            for p in old.get("positions", []):
+                code, price = p.get("代码"), p.get("现价")
+                if code and price:
+                    old_price_map[code] = price
+        except Exception:
+            pass
+    pnl_mv = None
+    ph_path = ROOT_DIR / "data" / "pnl_history.json"
+    if ph_path.exists():
+        try:
+            with open(ph_path) as f:
+                ph = json.load(f)
+            pnl_mv = ph.get("meta", {}).get("last_mv")
+        except Exception:
+            pass
+    for p in new_data.get("positions", []):
+        code = p.get("代码")
+        if not code or p.get("现价"):
+            continue
+        if code in old_price_map:
+            p["现价"] = old_price_map[code]
+        elif pnl_mv:
+            qty_str = str(p.get("数量", "0"))
+            qty = float(qty_str.replace("股", "")) if qty_str else 0
+            if qty > 0:
+                p["现价"] = round(pnl_mv / qty, 2)
+    # 兜底：仍未设置现价的持仓用成本价
+    for p in new_data.get("positions", []):
+        if not p.get("现价") and p.get("成本"):
+            p["现价"] = p["成本"]
+
+
 def _preserve_cleared(new_data):
     """从现有 dashboard_data.json 中提取清仓持仓（7日内），合并到新数据中"""
     if not OUTPUT_FILE.exists():
@@ -1077,8 +1137,25 @@ def _preserve_pnl(new_data):
     except Exception:
         return
     old_pnl = old.get("pnl", {})
-    if old_pnl:
-        new_data["pnl"] = old_pnl
+    # 累计入金：优先从 pnl_history.json 读取（权威来源），其次旧文件
+    deposit = None
+    total_asset = None
+    pnl_history_path = ROOT_DIR / "data" / "pnl_history.json"
+    if pnl_history_path.exists():
+        try:
+            with open(pnl_history_path) as f:
+                ph = json.load(f)
+            meta = ph.get("meta", {})
+            deposit = str(meta.get("total_deposit", "")) or None
+            total_asset = meta.get("day_start_asset") or meta.get("last_total_asset")
+        except Exception:
+            pass
+    if not deposit and old_pnl:
+        deposit = old_pnl.get("累计入金", "200000")
+    if deposit:
+        new_data["pnl"] = {"累计入金": deposit}
+        if total_asset is not None:
+            new_data["pnl"]["总资产"] = total_asset
 
 
 def watch_mode(review_path, interval=10):

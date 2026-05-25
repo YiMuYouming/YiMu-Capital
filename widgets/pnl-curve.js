@@ -87,7 +87,7 @@ class PnLCurveWidget extends YiMuWidget {
       positions = (data && data.positions) || [];
     }
     var pnlCfg = (data && data.pnl) || {};
-    var totalAsset = manual['总资产'] || pnlCfg['总资产'] || (this._state && this._state.totalAsset) || 0;
+    var totalAsset = parseFloat(pnlCfg['总资产']) || (this._state && this._state.totalAsset) || 0;
     var totalDeposit = manual['累计入金'] || pnlCfg['累计入金'] || (this._state && this._state.totalDeposit) || 0;
 
     this._state = {
@@ -115,7 +115,16 @@ class PnLCurveWidget extends YiMuWidget {
           return fetch('/api/pnl/summary').then(function(r) { return r.json(); });
         })
         .then(function(s) {
-          if (s) { self._state._pnlSummary = s; self._updateSummary(); }
+          if (s) {
+            self._state._pnlSummary = s;
+            if (s.total_asset) self._state.totalAsset = s.total_asset;
+            self._updateSummary();
+            // 用真实总资产刷新 KPI
+            self._fetchChartData(function(cd) {
+              self._updateKPI(cd);
+              self._drawChart(cd);
+            });
+          }
         })
         .catch(function() { self._allDataLoading = false; });
     }
@@ -246,7 +255,13 @@ class PnLCurveWidget extends YiMuWidget {
 
   _calcDD(chartData) {
     if (!chartData || !chartData.portfolio || chartData.portfolio.length < 2) return null;
-    var p = chartData.portfolio;
+    var raw = chartData.portfolio;
+    // 前值填充 null（被删脏数据/断连），供回撤计算用
+    var p = [], last = null;
+    for (var i = 0; i < raw.length; i++) {
+      if (raw[i] != null) { last = raw[i]; p.push(raw[i]); }
+      else { p.push(last); }
+    }
     // 找最高点，然后往前（时间后）找最低点，计算最大回撤
     var bestPeak = { idx: 0, val: p[0] };
     var worstDD = { dd: 0, peak: null, trough: null };
@@ -298,7 +313,7 @@ class PnLCurveWidget extends YiMuWidget {
     var pnlPct = ta > 0 ? (pnlAmount / ta * 100) : 0;
     var posPct = ta > 0 ? (mv / ta * 100) : 0;
 
-    pnlEl.textContent = _pnlFmtMoney(pnlAmount);
+    pnlEl.textContent = (pnlAmount >= 0 ? '+' : '') + pnlAmount.toLocaleString();
     pnlEl.style.color = pnlAmount >= 0 ? 'var(--up)' : 'var(--down)';
     document.getElementById('pnl_pnl_sub').textContent = (pnlPct >= 0 ? '+' : '') + pnlPct.toFixed(2) + '% 浮动';
 
@@ -320,11 +335,23 @@ class PnLCurveWidget extends YiMuWidget {
       if (alphaLbl) alphaLbl.textContent = perStr + ' 超额 α';
     }
 
-    // 今日：用实时持仓浮动盈亏；周/月/季/年：用 all-data 缓存算 TWR
+    // 今日：用实时持仓浮动盈亏 + 日内的回撤/超额
     if (s.period === 'today') {
-      document.getElementById('pnl_period_val').textContent = (pnlPct >= 0 ? '+' : '') + pnlPct.toFixed(2) + '%';
-      document.getElementById('pnl_period_val').style.color = pnlPct >= 0 ? 'var(--up)' : 'var(--down)';
-      document.getElementById('pnl_period_sub').textContent = '浮动盈亏/总资产';
+      if (chartData && chartData.portfolio && chartData.portfolio.length) {
+        var lastPnl = chartData.portfolio[chartData.portfolio.length - 1];
+        document.getElementById('pnl_period_val').textContent = (lastPnl >= 0 ? '+' : '') + lastPnl.toFixed(2) + '%';
+        document.getElementById('pnl_period_val').style.color = lastPnl >= 0 ? 'var(--up)' : 'var(--down)';
+        document.getElementById('pnl_period_sub').textContent = 'TWR 收益';
+        var ddI = this._calcDD(chartData);
+        document.getElementById('pnl_dd_val').textContent = (ddI ? ddI.dd : 0).toFixed(2) + '%';
+        var lastB = chartData.benchmark && chartData.benchmark[chartData.benchmark.length-1];
+        var todayAlphaEl = document.getElementById('pnl_today_alpha');
+        if (todayAlphaEl && lastB != null) {
+          var ta = (chartData.portfolio[chartData.portfolio.length-1]||0) - lastB;
+          todayAlphaEl.textContent = (ta >= 0 ? '+' : '') + ta.toFixed(2) + '%';
+          todayAlphaEl.style.color = ta >= 0 ? 'var(--up)' : 'var(--down)';
+        }
+      }
     } else {
       var cache = this._allDailyData;
       if (cache && cache.dates && cache.dates.length) {
@@ -586,9 +613,28 @@ class PnLCurveWidget extends YiMuWidget {
     var pos = chartData.position;
     var n = p.length;
 
+    // 前值填充：中间 null（被删的脏数据/短暂断连）用上一个有效值填，首尾 null（未开盘/未到时间）保留
+    function _forwardFill(arr) {
+      var out = [], lastVal = null, seenValid = false;
+      for (var i = 0; i < arr.length; i++) {
+        if (arr[i] != null) { seenValid = true; lastVal = arr[i]; out.push(arr[i]); }
+        else if (seenValid) { out.push(lastVal); }  // 数据中段null → 前值填充
+        else { out.push(null); }  // 开盘前null → 保留
+      }
+      // 尾部 null → 恢复为 null（未来时间不填充）
+      for (var j = out.length - 1; j >= 0 && out[j] === lastVal && arr[j] == null; j--) {
+        out[j] = null;
+      }
+      return out;
+    }
+
+    var pFilled = _forwardFill(p);
+    var bFilled = _forwardFill(b);
+    var posFilled = _forwardFill(pos);
+
     // Scale — 跳过 null (未到时间的空槽)
-    var validP = p.filter(function(v){return v != null;});
-    var validB = b.filter(function(v){return v != null;});
+    var validP = pFilled.filter(function(v){return v != null;});
+    var validB = bFilled.filter(function(v){return v != null;});
     var allVals = validP.concat(validB);
     if (!allVals.length) { allVals = [0, 0]; }
     var absMax = Math.max(Math.abs(Math.min.apply(null, allVals)), Math.abs(Math.max.apply(null, allVals)));
@@ -723,16 +769,16 @@ class PnLCurveWidget extends YiMuWidget {
     }
 
     // Benchmark line
-    _drawSegments(b, '#2563EB', 2, [6, 3]);
+    _drawSegments(bFilled, '#2563EB', 2, [6, 3]);
 
     // Area fill
     var grad = ctx.createLinearGradient(0, PAD.t, 0, PAD.t + ch);
     grad.addColorStop(0, 'rgba(220,38,38,0.12)');
     grad.addColorStop(1, 'rgba(220,38,38,0.01)');
-    _fillArea(p, grad);
+    _fillArea(pFilled, grad);
 
     // Portfolio line
-    _drawSegments(p, '#DC2626', 2.5);
+    _drawSegments(pFilled, '#DC2626', 2.5);
 
     // End labels — 用最后一个有效值
     var lastValidI = n - 1;

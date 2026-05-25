@@ -7,9 +7,15 @@ class TodayOpsWidget extends YiMuWidget {
     if (!body) return;
 
     var manual = DataStore.manualData.getAll();
-    var opsJson = manual['_今日操作'] || '[]';
+    var opsJson = manual['_今日操作'];
     var ops = [];
-    try { ops = JSON.parse(opsJson); } catch(e) { ops = []; }
+    if (opsJson) {
+      try { ops = JSON.parse(opsJson); } catch(e) { ops = []; }
+    }
+    // fallback: baseline decision.今日操作（W15 记流水未录入时）
+    if (!ops || !ops.length) {
+      ops = (data && data.decision && data.decision['今日操作']) || [];
+    }
 
     var html = '';
 

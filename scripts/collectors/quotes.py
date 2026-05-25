@@ -230,8 +230,57 @@ def collect_hot_list(force=False):
         if r:
             CACHE["hot_list"] = r
             CACHE["hot_list"]["_updated"] = datetime.now().strftime("%Y-%m-%dT%H:%M:%S+08:00")
+            # 持久化涨停历史：每日快照保存到 data/zt_history.json
+            _save_zt_snapshot(r)
     except Exception as e:
         print(f"  [quotes] collect_hot_list error: {e}", file=sys.stderr)
+
+
+def _save_zt_snapshot(hot_data):
+    """保存涨停快照到 data/zt_history.json，含完整股票数据"""
+    ROOT = Path(__file__).resolve().parent.parent.parent
+    zt_file = ROOT / "data" / "zt_history.json"
+    today = datetime.now().strftime("%Y-%m-%d")
+
+    try:
+        # 读取现有历史
+        if zt_file.exists():
+            with open(zt_file) as f:
+                history = json.load(f)
+        else:
+            history = {}
+
+        # 从 hot_data 提取今日涨停股票
+        raw_stocks = hot_data.get("zt_stocks") or hot_data.get("stocks") or []
+        today_snapshot = []
+        for s in raw_stocks:
+            if s.get("name", "").find("ST") >= 0:
+                continue
+            today_snapshot.append({
+                "code": s.get("code", ""),
+                "name": s.get("name", ""),
+                "zhangfu": s.get("zhangfu"),
+                "huanshou": s.get("huanshou"),
+                "chengjiaoe": s.get("chengjiaoe"),
+                "reason": s.get("reason", ""),
+            })
+
+        if today_snapshot:
+            # 如果 gen 已完成收盘写入（含 _meta 标志），不覆盖
+            existing_entry = history.get(today, [])
+            is_gen_written = any(isinstance(s, dict) and s.get("_meta") for s in existing_entry if isinstance(s, dict))
+            if not is_gen_written:
+                history[today] = today_snapshot
+            # 限制保留最近 60 天
+            keys = sorted(history.keys(), reverse=True)
+            if len(keys) > 60:
+                history = {k: history[k] for k in keys[:60]}
+
+            atomic_write_json(zt_file, history)
+            # 注入到 hot_list CACHE（供 W21 前端读取）
+            CACHE["hot_list"]["zt_history"] = dict(list(history.items())[:5])  # 最近5天
+    except Exception as e:
+        print(f"  [quotes] _save_zt_snapshot error: {e}", file=sys.stderr)
 
 
 def collect_kline_15m(force=False):
@@ -266,7 +315,7 @@ def log_pnl_snapshot(force=False):
         live_idx = CACHE.get("live_index") or {}
         sh_pct_str = live_idx.get("上证指数涨幅", "0") or "0"
         sz_pct_str = live_idx.get("深证指数涨幅", "0") or "0"
-        cy_pct_str = live_idx.get("创业板指涨幅", "0") or "0"
+        cy_pct_str = live_idx.get("创业板指涨幅") or live_idx.get("创业指数涨幅") or "0"
         sh_pct = float(str(sh_pct_str).replace("%","").replace("+","")) if sh_pct_str else 0
         sz_pct = float(str(sz_pct_str).replace("%","").replace("+","")) if sz_pct_str else 0
         cy_pct = float(str(cy_pct_str).replace("%","").replace("+","")) if cy_pct_str else 0
@@ -314,14 +363,44 @@ def log_pnl_snapshot(force=False):
                     with open(pnl_hist_file) as f:
                         ph = json.load(f)
                     total_deposit = ph.get("meta", {}).get("total_deposit", 0) or 0
+            available_from_cache = True
             if not available:
+                available_from_cache = False
                 # 从历史记录推算可用资金
                 if pnl_hist_file.exists():
                     with open(pnl_hist_file) as f:
                         ph = json.load(f)
                     last_asset = ph.get("meta", {}).get("last_total_asset", 0) or 0
+                    last_mv = ph.get("meta", {}).get("last_mv", 0) or 0
                     if last_asset > 0:
-                        available = max(0, last_asset - mv)
+                        if last_mv > 0:
+                            # 昨日现金 = 昨日总资产 - 昨日持仓市值（正确，不受日内MV变化影响）
+                            available = max(0, last_asset - last_mv)
+                        else:
+                            # 无 last_mv 记录（第一次升级后用旧模式）
+                            available = max(0, last_asset - mv)
+
+            # 扣减今日买入金额（买股票花掉的钱），交易记录来自 pnl.db
+            # 注意：仅当 available 来自 CACHE（盘前/日初未扣减过交易）时才扣。
+            # 若来自 pnl_history（15:00+已包含交易后数据），交易已体现在 last_asset 中，不重复扣。
+            today_buy_cost = 0
+            if available_from_cache:
+                try:
+                    db_path = ROOT / "data" / "pnl.db"
+                    if db_path.exists():
+                        import sqlite3
+                        conn2 = sqlite3.connect(str(db_path))
+                        cur2 = conn2.execute(
+                            "SELECT COALESCE(SUM(price * qty), 0) FROM trade_records WHERE trade_date = ? AND (action LIKE '%买入%' OR action LIKE '%追涨%')",
+                            (now.strftime('%Y-%m-%d'),)
+                        )
+                        row2 = cur2.fetchone()
+                        if row2 and row2[0]:
+                            today_buy_cost = float(row2[0])
+                        conn2.close()
+                except Exception:
+                    pass
+                available = max(0, available - today_buy_cost)
 
             total_asset = mv + available
             if total_asset > 0 and total_deposit > 0:
@@ -360,6 +439,7 @@ def log_pnl_snapshot(force=False):
                         ph_data = {}
                     ph_data["meta"] = ph_data.get("meta", {})
                     ph_data["meta"]["last_total_asset"] = total_asset
+                    ph_data["meta"]["last_mv"] = mv
                     ph_data["meta"]["last_twr_nav"] = nav
                     ph_data["meta"]["last_updated"] = now.strftime("%Y-%m-%dT%H:%M:%S")
                     atomic_write_json(pnl_hist_file, ph_data)

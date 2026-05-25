@@ -32,15 +32,21 @@ class PositionCalcWidget extends YiMuWidget {
 
     // ===== Layer 1: 总仓位上限 =====
     var manual = DataStore.manualData.getAll();
-    var totalCapital = parseFloat(manual['总资产']) || 0;
-    // 已持仓市值：从实际持仓（状态=持有）实时计算
+    // 总资产来源链：W16 手动录入 → pnl 基线（含真实总资产）
+    var totalCapital = parseFloat(manual['总资产'])
+                    || parseFloat((data.pnl||{})['总资产'])
+                    || 0;
+    // 已持仓市值：从实际持仓（状态=持有，排除清仓/删除）实时计算
     var currentPosVal = 0;
     (data.positions||[]).forEach(function(p){
-      if (p['状态'] === '持有' || !p['状态']) {
-        currentPosVal += Math.round((parseFloat(p['数量'])||0)*(parseFloat(p['现价'])||0));
+      var s = String(p['状态']||'');
+      if (s && s.indexOf('持有') >= 0 && s.indexOf('清') < 0 && s.indexOf('删') < 0) {
+        currentPosVal += Math.round((parseFloat(p['数量'])||0)*(parseFloat(p['现价'])||parseFloat(p['成本'])||0));
       }
     });
-    var availCash = parseFloat(manual['可用资金']) || (totalCapital - currentPosVal);
+    var availCash = parseFloat(manual['可用资金'])
+                 || parseFloat((data.pnl||{})['可用资金'])
+                 || (totalCapital - currentPosVal);
     var currentPosPct = totalCapital > 0 ? Math.round(currentPosVal / totalCapital * 100) : 0;
     var maxPosition = Math.round(totalCapital * (totalCap||0) / 100);
     var availPct = Math.max(0, totalCap - currentPosPct);

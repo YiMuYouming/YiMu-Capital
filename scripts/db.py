@@ -14,9 +14,9 @@ DB_PATH = ROOT / "data" / "pnl.db"
 TRADING_HOUR_START = (9, 30)
 TRADING_HOUR_END = (15, 0)
 TRADING_SLOTS = [(h, m)
-    for h in (9, 10, 11, 12, 13, 14)
+    for h in (9, 10, 11, 13, 14)
     for m in (0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55)
-    if not (h == 15 and m > 0) and not (h == 9 and m < 30)]
+    if not (h == 15 and m > 0) and not (h == 9 and m < 30) and not (h == 11 and m >= 30)]
 
 _local = threading.local()
 
@@ -300,14 +300,30 @@ def query_pnl_summary():
     last = rows[0] if rows else None
     count_rows = _exec("SELECT COUNT(*) AS n FROM daily_summary")
     daily_n = count_rows[0]['n'] if count_rows else 0
-    rows2 = _exec("SELECT COUNT(*) AS n FROM intraday_snapshots WHERE date = ?",
-                  (datetime.now().strftime('%Y-%m-%d'),))
+    today_str = datetime.now().strftime('%Y-%m-%d')
+    rows2 = _exec("SELECT COUNT(*) AS n FROM intraday_snapshots WHERE date = ?", (today_str,))
     intra_n = rows2[0]['n'] if rows2 else 0
+    # 盘中有日内快照时，用最新的实时总资产
+    today_asset = None
+    today_mv = None
+    if intra_n > 0:
+        intra = _exec("SELECT ts, total_asset, mv FROM intraday_snapshots WHERE date = ? ORDER BY ts DESC LIMIT 2", (today_str,))
+        # 取最新一条，但如果 mv 突跳 >50%（如清仓后错误重算），用上一条
+        if intra:
+            latest = intra[0]
+            if len(intra) >= 2 and latest['mv'] and intra[1]['mv']:
+                prev_mv = intra[1]['mv'] or 1
+                if prev_mv > 0 and abs(latest['mv'] - prev_mv) / prev_mv > 0.5:
+                    latest = intra[1]
+            today_asset = latest['total_asset']
+            today_mv = latest['mv']
     return {
         'last_nav': last['nav'] if last else 1.0,
         'last_date': last['date'] if last else None,
         'daily_count': daily_n,
         'today_snapshots': intra_n,
+        'total_asset': today_asset if today_asset else (round(last['nav'] * last['deposit'], 1) if last else None),
+        'mv': today_mv if today_mv else None,
     }
 
 
