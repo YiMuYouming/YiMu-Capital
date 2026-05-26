@@ -5,6 +5,12 @@ class TrendPoolWidget extends YiMuWidget {
   constructor(config) {
     super(config);
     this._sortDir = null;
+    this._sortBound = false;
+  }
+
+  unmount() {
+    this._sortBound = false;
+    super.unmount();
   }
 
   render(data) {
@@ -85,13 +91,15 @@ class TrendPoolWidget extends YiMuWidget {
     html += '</tbody></table>';
     body.innerHTML = html;
 
-    var th = body.querySelector('.sortable');
-    if (th) {
-      th.addEventListener('click', function() {
-        if (!self._sortDir) self._sortDir = 'desc';
-        else if (self._sortDir === 'desc') self._sortDir = 'asc';
-        else self._sortDir = null;
-        self._renderBody();
+    if (!this._sortBound) {
+      this._sortBound = true;
+      this._on(body, 'click', function(e) {
+        if (e.target && e.target.classList.contains('sortable')) {
+          if (!self._sortDir) self._sortDir = 'desc';
+          else if (self._sortDir === 'desc') self._sortDir = 'asc';
+          else self._sortDir = null;
+          self._renderBody();
+        }
       });
     }
 

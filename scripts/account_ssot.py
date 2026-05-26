@@ -212,8 +212,17 @@ def compute_max_drawdown(date_str):
     return round(max_dd * 100, 4), dd_start, dd_end
 
 
-def generate_closing_anchor(live_quotes, now=None, insert_anchor=None):
-    """固化当日收盘账户状态，写次日 previous_close 锚点，更新 daily_summary（含 max_dd）。"""
+def generate_closing_anchor(live_quotes, now=None, insert_anchor=None,
+                            pnl_history_path=None):
+    """固化当日收盘账户状态，写次日 previous_close 锚点，更新 daily_summary（含 max_dd）。
+
+    Args:
+        live_quotes: 收盘行情 dict
+        now: 结算时间戳，默认当前时间
+        insert_anchor: 锚点写入函数，默认使用 db.insert_account_baseline
+        pnl_history_path: pnl_history.json 输出路径，默认写入 data/pnl_history.json
+                         测试应传入 tempfile 路径以避免污染真实文件。
+    """
     from scripts.db import query_account_baseline, query_trades, query_fund_events, insert_daily_summary
     if insert_anchor is None:
         from scripts.db import insert_account_baseline
@@ -271,7 +280,8 @@ def generate_closing_anchor(live_quotes, now=None, insert_anchor=None):
     })
 
     # 日结：更新 pnl_history.json（收盘权威值）
-    pnl_hist_file = ROOT / "data" / "pnl_history.json"
+    # 可注入路径，避免测试污染真实 data/ 文件
+    pnl_hist_file = pnl_history_path if pnl_history_path else (ROOT / "data" / "pnl_history.json")
     ph_data = {}
     if pnl_hist_file.exists():
         try:

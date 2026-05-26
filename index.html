@@ -43,9 +43,9 @@
 /* Inline critical styles for initial load */
 body{opacity:0;transition:opacity .3s}
 body.ready{opacity:1}
-#loading{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);color:var(--text-secondary);font-family:var(--font-sans);font-size:var(--fs-body);z-index:9999}
+#loading{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);color:var(--text-secondary);font-family:var(--font-sans);font-size:var(--fs-body);z-index:var(--z-toast)}
 /* Widget Panel */
-.widget-panel-overlay{display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.6);z-index:2000;align-items:center;justify-content:center}
+.widget-panel-overlay{display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.6);z-index:var(--z-modal);align-items:center;justify-content:center}
 .widget-panel-overlay.show{display:flex}
 .widget-panel{background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-lg);box-shadow:var(--shadow-modal);width:90%;max-width:640px;max-height:80vh;overflow:hidden;display:flex;flex-direction:column}
 .widget-panel-header{display:flex;align-items:center;justify-content:space-between;padding:var(--sp-md) var(--sp-lg);border-bottom:1px solid var(--border-light)}
@@ -99,7 +99,7 @@ body.ready{opacity:1}
   <span class="topbar-brand">弈沐资本 · 数据看板 v2.0</span>
   <span class="conn-dot polling" id="connDot"></span>
   <span class="conn-text" id="connText">轮询</span>
-  <button id="addWidgetBtn" title="添加组件" style="background:var(--info);color:#fff;font-weight:600;border:none;padding:var(--sp-xs) var(--sp-md);border-radius:var(--radius-sm);cursor:pointer;font-size:var(--fs-body);font-family:var(--font-sans);white-space:nowrap;height:28px;line-height:1">+ 添加组件</button>
+  <span class="topbar-health" id="topbarHealth" title="系统健康状态"><span class="health-dot" id="healthDot"></span><span id="healthLabel">—</span></span><span class="topbar-metric" id="topbarEmotion" title="当前情绪值">情绪 —</span><span class="topbar-metric" id="topbarPnl" title="今日盈亏">盈亏 —</span><span class="topbar-metric" id="topbarPosPct" title="仓位占比">仓位 —</span><span class="topbar-metric" id="topbarCash" title="可用资金">可用 —</span><span style="flex:0.5"></span><button id="compactBtn" title="精简模式" style="background:var(--bg-hover);border:1px solid var(--border);padding:2px 8px;border-radius:var(--radius-sm);cursor:pointer;font-size:11px;font-family:var(--font-sans);white-space:nowrap;height:24px;line-height:1">精简</button><button id="addWidgetBtn" title="添加组件" style="background:var(--info);color:#fff;font-weight:600;border:none;padding:var(--sp-xs) var(--sp-md);border-radius:var(--radius-sm);cursor:pointer;font-size:var(--fs-body);font-family:var(--font-sans);white-space:nowrap;height:28px;line-height:1">+ 添加组件</button>
   <button id="inputPanelBtn" title="报数面板" style="background:var(--accent-purple);color:#fff;font-weight:600;border:none;padding:var(--sp-xs) var(--sp-md);border-radius:var(--radius-sm);cursor:pointer;font-size:var(--fs-body);font-family:var(--font-sans);white-space:nowrap;height:28px;line-height:1">报数</button>
   <input id="widgetSearch" type="text" placeholder="搜索组件 (Ctrl+F)" title="输入组件名快速定位" style="width:150px;height:28px;border:1px solid var(--border);border-radius:var(--radius-sm);padding:0 var(--sp-sm);font-size:var(--fs-body);font-family:var(--font-sans);background:var(--bg-card);color:var(--text);outline:none">
   <button id="llmPanelBtn" title="AI盯盘" style="background:var(--info);color:#fff;font-weight:600;border:none;padding:var(--sp-xs) var(--sp-md);border-radius:var(--radius-sm);cursor:pointer;font-size:var(--fs-body);font-family:var(--font-sans);white-space:nowrap;height:28px;line-height:1;position:relative">🤖 AI盯盘<span class="btn-badge" id="llmBadge" style="display:none">0</span></button>
@@ -727,6 +727,171 @@ DataStore.onConnChange(function(status) {
   if (dot) dot.className = 'conn-dot ' + (isFile ? 'polling' : status);
   if (txt) txt.textContent = isFile ? '本地' : status === 'live' ? '实时' : status === 'polling' ? '轮询' : '断开';
 });
+
+// === Top Bar Health + Metrics (fail-closed: health 未确认前禁止录入) ===
+window._healthCritical = true;
+window._healthConfirmed = false;
+(function() {
+  var _healthWasOk = false;
+  function _updateMetrics() {
+    var m = DataStore.merged || {};
+    var pnl = m.pnl_live || {};
+    var sent = m.sentiment || {};
+
+    var emo = document.getElementById('topbarEmotion');
+    var emoVal = sent['情绪值'] != null ? sent['情绪值'] : null;
+    if (emo) {
+      emo.textContent = '情绪 ' + (emoVal != null ? Math.round(emoVal) + '%' : '—');
+      emo.style.color = emoVal < 20 ? 'var(--danger)' : emoVal < 40 ? 'var(--warn)' : '';
+    }
+
+    var pnlEl = document.getElementById('topbarPnl');
+    var pnlPct = parseFloat(pnl.pnl_pct);
+    if (pnlEl) {
+      if (!isNaN(pnlPct)) {
+        var s = pnlPct >= 0 ? '+' : '';
+        pnlEl.textContent = '盈亏 ' + s + pnlPct.toFixed(2) + '%';
+        pnlEl.style.color = pnlPct >= 0 ? 'var(--up)' : 'var(--down)';
+      } else { pnlEl.textContent = '盈亏 —'; pnlEl.style.color = ''; }
+    }
+
+    var posEl = document.getElementById('topbarPosPct');
+    var mv = parseFloat(pnl.mv);
+    var ta = parseFloat(pnl.total_asset);
+    var posPct = (ta > 0) ? (mv / ta * 100) : null;
+    if (posEl) {
+      posEl.textContent = '仓位 ' + (posPct != null ? posPct.toFixed(1) + '%' : '—');
+    }
+
+    var cashEl = document.getElementById('topbarCash');
+    var cash = parseFloat(pnl.cash);
+    if (cashEl) {
+      if (!isNaN(cash) && cash >= 0) {
+        cashEl.textContent = '可用 ' + (cash / 10000).toFixed(1) + '万';
+      } else { cashEl.textContent = '可用 —'; }
+    }
+  }
+
+  function _updateHealth() {
+    var hDot = document.getElementById('healthDot');
+    var hLabel = document.getElementById('healthLabel');
+    if (!hDot || !hLabel) return;
+
+    fetch('/api/health').then(function(r) {
+      // HTTP non-2xx -> degrade immediately
+      if (!r.ok) {
+        hDot.className = 'health-dot dead'; hLabel.textContent = 'HTTP ' + r.status;
+        hLabel.style.color = 'var(--danger)';
+        window._healthCritical = true; window._healthConfirmed = false;
+        var bar2 = document.getElementById('topbar');
+        if (bar2) bar2.style.boxShadow = 'inset 0 -2px 0 var(--danger)';
+        if (_healthWasOk) { _healthWasOk = false; DataStore.notifyAll(); }
+        return;
+      }
+      return r.json().then(function(h) {
+      if (!h) {
+        hDot.className = 'health-dot dead'; hLabel.textContent = '无响应';
+        hLabel.style.color = 'var(--danger)';
+        window._healthCritical = true; window._healthConfirmed = false;
+        var bar2 = document.getElementById('topbar');
+        if (bar2) bar2.style.boxShadow = 'inset 0 -2px 0 var(--danger)';
+        if (_healthWasOk) { _healthWasOk = false; DataStore.notifyAll(); }
+        return;
+      }
+      var ok = h.status === 'healthy';
+      var critDomains = ['bridge','db','quotes','account','pnl'];
+      var hasCritical = critDomains.some(function(k) {
+        var s = (h[k] || {}).status || ''; return s === 'dead' || s === 'missing' || s === 'error';
+      });
+      window._healthCritical = !ok || hasCritical;
+      if (ok && !hasCritical) {
+        hDot.className = 'health-dot live'; hLabel.textContent = '正常'; hLabel.style.color = '';
+      } else if (!ok) {
+        hDot.className = 'health-dot dead'; hLabel.textContent = '不健康'; hLabel.style.color = 'var(--danger)';
+      } else {
+        hDot.className = 'health-dot dead'; hLabel.textContent = '关键异常'; hLabel.style.color = 'var(--danger)';
+      }
+      window._healthConfirmed = (ok && !hasCritical);
+      window._healthCritical = !window._healthConfirmed;
+      // Pulse bar on critical
+      var bar = document.getElementById('topbar');
+      if (bar) bar.style.boxShadow = window._healthCritical ? 'inset 0 -2px 0 var(--danger)' : '';
+      // Health state change → refresh decision widgets immediately
+      var prevOk = _healthWasOk;
+      _healthWasOk = !window._healthCritical;
+      if (!prevOk && _healthWasOk) {
+        DataStore.notifyAll();
+      }
+      if (prevOk && !_healthWasOk) {
+        // Health degraded → force re-render W08/W09 to hide entry buttons
+        DataStore.notifyAll();
+      }
+      }); // close r.json().then(h_callback)
+    }).catch(function() {
+      hDot.className = 'health-dot dead'; hLabel.textContent = '无响应'; hLabel.style.color = 'var(--danger)';
+      window._healthCritical = true;
+      window._healthConfirmed = false;
+      if (_healthWasOk) { _healthWasOk = false; DataStore.notifyAll(); }
+    });
+  }
+
+  var _healthWasOk = false;
+  DataStore.subscribe(['pnl_live', 'sentiment'], _updateMetrics);
+  setInterval(_updateMetrics, 30000);
+  setInterval(_updateHealth, 60000);
+  setTimeout(_updateMetrics, 2000);
+  setTimeout(_updateHealth, 3000);
+})();
+
+// === Compact Mode ===
+var _compactMode = false;
+var CORE_IDS = ['W04','W07','W08','W09','W14','W15','W22'];
+(function() {
+  var btn = document.getElementById('compactBtn');
+  if (!btn) return;
+  var origAdd = _addWidgetToGrid;
+  _addWidgetToGrid = function(widgetId) {
+    origAdd(widgetId);
+    setTimeout(function() {
+      var el = document.querySelector('[gs-id="' + widgetId + '"]');
+      if (el && CORE_IDS.indexOf(widgetId) >= 0) el.classList.add('core-widget');
+    }, 100);
+  };
+  CORE_IDS.forEach(function(id) {
+    var el = document.querySelector('[gs-id="' + id + '"]');
+    if (el) el.classList.add('core-widget');
+  });
+  btn.addEventListener('click', function() {
+    _compactMode = !_compactMode;
+    btn.textContent = _compactMode ? '完整' : '精简';
+    btn.style.background = _compactMode ? 'var(--accent)' : '';
+    btn.style.color = _compactMode ? '#fff' : '';
+    document.body.classList.toggle('compact-mode', _compactMode);
+  });
+})();
+
+// === W15 预填链路（打开 W15 表单，只预填不保存不写 API）===
+function _prefillW15(name, code, windowLabel, evidence) {
+  DataStore._prefill = {
+    name: name, code: code, window: windowLabel,
+    evidence: evidence || '', ts: Date.now()
+  };
+  DataStore.merge(); DataStore.notifyAll();
+  if (!widgetInstances['W15']) _addWidgetToGrid('W15');
+  var w15el = document.querySelector('[gs-id="W15"]');
+  if (w15el) w15el.scrollIntoView({ behavior: 'smooth' });
+  // Open W15 real form with prefill — read active positions from merged data
+  var inst = widgetInstances['W15'];
+  if (inst && typeof inst._showForm === 'function') {
+    var m = DataStore.merged || {};
+    var pos = m.pnl_live && m.pnl_live.positions ? m.pnl_live.positions : (m.positions || []);
+    var active = pos.filter(function(p) {
+      var s = p['状态'] || ''; return s.indexOf('清') < 0 && s.indexOf('删') < 0;
+    });
+    setTimeout(function() { inst._showForm(active); }, 100);
+  }
+  showToast('已预填 W15: ' + name + ' ' + code + ' ' + windowLabel);
+}
 
 // === Toast ===
 function showToast(msg) {

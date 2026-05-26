@@ -13,11 +13,36 @@ python3 scripts/bridge.py 8088
 
 ## 依赖
 
+### Python（服务端）
+
+```bash
+# 推荐：用虚拟环境隔离
+python3 -m venv .venv
+source .venv/bin/activate          # macOS/Linux
+# .\.venv\Scripts\Activate.ps1     # Windows
+
+# 安装依赖
+pip install -r requirements.txt
+
+# 数据管道（ym_stock_data，详见 requirements.txt 中的安装说明）
+cd ~/Documents/YM_Capital/YM-data-pipeline && pip install -e .
+# 或使用环境变量指定本地路径（开发模式）:
+# export YM_DATA_PIPELINE_PATH=/Users/xxx/YM_Capital/YM-data-pipeline
+```
+
+### 前端
+
 - GridStack.js v12（CDN 自动加载，版本锁定 12.0.0）
 - 无 Node.js/npm 依赖
 - 纯原生 HTML/CSS/JS
 
-## 目录
+### 运行环境检查
+
+```bash
+python3 scripts/check_runtime.py
+```
+
+## 启动
 
 ```
 live-dashboard/

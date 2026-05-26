@@ -12,9 +12,41 @@ import json, os, sys, time, re
 from pathlib import Path
 from datetime import datetime
 
-# OpenAPI（仅在此处使用，用量极低）
-sys.path.insert(0, "/Users/YouMing/Documents/YM_Capital/YM-data-pipeline")
-from ym_stock_data.sources.iwencai import query as _iwencai_query
+def _load_pipeline_path():
+    """从环境变量或默认值解析 ym_stock_data 的路径。
+
+    若用户显式提供 YM_DATA_PIPELINE_PATH 但路径不存在，立即报错。
+    """
+    env_path = os.environ.get("YM_DATA_PIPELINE_PATH", "")
+    if env_path:
+        p = Path(env_path)
+        if p.exists():
+            return p
+        raise RuntimeError(
+            f"YM_DATA_PIPELINE_PATH='{env_path}' 不存在。"
+            f"请检查路径是否正确，或取消设置该环境变量以使用默认路径。"
+            f"默认路径: {ROOT_DIR.parent / 'YM-data-pipeline'}"
+        )
+    return ROOT_DIR.parent / "YM-data-pipeline"
+
+_pip_path = None
+
+def _ensure_pipeline():
+    """确保 ym_stock_data 在 sys.path 中（延迟导入）"""
+    global _pip_path
+    if _pip_path is not None:
+        return _pip_path
+    p = _load_pipeline_path()
+    if str(p) not in sys.path:
+        sys.path.insert(0, str(p))
+    _pip_path = p
+    return p
+
+def _iwencai_query(*args, **kwargs):
+    """延迟导入 iwencai 模块"""
+    _ensure_pipeline()
+    from ym_stock_data.sources.iwencai import query as _q
+    return _q(*args, **kwargs)
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
 OUTPUT_FILE = ROOT_DIR / "data" / "auction_snapshot.json"
@@ -399,23 +431,111 @@ def _judge_auction(snap):
     }
 
 
+def _safe_int(val, default=0):
+    """Parse int safely: None / '' / '—' / non-numeric → default, no exceptions."""
+    if val is None or val == "" or val == "—":
+        return default
+    try:
+        return int(val)
+    except (ValueError, TypeError):
+        return default
+
+
+def is_auction_valid(snapshot, now=None):
+    """Check if auction snapshot was fetched today, has required structure,
+    and contains minimum actual data (not all-empty collection results)."""
+    if not isinstance(snapshot, dict):
+        return False
+    now = now or datetime.now()
+    fetched = str(snapshot.get("fetched", ""))
+    today = now.strftime("%Y-%m-%d")
+    if today not in fetched:
+        return False
+    required_keys = ["指数竞价", "涨跌家数", "高标竞价", "自选池竞价", "信号灯"]
+    for k in required_keys:
+        if k not in snapshot or snapshot[k] is None:
+            return False
+    if not isinstance(snapshot.get("指数竞价"), list):
+        return False
+    if not isinstance(snapshot.get("信号灯"), dict):
+        return False
+    # Minimum actual data: at least one index collected, or breadth has real numbers.
+    idx_list = snapshot.get("指数竞价", [])
+    has_index = len(idx_list) > 0
+    ud = snapshot.get("涨跌家数", {})
+    has_breadth = False
+    if isinstance(ud, dict):
+        up = _safe_int(ud.get("上涨"), 0)
+        dn = _safe_int(ud.get("下跌"), 0)
+        has_breadth = (up + dn) > 0
+    if not has_index and not has_breadth:
+        return False
+    return True
+
+
+def auction_catch_up(output_path=None, build_fn=None):
+    """Attempt to catch-up auction snapshot if missing or invalid.
+    Does NOT overwrite a valid today snapshot (09:28 is final).
+    Returns (snapshot, action) where action is 'skip', 'catch_up', or 'error'.
+    """
+    output_path = Path(output_path) if output_path else OUTPUT_FILE
+
+    existing = None
+    if output_path.exists():
+        try:
+            with open(output_path, encoding="utf-8") as f:
+                existing = json.load(f)
+        except Exception:
+            pass
+
+    if existing and is_auction_valid(existing):
+        return existing, "skip"
+
+    try:
+        build = build_fn or build_auction_snapshot
+        snap = build()
+        if not is_auction_valid(snap):
+            return {"error": "built snapshot invalid (empty/missing data)", "built": snap}, "error"
+
+        now_str = datetime.now().strftime("%Y-%m-%dT%H:%M:%S+08:00")
+        snap["source"] = "catch_up"
+        snap["captured_at"] = now_str
+
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(output_path, "w", encoding="utf-8") as f:
+            json.dump(snap, f, ensure_ascii=False, indent=2)
+
+        return snap, "catch_up"
+    except Exception as e:
+        return {"error": str(e)[:200]}, "error"
+
+
 def main():
     import argparse
     parser = argparse.ArgumentParser(description="竞价5维快照")
     parser.add_argument("--output", choices=["json", "file"], default="file")
+    parser.add_argument("--force", action="store_true", help="Force re-capture even if valid")
     args = parser.parse_args()
 
     print(f"[{datetime.now().strftime('%H:%M:%S')}] 竞价快照抓取中...", file=sys.stderr)
-    snap = build_auction_snapshot()
 
-    if args.output == "json":
-        print(json.dumps(snap, ensure_ascii=False, indent=2))
-        return
-
-    # 写入独立文件（不被 poll_live 覆盖）
-    OUTPUT_FILE.parent.mkdir(parents=True, exist_ok=True)
-    with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
-        json.dump(snap, f, ensure_ascii=False, indent=2)
+    if args.output == "file" and not args.force:
+        snap, action = auction_catch_up()
+        if action == "skip":
+            print(f"[{datetime.now().strftime('%H:%M:%S')}] 竞价快照已有效，跳过", file=sys.stderr)
+            return
+        if action == "error":
+            print(f"[{datetime.now().strftime('%H:%M:%S')}] 竞价快照失败: {snap.get('error','')}", file=sys.stderr)
+            return
+    else:
+        snap = build_auction_snapshot()
+        now_str = datetime.now().strftime("%Y-%m-%dT%H:%M:%S+08:00")
+        snap["source"] = "forced" if args.force else "manual"
+        snap["captured_at"] = now_str
+        if args.output == "file":
+            OUTPUT_FILE.parent.mkdir(parents=True, exist_ok=True)
+            with open(OUTPUT_FILE, "w", encoding="utf-8") as f:
+                json.dump(snap, f, ensure_ascii=False, indent=2)
 
     # 简要输出
     lights = snap.get("信号灯", {})

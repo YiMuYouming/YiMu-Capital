@@ -138,11 +138,12 @@ class AccountAnchorStorageTests(unittest.TestCase):
         db.init_db()
 
     def tearDown(self):
+        # 先从当前 _local（temp）关闭连接，再恢复原始 _local
         conn = getattr(db._local, "conn", None)
         if conn is not None:
             conn.close()
-        db.DB_PATH = self.original_path
         db._local = self.original_local
+        db.DB_PATH = self.original_path
         self.tmp.cleanup()
 
     def test_first_anchor_is_locked_and_reused(self):
@@ -219,11 +220,12 @@ class ClosingAnchorTests(unittest.TestCase):
         db.init_db()
 
     def tearDown(self):
+        # 先从当前 _local（temp）关闭连接，再恢复原始 _local
         conn = getattr(db._local, "conn", None)
         if conn is not None:
             conn.close()
-        db.DB_PATH = self.original_path
         db._local = self.original_local
+        db.DB_PATH = self.original_path
         self.tmp.cleanup()
 
     def test_closing_anchor_generates_next_day_previous_close_anchor(self):
@@ -231,6 +233,7 @@ class ClosingAnchorTests(unittest.TestCase):
 
         # 1. 先建今日锚点 + 一笔买入
         dashboard_path = Path(self.tmp.name) / "dashboard_data.json"
+        history_path = Path(self.tmp.name) / "pnl_history.json"
         dashboard_path.write_text(json.dumps({
             "pnl": {"可用资金": 100000, "累计入金": 100000},
             "positions": [{"标的": "沪电", "代码": "002463", "数量": 0, "现价": 100, "状态": "持有"}],
@@ -252,9 +255,11 @@ class ClosingAnchorTests(unittest.TestCase):
         })
 
         # 2. 执行收盘锚点生成（模拟收盘行情）
+        # 传入 pnl_history_path=history_path，避免写入真实 data/pnl_history.json
         result = generate_closing_anchor(
             {"002463": {"最新价": 105.0}, "_updated": "2026-05-26T15:00:00"},
             now="2026-05-26T15:05:00",
+            pnl_history_path=history_path,
         )
         self.assertIsNotNone(result)
         self.assertEqual(result["next_date"], "2026-05-27")
@@ -324,11 +329,12 @@ class CorrectionTradeTests(unittest.TestCase):
         db.init_db()
 
     def tearDown(self):
+        # 先从当前 _local（temp）关闭连接，再恢复原始 _local
         conn = getattr(db._local, "conn", None)
         if conn is not None:
             conn.close()
-        db.DB_PATH = self.original_path
         db._local = self.original_local
+        db.DB_PATH = self.original_path
         self.tmp.cleanup()
 
     def test_correction_creates_reversal_trade(self):
@@ -385,11 +391,12 @@ class FullLifecycleReplayTests(unittest.TestCase):
         })
 
     def tearDown(self):
+        # 先从当前 _local（temp）关闭连接，再恢复原始 _local
         conn = getattr(db._local, "conn", None)
         if conn is not None:
             conn.close()
-        db.DB_PATH = self.original_path
         db._local = self.original_local
+        db.DB_PATH = self.original_path
         self.tmp.cleanup()
 
     def test_full_day_replay_lifecycle(self):
@@ -483,9 +490,11 @@ class FullLifecycleReplayTests(unittest.TestCase):
 
         # === 阶段6：收盘日结 ===
         # 收盘价=42.5 → 持仓市值=400*42.5=17000，cash=94400，total_asset=111400
+        # 传入 pnl_history_path=history_path，避免写入真实 data/pnl_history.json
         result = generate_closing_anchor(
             {"000001": {"最新价": 42.5}, "_updated": "2026-05-26T15:00:00"},
             now="2026-05-26T15:05:00",
+            pnl_history_path=history_path,
         )
         self.assertIsNotNone(result)
         self.assertEqual(result["next_date"], "2026-05-27")

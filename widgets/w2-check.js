@@ -42,21 +42,34 @@ class W2CheckWidget extends YiMuWidget {
         'background:'+color+';vertical-align:middle;margin-right:2px"></span>';
     }
 
+    // ===== rule_state 实时规则引擎（Gate 1A 唯一权威结论）=====
+    var RS = (data && data.rule_state) || null;
+    var rsW2 = (RS && RS.windows && RS.windows.w2) || {};
+    var rsBlocks = (RS && RS.blocks) || [];
+    var rsMissing = !RS;
+
+    if (rsMissing) {
+      body.innerHTML = '<div style="text-align:center;padding:20px;color:var(--danger);font-weight:600">规则状态不可用</div>'
+        +'<div style="font-size:12px;color:var(--text-disabled);text-align:center">后端 rule_state 未生成</div>';
+      this.updateTimestamp();
+      return;
+    }
+
+    var w2BuyAllowed = rsW2.buy_allowed;
     var html = '';
 
-    // ===== 顶栏：3 信号灯=条件 =====
-    var c1 = qx >= 20;     // 条件1: 非冰点
-    var c2 = ztProfit >= 2; // 条件2: 赚钱效应
-    var c3 = profitFx === '好' || profitFx === '较好' || profitFx.indexOf('好') >= 0; // 条件3: 赚钱评判
-    var allOk = c1 && c2 && c3;
+    // ===== 顶栏：rule_state 结论 + 本地三条件详情 =====
+    var c1 = qx >= 20;
+    var c2 = ztProfit >= 2;
+    var c3 = profitFx === '好' || profitFx === '较好' || profitFx === '很好' || profitFx === '非常好';
     function dot(ok) {
       return '<span style="display:inline-block;width:14px;height:14px;border-radius:50%;'+
         'background:'+(ok===true?'var(--down)':(ok===false?'var(--danger)':'var(--text-disabled)'))+';'+
         'box-shadow:'+(ok===true?'0 0 6px rgba(5,150,105,0.4)':'none')+';'+
         'vertical-align:middle;margin:0 2px"></span>';
     }
-    var overallColor = allOk ? 'var(--down)' : 'var(--danger)';
-    var overallLabel = allOk ? '✅ W2环境可操作' : '⚠️ W2环境不佳';
+    var overallColor = w2BuyAllowed ? 'var(--down)' : 'var(--danger)';
+    var overallLabel = w2BuyAllowed ? '✅ W2 允许买入' : '⚠️ W2 关闭' + (rsW2.in_session ? '' : '（非W2时段）');
     html += '<div style="padding:6px 10px;background:var(--bg-base);border-radius:6px;'+
       'border-left:3px solid '+overallColor+';margin-bottom:6px">'+
       '<div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">'+
@@ -71,7 +84,16 @@ class W2CheckWidget extends YiMuWidget {
       '</div>'+
       '<div style="font-size:10px;color:var(--text-disabled);margin-top:3px">'+
         '涨'+upCnt+'跌'+dnCnt+' | 上证'+szChg+' | 情绪区：'+qx.toFixed(0)+'% '+zone+
-      '</div></div>';
+      '</div>';
+
+    // W2 阻断展示（rule_state blocks 中 scope=w2 或 scope=all 的项）
+    var w2ScopeCodes = rsBlocks.filter(function(b){ return b.scope === 'w2' || b.scope === 'all'; });
+    if (w2ScopeCodes.length) {
+      html += '<div style="margin-top:4px;padding:3px 6px;background:rgba(220,38,38,0.08);border-radius:4px;font-size:10px">';
+      w2ScopeCodes.forEach(function(b){ html += '<div style="color:var(--danger)">✕ '+b.code+': '+b.message+'</div>'; });
+      html += '</div>';
+    }
+    html += '</div>';
 
     // ===== 趋势 W2 标的信号卡 =====
     var trW2 = trPool.filter(function(s){ var w=s['窗口']||''; return !w||w==='W2'; });
@@ -107,7 +129,10 @@ class W2CheckWidget extends YiMuWidget {
       var hardMet = (near60m?1:0) + (shrink?1:0) + (notCrash?1:0);
 
       var signal, sigColor;
-      if (hardMet >= 3)      { signal = '买入'; sigColor = 'var(--down)'; }
+      if (!w2BuyAllowed) {
+        // rule_state 判定 W2 不可交易，所有候选统一降级
+        signal = '关闭'; sigColor = 'var(--text-disabled)';
+      } else if (hardMet >= 3)      { signal = '买入'; sigColor = 'var(--down)'; }
       else if (hardMet >= 2) { signal = '接近'; sigColor = 'var(--warn)'; }
       else                   { signal = '—'; sigColor = 'var(--text-disabled)'; }
 
@@ -125,9 +150,9 @@ class W2CheckWidget extends YiMuWidget {
 
     if (trendEvals.length > 0) {
       trendEvals.forEach(function(t) {
-        var stockOk = t.hardMet >= 3;
-        var stockWait = t.hardMet >= 2 && t.hardMet < 3;
-        var stockFail = t.hardMet < 2;
+        var stockOk = t.hardMet >= 3 && w2BuyAllowed;
+        var stockWait = t.hardMet >= 2 && t.hardMet < 3 && w2BuyAllowed;
+        var stockFail = !w2BuyAllowed || t.hardMet < 2;
 
         html += '<div style="padding:6px 4px;border-bottom:1px solid var(--border-light);display:flex;align-items:center;gap:8px">';
 
@@ -151,7 +176,7 @@ class W2CheckWidget extends YiMuWidget {
           '</div>';
 
         // 止损线
-        if (t.hardMet >= 2 && !stockOk) {
+        if (t.hardMet >= 2 && !stockOk && w2BuyAllowed) {
           var stopPx = t.dist <= 0 ? (t.price*0.93) : (t.price*0.95);
           html += '<div style="font-size:9px;color:var(--text-disabled);margin-top:1px">止损参考 '+
             '<span style="color:var(--danger)">'+stopPx.toFixed(1)+'</span> 仓位20%</div>';
@@ -164,6 +189,7 @@ class W2CheckWidget extends YiMuWidget {
             (t.chg>=0?'+':'')+t.chg.toFixed(1)+'%</div>'+
           '<div style="font-size:10px">'+(t.price?t.price.toFixed(2):'—')+'</div>'+
           '<div style="font-size:9px;color:var(--text-disabled)">MA10 '+(t.ma10_60m?t.ma10_60m.toFixed(2):'—')+'</div>'+
+          (!window._healthCritical && stockOk?'<button onclick="event.stopPropagation();_prefillW15(\''+t.name.replace(/'/g,"\\'")+'\',\''+t.code+'\',\'W2\',\'趋势W2买入:MA回踩+缩量+未大跌\')" style="margin-top:2px;background:var(--down);color:#fff;border:none;padding:1px 6px;border-radius:3px;cursor:pointer;font-size:9px;white-space:nowrap">录入</button>':'')+
           '</div>';
 
         html += '</div>';
@@ -178,7 +204,7 @@ class W2CheckWidget extends YiMuWidget {
       var op=s['操作']||''; return op.indexOf('低吸')>=0 || op.indexOf('W2')>=0;
     });
     if (lbW2.length > 0) {
-      html += '<div style="font-size:12px;font-weight:700;color:var(--text-primary);margin:8px 0 4px;padding-top:4px;border-top:1px solid var(--border-light)">连板 W2 低吸</div>';
+      html += '<div style="font-size:12px;font-weight:700;color:var(--text-primary);margin:8px 0 4px;padding-top:4px;border-top:1px solid var(--border-light)">连板 W2' + (w2BuyAllowed ? ' 低吸' : ' 关闭') + '</div>';
 
       lbW2.forEach(function(s){
         var code = s['代码'] || '';
@@ -205,12 +231,20 @@ class W2CheckWidget extends YiMuWidget {
         var notIce = qx >= 20;
 
         var hardMet = (diverge?1:0) + (shrink2?1:0) + (leaderAlive?1:0) + (notIce?1:0);
-        var stockOk = hardMet >= 3;
-        var stockWait = hardMet >= 2 && hardMet < 3;
-        var stockFail = hardMet < 2;
+
+        // rule_state W2 关闭时连板候选统一降级
+        var stockOk, stockWait, stockFail;
+        if (!w2BuyAllowed) {
+          stockOk = false; stockWait = false; stockFail = true;
+        } else {
+          stockOk = hardMet >= 3;
+          stockWait = hardMet >= 2 && hardMet < 3;
+          stockFail = hardMet < 2;
+        }
 
         var stockStatus, stColor;
-        if (stockOk)      { stockStatus = '低吸'; stColor = 'var(--down)'; }
+        if (!w2BuyAllowed) { stockStatus = '关闭'; stColor = 'var(--text-disabled)'; }
+        else if (stockOk)      { stockStatus = '低吸'; stColor = 'var(--down)'; }
         else if (stockWait) { stockStatus = '观察'; stColor = 'var(--warn)'; }
         else              { stockStatus = '—'; stColor = 'var(--text-disabled)'; }
 

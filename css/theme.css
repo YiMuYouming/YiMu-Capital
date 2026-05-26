@@ -70,6 +70,15 @@
   --shadow-glow-info: 0 0 16px rgba(37,99,235,0.12);
 
   /* GridStack override */
+  /* z-index layers — single source of truth */
+  --z-base: 0;
+  --z-dropdown: 100;
+  --z-sticky: 200;
+  --z-overlay: 1000;
+  --z-modal: 2000;
+  --z-toast: 3000;
+  --z-tooltip: 4000;
+
   --widget-header-bg: rgba(255,255,255,0.92);
   --widget-header-height: 32px;
   --widget-radius: 8px;
@@ -126,7 +135,7 @@ html,body{
 
 /* ===== Top Bar ===== */
 .topbar{
-  position:sticky;top:0;z-index:100;
+  position:sticky;top:0;z-index:var(--z-sticky);
   display:flex;align-items:center;gap:var(--sp-sm);
   padding:var(--sp-sm) var(--sp-lg);
   background:var(--widget-header-bg);
@@ -167,7 +176,7 @@ html,body{
 
 /* ===== Context Menu ===== */
 .context-menu{
-  display:none;position:fixed;z-index:1000;
+  display:none;position:fixed;z-index:var(--z-overlay);
   background:var(--bg-card);
   border:1px solid var(--border);
   border-radius:var(--radius-md);
@@ -334,7 +343,7 @@ html,body{
   box-shadow:var(--shadow-elevated);
   opacity:0;visibility:hidden;
   transition:opacity .25s,transform .3s cubic-bezier(.34,1.56,.64,1),visibility .25s;
-  z-index:2000;
+  z-index:var(--z-modal);
   white-space:nowrap;
   pointer-events:none;
 }
@@ -426,7 +435,7 @@ html,body{
   padding:var(--sp-xs) var(--sp-sm);
   border-bottom:1px solid var(--border);
   font-weight:600;
-  z-index:1;
+  z-index:0;
 }
 .data-table td{
   padding:var(--sp-xs) var(--sp-sm);
@@ -594,7 +603,7 @@ html,body{
   left:var(--fs-origin-left, 0)!important;
   width:100vw!important;
   height:100vh!important;
-  z-index:9999!important;
+  z-index:var(--z-modal)!important;
   border-radius:0!important;
   border-color:transparent!important;
   box-shadow:var(--shadow-modal)!important;
@@ -706,7 +715,7 @@ body:not(.has-fullscreen) .topbar{
   text-align: center;
   padding: 0 4px;
   pointer-events: none;
-  z-index: 1;
+  z-index: var(--z-dropdown);
 }
 
 /* ===== LLM Chat 浮动框 ===== */
@@ -714,7 +723,7 @@ body:not(.has-fullscreen) .topbar{
   position: fixed;
   top: 0; left: 0; right: 0; bottom: 0;
   background: rgba(0,0,0,0.4);
-  z-index: 3000;
+  z-index: var(--z-toast);
   display: none;
   align-items: flex-end;
   justify-content: flex-end;
@@ -822,4 +831,39 @@ body:not(.has-fullscreen) .topbar{
   font-size: 11px;
   color: var(--text-disabled);
   flex-shrink: 0;
+}
+
+/* ===== Top Bar Health & Metrics ===== */
+.topbar-health {
+  display: inline-flex; align-items: center; gap: 4px; padding: 1px 8px;
+  border-radius: var(--radius-sm); font-size: 11px; font-weight: 600;
+  background: var(--bg-hover); margin: 0 4px;
+}
+.health-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; }
+.health-dot.live { background: var(--down); }
+.health-dot.dead { background: var(--danger); animation: health-pulse 1s infinite; }
+@keyframes health-pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.3; } }
+.topbar-metric {
+  display: inline-block; padding: 1px 8px; border-radius: var(--radius-sm);
+  font-size: 11px; font-family: var(--font-mono); font-weight: 600;
+  background: var(--bg-hover); margin: 0 2px; white-space: nowrap;
+}
+
+/* ===== Compact Mode ===== */
+body.compact-mode .grid-stack-item:not(.core-widget) { display: none !important; }
+
+/* ===== Stop-Loss Alert ===== */
+.sl-alert {
+  display: block; padding: 3px 10px; margin-top: 2px;
+  background: var(--danger-bg); color: var(--danger);
+  border-left: 3px solid var(--danger); border-radius: var(--radius-sm);
+  font-size: 11px; font-weight: 700; animation: sl-blink 1.5s infinite;
+}
+@keyframes sl-blink { 0%,100% { opacity: 1; } 50% { opacity: 0.6; } }
+
+/* ===== Prefill Banner in W15 ===== */
+.prefill-banner {
+  padding: 6px 12px; margin-bottom: var(--sp-sm);
+  background: var(--info-bg); border-left: 3px solid var(--info);
+  border-radius: var(--radius-sm); font-size: 12px;
 }

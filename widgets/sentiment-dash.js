@@ -1,4 +1,4 @@
-// widgets/sentiment-dash.js — W05 情绪节点对比 v4.1 (独立 fetch + 颜色修复)
+// widgets/sentiment-dash.js — W05 情绪节点对比 v5.0 (DataStore subscription, no direct fetch)
 'use strict';
 
 class SentimentDashWidget extends YiMuWidget {
@@ -6,21 +6,18 @@ class SentimentDashWidget extends YiMuWidget {
     var body = this.getBody();
     if (!body) return;
 
-    if (!this._data) {
-      body.innerHTML = '<div style="font-size:var(--fs-label);color:var(--text-disabled);text-align:center;padding:var(--sp-md)">加载节点数据...</div>';
+    var nodes = (data && data.sentiment_nodes) || {};
+
+    if (!nodes._available) {
+      body.innerHTML = '<div style="font-size:var(--fs-label);color:var(--text-disabled);text-align:center;padding:var(--sp-md)">情绪节点数据不可用</div>';
+      this.updateTimestamp();
+      return;
     }
 
-    var self = this;
-    fetch('data/sentiment_auto.json?t=' + Date.now())
-      .then(function(r) { return r.ok ? r.json() : null; })
-      .catch(function() { return null; })
-      .then(function(json) {
-        if (json) self._data = json;
-        self._renderTable(body);
-      });
+    this._renderTable(body, nodes, nodes._stale);
   }
 
-  _renderTable(body) {
+  _renderTable(body, nodes, isStale) {
     var NODES = [
       {id:'auction',    label:'9:25',  target:'竞价'},
       {id:'morning',    label:'10:00', target:'早盘'},
@@ -32,11 +29,14 @@ class SentimentDashWidget extends YiMuWidget {
       {id:'close',      label:'15:00', target:'收盘'},
     ];
 
-    var today = new Date().toISOString().slice(0, 10);
-    var allDay = this._data[today] || [];
-    if (!allDay.length) {
-      var yesterday = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
-      allDay = this._data[yesterday] || [];
+    // 取最新日期 key（与 DataStore 北京交易日统一，不依赖 UTC toISOString）
+    var nodeKeys = Object.keys(nodes).filter(function(k) {
+      return /^\d{4}-\d{2}-\d{2}$/.test(k);
+    }).sort().reverse();
+    var allDay = [];
+    for (var i = 0; i < nodeKeys.length; i++) {
+      allDay = nodes[nodeKeys[i]] || [];
+      if (allDay.length) break;
     }
 
     var nodeSnaps = {};
@@ -51,7 +51,6 @@ class SentimentDashWidget extends YiMuWidget {
     function fmt(val, suffix) {
       if (val == null || val === '') return '—';
       var s = String(val);
-      // 去掉已有的百分号避免重复
       if (suffix === '%' && s.indexOf('%') >= 0) return s;
       if (suffix === '亿' && s.indexOf('亿') >= 0) return s;
       return s + (suffix || '');
@@ -74,9 +73,12 @@ class SentimentDashWidget extends YiMuWidget {
     ];
 
     var html = '';
+    if (isStale) {
+      html += '<div class="w05-stale" style="text-align:center;padding:2px 8px;margin-bottom:var(--sp-xs);background:var(--warn);color:#fff;font-size:var(--fs-label);border-radius:var(--radius-sm)">数据过期 — 最后更新超过30分钟</div>';
+    }
+
     html += '<table style="width:100%;border-collapse:collapse;font-size:var(--fs-body)">';
 
-    // 表头
     html += '<thead><tr style="border-bottom:2px solid var(--border)">' +
       '<th style="text-align:left;padding:3px var(--sp-sm);color:var(--text-disabled);font-weight:400;width:60px">指标</th>';
     NODES.forEach(function(nd) {
@@ -85,14 +87,12 @@ class SentimentDashWidget extends YiMuWidget {
     });
     html += '</tr></thead><tbody>';
 
-    // 数据行
     rows.forEach(function(row) {
       html += '<tr style="border-bottom:1px solid var(--border-light)">' +
         '<td style="padding:3px var(--sp-sm);color:var(--text-secondary);white-space:nowrap;font-weight:500">' + row.label + '</td>';
 
       NODES.forEach(function(nd) {
         var snap = nodeSnaps[nd.id];
-        // 特殊行：涨跌比用上涨/下跌家数，涨跌停用涨停/跌停家数
         var display, cls = '';
         if (row.key === '涨跌比') {
           display = row.fmt(null, snap);
@@ -120,34 +120,11 @@ class SentimentDashWidget extends YiMuWidget {
 
     html += '</tbody></table>';
 
-    // LLM 研判卡槽
     html += '<div style="margin-top:var(--sp-sm);padding:3px 8px;background:var(--bg-base);border-radius:var(--radius-sm);font-size:var(--fs-body);border:1px dashed var(--border-light)" id="w05-llm-text">' +
       '<span style="color:var(--text-disabled)">🤖 待研判</span></div>';
 
     body.innerHTML = html;
     this.updateTimestamp();
-
-    // 异步加载 LLM
-    this._loadLLM(body);
-  }
-
-  _loadLLM(body) {
-    fetch('data/llm_insights.json?t=' + Date.now())
-      .then(function(r) { return r.ok ? r.json() : null; })
-      .then(function(data) {
-        if (!data) return;
-        var today = new Date().toISOString().slice(0, 10);
-        var keys = Object.keys(data).filter(function(k) { return k.indexOf(today) === 0; }).sort().reverse();
-        var text = '';
-        keys.forEach(function(k) {
-          if (data[k] && data[k].text) text = data[k].text;
-        });
-        var el = body.querySelector('#w05-llm-text');
-        if (el && text) {
-          el.innerHTML = '<span style="color:var(--info)">🤖 ' + (text.length > 150 ? text.substring(0, 150) + '...' : text) + '</span>';
-        }
-      })
-      .catch(function() {});
   }
 }
 

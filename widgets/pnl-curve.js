@@ -900,7 +900,7 @@ class PnLCurveWidget extends YiMuWidget {
       // 创建十字线 div
       var crossEl = document.createElement('div');
       crossEl.id = 'pnl_cross_' + this.id;
-      crossEl.style.cssText = 'position:absolute;top:0;width:1px;background:#D97706;pointer-events:none;z-index:10;display:none;border-left:1px dashed #D97706';
+      crossEl.style.cssText = 'position:absolute;top:0;width:1px;background:#D97706;pointer-events:none;z-index:var(--z-dropdown);display:none;border-left:1px dashed #D97706';
       mainCanvas.parentElement.appendChild(crossEl);
 
       mainCanvas.addEventListener('mousemove', function(e) {
@@ -925,7 +925,7 @@ class PnLCurveWidget extends YiMuWidget {
         if (!tip) {
           tip = document.createElement('div');
           tip.id = 'pnl_tooltip_' + self.id;
-          tip.style.cssText = 'position:fixed;background:var(--bg-card,#FFFFFF);color:var(--text-primary,#2D2926);padding:6px 10px;border-radius:4px;border:1px solid var(--border,#E5E2DE);font-size:11px;pointer-events:none;z-index:9999;line-height:1.6;font-family:var(--font-mono);box-shadow:0 2px 8px rgba(0,0,0,0.1)';
+          tip.style.cssText = 'position:fixed;background:var(--bg-card,#FFFFFF);color:var(--text-primary,#2D2926);padding:6px 10px;border-radius:4px;border:1px solid var(--border,#E5E2DE);font-size:11px;pointer-events:none;z-index:var(--z-tooltip);line-height:1.6;font-family:var(--font-mono);box-shadow:0 2px 8px rgba(0,0,0,0.1)';
           document.body.appendChild(tip);
         }
         var isDaily = cd.type === 'daily';

@@ -21,14 +21,41 @@ TRADING_SLOTS = [(h, m)
 _local = threading.local()
 
 def get_conn():
-    """线程本地连接，每个线程独立连接"""
+    """线程本地连接，每个线程独立连接。
+
+    若当前线程已持有连接但 DB_PATH 已变更（如测试隔离），自动关闭旧连接。
+    """
     conn = getattr(_local, 'conn', None)
-    if conn is None:
-        conn = sqlite3.connect(str(DB_PATH))
+    if conn is not None:
+        try:
+            actual_path = conn.execute("PRAGMA database_list").fetchone()[2]
+            if actual_path != str(DB_PATH):
+                conn.close()
+                _local.conn = None
+        except Exception:
+            _local.conn = None
+    if getattr(_local, 'conn', None) is None:
+        conn = sqlite3.connect(str(DB_PATH), timeout=10)
         conn.row_factory = sqlite3.Row
         conn.execute("PRAGMA journal_mode=WAL")
         _local.conn = conn
     return conn
+
+
+def close_conn():
+    """显式关闭当前线程的 SQLite 连接，并清空 thread-local 引用。
+
+    在 HTTP 请求结束时调用，避免连接随线程累积。
+    WAL 模式下的检查点由下次连接自动恢复。
+    """
+    conn = getattr(_local, 'conn', None)
+    if conn is not None:
+        try:
+            conn.close()
+        except Exception:
+            pass
+        finally:
+            delattr(_local, 'conn')
 
 
 def _exec(sql, params=None):

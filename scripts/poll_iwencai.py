@@ -7,15 +7,52 @@ v2.3: 竞价快照已迁至 snapshot_auction.py，本脚本仅用于盘后复盘
   python3 poll_iwencai.py --review --save # 查询并保存到 data/iwencai_review.json
 """
 
-import json, sys, re
+import json, os, sys, re
 from datetime import datetime
 from pathlib import Path
 
-# 统一走 ym_stock_data
-sys.path.insert(0, "/Users/YouMing/Documents/YM_Capital/YM-data-pipeline")
-from ym_stock_data.sources.iwencai import query as _iwencai_query
-
 ROOT_DIR = Path(__file__).resolve().parent.parent  # live-dashboard/
+
+
+def _load_pipeline_path():
+    """从环境变量或默认值解析 ym_stock_data 的路径。
+
+    若用户显式提供 YM_DATA_PIPELINE_PATH 但路径不存在，立即报错。
+    """
+    env_path = os.environ.get("YM_DATA_PIPELINE_PATH", "")
+    if env_path:
+        p = Path(env_path)
+        if p.exists():
+            return p
+        raise RuntimeError(
+            f"YM_DATA_PIPELINE_PATH='{env_path}' 不存在。\n"
+            f"请检查路径是否正确，或取消设置该环境变量以使用默认路径。\n"
+            f"默认路径: {ROOT_DIR.parent / 'YM-data-pipeline'}"
+        )
+    default = ROOT_DIR.parent / "YM-data-pipeline"
+    return default
+
+
+_pip_path = None
+
+
+def _ensure_pipeline():
+    """确保 ym_stock_data 在 sys.path 中（延迟导入）"""
+    global _pip_path
+    if _pip_path is not None:
+        return _pip_path
+    p = _load_pipeline_path()
+    if str(p) not in sys.path:
+        sys.path.insert(0, str(p))
+    _pip_path = p
+    return p
+
+
+def _iwencai_query(*args, **kwargs):
+    """延迟导入 iwencai 查询"""
+    _ensure_pipeline()
+    from ym_stock_data.sources.iwencai import query as _q
+    return _q(*args, **kwargs)
 
 def run_iwencai(q, extra_args=None):
     """调用 ym_stock_data 问财查询，返回 datas 列表"""

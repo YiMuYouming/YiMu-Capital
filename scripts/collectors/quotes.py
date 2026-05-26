@@ -3,14 +3,49 @@
 使用 YM-data-pipeline fetch() 统一接口，不再直接调 PyTDX/easyquotation。
 bridge.py APScheduler 调度：5s/30s/300s 三档频率。
 """
-import sys, json, threading
+import os, sys, json, threading
 from pathlib import Path
 from datetime import datetime, time as _time_module
 
 from scripts.file_utils import atomic_write_json
 
-sys.path.insert(0, "/Users/YouMing/Documents/YM_Capital/YM-data-pipeline")
-from ym_stock_data.fetch import fetch as _pipeline_fetch
+def _load_pipeline_path():
+    """从环境变量或默认值解析 ym_stock_data 的路径。
+
+    若用户显式提供 YM_DATA_PIPELINE_PATH 但路径不存在，立即报错。
+    """
+    env_path = os.environ.get("YM_DATA_PIPELINE_PATH", "")
+    if env_path:
+        p = Path(env_path)
+        if p.exists():
+            return p
+        raise RuntimeError(
+            f"YM_DATA_PIPELINE_PATH='{env_path}' 不存在。"
+            f"请检查路径是否正确，或取消设置该环境变量以使用默认路径。"
+            f"默认路径: {Path(__file__).resolve().parent.parent.parent / 'YM-data-pipeline'}"
+        )
+    # scripts/collectors/quotes.py → parents[4] = YM_Capital/ (4 layers from file to YM_Capital)
+    default = Path(__file__).resolve().parent.parent.parent.parent / "YM-data-pipeline"
+    return default
+
+_pip_path = None
+
+def _ensure_pipeline():
+    """确保 ym_stock_data 在 sys.path 中，返回路径"""
+    global _pip_path
+    if _pip_path is not None:
+        return _pip_path
+    p = _load_pipeline_path()
+    if str(p) not in sys.path:
+        sys.path.insert(0, str(p))
+    _pip_path = p
+    return p
+
+def _pipeline_fetch(*args, **kwargs):
+    """延迟导入 ym_stock_data.fetch，避免启动时崩溃"""
+    _ensure_pipeline()
+    from ym_stock_data.fetch import fetch as _f
+    return _f(*args, **kwargs)
 
 CACHE = {}
 _tdx_lock = threading.Lock()  # PyTDX 共用连接保护锁
@@ -346,10 +381,12 @@ def log_pnl_snapshot(force=False):
     """300s: persist one disposable snapshot derived from account SSOT."""
     if not force and not is_trading_time():
         return
+    conn_opened = False
     try:
         from scripts.account_ssot import load_current_account_state
-        from scripts.db import init_db, insert_daily_summary, insert_snapshot, query_pnl_summary
+        from scripts.db import init_db, insert_daily_summary, insert_snapshot, query_pnl_summary, close_conn
         init_db()
+        conn_opened = True
         now = datetime.now()
         state = load_current_account_state(CACHE.get("live_quotes", {}))
 
@@ -382,6 +419,9 @@ def log_pnl_snapshot(force=False):
         # 此处只写日内快照，不写 daily_summary；15:00 之后的快照仍写入但不加锁
     except Exception as e:
         print(f"  [quotes] log_pnl_snapshot error: {e}", file=sys.stderr)
+    finally:
+        if conn_opened:
+            close_conn()
 
 
 def set_stock_codes(codes):

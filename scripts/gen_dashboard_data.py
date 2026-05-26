@@ -625,7 +625,7 @@ def get_style_data(review_path=None):
     return {}
 
 # 风格总分 → 总仓位上限映射 (score_threshold, cap)
-_TOTAL_CAP_BRACKETS = [(80, 60), (60, 50), (40, 40), (20, 20)]
+_TOTAL_CAP_BRACKETS = [(80, 60), (60, 50), (40, 40)]
 
 def _compute_total_cap(sd):
     """根据总分计算总仓位上限"""
@@ -633,7 +633,7 @@ def _compute_total_cap(sd):
     for threshold, cap in _TOTAL_CAP_BRACKETS:
         if total >= threshold:
             return cap
-    return 10
+    return 20
 
 def compute_style_execution(fm, style):
     """规则引擎：根据 trading-core.md 计算 style.实际执行

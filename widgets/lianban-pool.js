@@ -4,7 +4,13 @@
 class LianbanPoolWidget extends YiMuWidget {
   constructor(config) {
     super(config);
-    this._sortDir = null; // null | 'asc' | 'desc'
+    this._sortDir = null;
+    this._sortBound = false;
+  }
+
+  unmount() {
+    this._sortBound = false;
+    super.unmount();
   }
 
   render(data) {
@@ -89,14 +95,16 @@ class LianbanPoolWidget extends YiMuWidget {
     html += '</tbody></table>';
     body.innerHTML = html;
 
-    // 排序按钮事件
-    var th = body.querySelector('.sortable');
-    if (th) {
-      th.addEventListener('click', function() {
-        if (!self._sortDir) self._sortDir = 'desc';
-        else if (self._sortDir === 'desc') self._sortDir = 'asc';
-        else self._sortDir = null;
-        self._renderBody();
+    // 排序：事件代理在 body，仅首次 render 绑定
+    if (!this._sortBound) {
+      this._sortBound = true;
+      this._on(body, 'click', function(e) {
+        if (e.target && e.target.classList.contains('sortable')) {
+          if (!self._sortDir) self._sortDir = 'desc';
+          else if (self._sortDir === 'desc') self._sortDir = 'asc';
+          else self._sortDir = null;
+          self._renderBody();
+        }
       });
     }
 

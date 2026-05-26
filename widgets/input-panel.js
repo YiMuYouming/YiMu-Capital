@@ -5,7 +5,13 @@ class InputPanelWidget extends YiMuWidget {
   constructor(config) {
     super(config);
     this._panelOpen = true;
+    this._delegatedBound = false;
     try { this._panelOpen = localStorage.getItem(STORAGE_KEYS.panelOpen) !== '0'; } catch(e) {}
+  }
+
+  unmount() {
+    this._delegatedBound = false;
+    super.unmount();
   }
 
   mount(container) {
@@ -77,30 +83,34 @@ class InputPanelWidget extends YiMuWidget {
 
     body.innerHTML = html;
 
-    // Bind events
-    var self = this;
-    var refreshBtn = body.querySelector('#btnRefresh');
-    if (refreshBtn) {
-      refreshBtn.addEventListener('click', function() { self._saveAndRefresh(); });
-    }
+    // 事件代理：仅首次 render 绑定，防重复 render 叠加 handler
+    if (!this._delegatedBound) {
+      this._delegatedBound = true;
+      var self = this;
+      this._on(body, 'click', function(e) {
+        if (e.target && e.target.id === 'btnRefresh') {
+          self._saveAndRefresh();
+        }
+      });
 
-    fields.forEach(function(f) {
-      var el = body.querySelector('#in_'+f.id);
-      if (el) {
-        el.addEventListener('change', function() {
-          DataStore.manualData.set(f.id, el.value);
-        });
-        el.addEventListener('input', function() {
-          DataStore.manualData.set(f.id, el.value);
-        });
-      }
-    });
+      this._on(body, 'change', function(e) {
+        var el = e.target;
+        var id = el && el.id;
+        if (!id || id.indexOf('in_') !== 0) return;
+        if (id === 'in_情绪值_手动覆盖') {
+          DataStore.manualData.set('_情绪值_手动覆盖', el.checked ? 'true' : 'false');
+          return;
+        }
+        var fieldKey = id.replace('in_', '');
+        DataStore.manualData.set(fieldKey, el.value);
+      });
 
-    // 情绪值手动覆盖 checkbox
-    var overrideCb = body.querySelector('#in_情绪值_手动覆盖');
-    if (overrideCb) {
-      overrideCb.addEventListener('change', function() {
-        DataStore.manualData.set('_情绪值_手动覆盖', overrideCb.checked ? 'true' : 'false');
+      this._on(body, 'input', function(e) {
+        var el = e.target;
+        var id = el && el.id;
+        if (!id || id.indexOf('in_') !== 0 || id === 'in_情绪值_手动覆盖') return;
+        var fieldKey = id.replace('in_', '');
+        DataStore.manualData.set(fieldKey, el.value);
       });
     }
 

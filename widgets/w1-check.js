@@ -39,7 +39,7 @@ class W1CheckWidget extends YiMuWidget {
 
     var now = new Date();
     var hour = now.getHours(), min = now.getMinutes();
-    var inW1 = (hour === 9 && min >= 30) || (hour === 9 && min <= 59) || (hour === 10 && min === 0);
+    var inW1 = hour === 9 && min >= 30 && min <= 59 || hour === 10 && min === 0;
     var isFriday = now.getDay() === 5;
 
     // ===== 开盘快照：W1 首次有数据时定格，用于高开/合力判定 =====
@@ -83,12 +83,27 @@ class W1CheckWidget extends YiMuWidget {
     // 赚钱效应
     var profitEffect = iw['赚钱效应'] || S['赚钱效应'] || '—';
 
-    // ===== 环境阻断 =====
+    // ===== rule_state 实时规则引擎（Gate 1A 唯一权威结论）=====
+    var RS = (data && data.rule_state) || null;
+    var rsW1 = (RS && RS.windows && RS.windows.w1) || {};
+    var rsBlocks = (RS && RS.blocks) || [];
+    var rsMissing = !RS;
+
+    if (rsMissing) {
+      body.innerHTML = '<div style="text-align:center;padding:20px;color:var(--danger);font-weight:600">规则状态不可用</div>'
+        +'<div style="font-size:12px;color:var(--text-disabled);text-align:center">后端 rule_state 未生成</div>';
+      this.updateTimestamp();
+      return;
+    }
+
+    var w1BuyAllowed = rsW1.buy_allowed;
+    var w1Blocks = rsW1.blocks || [];
+
+    // ===== 环境阻断（展示 rule_state blocks + 本地详情补充，结论一律服从 buy_allowed）=====
     var blocks = [];
-    if (isFriday) blocks.push({label:'周五休战', detail:'周五W1关闭'});
-    if (qx < 20 && yestQx < 20) blocks.push({label:'双冰', detail:'连续两日情绪<20%'});
-    if (qx >= 85) blocks.push({label:'高潮保护', detail:'情绪≥85%极端高潮'});
-    var blocked = blocks.length > 0;
+    rsBlocks.forEach(function(b) {
+      blocks.push({label: b.code, detail: b.message + ' ['+b.scope+']'});
+    });
 
     // ===== 三件套 =====
     var piece1_ok = qx >= 60;
@@ -106,15 +121,16 @@ class W1CheckWidget extends YiMuWidget {
     // ===== 渲染 =====
     var html = '';
 
-    // 环境阻断
-    if (blocked) {
+    // rule_state 结论：W1 不允许买入时展示阻断原因
+    if (!w1BuyAllowed) {
       html += '<div style="text-align:center;padding:20px">'+
         '<div style="display:inline-block;width:48px;height:48px;border-radius:50%;background:var(--danger);'+
           'box-shadow:0 0 16px var(--danger);line-height:48px;font-size:22px;color:var(--text-inverse);margin-bottom:8px">✕</div>'+
-        '<div style="font-size:14px;font-weight:700;color:var(--danger);margin-bottom:6px">W1 关闭</div>';
+        '<div style="font-size:14px;font-weight:700;color:var(--danger);margin-bottom:6px">W1 关闭' + (rsW1.in_session ? '' : '（非W1时段）') + '</div>';
       blocks.forEach(function(b){
         html += '<div style="font-size:12px;color:var(--text-secondary)">'+b.label+': '+b.detail+'</div>';
       });
+      if (!blocks.length) html += '<div style="font-size:12px;color:var(--text-secondary)">后端规则引擎判定不可交易</div>';
       html += '</div>';
       body.innerHTML = html;
       this.updateTimestamp();
@@ -369,6 +385,7 @@ class W1CheckWidget extends YiMuWidget {
           '<span style="font-weight:600;color:'+(chg>=0?'var(--up)':'var(--down)')+'">'+(chg>=0?'+':'')+chg.toFixed(1)+'%</span>'+
           (distMA5!==null?'<span style="font-size:10px;color:var(--text-disabled)">MA5 '+(distMA5>=0?'+':'')+distMA5.toFixed(1)+'%</span>':'<span style="font-size:10px;color:var(--text-disabled)">MA5 —</span>')+
           (s['止损']?'<span style="font-size:10px;color:var(--danger)">止损'+s['止损']+'</span>':'')+
+          (!window._healthCritical && w1BuyAllowed && dotOk ? '<button onclick="event.stopPropagation();_prefillW15(\''+(s['标的']||'').replace(/'/g,"\\'")+'\',\''+code+'\',\'W1\',\'W1买入信号：涨幅'+chg.toFixed(1)+'%\')" style="margin-left:4px;background:var(--info);color:#fff;border:none;padding:1px 6px;border-radius:3px;cursor:pointer;font-size:10px;white-space:nowrap">录入</button>' : '')+
           '</div>';
       });
       html += '</div>';

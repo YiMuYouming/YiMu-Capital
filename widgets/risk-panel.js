@@ -45,12 +45,17 @@ class RiskPanelWidget extends YiMuWidget {
     var realTimePnlPct = totalCost > 0 ? (realTimePnl / totalCost * 100) : 0;
 
     // 账户口径优先使用日内快照，避免过期基线把仓位显示成 100%。
-    if (parseFloat(pnlLive.mv) > 0) totalMV = parseFloat(pnlLive.mv);
-    var totalAsset = parseFloat(pnlLive.total_asset)
-                  || parseFloat(((data && data.pnl) || {})['总资产'])
-                  || totalMV;
+    // pnlLive.cash=0 / mv=0 / total_asset=0 是合法值，用 != null 判断。
+    if (pnlLive.mv != null && !isNaN(parseFloat(pnlLive.mv))) {
+      totalMV = parseFloat(pnlLive.mv);
+    }
+    var totalAsset = pnlLive.total_asset != null && !isNaN(parseFloat(pnlLive.total_asset))
+                  ? parseFloat(pnlLive.total_asset)
+                  : parseFloat(((data && data.pnl) || {})['总资产'] || '0') || totalMV;
     var positionRatio = totalAsset > 0 ? (totalMV / totalAsset * 100) : 0;
-    var availFund = parseFloat(pnlLive.cash) || (totalAsset - totalMV);
+    var availFund = pnlLive.cash != null && !isNaN(parseFloat(pnlLive.cash))
+                  ? parseFloat(pnlLive.cash)
+                  : (totalAsset - totalMV);
 
     // 风控基线
     var meltdownLine = parseFloat(R['单日熔断线']) || -3;
@@ -72,6 +77,26 @@ class RiskPanelWidget extends YiMuWidget {
 
     var html = '';
 
+    // ===== rule_state 实时风控（Gate 1A）=====
+    var RS = (data && data.rule_state) || null;
+    if (RS) {
+      var rsBlocks = RS.blocks || [];
+      var rsWarnings = RS.warnings || [];
+      var rsCaps = RS.caps || {};
+      if (rsBlocks.length || rsWarnings.length) {
+        html += '<div style="margin-bottom:var(--sp-sm);padding:var(--sp-xs) var(--sp-sm);background:rgba(220,38,38,0.06);border-radius:var(--radius-md);border-left:3px solid'+(RS.tradable?'var(--warn)':'var(--danger)')+'">';
+        html += '<div style="font-size:var(--fs-label);font-weight:700;color:'+(RS.tradable?'var(--warn)':'var(--danger)')+';margin-bottom:2px">'+(RS.tradable?'⚠ 规则约束':'✕ 规则阻断')+'</div>';
+        rsBlocks.forEach(function(b){
+          html += '<div style="font-size:var(--fs-body);color:var(--'+(b.scope==='all'?'danger':'warn')+');padding:1px 0">'+b.code+': '+b.message+'</div>';
+        });
+        rsWarnings.forEach(function(w){
+          html += '<div style="font-size:var(--fs-body);color:var(--warn)">⚠ '+w.message+'</div>';
+        });
+        html += '</div>';
+      }
+      html += '<div style="font-size:var(--fs-body);color:var(--text-disabled);margin-bottom:var(--sp-sm)">总仓位 '+(rsCaps.total_pct!=null?rsCaps.total_pct+'%':'—')+' | 首笔 '+(rsCaps.first_entry_pct!=null?rsCaps.first_entry_pct+'%':'—')+' | '+(RS.tradable?'可交易':'禁止开仓')+'</div>';
+    }
+
     // === 持仓累计浮盈（大字）===
     var pnlCls = realTimePnl > 0 ? 'up' : realTimePnl < 0 ? 'down' : '';
     html += '<div style="text-align:center;padding:var(--sp-sm);margin-bottom:var(--sp-sm);background:var(--bg-base);border-radius:var(--radius-md)">'+
@@ -92,35 +117,78 @@ class RiskPanelWidget extends YiMuWidget {
         '<div class="kpi-value" style="font-size:14px">'+activePos.length+'只</div></div>'+
       '</div>';
 
-    // === 风控线 ===
+    // === 风控线（实时 rule_state 驱动，旧 daily risk 仅供数值引用）===
     html += '<div style="font-size:var(--fs-label);font-weight:600;color:var(--text-primary);margin-bottom:var(--sp-xs)">风控线</div>';
 
-    // 单日熔断以风险域判定为准，累计浮盈不能替代当日账户收益。
-    var dayHit = !!meltdown;
-    html += '<div style="display:flex;justify-content:space-between;padding:2px 0;font-size:var(--fs-body)">'+
-      '<span style="color:var(--text-secondary)">单日熔断</span>'+
-      '<span style="font-family:var(--font-mono)">阈值 '+meltdownLine+'%</span>'+
-      '<span style="color:'+(dayHit?'var(--danger)':'var(--info)')+'">'+(dayHit?'⚠️触发':'✅安全')+'</span></div>';
+    if (!RS) {
+      html += '<div style="text-align:center;padding:8px;color:var(--danger);font-size:var(--fs-body);font-weight:600">规则状态不可用</div>'+
+        '<div style="font-size:10px;color:var(--text-disabled);text-align:center">无法确认实时风控结论</div>';
+    } else {
+      // 从 rule_state 取实时阻断结论
+      var dayStopBlock = rsBlocks.filter(function(b){ return b.code === 'DAY_STOP'; });
+      var lossStreakBlock = rsBlocks.filter(function(b){ return b.code === 'LOSS_STREAK'; });
+      var dayHit = dayStopBlock.length > 0;
+      var streakHit = lossStreakBlock.length > 0;
 
-    // 连亏
-    html += '<div style="display:flex;justify-content:space-between;padding:2px 0;font-size:var(--fs-body)">'+
-      '<span style="color:var(--text-secondary)">连亏天数</span>'+
-      '<span style="font-family:var(--font-mono)">'+loseDays+'天</span>'+
-      '<span style="color:'+(loseDays>=2?'var(--danger)':'var(--info)')+'">'+(loseDays>=2?'⚠️空仓':'✅正常')+'</span></div>';
+      html += '<div style="display:flex;justify-content:space-between;padding:2px 0;font-size:var(--fs-body)">'+
+        '<span style="color:var(--text-secondary)">单日熔断</span>'+
+        '<span style="font-family:var(--font-mono)">阈值 -3%</span>'+
+        '<span style="color:'+(dayHit?'var(--danger)':'var(--info)')+'">'+(dayHit?'⚠ 触发':'✓ 未触发')+'</span></div>';
 
-    // 周回撤
+      html += '<div style="display:flex;justify-content:space-between;padding:2px 0;font-size:var(--fs-body)">'+
+        '<span style="color:var(--text-secondary)">连亏天数</span>'+
+        '<span style="font-family:var(--font-mono)">'+loseDays+'天</span>'+
+        '<span style="color:'+(streakHit?'var(--danger)':'var(--info)')+'">'+(streakHit?'⚠ 空仓':'✓ 正常')+'</span></div>';
+    }
+
+    // 周回撤（rule_state 不覆盖，保留 baseline 字段 + 数据引用）
     var wCls = weekDD > weekWarnLine ? 'danger' : weekDD > 3 ? 'warn' : 'info';
     html += '<div style="display:flex;justify-content:space-between;padding:2px 0;font-size:var(--fs-body)">'+
       '<span style="color:var(--text-secondary)">周回撤</span>'+
       '<span style="font-family:var(--font-mono)">'+pct(weekDD)+' / '+weekWarnLine+'%</span>'+
-      '<span class="'+wCls+'" style="font-weight:600">'+(weekDD>weekWarnLine?'⚠️触发':'✅安全')+'</span></div>';
+      '<span class="'+wCls+'" style="font-weight:600">'+(weekDD>weekWarnLine?'⚠ 触发':'—')+'</span></div>';
 
     // 月回撤
     var mCls = monthDD > monthWarnLine ? 'danger' : monthDD > 5 ? 'warn' : 'info';
     html += '<div style="display:flex;justify-content:space-between;padding:2px 0;font-size:var(--fs-body)">'+
       '<span style="color:var(--text-secondary)">月回撤</span>'+
       '<span style="font-family:var(--font-mono)">'+pct(monthDD)+' / '+monthWarnLine+'%</span>'+
-      '<span class="'+mCls+'" style="font-weight:600">'+(monthDD>monthWarnLine?'⚠️触发':'✅安全')+'</span></div>';
+      '<span class="'+mCls+'" style="font-weight:600">'+(monthDD>monthWarnLine?'⚠ 触发':'—')+'</span></div>';
+
+    // ===== 止损提醒（只读，优先 SSOT 止损字段，规则兜底明确标记）=====
+    var slAlerts = [];
+    activePos.forEach(function(p) {
+      var cost = parseFloat(p['成本']) || 0;
+      var price = parseFloat(p['现价']) || parseFloat(p['成本']) || 0;
+      var qty = parseFloat(p['数量']) || 0;
+      if (!cost || !price || !qty) return;
+      var ssotSl = parseFloat(p['止损']);
+      var hasSsotSl = !isNaN(ssotSl) && ssotSl > 0;
+      var slPrice = hasSsotSl ? ssotSl : (cost * 0.93);
+      var slSource = hasSsotSl ? '' : ' (规则推算)';
+      var isNearSl = price <= slPrice * 1.02 && price > slPrice;
+      var isHitSl = price <= slPrice;
+      if (isHitSl || isNearSl) {
+        var pnlPct = ((price - cost) / cost * 100);
+        slAlerts.push({
+          name: p['标的'] || '—', code: p['代码'] || '',
+          cost: cost, price: price, sl: slPrice,
+          pnlPct: pnlPct, hit: isHitSl, source: slSource
+        });
+      }
+    });
+    if (slAlerts.length > 0) {
+      html += '<div style="margin-top:var(--sp-sm);border-top:1px solid var(--border-light);padding-top:var(--sp-sm)">' +
+        '<div style="font-size:11px;font-weight:700;color:var(--danger);margin-bottom:4px">止损提醒</div>';
+      slAlerts.forEach(function(a) {
+        html += '<div class="' + (a.hit ? 'sl-alert' : '') + '" style="' + (a.hit ? '' : 'font-size:11px;padding:2px 8px;color:var(--warn);') + '">' +
+          (a.hit ? '🔴 ' : '🟡 ') + a.name + ' ' + a.code +
+          ' 成本' + a.cost.toFixed(2) + ' 现价' + a.price.toFixed(2) +
+          ' 止损' + a.sl.toFixed(2) + a.source + ' 浮亏' + (a.pnlPct >= 0 ? '+' : '') + a.pnlPct.toFixed(2) + '%' +
+          '</div>';
+      });
+      html += '</div>';
+    }
 
     body.innerHTML = html;
     this.updateTimestamp();

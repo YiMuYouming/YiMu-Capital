@@ -97,6 +97,13 @@ const DataStore = (function() {
   }
 
   // === 工具函数 ===
+  function _pad2(n) { return (n < 10 ? '0' : '') + n; }
+
+  function _beijingToday() {
+    var now = new Date();
+    return now.getFullYear() + '-' + _pad2(now.getMonth() + 1) + '-' + _pad2(now.getDate());
+  }
+
   function deepClone(obj) {
     return JSON.parse(JSON.stringify(obj));
   }
@@ -276,6 +283,55 @@ const DataStore = (function() {
     // 保留 API 响应的 _freshness（优先 liveData 实时源，其次 baseData 基线源）
     d._freshness = (liveData && liveData._freshness) || d._freshness || null;
 
+    // sentient_nodes — 情绪节点快照（持久化，refresh 不丢失）
+    if (_sentimentNodes) {
+      d.sentiment_nodes = _sentimentNodes;
+      var snKeys = Object.keys(_sentimentNodes).filter(function(k) {
+        return /^\d{4}-\d{2}-\d{2}$/.test(k);
+      }).sort();
+      var snLatest = snKeys.length > 0 ? snKeys[snKeys.length - 1] : '';
+      var snStale = (snLatest !== _beijingToday());
+      // 当天数据也需检查最新节点 time 是否在 30min 窗口内
+      if (!snStale && snLatest) {
+        var todayNodes = _sentimentNodes[snLatest] || [];
+        if (Array.isArray(todayNodes) && todayNodes.length > 0) {
+          var lastNode = todayNodes[todayNodes.length - 1];
+          var nodeTime = lastNode.time || '';
+          if (!nodeTime && lastNode.node) {
+            nodeTime = snLatest + 'T' + lastNode.node + ':00+08:00';
+          }
+          if (nodeTime) {
+            var nodeMs = new Date(nodeTime).getTime();
+            if (!isNaN(nodeMs)) {
+              snStale = (Date.now() - nodeMs) > 1800000;
+            }
+          }
+        }
+      }
+      d.sentiment_nodes._stale = snStale;
+      d.sentiment_nodes._available = true;
+      d.sentiment_nodes._latest_date = snLatest;
+    } else {
+      d.sentiment_nodes = { _available: false, _stale: true };
+    }
+
+    // auction_snapshot — 竞价快照（持久化，refresh 不丢失）
+    if (_auctionSnapshot) {
+      d.auction_snapshot = _auctionSnapshot;
+      if (!d.auction_snapshot._loaded) d.auction_snapshot._loaded = 0;
+      var asFetched = _auctionSnapshot.fetched || _auctionSnapshot.captured_at || '';
+      var asToday = _beijingToday();
+      d.auction_snapshot._stale = asToday !== asFetched.slice(0, 10);
+      d.auction_snapshot._available = true;
+    } else {
+      d.auction_snapshot = { _available: false, _stale: true };
+    }
+
+    // Step 4: rule_state 实时规则引擎结果（SSE 与轮询共享同一后端来源）
+    if (liveData && liveData.rule_state) {
+      d.rule_state = liveData.rule_state;
+    }
+
     // 注入 PnL 实时总资产（每 tick 从 bridge /api/pnl/summary 拉取）
     if (_pnlLive) {
       d.pnl_live = _pnlLive;
@@ -287,13 +343,57 @@ const DataStore = (function() {
 
   var _pnlLive = null;
 
+  // === 内部持久化数据域（refresh 周期不丢失）===
+  var _sentimentNodes = null;    // sentient_auto.json 快照
+  var _auctionSnapshot = null;   // auction_snapshot.json 快照
+
+  function _loadSentimentNodes() {
+    return fetch('data/sentiment_auto.json?t=' + Date.now())
+      .then(function(r) { return r.ok ? r.json() : null; })
+      .catch(function() { return null; })
+      .then(function(data) {
+        if (data) {
+          _sentimentNodes = data;
+          _sentimentNodes._loaded = Date.now();
+        }
+        return data;
+      });
+  }
+
+  function _loadAuctionSnapshot() {
+    return fetch('data/auction_snapshot.json?t=' + Date.now())
+      .then(function(r) { return r.ok ? r.json() : null; })
+      .catch(function() { return null; })
+      .then(function(data) {
+        if (data) {
+          _auctionSnapshot = data;
+          _auctionSnapshot._loaded = Date.now();
+        }
+        return data;
+      });
+  }
+
   function _fetchPnlSummary() {
-    if (location.protocol === 'file:') return Promise.resolve(null);
+    if (typeof location !== 'undefined' && location.protocol === 'file:') return Promise.resolve(null);
     return fetch('/api/pnl/summary').then(function(r) { return r.ok ? r.json() : null; }).catch(function() { return null; });
   }
 
   // === 刷新数据（v2.0 多源实时管线）===
   var _refreshCount = 0;
+  var _slowDataCounter = 0;
+
+  function _maybeReloadSlowData() {
+    _slowDataCounter++;
+    if (_slowDataCounter < 60) return;
+    _slowDataCounter = 0;
+    _loadSentimentNodes().then(function() {
+      return _loadAuctionSnapshot();
+    }).then(function() {
+      merge();
+      notifyAll();
+    });
+  }
+
   function refresh(tier) {
     if (tier === 'manual' || tier === 'daily' || tier === 'slow') return;
 
@@ -312,6 +412,7 @@ const DataStore = (function() {
           merge();
           notifyAll();
           notifyConnListeners();
+          _maybeReloadSlowData();
         });
       } else {
         chain.then(function(base) {
@@ -326,6 +427,7 @@ const DataStore = (function() {
           merge();
           notifyAll();
           notifyConnListeners();
+          if (tier === 'tick') _maybeReloadSlowData();
         }).catch(function() {
           connectionStatus = 'dead';
           if (!baseData && fallback) {
@@ -356,7 +458,7 @@ const DataStore = (function() {
     connectionStatus = 'polling';
     notifyConnListeners();
 
-    adapter.fetchBase().then(function(base) {
+    return adapter.fetchBase().then(function(base) {
       baseData = base;
       if (!initialBase && base.market) {
         initialBase = { market: deepClone(base.market), sentiment: deepClone(base.sentiment) };
@@ -368,17 +470,11 @@ const DataStore = (function() {
         if (pnlLive) _pnlLive = pnlLive;
       });
     }).then(function() {
-      // 加载 sentiment_auto.json 快照（供 W05 等组件订阅）
-      return fetch('data/sentiment_auto.json?t=' + Date.now())
-        .then(function(r) { return r.ok ? r.json() : null; })
-        .catch(function() { return null; });
-    }).then(function(sentimentSnap) {
-      if (sentimentSnap) {
-        // 挂载到 merged.sentiment_nodes，供 DataStore 订阅路径 sentiment_nodes
-        var d = merged || {};
-        d._sentiment_auto = sentimentSnap;
-        setMerged(d);
-      }
+      // 加载 sentiment_nodes 和 auction_snapshot
+      return _loadSentimentNodes().then(function() {
+        return _loadAuctionSnapshot();
+      });
+    }).then(function() {
       merge();
       notifyAll();
       notifyConnListeners();
@@ -478,12 +574,10 @@ const DataStore = (function() {
         return adapter.fetchLive();
       }).then(function(live) {
         if (live) liveData = live;
-        return fetch('data/sentiment_auto.json?t=' + Date.now())
-          .then(function(r) { return r.ok ? r.json() : null; })
-          .catch(function() { return null; });
-      }).then(function(sentimentSnap) {
-        var d = merged || {};
-        if (sentimentSnap) d._sentiment_auto = sentimentSnap;
+        return _loadSentimentNodes().then(function() {
+          return _loadAuctionSnapshot();
+        });
+      }).then(function() {
         merge();
         notifyAll();
         notifyConnListeners();
@@ -527,6 +621,7 @@ const DataStore = (function() {
         'news.*':                 { source: 'YM-data-pipeline fetch(news) → collectors/market_data.py → bridge CACHE', freq: '5min', owner: 'bridge APScheduler' },
         'decision.竞价.*':         { source: 'snapshot_auction.py 9:25快照 → auction_snapshot.json', freq: '9:25', owner: 'bridge APScheduler' },
         'sentiment_nodes.*':      { source: 'sentiment_snapshot.py 30min自动快照 → sentiment_auto.json', freq: '30min', owner: 'bridge APScheduler' },
+        'auction_snapshot.*':    { source: 'snapshot_auction.py 9:28竞价快照 → auction_snapshot.json', freq: '9:28 + catch-up', owner: 'bridge APScheduler' },
         // === T3 实时计算（从 T1+T2 逻辑推导） ===
         'sentiment.情绪值':         { source: 'T3涨跌家数比(主) / T2 iwencai(校验) / T4手工覆盖(需checkbox)', freq: '5s/2min/随录', owner: 'store.js merge() Step4' },
         'sentiment.情绪区间':       { source: 'T3计算: 情绪值阈值判定(<20冰点 <40低迷 <60主升 <80强势 ≥80高潮)', freq: '实时', owner: 'store.js merge() Step4' },

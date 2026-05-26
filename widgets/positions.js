@@ -93,13 +93,31 @@ class PositionsWidget extends YiMuWidget {
 
     var html = '';
 
+    // Prefill banner (from W08/W09 录入操作 — 只读，不自动提交)
+    var _pf = DataStore._prefill;
+    if (_pf && Date.now() - (_pf.ts || 0) < 300000) {
+      html += '<div class="prefill-banner">' +
+        '<span style="font-weight:700;color:var(--info)">预填: </span>' +
+        '<span>' + _pf.name + ' ' + _pf.code + ' ' + _pf.window + '</span>' +
+        '<span style="margin-left:8px;font-size:10px;color:var(--text-secondary)">' + (_pf.evidence || '') + '</span>' +
+        '<button onclick="DataStore._prefill=null;DataStore.notifyAll()" style="float:right;background:none;border:none;cursor:pointer;font-size:14px;color:var(--text-disabled)" title="关闭预填">x</button>' +
+        '</div>';
+    }
+
     // 汇总卡片以日内账户快照为 SSOT；逐股计算仅作接口暂不可用时的兜底。
-    var dayStart = parseFloat(pnlLive.day_start_asset) || parseFloat((data.pnl||{})['总资产']) || 0;
+    // pnlLive.mv=0 / total_asset=0 是合法值，用 != null 判断。
+    var dayStart = pnlLive.day_start_asset != null && !isNaN(parseFloat(pnlLive.day_start_asset))
+                 ? parseFloat(pnlLive.day_start_asset)
+                 : parseFloat((data.pnl||{})['总资产'] || '0') || 0;
     var localPv=0; active.forEach(function(p){localPv+=p['_mv']||0;});
     var localPnl = active.reduce(function(sum,p){return sum+(p['_todayPnl']||0);}, 0) + realizedPnL;
-    var pv = parseFloat(pnlLive.mv) || localPv;
+    var pv = pnlLive.mv != null && !isNaN(parseFloat(pnlLive.mv))
+           ? parseFloat(pnlLive.mv)
+           : localPv;
     var tp = pnlLive.pnl_amount != null ? parseFloat(pnlLive.pnl_amount) : localPnl;
-    var ta = parseFloat(pnlLive.total_asset) || (dayStart > 0 ? dayStart + tp : 0);
+    var ta = pnlLive.total_asset != null && !isNaN(parseFloat(pnlLive.total_asset))
+           ? parseFloat(pnlLive.total_asset)
+           : (dayStart > 0 ? dayStart + tp : 0);
     var af = ta - pv;
     if (!ta || ta <= 0) ta = pv + af;
     var tc=tp>0?'up':tp<0?'down':'';
@@ -211,10 +229,10 @@ class PositionsWidget extends YiMuWidget {
 
   _showForm(active) {
     var self = this;
-    var pf = {};
+    var pf = DataStore._prefill || {};
 
     var o = document.createElement('div');
-    o.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.6);z-index:3000;display:flex;align-items:center;justify-content:center';
+    o.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.6);z-index:var(--z-toast);display:flex;align-items:center;justify-content:center';
 
     var sellOpts = active.map(function(p){return '<option value="'+p['标的']+'" data-code="'+(p['代码']||'')+'" data-price="'+(p['现价']||'')+'" data-qty="'+(p['数量']||0)+'">'+p['标的']+' ('+(p['代码']||'')+')</option>';}).join('');
 
@@ -231,7 +249,7 @@ class PositionsWidget extends YiMuWidget {
         '<div class="input-group" style="grid-column:1/-1"><label>标的名称</label><input id="f_stock" value="'+(pf['标的']||'')+'" style="width:100%"></div>'+
         '<div class="input-group"><label>价格</label><input id="f_price" type="number" step="0.01" value="'+(pf['价格']||'')+'" style="width:100%"></div>'+
         '<div class="input-group" id="f_qty_row"><label>数量(股)</label><input id="f_qty" type="number" value="'+(pf['数量']||'100')+'" style="width:100%"></div>'+
-        '<div class="input-group" id="f_win_row"><label>窗口</label><select id="f_win" style="width:100%"><option>W1</option><option>W2</option></select></div>'+
+        '<div class="input-group" id="f_win_row"><label>窗口</label><select id="f_win" style="width:100%"><option value="W1">W1</option><option value="W2">W2</option></select></div>'+
         '<div class="input-group" style="grid-column:1/-1"><label>交易理由</label><input id="f_reason" value="'+(pf['原因']||'')+'" style="width:100%"></div>'+
       '</div>'+
       '<div style="display:flex;gap:var(--sp-sm);margin-top:var(--sp-md)">'+
@@ -245,6 +263,22 @@ class PositionsWidget extends YiMuWidget {
     var sellSelect2 = o.querySelector('#f_sell_select'), qtyRow2 = o.querySelector('#f_qty_row'), winRow2 = o.querySelector('#f_win_row');
     var qtyLabel2 = qtyRow2.querySelector('label');
 
+    // Prefill from DataStore._prefill if available
+    if (pf && pf.code) {
+      var fCode = o.querySelector('#f_code');
+      var fStock = o.querySelector('#f_stock');
+      var fWin = o.querySelector('#f_win');
+      var fReason = o.querySelector('#f_reason');
+      if (fCode) fCode.value = pf.code || '';
+      if (fStock) fStock.value = pf.name || '';
+      if (pf.window && fWin && fWin.options) {
+        var wOpts = fWin.options;
+        for (var wi = 0; wi < wOpts.length; wi++) {
+          if (wOpts[wi].value === pf.window) { wOpts[wi].selected = true; break; }
+        }
+      }
+      if (fReason) fReason.value = pf.evidence || '';
+    }
     function toggle(buy) {
       buyBtn2.style.opacity = buy ? '1' : '0.4';
       sellBtn2.style.opacity = buy ? '0.4' : '1';

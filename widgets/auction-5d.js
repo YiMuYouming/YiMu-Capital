@@ -1,43 +1,32 @@
-// widgets/auction-5d.js — W06 竞价5维面板 v3.1 (纯竞价快照，零fallback)
+// widgets/auction-5d.js — W06 竞价5维面板 v4.0 (DataStore subscription, no direct fetch)
 'use strict';
 
 class Auction5DWidget extends YiMuWidget {
-  constructor(config) {
-    super(config);
-    this._snapshot = null;
-  }
-
   render(data) {
     var body = this.getBody();
     if (!body) return;
 
-    var snap = this._snapshot;
+    var snap = (data && data.auction_snapshot) || {};
 
-    if (!snap) {
-      this._loadSnapshot();
-      this._renderPlaceholder(body);
+    if (!snap._available) {
+      body.innerHTML = '<div style="font-size:var(--fs-label);color:var(--text-disabled);text-align:center;padding:var(--sp-md)">竞价数据不可用</div>';
+      this.updateTimestamp();
+      return;
+    }
+
+    if (snap._stale) {
+      body.innerHTML = '<div style="font-size:var(--fs-label);color:var(--warn);text-align:center;padding:var(--sp-md)">竞价数据过期</div>';
+      this.updateTimestamp();
+      return;
+    }
+
+    if (!snap['指数竞价'] || !snap['信号灯']) {
+      body.innerHTML = '<div style="font-size:var(--fs-label);color:var(--text-disabled);text-align:center;padding:var(--sp-md)">竞价数据结构不完整</div>';
+      this.updateTimestamp();
       return;
     }
 
     this._renderFull(body, snap);
-  }
-
-  _loadSnapshot() {
-    var self = this;
-    fetch('data/auction_snapshot.json?t=' + Date.now())
-      .then(function(r) { return r.ok ? r.json() : null; })
-      .then(function(snap) {
-        if (snap && snap['指数竞价']) {
-          self._snapshot = snap;
-          self._renderBody();
-        }
-      })
-      .catch(function() {});
-  }
-
-  _renderPlaceholder(body) {
-    body.innerHTML = '<div style="font-size:var(--fs-label);color:var(--text-disabled);text-align:center;padding:var(--sp-md)">加载竞价数据...</div>';
-    this.updateTimestamp();
   }
 
   _renderFull(body, snap) {
@@ -153,7 +142,6 @@ class Auction5DWidget extends YiMuWidget {
     this.updateTimestamp();
   }
 
-  // === 情绪指标卡片（竞价快照定格数据，零fallback）===
   _renderSentiment(snap) {
     var sent = (snap && snap['情绪指标']) || {};
 
@@ -176,7 +164,6 @@ class Auction5DWidget extends YiMuWidget {
 
     h += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:2px var(--sp-md);font-size:var(--fs-body)">';
 
-    // 左列
     var left = '';
     var qx = sent['情绪值'];
     if (qx != null && qx !== '') {
@@ -190,7 +177,6 @@ class Auction5DWidget extends YiMuWidget {
     left += pctV('涨停收益', sent['昨日涨停收益']);
     left += pctV('连板收益', sent['昨日连板收益']);
 
-    // 右列
     var right = '';
     right += pctV('炸板收益', sent['昨日炸板收益']);
     right += kv('连板风险值', sent['连板风险值'] != null ? sent['连板风险值'] : null);

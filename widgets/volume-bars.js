@@ -2,6 +2,16 @@
 'use strict';
 
 class VolumeBarsWidget extends YiMuWidget {
+  constructor(config) {
+    super(config);
+    this._hoverBound = false;
+  }
+
+  unmount() {
+    this._hoverBound = false;
+    super.unmount();
+  }
+
   render(data) {
     var body = this.getBody();
     if (!body) return;
@@ -28,7 +38,7 @@ class VolumeBarsWidget extends YiMuWidget {
     var html = '';
 
     // tooltip
-    html += '<div id="w11tip" style="display:none;position:fixed;background:rgba(0,0,0,0.85);color:#fff;padding:3px 9px;border-radius:5px;font-size:11px;white-space:nowrap;z-index:9999;pointer-events:none"></div>';
+    html += '<div id="w11tip" style="display:none;position:fixed;background:rgba(0,0,0,0.85);color:#fff;padding:3px 9px;border-radius:5px;font-size:11px;white-space:nowrap;z-index:var(--z-tooltip);pointer-events:none"></div>';
 
     indexes.forEach(function(idx, rowI) {
       var bars = idx.data;
@@ -150,25 +160,27 @@ class VolumeBarsWidget extends YiMuWidget {
 
     body.innerHTML = html;
 
-    // hover
-    var tipEl = body.querySelector('#w11tip');
-    [0,1,2].forEach(function(ri){
-      var rowEl = body.querySelector('#w11r'+ri);
-      if(rowEl&&tipEl){
-        rowEl.addEventListener('mouseover',function(e){
-          var t=e.target;
-          if(t&&t.classList.contains('w11b')){
-            tipEl.textContent=t.getAttribute('data-tip')||'';
-            tipEl.style.display='block';
-            tipEl.style.left=(e.clientX+12)+'px';
-            tipEl.style.top=(e.clientY-28)+'px';
-          }
-        });
-        rowEl.addEventListener('mouseout',function(e){
-          if(e.target&&e.target.classList.contains('w11b'))tipEl.style.display='none';
-        });
-      }
-    });
+    // hover tooltip via event delegation — 仅首次 render 绑定
+    if (!this._hoverBound) {
+      this._hoverBound = true;
+      var self = this;
+      this._on(body, 'mouseover', function(e) {
+        var t = e.target;
+        if (!t || !t.classList.contains('w11b')) return;
+        var tip = body.querySelector('#w11tip');
+        if (!tip) return;
+        tip.textContent = t.getAttribute('data-tip') || '';
+        tip.style.display = 'block';
+        tip.style.left = (e.clientX + 12) + 'px';
+        tip.style.top = (e.clientY - 28) + 'px';
+      });
+      this._on(body, 'mouseout', function(e) {
+        var t = e.target;
+        if (!t || !t.classList.contains('w11b')) return;
+        var tip = body.querySelector('#w11tip');
+        if (tip) tip.style.display = 'none';
+      });
+    }
 
     this.updateTimestamp();
   }

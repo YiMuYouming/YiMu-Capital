@@ -2,6 +2,9 @@
 
 > 源: trading-core.md + Core-连板.md + Core-趋势.md
 > 维护: 改 Vault 核心规则后手动同步到本文
+>
+> **机器硬规则唯一来源：`scripts/rule_engine.py` 输出的 `rule_state`。**
+> **本文件供人类与模型阅读；如文本与 `rule_state` 不一致，以 `rule_state` 为准并视为待修文档缺陷。**
 
 ## 铁律（9条，所有研判必须遵守）
 
@@ -40,13 +43,17 @@
 
 ## 禁止买入（任一触发则不开仓）
 
-- 周五（W1全关）
+- 周五（W1全关，趋势仓位上限 15%，不自动关闭 W2）
 - 双冰（连续两日情绪<20%）
 - 高潮保护（情绪≥85%→全关，≥80%→降半仓）
 - 单日熔断（亏损≥3%→当日停止交易）
 - 连亏≥2天→强制空仓
 - 炸板率>30%（W1追涨）/ >40%（W2冰点）
 - 一进二晋级率<15%（低迷）/ <18%（主升）
+
+## 数据可信度
+- 估值不完整、行情数据过期（stale/dead）、或 PnL 缺失 → 禁止新开仓（DATA_UNTRUSTED）
+- 情绪数据过期或核心字段缺失 → 禁止新开仓（SENTIMENT_STALE）
 
 ## 仓位规则
 
@@ -81,7 +88,15 @@
 AI研判时对每个操作建议标注: BUY(买入)/WATCH(关注)/RISK(风险)/INFO(信息)
 必须附带置信度（高/中/低）和支撑该建议的具体数据点。
 
-## 研判输出格式
+## 研判输出格式（严格 JSON）
 
-[TEXT]: 3-5句中文，结论优先，引用实时数据
-[SIGNALS]: 每行 TYPE | 标的 | 方向 | 置信度
+输出一个 JSON 对象，不含 markdown 包裹或额外文字：
+```json
+{"text":"3-5句中文研判","signals":[
+  {"type":"BUY|WATCH|RISK|INFO","target":"标的名称","code":"代码可空","window":"W1|W2|—","direction":"多|空|—","confidence":"高|中|低","basis":["依据1"]}
+]}
+```
+- type/window/direction/confidence 只允许列出的枚举值
+- signals 可为空数组
+- BUY 信号仅当 rule_state.tradable=true 且对应窗口 buy_allowed=true 才可发出
+- 所有 BUY 由后端 rule_state 硬校验，不满足规则时自动降级为 warning

@@ -6,7 +6,7 @@ W15 记流水时自动 POST 到 /api/sync，实时写入 JSON
 LLM Hook: POST /api/llm → Anthropic API → 研判文本
 """
 
-import json, os, sys, time
+import atexit, json, os, sys, time
 from http.server import HTTPServer, SimpleHTTPRequestHandler
 from socketserver import ThreadingMixIn
 
@@ -92,21 +92,37 @@ def _trade_cash_effect(op):
     return 0
 
 
+def _ensure_db():
+    """Lazy DB initialization on first use; also registers atexit hook."""
+    global _db_inited
+    if not _db_inited:
+        init_db()
+        _db_inited = True
+        atexit.register(_shutdown_db)
+
+
+_db_inited = False
+
+
+def _shutdown_db():
+    """Shutdown hook: close DB connection on process exit."""
+    from scripts.db import close_conn
+    close_conn()
+
+
 def _payload_overwrites_account(payload):
     """Asset state is server-owned; legacy browser PnL writes are forbidden."""
     return isinstance(payload, dict) and 'pnl' in payload
 
-# SQLite db
+# SQLite db — deferred init (lazy, avoids module-level connection leak at shutdown)
 try:
     from scripts.db import init_db, query_pnl, query_trades, query_pnl_summary
     from scripts.account_ssot import load_current_account_state
-    init_db()
 except ImportError:
     _s = str(ROOT)
     if _s not in sys.path: sys.path.insert(0, _s)
     from scripts.db import init_db, query_pnl, query_trades, query_pnl_summary
     from scripts.account_ssot import load_current_account_state
-    init_db()
 
 
 def _merge_pnl_summary(snapshot_summary, account_state):
@@ -132,12 +148,10 @@ SYSTEM_PROMPT_HEADER = """你是弈沐盯盘助手，严格遵循弈沐交易规
 每次研判你会收到: ①交易规则(LLM_RULES) ②项目约定(CLAUDE) ③全盘实时数据。
 结论优先，引用具体数据点。操作建议必须对照规则逐条验证。"""
 
-OUTPUT_FORMAT = """## 输出格式
-[TEXT]
-3-5句中文研判。结论优先，简洁直白。W1时段优先回答龙头和合力问题。
-[SIGNALS]
-每行一个信号，格式: 类型 | 标的 | 方向 | 置信度
-类型: BUY/WATCH/RISK/INFO 方向: 多/空/— 置信度: 高/中/低"""
+OUTPUT_FORMAT = """## 输出格式（严格 JSON）
+只输出一个 JSON 对象，不要任何 markdown 包裹或额外文字：
+{"text":"3-5句中文研判，结论优先","signals":[{"type":"BUY|WATCH|RISK|INFO","target":"标的名称","code":"代码可空","window":"W1|W2|—","direction":"多|空|—","confidence":"高|中|低","basis":["依据1"]}]}
+type/window/direction/confidence 只允许列出的枚举值。signals 可为空数组。"""
 
 
 def _build_system_prompt():
@@ -178,87 +192,397 @@ def _load_api_config():
     return {}
 
 
-def _verify_signals(signals_raw, snapshot):
-    """ReAct 验证：交叉检查 LLM 输出的信号是否与数据一致"""
-    verified = []
-    for line in signals_raw.strip().split('\n'):
-        line = line.strip()
-        if not line or '|' not in line:
-            continue
-        parts = [p.strip() for p in line.split('|')]
-        if len(parts) < 4:
-            continue
-        sig_type, target, direction, confidence = parts[0], parts[1], parts[2], parts[3]
+ALLOWED_TYPES = frozenset(["BUY", "WATCH", "RISK", "INFO"])
+ALLOWED_WINDOWS = frozenset(["W1", "W2", "—"])
+ALLOWED_DIRECTIONS = frozenset(["多", "空", "—"])
+ALLOWED_CONFIDENCE = frozenset(["高", "中", "低"])
+SIGNAL_REQUIRED = ["type", "target", "window", "direction", "confidence"]
 
-        check = {'signal': line, 'type': sig_type, 'target': target, 'status': '✅', 'note': ''}
 
-        # 验证规则（基于数据快照交叉检查）
+def _parse_llm_response(raw_text):
+    """解析 LLM 输出：标准 JSON（支持空格/换行/任意字段顺序）优先；
+    [TEXT]/[SIGNALS] 降级并标记 legacy warning。"""
+    text_part = raw_text
+    signals_raw = []
+    parse_warnings = []
+    # 检查是否是纯 JSON（修剪空白后以 { 开始 } 结束）
+    trimmed = raw_text.strip()
+    json_obj = None; extra_text = False
+    brace_idx = trimmed.find("{")
+    if brace_idx > 0:
+        extra_text = True  # JSON 前有非空白字符
+    if brace_idx >= 0:
+        depth = 0; in_str = False; esc = False
+        for i in range(brace_idx, len(trimmed)):
+            ch = trimmed[i]
+            if esc: esc = False; continue
+            if ch == '\\': esc = True; continue
+            if ch == '"' and not esc: in_str = not in_str; continue
+            if in_str: continue
+            if ch == '{': depth += 1
+            elif ch == '}':
+                depth -= 1
+                if depth == 0:
+                    json_obj = trimmed[brace_idx:i+1]
+                    # JSON 后面不应有非空白内容
+                    rest = trimmed[i+1:].strip()
+                    if rest: extra_text = True
+                    break
+    if json_obj:
+        if extra_text:
+            parse_warnings.append("JSON has extra text before/after — output should be pure JSON")
         try:
-            if sig_type == 'BUY':
-                # 检查该标的是否真的在趋势自选里，且满足 W2 回踩条件
-                trend_stocks = snapshot.get('趋势自选', [])
-                found = None
-                for s in trend_stocks:
-                    if target in str(s.get('name', '')):
-                        found = s
-                        break
-                if found:
-                    dist_str = str(found.get('dist_to_ma10_60m', '—'))
-                    vol_str = str(found.get('volRatio', '1'))
-                    if '—' in dist_str:
-                        check['status'] = '⚠️'
-                        check['note'] = 'MA10数据缺失，无法验证回踩距离'
+            obj = json.loads(json_obj)
+        except (json.JSONDecodeError, ValueError) as e:
+            parse_warnings.append(f"JSON parse failed: {str(e)[:60]}")
+            obj = None
+        if isinstance(obj, dict):
+            if "text" not in obj:
+                parse_warnings.append("JSON missing 'text' field")
+            text_part = str(obj.get("text", raw_text))
+            raw_signals = obj.get("signals")
+            if not isinstance(raw_signals, list):
+                parse_warnings.append("signals is not an array")
+            else:
+                for si, s in enumerate(raw_signals):
+                    if not isinstance(s, dict):
+                        parse_warnings.append(f"signal[{si}] is not an object")
+                        continue
+                    s["_schema_errors"] = []
+                    for f in SIGNAL_REQUIRED:
+                        if f not in s or s[f] is None:
+                            s["_schema_errors"].append(f"missing '{f}'")
+                    # basis 必填数组
+                    basis = s.get("basis")
+                    if isinstance(basis, list):
+                        if not basis:
+                            s["_schema_errors"].append("basis is empty")
                     else:
-                        dist = float(dist_str.replace('%', ''))
-                        vol = float(vol_str)
-                        conditions_met = 0
-                        if -1 <= dist <= 0.5:
-                            conditions_met += 1
-                        else:
-                            check['note'] = f'距MA10 {dist}% (需-1%~0.5%)'
-                        if vol < 0.8:
-                            conditions_met += 1
-                        else:
-                            check['note'] = (check['note'] + ' ' if check['note'] else '') + f'量比{vol}(需<0.8)'
-                        if conditions_met < 2:
-                            check['status'] = '⚠️'
-                            if not check['note']:
-                                check['note'] = '回踩条件不足'
-                        elif conditions_met == 2:
-                            check['note'] = '满足回踩+缩量' + ((' ' + check['note']) if check['note'] else '')
+                        s["_schema_errors"].append("basis missing or not an array")
+                        s["basis"] = []
+                    stype = str(s.get("type", ""))
+                    swindow = str(s.get("window", ""))
+                    sdirection = str(s.get("direction", ""))
+                    sconfidence = str(s.get("confidence", ""))
+                    if stype and stype not in ALLOWED_TYPES:
+                        s["_schema_errors"].append(f"unknown type: {stype}")
+                    if swindow and swindow not in ALLOWED_WINDOWS:
+                        s["_schema_errors"].append(f"unknown window: {swindow}")
+                    if sdirection and sdirection not in ALLOWED_DIRECTIONS:
+                        s["_schema_errors"].append(f"unknown direction: {sdirection}")
+                    if sconfidence and sconfidence not in ALLOWED_CONFIDENCE:
+                        s["_schema_errors"].append(f"unknown confidence: {sconfidence}")
+                    signals_raw.append(s)
+                # Extra text degrades BUY signals
+                if extra_text:
+                    for s in signals_raw:
+                        if s.get("type") == "BUY":
+                            s["_schema_errors"].append("parse: output has extra text")
+    # 降级：[TEXT]/[SIGNALS] — 标记为 legacy
+    if not signals_raw and "[TEXT]" in raw_text:
+        parse_warnings.append("legacy [TEXT]/[SIGNALS] format — prefer JSON")
+        parts = raw_text.split("[SIGNALS]")
+        text_part = parts[0].replace("[TEXT]", "").strip()
+        sig_text = parts[1].strip() if len(parts) > 1 else ""
+        for line in sig_text.split("\n"):
+            line = line.strip()
+            if not line or "|" not in line: continue
+            fields = [p.strip() for p in line.split("|")]
+            if len(fields) >= 4:
+                entry = {"type": fields[0], "target": fields[1],
+                         "direction": fields[2], "confidence": fields[3]}
+                if len(fields) >= 5: entry["code"] = fields[4]
+                if len(fields) >= 6: entry["window"] = fields[5]
+                if fields[0] == "BUY":
+                    entry["_schema_errors"] = ["parse: legacy format"]
+                signals_raw.append(entry)
+    if not signals_raw and not json_obj and "[TEXT]" not in raw_text and raw_text.strip():
+        parse_warnings.append("unrecognized output format")
+    return text_part, signals_raw, parse_warnings
+
+
+def _verify_signals(signals_list, snapshot):
+    """验证 LLM 信号：BUY 先过 rule_state 硬校验，再按窗口验证实际组件技术条件。"""
+    verified = []
+    if not isinstance(signals_list, list):
+        return verified
+
+    rule_state = snapshot.get("rule_state") or {}
+    rs_tradable = rule_state.get("tradable")
+    rs_windows = rule_state.get("windows") or {}
+    rs_w1 = rs_windows.get("w1") or {}
+    rs_w2 = rs_windows.get("w2") or {}
+    rs_missing = "tradable" not in rule_state
+
+    lb_pool = snapshot.get("连板池") or []
+    trend_pool = snapshot.get("趋势池") or []
+    positions = snapshot.get("持仓") or []
+    sectors = snapshot.get("板块") or []
+    sentiment_snap = snapshot.get("情绪") or {}
+
+    lb_by_name = {str(s.get("标的", "")): s for s in lb_pool}
+    tr_by_name = {str(s.get("标的", "")): s for s in trend_pool}
+    pos_by_name = {str(p.get("标的", "")): p for p in positions}
+
+    for sig in signals_list:
+        sig_type = str(sig.get("type", ""))
+        target = str(sig.get("target", ""))
+        code = str(sig.get("code", ""))
+        window = str(sig.get("window", "—"))
+        direction = str(sig.get("direction", "—"))
+        confidence = str(sig.get("confidence", "中"))
+
+        check = {"type": sig_type, "target": target, "code": code, "status": "✅", "note": ""}
+        warnings = []
+
+        # Per-signal schema errors from parse (missing fields, basis, enums, extra text, legacy)
+        for e in (sig.get("_schema_errors") or []):
+            warnings.append(e)
+
+        try:
+            if sig_type == "BUY":
+                if not target.strip():
+                    warnings.append("BUY target is empty")
+                if window not in ("W1", "W2"):
+                    warnings.append(f"BUY window must be W1 or W2, got: {window}")
+                if rs_missing:
+                    warnings.append("rule_state missing")
+                elif not rs_tradable:
+                    warnings.append("tradable is false")
+                elif window == "W1" and rs_w1.get("buy_allowed") is not True:
+                    warnings.append("W1 buy_allowed is not true")
+                elif window == "W2" and rs_w2.get("buy_allowed") is not True:
+                    warnings.append("W2 buy_allowed is not true")
+
+                in_lb = target in lb_by_name
+                in_tr = target in tr_by_name
+                if not in_lb and not in_tr and target.strip():
+                    warnings.append(f"目标 {target} 不在连板池/趋势池")
+
+                if not warnings and target.strip():
+                    found = tr_by_name.get(target) or lb_by_name.get(target)
+                    if not found:
+                        warnings.append(f"目标 {target} 无池数据")
+                    elif window == "W1":
+                        _validate_w1_buy(found, warnings)
+                    elif window == "W2":
+                        if in_tr:
+                            _validate_trend_w2_buy(found, warnings)
+                        elif in_lb:
+                            _validate_lianban_w2_buy(found, lb_pool, sentiment_snap, warnings)
+
+                if warnings:
+                    check["status"] = "⚠️"
+                    check["note"] = "；".join(warnings)
                 else:
-                    check['status'] = '⚠️'
-                    check['note'] = '标的未在趋势自选池中'
+                    check["note"] = "BUY 通过规则校验"
 
-            elif sig_type == 'RISK':
-                # 检查风控指标
-                positions = snapshot.get('持仓', [])
-                for p in positions:
-                    if target in str(p.get('name', '')):
-                        pnl = float(str(p.get('pnl_pct', '0')).replace('%', ''))
-                        if pnl < -3:
-                            check['note'] = f'浮亏{pnl}%，接近熔断线'
-                        elif pnl < 0:
-                            check['note'] = f'浮亏{pnl}%，正常范围内'
-                        else:
-                            check['note'] = f'浮盈，无风险'
-                        break
+            elif sig_type == "RISK":
+                if not target.strip():
+                    warnings.append("RISK target is empty")
+                found = pos_by_name.get(target) if target.strip() else None
+                if found:
+                    cost = float(found.get("成本", 0) or 0)
+                    price = float(found.get("现价", 0) or 0)
+                    if cost and price:
+                        check["note"] = f"浮盈{round((price-cost)/cost*100,2)}%"
+                    else:
+                        warnings.append(f"目标 {target} 缺成本/现价")
+                elif target.strip():
+                    warnings.append(f"目标 {target} 不在持仓中")
+                if warnings:
+                    check["status"] = "⚠️"; check["note"] = "；".join(warnings)
 
-            elif sig_type == 'INFO':
-                # 信息类信号，仅检查数据是否存在
-                sectors = snapshot.get('sectors', [])
-                found_sec = any(target in str(s.get('name', '')) for s in sectors)
-                if not found_sec:
-                    check['status'] = '⚠️'
-                    check['note'] = '板块未在数据中'
+            elif sig_type == "WATCH":
+                if not target.strip():
+                    warnings.append("WATCH target is empty")
+                elif target not in lb_by_name and target not in tr_by_name:
+                    warnings.append(f"目标 {target} 不在候选池")
+                if warnings:
+                    check["status"] = "⚠️"; check["note"] = "；".join(warnings)
+                else:
+                    check["note"] = "目标在候选池"
+
+            elif sig_type == "INFO":
+                found_sec = any(target in str(s.get("板块", "")) for s in sectors)
+                if not found_sec and target.strip():
+                    warnings.append(f"板块 {target} 未在数据中")
+                if warnings:
+                    check["status"] = "⚠️"; check["note"] = "；".join(warnings)
+                else:
+                    check["note"] = "数据可查"
+
+            else:
+                warnings.append(f"unknown type: {sig_type}")
+                check["status"] = "⚠️"; check["note"] = "；".join(warnings)
 
         except Exception as e:
-            check['status'] = '⚠️'
-            check['note'] = f'验证异常: {str(e)[:50]}'
+            check["status"] = "⚠️"
+            check["note"] = f"验证异常: {str(e)[:80]}"
 
         verified.append(check)
-
     return verified
+
+
+def _parse_field_float(raw, default=None):
+    if raw is None or raw == "—" or raw == "":
+        return default
+    try:
+        return float(str(raw).replace("%", "").replace("+", ""))
+    except (ValueError, TypeError):
+        return default
+
+
+def _validate_w1_buy(found, warnings):
+    """W1 BUY: 涨幅 3-9.5%，量比、MA10 作为参考"""
+    chg = _parse_field_float(found.get("涨幅"), None)
+    if chg is None:
+        warnings.append("W1 缺涨幅数据")
+    elif not (3 <= chg <= 9.5):
+        warnings.append(f"W1 涨幅 {chg}% 不在 3-9.5%")
+    vr = _parse_field_float(found.get("量比"), None)
+    if vr is None:
+        warnings.append("W1 缺量比数据")
+
+
+def _validate_trend_w2_buy(found, warnings):
+    """趋势 W2 BUY（对齐 W09 条件）: MA方向向上 + 距MA10 -1.5%~1.0% + 缩量<0.8 + 未大跌 >-5%"""
+    chg = _parse_field_float(found.get("涨幅"), None)
+    vr = _parse_field_float(found.get("量比"), None)
+    ma10 = _parse_field_float(found.get("MA10_60m"), None)
+    ma_dir = str(found.get("MA10_60m_dir", "—"))
+    price = _parse_field_float(found.get("最新价"), None)
+
+    if chg is None:
+        warnings.append("趋势W2 缺涨幅")
+    if vr is None:
+        warnings.append("趋势W2 缺量比")
+    if ma10 is None:
+        warnings.append("趋势W2 缺MA10_60m")
+    if ma_dir == "—" or not ma_dir:
+        warnings.append("趋势W2 缺MA10方向")
+
+    if warnings: return
+
+    # 1) MA方向向上 + 距离 MA10 在 -1.5% ~ 1.0%
+    dir_ok = ma_dir == "向上"
+    near_ma = False
+    if ma10 > 0 and price is not None:
+        dist = (price - ma10) / ma10 * 100
+        near_ma = -1.5 <= dist <= 1.0
+        if not near_ma and dir_ok:
+            warnings.append(f"趋势W2 距MA10 {dist:.1f}%，需在 -1.5%~1.0%")
+    elif not dir_ok:
+        warnings.append(f"趋势W2 MA10方向={ma_dir}，需向上")
+    near60m = dir_ok and near_ma
+    # 2) 缩量：量比 < 0.8
+    shrink_ok = vr < 0.8
+    if not shrink_ok:
+        warnings.append(f"趋势W2 量比={vr}，需<0.8")
+    # 3) 未大跌：涨幅 > -5
+    crash_ok = chg > -5
+    if not crash_ok:
+        warnings.append(f"趋势W2 涨幅={chg}%，需>-5%")
+
+    hardMet = (1 if near60m else 0) + (1 if shrink_ok else 0) + (1 if crash_ok else 0)
+    if hardMet < 3:
+        warnings.append(f"趋势W2 条件满足{hardMet}/3（MA回踩/缩量/未大跌）")
+
+
+def _validate_lianban_w2_buy(found, lb_pool, sentiment_snap, warnings):
+    """连板 W2 BUY（对齐 W09 条件）: 分歧回落 + 缩量 + 龙头活 + 非冰点"""
+    chg = _parse_field_float(found.get("涨幅"), None)
+    vr = _parse_field_float(found.get("量比"), None)
+    sector = str(found.get("板块", ""))
+
+    if chg is None:
+        warnings.append("连板W2 缺涨幅")
+    if vr is None:
+        warnings.append("连板W2 缺量比")
+
+    if warnings: return
+
+    # 1) 分歧回落：-7 < chg < 0
+    diverge_ok = -7 < chg < 0
+    if not diverge_ok:
+        warnings.append(f"连板W2 涨幅={chg}%，需在-7%~0%")
+    # 2) 缩量
+    shrink_ok = vr < 0.8
+    if not shrink_ok:
+        warnings.append(f"连板W2 量比={vr}，需<0.8")
+    # 3) 龙头存活：同板块存在情绪标且涨幅>=3
+    leader_alive = False
+    if sector:
+        for s in lb_pool:
+            if str(s.get("板块", "")) == sector and "情绪标" in str(s.get("角色", "")):
+                lchg = _parse_field_float(s.get("涨幅"), None)
+                if lchg is not None and lchg >= 3:
+                    leader_alive = True
+                break
+    if not leader_alive:
+        leader_alive = True  # 找不到明确龙头时放行（对齐W09逻辑）
+    # 4) 非冰点
+    emotion = _parse_field_float(sentiment_snap.get("情绪值"), None)
+    not_ice = False
+    if emotion is None:
+        warnings.append("连板W2 缺情绪数据")
+    elif emotion >= 20:
+        not_ice = True
+    else:
+        warnings.append(f"连板W2 情绪={emotion}%，需>=20%")
+
+    hardMet = (1 if diverge_ok else 0) + (1 if shrink_ok else 0) + (1 if leader_alive else 0) + (1 if not_ice else 0)
+    if hardMet < 3:
+        warnings.append(f"连板W2 条件满足{hardMet}/4（分歧/缩量/龙头/非冰）")
+
+
+
+def _process_llm_result(raw_text, snapshot, today_str, node_ts, mode, userMsg=None):
+    """共用 LLM 结果处理：解析 → 验证 → user→assistant 持久化 → 返回。"""
+    text_part, signals_raw, parse_warnings = _parse_llm_response(raw_text)
+    verified_signals = _verify_signals(signals_raw, snapshot)
+    for w in parse_warnings:
+        verified_signals.append({
+            "type": "INFO", "target": "—", "code": "",
+            "status": "⚠️", "note": f"[parse] {w}",
+        })
+    verified_count = sum(1 for v in verified_signals if v.get("status") == "✅")
+    warning_count = sum(1 for v in verified_signals if v.get("status") == "⚠️")
+    insight = {
+        "timestamp": node_ts, "node": node_ts, "mode": mode,
+        "text": text_part, "signals": verified_signals,
+        "verified_count": verified_count, "warning_count": warning_count,
+    }
+    # 单次写入：user → assistant 顺序
+    insights = {}
+    if LLM_INSIGHTS_FILE.exists():
+        try:
+            with open(LLM_INSIGHTS_FILE) as f:
+                insights = json.load(f)
+        except Exception:
+            pass
+    if today_str not in insights:
+        insights[today_str] = {"meta": {}, "conversation": []}
+    meta = insights[today_str].setdefault("meta", {})
+    if "started_at" not in meta:
+        meta["started_at"] = node_ts
+    meta["last_assistant_ts"] = node_ts
+    if mode == "auto":
+        meta["auto_trigger_count"] = meta.get("auto_trigger_count", 0) + 1
+    else:
+        meta["manual_question_count"] = meta.get("manual_question_count", 0) + 1
+    if userMsg and isinstance(userMsg, dict) and userMsg.get("text"):
+        insights[today_str]["conversation"].append({
+            "role": "user", "ts": userMsg.get("ts", node_ts),
+            "text": userMsg.get("text", ""), "auto": False,
+        })
+    insights[today_str]["conversation"].append({
+        "role": "assistant", "ts": node_ts, "text": text_part,
+        "signals": verified_signals, "auto": mode == "auto",
+    })
+    LLM_INSIGHTS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    atomic_write_json(LLM_INSIGHTS_FILE, insights)
+    return insight, verified_signals, verified_count, warning_count
 
 
 def _call_llm_api(messages):
@@ -348,6 +672,186 @@ def _add_freshness(data, data_type, fetched_at=None):
     return data
 
 
+# ===== 实时规则引擎适配 =====
+
+def _build_rule_inputs(now=None, account_state=None):
+    """从 CACHE / baseline / SSOT 构建符合 rule_engine v1 契约的输入 dict。
+    纯适配函数：不对值做业务判断，只做单位转换和缺省填充。
+    """
+    from datetime import datetime as _dt
+
+    now = now or _dt.now()
+    account_state = account_state or {}
+    pnl_live = {}
+    if not account_state:
+        try:
+            pnl_live = _current_pnl_summary()
+        except Exception:
+            pass
+    else:
+        pnl_live = account_state
+
+    # ── account ──
+    pnl_pct_raw = pnl_live.get("pnl_pct")
+    try:
+        pnl_pct = float(pnl_pct_raw) if pnl_pct_raw is not None else None
+    except (TypeError, ValueError):
+        pnl_pct = None
+    valuation_complete = bool(pnl_live.get("valuation_complete"))
+    if "valuation_complete" not in pnl_live:
+        valuation_complete = pnl_live.get("mv") is not None
+
+    # ── risk ──
+    dash = _load_dashboard_data()
+    risk = dash.get("risk", {})
+    loss_streak = int(risk.get("连亏天数", 0) or 0)
+
+    # ── style ──
+    style_raw = dash.get("style", {})
+    _score_raw = style_raw.get("总分")
+    score = int(_score_raw) if _score_raw is not None else 50
+    _lianban_raw = style_raw.get("连板占比")
+    lianban_pct = float(_lianban_raw) if _lianban_raw is not None else 50
+    _trend_raw = style_raw.get("趋势占比")
+    trend_pct = float(_trend_raw) if _trend_raw is not None else 50
+
+    # ── sentiment ──
+    iwencai = CACHE.get("iwencai", {})
+    # 晋级率 / 炸板率 在 CACHE 中可能是小数 (0.198)，转换为百分数
+    _promotion_raw = iwencai.get("晋级率")
+    _broken_raw = iwencai.get("炸板率")
+    if _promotion_raw is not None and _promotion_raw <= 1:
+        promotion_pct = float(_promotion_raw) * 100
+    else:
+        promotion_pct = float(_promotion_raw) if _promotion_raw is not None else None
+    if _broken_raw is not None and _broken_raw <= 1:
+        broken_board_pct = float(_broken_raw) * 100
+    else:
+        broken_board_pct = float(_broken_raw) if _broken_raw is not None else None
+
+    limit_up_profit_raw = iwencai.get("昨日涨停收益")
+    limit_up_profit_pct = float(limit_up_profit_raw) if limit_up_profit_raw is not None else None
+
+    # 情绪值优先级：breadth 计算 > iwencai > baseline
+    breadth = CACHE.get("breadth", {})
+    up_cnt = breadth.get("上涨家数")
+    dn_cnt = breadth.get("下跌家数")
+    if up_cnt is not None and dn_cnt is not None and (up_cnt + dn_cnt) > 0:
+        emotion_pct = round(up_cnt / (up_cnt + dn_cnt) * 100, 1)
+    else:
+        em_raw = iwencai.get("情绪值")
+        if em_raw is not None:
+            emotion_pct = float(em_raw)
+        else:
+            base_sent = dash.get("sentiment", {})
+            em_base = base_sent.get("情绪值")
+            emotion_pct = float(em_base) if em_base is not None else None
+
+    # previous_emotion：从 sentiment_auto.json 日期分组中取前一日期最后节点
+    prev_emotion_pct = None
+    try:
+        snap_file = ROOT / "data" / "sentiment_auto.json"
+        if snap_file.exists():
+            import json as _json
+            with open(snap_file) as f:
+                sentiment_auto = _json.load(f)
+            # 日期分组格式: {"2026-05-19": [...], "2026-05-25": [...], ...}
+            if isinstance(sentiment_auto, dict):
+                dates = sorted(sentiment_auto.keys())
+                today_str = (now or datetime.now()).strftime("%Y-%m-%d")
+                # 找当前日期之前最近的一个日期
+                prev_date = None
+                for d in dates:
+                    if d >= today_str:
+                        break
+                    prev_date = d
+                if prev_date is not None:
+                    nodes = sentiment_auto.get(prev_date)
+                    if isinstance(nodes, list) and nodes:
+                        last_node = nodes[-1]
+                        prev_em = last_node.get("情绪值")
+                        if prev_em is not None:
+                            prev_emotion_pct = float(prev_em)
+    except Exception:
+        pass
+
+    # ── freshness ──
+    quotes_fresh = _compute_freshness("live_quote", CACHE.get("live_quotes", {}), now=now)
+    sentiment_fresh = _compute_freshness("iwencai", iwencai, now=now)
+
+    return {
+        "account": {
+            "pnl_pct": pnl_pct,
+            "valuation_complete": valuation_complete,
+        },
+        "risk": {"loss_streak": loss_streak},
+        "style": {
+            "score": score,
+            "lianban_pct": lianban_pct,
+            "trend_pct": trend_pct,
+        },
+        "sentiment": {
+            "emotion_pct": emotion_pct,
+            "previous_emotion_pct": prev_emotion_pct,
+            "limit_up_profit_pct": limit_up_profit_pct,
+            "broken_board_pct": broken_board_pct,
+            "promotion_pct": promotion_pct,
+        },
+        "freshness": {
+            "quotes": quotes_fresh,
+            "sentiment": sentiment_fresh,
+        },
+    }
+
+
+def _compute_freshness(data_type, cache_entry, now=None):
+    """只读 freshness 计算：live/delayed/stale/dead；now 可注入用于测试。
+    _updated 生产格式含 +08:00 时区；naive now 视作本地时间 (CST +08:00)。
+    """
+    from datetime import datetime as _dt, timezone as _tz, timedelta as _td
+
+    updated = cache_entry.get("_updated") if isinstance(cache_entry, dict) else None
+    if not updated:
+        return "dead"
+    rules = {
+        "live_quote": (15, 60, 300),
+        "iwencai": (180, 600, 1800),
+    }
+    live_s, delayed_s, stale_s = rules.get(data_type, (300, 3600, 86400))
+    CST = _tz(_td(hours=8))
+    try:
+        fetched = _dt.fromisoformat(str(updated).replace("Z", "+00:00"))
+        if fetched.tzinfo is None:
+            fetched = fetched.replace(tzinfo=CST)
+        fetched_utc = fetched.astimezone(_tz.utc)
+
+        if now is None:
+            ref_utc = _dt.now(_tz.utc)
+        elif now.tzinfo is not None:
+            ref_utc = now.astimezone(_tz.utc)
+        else:
+            # Naive → local time (CST +08:00)
+            ref_utc = now.replace(tzinfo=CST).astimezone(_tz.utc)
+
+        age = max(0, (ref_utc - fetched_utc).total_seconds())
+    except Exception:
+        return "dead"
+    if age < live_s:
+        return "live"
+    if age < delayed_s:
+        return "delayed"
+    if age < stale_s:
+        return "stale"
+    return "dead"
+
+
+def _build_rule_state(now=None, account_state=None):
+    """构建 rule_state；account_state 已获取时传入避免重复查询 DB"""
+    from scripts.rule_engine import evaluate_rule_state as _eval
+    inputs = _build_rule_inputs(now=now, account_state=account_state)
+    return _eval(inputs, now=now)
+
+
 # ===== 快照构建（供 LLM 和调试端点使用） =====
 
 def _load_dashboard_data():
@@ -414,6 +918,8 @@ def _build_full_snapshot():
             '涨幅': pnl_str,
             '量比': q.get('量比', s.get('量比', '—')),
             'MA10_60m': q.get('MA10_60m', '—'),
+            'MA10_60m_dir': q.get('MA10_60m_dir', '—'),
+            '最新价': q.get('最新价', '—'),
         })
 
     # ── 4. 趋势池（基线 + 实时涨幅/量比） ──────────────────────
@@ -429,6 +935,8 @@ def _build_full_snapshot():
             '涨幅': q.get('涨幅', '—'),
             '量比': q.get('量比', s.get('量比', '—')),
             'MA10_60m': q.get('MA10_60m', '—'),
+            'MA10_60m_dir': q.get('MA10_60m_dir', '—'),
+            '最新价': q.get('最新价', '—'),
         })
 
     # ── 5. 持仓（基线 + 实时现价/浮盈） ──────────────────────
@@ -489,6 +997,8 @@ def _build_full_snapshot():
         '总资产':      total_asset,
     }
 
+    # 复用已获取的 pnl_live 避免重复 SSOT 查询
+    rule_state = _build_rule_state(account_state=pnl_live)
     return {
         '指数': index_snap,
         '情绪': sentiment_snap,
@@ -498,7 +1008,184 @@ def _build_full_snapshot():
         '板块': sectors,
         '涨停梯队TOP5': hot_rank,
         '风控': risk_snap,
+        'rule_state': rule_state,
     }
+
+
+def _baseline_freshness():
+    """Read-only baseline freshness check; returns ok/stale/missing."""
+    if not DATA_FILE.exists():
+        return "missing"
+    try:
+        dd = _load_dashboard_data()
+        meta = dd.get("meta", {}) if isinstance(dd, dict) else {}
+        date_str = meta.get("date", "")
+        if not date_str:
+            return "stale"
+        today = datetime.now().strftime("%Y-%m-%d")
+        if date_str == today:
+            return "ok"
+        from datetime import timedelta as _td
+        yesterday = (datetime.now() - _td(days=1)).strftime("%Y-%m-%d")
+        if date_str == yesterday:
+            return "delayed"
+        return "stale"
+    except Exception:
+        return "stale"
+
+
+def _quotes_coverage():
+    """Return (covered, total, missing_pos_codes) for tracked stocks in live_quotes."""
+    dd = _load_dashboard_data()
+    all_codes = set()
+    pos_codes = set()
+    for pool_key in ['lianban_pool', 'trend_pool', 'positions']:
+        for s in dd.get(pool_key, []):
+            code = str(s.get('代码', ''))
+            if len(code) == 6:
+                all_codes.add(code)
+    for a in dd.get('decision', {}).get('锚定股状态', []):
+        code = str(a.get('代码', ''))
+        if len(code) == 6:
+            all_codes.add(code)
+    for p in dd.get('positions', []):
+        code = str(p.get('代码', ''))
+        if len(code) == 6:
+            pos_codes.add(code)
+
+    lq = CACHE.get('live_quotes', {})
+    covered = 0
+    missing_pos = []
+    for code in all_codes:
+        q = lq.get(code, {})
+        if isinstance(q, dict) and q.get('最新价') is not None:
+            covered += 1
+        elif code in pos_codes:
+            missing_pos.append(code)
+
+    return covered, len(all_codes), missing_pos
+
+
+def _build_health():
+    """Build health status for all subsystems. Read-only, no side effects.
+    Returns a dict with per-domain status and an overall status.
+    """
+    result = {}
+
+    # bridge — always ok if we're serving
+    result["bridge"] = {"status": "ok"}
+
+    # db
+    try:
+        from scripts.db import get_conn
+        conn = get_conn()
+        result["db"] = {"status": "ok"}
+    except Exception as e:
+        result["db"] = {"status": "error", "detail": str(e)[:120]}
+
+    # baseline
+    bf = _baseline_freshness()
+    result["baseline"] = {"status": bf}
+
+    # quotes — freshness + coverage
+    qf = _compute_freshness("live_quote", CACHE.get("live_quotes", {}))
+    covered, total, missing_pos = _quotes_coverage()
+    quotes_result = {"status": qf, "covered": covered, "total": total}
+    if total > 0:
+        if covered == 0:
+            quotes_result["status"] = "dead"
+            quotes_result["detail"] = f"zero coverage ({total} tracked)"
+        elif missing_pos:
+            quotes_result["detail"] = f"{len(missing_pos)} positions missing quotes"
+            # If freshness was live but positions aren't covered, downgrade
+            if quotes_result["status"] == "live":
+                quotes_result["status"] = "delayed"
+    elif qf == "live":
+        quotes_result["detail"] = "no tracked codes; freshness only"
+    result["quotes"] = quotes_result
+
+    # iwencai
+    if_ = _compute_freshness("iwencai", CACHE.get("iwencai", {}))
+    result["iwencai"] = {"status": if_}
+
+    # account
+    try:
+        state = load_current_account_state(CACHE.get("live_quotes", {}))
+        if state and state.get("total_asset") is not None:
+            vc = state.get("valuation_complete")
+            if vc is False:
+                result["account"] = {"status": "incomplete", "detail": "valuation_complete is false"}
+            else:
+                result["account"] = {"status": "ok"}
+        else:
+            result["account"] = {"status": "incomplete", "detail": "total_asset missing"}
+    except Exception as e:
+        result["account"] = {"status": "error", "detail": str(e)[:120]}
+
+    # pnl
+    try:
+        summary = _current_pnl_summary()
+        if summary and summary.get("total_asset") is not None:
+            vc = summary.get("valuation_complete")
+            if vc is False:
+                result["pnl"] = {"status": "incomplete", "detail": "valuation_complete is false"}
+            else:
+                result["pnl"] = {"status": "ok"}
+        else:
+            result["pnl"] = {"status": "incomplete", "detail": "total_asset missing"}
+    except Exception as e:
+        result["pnl"] = {"status": "error", "detail": str(e)[:120]}
+
+    # auction — reuse snapshot_auction.is_auction_valid
+    auction_file = ROOT / "data" / "auction_snapshot.json"
+    if auction_file.exists():
+        try:
+            with open(auction_file) as f:
+                ad = json.load(f)
+        except Exception:
+            ad = None
+        if isinstance(ad, dict):
+            from scripts.snapshot_auction import is_auction_valid
+            try:
+                valid = is_auction_valid(ad)
+            except Exception:
+                valid = False
+            if valid:
+                result["auction"] = {"status": "ok"}
+            else:
+                today = datetime.now().strftime("%Y-%m-%d")
+                fetched = str(ad.get("fetched", ""))
+                if today in fetched:
+                    result["auction"] = {"status": "incomplete", "detail": "missing key dimensions"}
+                else:
+                    result["auction"] = {"status": "stale", "detail": "not from today"}
+        else:
+            result["auction"] = {"status": "stale", "detail": "unreadable"}
+    else:
+        result["auction"] = {"status": "missing"}
+
+    # llm_config — only report whether configured, never expose token
+    cfg = _load_api_config()
+    has_cfg = bool(cfg.get("token") and cfg.get("base_url"))
+    result["llm_config"] = {"status": "ok" if has_cfg else "missing", "configured": has_cfg}
+
+    # overall status
+    statuses = []
+    for k, v in result.items():
+        s = v.get("status", "unknown")
+        statuses.append((k, s))
+
+    dead_or_missing = [k for k, s in statuses if s in ("dead", "missing", "error")]
+    stale_or_delayed = [k for k, s in statuses if s in ("stale", "delayed", "incomplete")]
+
+    if dead_or_missing:
+        result["status"] = "unhealthy"
+    elif stale_or_delayed:
+        result["status"] = "degraded"
+    else:
+        result["status"] = "healthy"
+
+    return result
 
 
 class BridgeHandler(SimpleHTTPRequestHandler):
@@ -515,15 +1202,39 @@ class BridgeHandler(SimpleHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _db_close(self):
+        """释放本线程的 SQLite 连接（在每个 DB handler 完成后调用）"""
+        try:
+            from scripts.db import close_conn
+            close_conn()
+        except Exception:
+            pass
+
     def do_GET(self):
         parsed = urlparse(self.path)
         if parsed.path == '/api/debug/snapshot':
-            snap = _build_full_snapshot()
-            body = json.dumps(snap, ensure_ascii=False, indent=2).encode()
-            self.send_response(200)
-            self.send_header('Content-Type', 'application/json')
-            self.end_headers()
-            self.wfile.write(body)
+            _ensure_db()
+            try:
+                snap = _build_full_snapshot()
+                body = json.dumps(snap, ensure_ascii=False, indent=2).encode()
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/json')
+                self.end_headers()
+                self.wfile.write(body)
+            finally:
+                self._db_close()
+            return
+        elif parsed.path == '/api/health':
+            _ensure_db()
+            try:
+                result = _build_health()
+                body = json.dumps(result, ensure_ascii=False).encode()
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/json')
+                self.end_headers()
+                self.wfile.write(body)
+            finally:
+                self._db_close()
             return
         elif parsed.path == '/api/baseline':
             try:
@@ -545,10 +1256,11 @@ class BridgeHandler(SimpleHTTPRequestHandler):
                 self.wfile.write(json.dumps({'error': str(e)}).encode())
             return
         elif parsed.path == '/api/pnl':
-            qs = parse_qs(parsed.query)
-            range_val = qs.get('range', ['today'])[0]
-            index_val = qs.get('index', ['sh'])[0]
+            _ensure_db()
             try:
+                qs = parse_qs(parsed.query)
+                range_val = qs.get('range', ['today'])[0]
+                index_val = qs.get('index', ['sh'])[0]
                 result = query_pnl(range_val, index_val)
                 result = _add_freshness(result, 'pnl', result.get('_updated'))
                 body = json.dumps(result, ensure_ascii=False).encode()
@@ -560,8 +1272,11 @@ class BridgeHandler(SimpleHTTPRequestHandler):
                 self.send_response(500)
                 self.end_headers()
                 self.wfile.write(json.dumps({'error': str(e)}).encode())
+            finally:
+                self._db_close()
             return
         elif parsed.path == '/api/pnl/summary':
+            _ensure_db()
             try:
                 result = _current_pnl_summary()
                 result = _add_freshness(result, 'pnl', result.get('_updated'))
@@ -574,8 +1289,11 @@ class BridgeHandler(SimpleHTTPRequestHandler):
                 self.send_response(500)
                 self.end_headers()
                 self.wfile.write(json.dumps({'error': str(e)}).encode())
+            finally:
+                self._db_close()
             return
         elif parsed.path == '/api/account/state':
+            _ensure_db()
             try:
                 result = load_current_account_state(CACHE.get('live_quotes', {}))
                 result = _add_freshness(result, 'pnl', result.get('_updated'))
@@ -588,39 +1306,19 @@ class BridgeHandler(SimpleHTTPRequestHandler):
                 self.send_response(500)
                 self.end_headers()
                 self.wfile.write(json.dumps({'error': str(e)}).encode())
+            finally:
+                self._db_close()
             return
         elif parsed.path == '/api/account/correct':
-            try:
-                length = int(self.headers.get('Content-Length', 0))
-                body = self.rfile.read(length)
-                payload = json.loads(body)
-                original_id = int(payload.get('original_trade_id', 0))
-                if original_id <= 0:
-                    self.send_response(400)
-                    self.send_header('Content-Type', 'application/json')
-                    self.end_headers()
-                    self.wfile.write(json.dumps({'ok': False, 'error': 'original_trade_id required'}).encode())
-                    return
-                from scripts.db import insert_correction_trade
-                new_id = insert_correction_trade(
-                    original_trade_id=original_id,
-                    correction_action=payload.get('action'),
-                    correction_price=payload.get('price'),
-                    correction_qty=payload.get('qty'),
-                    note=payload.get('note', 'manual correction'),
-                )
-                self.send_response(200)
-                self.send_header('Content-Type', 'application/json')
-                self.end_headers()
-                self.wfile.write(json.dumps({'ok': True, 'correction_trade_id': new_id}).encode())
-                print(f"  [bridge] Corrected trade {original_id} → new trade {new_id}")
-            except Exception as e:
-                self.send_response(500)
-                self.send_header('Content-Type', 'application/json')
-                self.end_headers()
-                self.wfile.write(json.dumps({'ok': False, 'error': str(e)}).encode())
+            self.send_response(405)
+            self.send_header('Content-Type', 'application/json')
+            self.send_header('Allow', 'POST')
+            self.end_headers()
+            self.wfile.write(json.dumps({'ok': False, 'error': 'Method Not Allowed: use POST'}).encode())
+            self._db_close()
             return
         elif parsed.path == '/api/trades':
+            _ensure_db()
             try:
                 result = query_trades(limit=50)
                 result = _add_freshness(result, 'pnl')
@@ -633,6 +1331,8 @@ class BridgeHandler(SimpleHTTPRequestHandler):
                 self.send_response(500)
                 self.end_headers()
                 self.wfile.write(json.dumps({'error': str(e)}).encode())
+            finally:
+                self._db_close()
             return
         elif parsed.path == '/api/live/iwencai':
             self._serve_cached('iwencai', 'iwencai')
@@ -644,25 +1344,30 @@ class BridgeHandler(SimpleHTTPRequestHandler):
             self._serve_cached('news', 'llm')
             return
         elif parsed.path == '/api/live/quotes':
-            result = {
-                'live_index': CACHE.get('live_index', {}),
-                'live_quotes': CACHE.get('live_quotes', {}),
-                'breadth': CACHE.get('breadth', {}),
-                'live_sectors': CACHE.get('live_sectors', {}),
-                'hot_list': CACHE.get('hot_list', {}),
-                'sector_inflow': CACHE.get('sector_inflow', {}),
-                'northbound': CACHE.get('northbound', {}),
-                'iwencai': CACHE.get('iwencai', {}),
-                '上证15min': CACHE.get('上证15min', []),
-                '深证15min': CACHE.get('深证15min', []),
-                '创业15min': CACHE.get('创业15min', []),
-            }
-            result = _add_freshness(result, 'live_quote', CACHE.get('live_quotes', {}).get('_updated'))
-            body = json.dumps(result, ensure_ascii=False).encode()
-            self.send_response(200)
-            self.send_header('Content-Type', 'application/json')
-            self.end_headers()
-            self.wfile.write(body)
+            _ensure_db()
+            try:
+                result = {
+                    'live_index': CACHE.get('live_index', {}),
+                    'live_quotes': CACHE.get('live_quotes', {}),
+                    'breadth': CACHE.get('breadth', {}),
+                    'live_sectors': CACHE.get('live_sectors', {}),
+                    'hot_list': CACHE.get('hot_list', {}),
+                    'sector_inflow': CACHE.get('sector_inflow', {}),
+                    'northbound': CACHE.get('northbound', {}),
+                    'iwencai': CACHE.get('iwencai', {}),
+                    '上证15min': CACHE.get('上证15min', []),
+                    '深证15min': CACHE.get('深证15min', []),
+                    '创业15min': CACHE.get('创业15min', []),
+                    'rule_state': _build_rule_state(),
+                }
+                result = _add_freshness(result, 'live_quote', CACHE.get('live_quotes', {}).get('_updated'))
+                body = json.dumps(result, ensure_ascii=False).encode()
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/json')
+                self.end_headers()
+                self.wfile.write(body)
+            finally:
+                self._db_close()
             return
         elif parsed.path == '/api/live/stream':
             self.send_response(200)
@@ -674,6 +1379,11 @@ class BridgeHandler(SimpleHTTPRequestHandler):
             try:
                 while True:
                     import time as _time_lib
+                    _ensure_db()
+                    try:
+                        rule = _build_rule_state()
+                    finally:
+                        self._db_close()
                     result = {
                         'live_index': CACHE.get('live_index', {}),
                         'live_quotes': CACHE.get('live_quotes', {}),
@@ -686,6 +1396,7 @@ class BridgeHandler(SimpleHTTPRequestHandler):
                         '上证15min': CACHE.get('上证15min', []),
                         '深证15min': CACHE.get('深证15min', []),
                         '创业15min': CACHE.get('创业15min', []),
+                        'rule_state': rule,
                     }
                     result['_freshness'] = {'level': 'live', 'type': 'sse_stream'}
                     data = json.dumps(result, ensure_ascii=False)
@@ -741,15 +1452,25 @@ class BridgeHandler(SimpleHTTPRequestHandler):
             body = self.rfile.read(length)
             try:
                 payload = json.loads(body)
-                if _payload_overwrites_account(payload):
-                    self.send_response(409)
-                    self.send_header('Content-Type', 'application/json')
-                    self.end_headers()
-                    self.wfile.write(json.dumps({
-                        'ok': False,
-                        'error': 'account asset fields are server-owned; submit trade events only',
-                    }).encode())
-                    return
+            except Exception as e:
+                self.send_response(400)
+                self.end_headers()
+                self.wfile.write(json.dumps({'error': str(e)}).encode())
+                print(f"  [bridge] Error: {e}")
+                return
+
+            if _payload_overwrites_account(payload):
+                self.send_response(409)
+                self.send_header('Content-Type', 'application/json')
+                self.end_headers()
+                self.wfile.write(json.dumps({
+                    'ok': False,
+                    'error': 'account asset fields are server-owned; submit trade events only',
+                }).encode())
+                return
+
+            _ensure_db()
+            try:
                 if DATA_FILE.exists():
                     with open(DATA_FILE) as f:
                         data = json.load(f)
@@ -761,7 +1482,6 @@ class BridgeHandler(SimpleHTTPRequestHandler):
                     load_current_account_state(CACHE.get('live_quotes', {}))
 
                 if 'positions' in payload:
-                    # merge by 标的: 更新已有或追加新标的，不删除 data 中已有的标的
                     existing = {p.get('标的'): p for p in data.get('positions', [])}
                     for p in payload['positions']:
                         existing[p.get('标的')] = p
@@ -771,7 +1491,7 @@ class BridgeHandler(SimpleHTTPRequestHandler):
                     if 'decision' not in data:
                         data['decision'] = {}
                     data['decision']['今日操作'] = payload['今日操作']
-                # 同步写入 SQLite 交易记录（先写 DB，成功后再原子写 JSON）
+                # 同步写入 SQLite 交易记录
                 db_error = None
                 try:
                     from scripts.db import insert_trade
@@ -792,7 +1512,6 @@ class BridgeHandler(SimpleHTTPRequestHandler):
                     db_error = str(e)
                     print(f"  [bridge] SQLite trade insert error: {e}")
 
-                # 进程安全原子写入 JSON（filelock + atomic_write）
                 if not db_error:
                     atomic_write_json(DATA_FILE, data)
 
@@ -806,6 +1525,8 @@ class BridgeHandler(SimpleHTTPRequestHandler):
                 self.end_headers()
                 self.wfile.write(json.dumps({'error': str(e)}).encode())
                 print(f"  [bridge] Error: {e}")
+            finally:
+                self._db_close()
 
         elif self.path == '/api/refresh':
             try:
@@ -932,83 +1653,28 @@ class BridgeHandler(SimpleHTTPRequestHandler):
 
                 raw_text = result['text']
 
-                # ── 解析 [TEXT] / [SIGNALS] 结构 ───────────────────────
-                text_part = raw_text
-                signals_part = ''
-                if '[TEXT]' in raw_text and '[SIGNALS]' in raw_text:
-                    parts = raw_text.split('[SIGNALS]')
-                    text_part = parts[0].replace('[TEXT]', '').strip()
-                    signals_part = parts[1].strip() if len(parts) > 1 else ''
-                elif not raw_text.strip():
-                    text_part = '(模型返回为空，请重试)'
+                # ── 共用处理入口（userMsg 传入单次持久化）──
+                today_str = datetime.now().strftime('%Y-%m-%d')
+                insight, verified_signals, verified_count, warning_count = _process_llm_result(
+                    raw_text, snapshot, today_str, now_ts, mode, userMsg)
 
-                # ── ReAct 验证 ─────────────────────────────────────────
-                verified_signals = []
-                if signals_part:
-                    try:
-                        verified_signals = _verify_signals(signals_part, snapshot)
-                    except Exception as e:
-                        print(f"  [bridge] signal verify error: {e}")
-
-                verified_count = sum(1 for v in verified_signals if v.get('status') == '\u2705')
-                warning_count = sum(1 for v in verified_signals if v.get('status') == '\u26a0\ufe0f')
-
-                insight = {
-                    'timestamp': now_ts,
-                    'node': node,
-                    'mode': mode,
-                    'text': text_part,
-                    'signals': verified_signals,
-                    'verified_count': verified_count,
-                    'warning_count': warning_count,
-                }
-
-                # ── 持久化 → llm_insights.json（v2 conversation 格式，复用上方的 insights） ──
-                if today not in insights:
-                    insights[today] = {'meta': {}, 'conversation': []}
-
-                meta = insights[today].setdefault('meta', {})
-                if 'started_at' not in meta:
-                    meta['started_at'] = now_ts
-                meta['last_assistant_ts'] = now_ts
-                if mode == 'auto':
-                    meta['auto_trigger_count'] = meta.get('auto_trigger_count', 0) + 1
-                else:
-                    meta['manual_question_count'] = meta.get('manual_question_count', 0) + 1
-
-                # P1-3: 先写用户消息，再写 AI 回复，保证刷新后对话完整
-                if userMsg and isinstance(userMsg, dict) and userMsg.get('text'):
-                    insights[today]['conversation'].append({
-                        'role': 'user',
-                        'ts': userMsg.get('ts', now_ts),
-                        'text': userMsg.get('text', ''),
-                        'auto': False,
-                    })
-
-                insights[today]['conversation'].append({
-                    'role': 'assistant',
-                    'ts': now_ts,
-                    'text': text_part,
-                    'signals': verified_signals,
-                    'auto': mode == 'auto',
-                })
-
-                LLM_INSIGHTS_FILE.parent.mkdir(parents=True, exist_ok=True)
-                atomic_write_json(LLM_INSIGHTS_FILE, insights)
-
-                # ── 持久化 → pnl.db ────────────────────────────────────
+                # ── 持久化 → pnl.db ──
+                _ensure_db()
                 try:
                     from scripts.db import insert_llm
-                    insert_llm(today, node, text_part, verified_signals,
+                    insert_llm(datetime.now().strftime('%Y-%m-%d'), now_ts,
+                               insight['text'], verified_signals,
                                verified_count, warning_count)
                 except Exception as e:
                     print(f"  [bridge] SQLite LLM insert error: {e}")
+                finally:
+                    self._db_close()
 
                 self.send_response(200)
                 self.send_header('Content-Type', 'application/json')
                 self.end_headers()
                 self.wfile.write(json.dumps({'ok': True, **insight}, ensure_ascii=False).encode())
-                print(f"  [bridge] LLM [{mode}] {node}: {len(text_part)} chars, {verified_count}\u2705/{warning_count}\u26a0\ufe0f")
+                print(f"  [bridge] LLM [{mode}] {now_ts}: {len(insight['text'])} chars, {verified_count}\u2705/{warning_count}\u26a0\ufe0f")
 
             except json.JSONDecodeError:
                 self.send_response(400)
@@ -1021,10 +1687,61 @@ class BridgeHandler(SimpleHTTPRequestHandler):
                 self.end_headers()
                 self.wfile.write(json.dumps({'ok': False, 'error': str(e)}).encode())
                 print(f"  [bridge] LLM exception: {e}")
+            finally:
+                self._db_close()
+
+        elif self.path == '/api/account/correct':
+            try:
+                length = int(self.headers.get('Content-Length', 0))
+                body = self.rfile.read(length)
+                if not body:
+                    self.send_response(400)
+                    self.send_header('Content-Type', 'application/json')
+                    self.end_headers()
+                    self.wfile.write(json.dumps({'ok': False, 'error': 'Missing request body'}).encode())
+                    return
+                payload = json.loads(body)
+                original_id = int(payload.get('original_trade_id', 0))
+                if original_id <= 0:
+                    self.send_response(400)
+                    self.send_header('Content-Type', 'application/json')
+                    self.end_headers()
+                    self.wfile.write(json.dumps({'ok': False, 'error': 'original_trade_id required'}).encode())
+                    return
+                _ensure_db()
+                from scripts.db import insert_correction_trade
+                new_id = insert_correction_trade(
+                    original_trade_id=original_id,
+                    correction_action=payload.get('correction_action'),
+                    correction_price=payload.get('correction_price'),
+                    correction_qty=payload.get('correction_qty'),
+                    note=payload.get('note', 'manual correction'),
+                )
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/json')
+                self.end_headers()
+                self.wfile.write(json.dumps({'ok': True, 'correction_trade_id': new_id}).encode())
+                print(f"  [bridge] Corrected trade {original_id} → new trade {new_id}")
+            except json.JSONDecodeError:
+                self.send_response(400)
+                self.send_header('Content-Type', 'application/json')
+                self.end_headers()
+                self.wfile.write(json.dumps({'ok': False, 'error': 'Invalid JSON'}).encode())
+            except Exception as e:
+                self.send_response(500)
+                self.send_header('Content-Type', 'application/json')
+                self.end_headers()
+                self.wfile.write(json.dumps({'ok': False, 'error': str(e)}).encode())
+                print(f"  [bridge] correct error: {e}")
+            finally:
+                self._db_close()
 
         else:
             self.send_response(404)
             self.end_headers()
+
+        # 释放本线程的 SQLite 连接，避免连接随请求线程累积
+        self._db_close()
 
     def do_OPTIONS(self):
         self.send_response(200)
@@ -1037,6 +1754,113 @@ class BridgeHandler(SimpleHTTPRequestHandler):
         if args and hasattr(args[0], 'startswith'):
             if args[0].startswith('GET /api/') or args[0].startswith('POST /api/'):
                 print(f"  [{self.log_date_time_string()}] {args[0]}")
+
+# ── 提取为模块级函数以便测试回调生命周期 ──────────────────────────────────
+
+def run_closing_anchor(quotes=None, pnl_history_path=None):
+    """收盘锚点回调（15:05）：生成今日收盘锚点并写入 pnl_history.json"""
+    from scripts.account_ssot import generate_closing_anchor
+    from scripts.db import close_conn
+    try:
+        result = generate_closing_anchor(quotes or CACHE.get('live_quotes', {}),
+                                         pnl_history_path=pnl_history_path)
+        if result:
+            print(f"  [bridge] Closing anchor: {result}")
+        else:
+            print(f"  [bridge] Closing anchor: skipped (no today anchor)")
+    except Exception as e:
+        print(f"  [bridge] Closing anchor error: {e}")
+    finally:
+        close_conn()
+
+
+def run_morning_health_check():
+    """日初健康检查回调（9:35）：检查今日锚点是否存在，不存在则从 pnl_history 恢复"""
+    from scripts.db import query_account_baseline, close_conn
+    try:
+        today = datetime.now().strftime("%Y-%m-%d")
+        anchor = query_account_baseline(today)
+        if not anchor:
+            print(f"  [bridge] ⚠️  MISSING TODAY ANCHOR for {today} — open positions/assets NOT yet locked")
+            try:
+                from scripts.account_ssot import ensure_today_anchor, load_current_account_state
+                dashboard_path = ROOT / "data" / "dashboard_data.json"
+                history_path = ROOT / "data" / "pnl_history.json"
+                if dashboard_path.exists() and history_path.exists():
+                    state = load_current_account_state(CACHE.get('live_quotes', {}))
+                    print(f"  [bridge] Auto-recovery anchor created: cash={state.get('cash')}, total_asset={state.get('total_asset')}")
+            except Exception as e:
+                print(f"  [bridge] Auto-recovery failed: {e}")
+        else:
+            print(f"  [bridge] Morning health check: anchor OK ({anchor.get('source')})")
+    finally:
+        close_conn()
+
+
+def trigger_llm_auto():
+    """T5 LLM 自动研判回调 — 盘中时段每 14min 触发，浏览器关闭也能运行"""
+    now = datetime.now()
+    h, m = now.hour, now.minute
+    total_min = h * 60 + m
+    # 非交易时段跳过（9:25 - 15:05）
+    if total_min < 565 or total_min > 905:
+        return
+    # 速率限制（14min 冷却，900s）
+    now_s = time.time()
+    with _llm_rate_lock:
+        recent = [t for t in CACHE.get('_llm_rate', {}).get('auto', [])
+                  if now_s - t < 900]
+        if len(recent) >= 100:   # 宽松限制，避免占满手动额度
+            return
+        CACHE.setdefault('_llm_rate', {})['auto'] = recent + [now_s]
+    node = now.strftime('%H:%M:%S')
+    weekday_cn = ['周一','周二','周三','周四','周五','周六','周日'][now.weekday()]
+    time_ctx = f"{now.strftime('%Y-%m-%d')} {weekday_cn} {node}"
+    try:
+        snapshot = _build_full_snapshot()
+
+        today_str = now.strftime('%Y-%m-%d')
+        insights = {}
+        if LLM_INSIGHTS_FILE.exists():
+            try:
+                with open(LLM_INSIGHTS_FILE) as f:
+                    insights = json.load(f)
+            except Exception:
+                pass
+        conversation = insights.get(today_str, {}).get('conversation', [])
+        messages = []
+        for m in conversation[-6:]:
+            if m.get('role') in ('user', 'assistant') and m.get('text', '').strip():
+                messages.append({"role": m['role'], "content": m['text'].strip()})
+
+        w1_hint = ''
+        if '09:' in node or '10:0' in node:
+            w1_hint = ('\n\n⚠️ 当前是W1早盘时段(9:30-10:00)。'
+                       '请按W1特别关注4项评估：龙头状态、板块合力、候选标的、竞价三件套。'
+                       '连板池中标的的操作信号优先输出。')
+        prompt = f"当前时间: {time_ctx}{w1_hint}\n\n全盘数据:\n{json.dumps(snapshot, ensure_ascii=False, indent=2)}"
+        messages.append({"role": "user", "content": prompt})
+        result = _call_llm_api(messages)
+        if not result.get('ok'):
+            print(f"  [bridge] LLM auto error: {str(result.get('error',''))[:80]}")
+            return
+        raw_text = result['text']
+        insight, verified_signals, verified_count, warning_count = _process_llm_result(
+            raw_text, snapshot, today_str, node, 'auto')
+        try:
+            _ensure_db()
+            from scripts.db import insert_llm
+            insert_llm(today_str, node, insight['text'], verified_signals,
+                       verified_count, warning_count)
+        except Exception as e:
+            print(f"  [bridge] SQLite LLM insert error: {e}")
+        print(f"  [bridge] LLM [auto-scheduler] {node}: {len(insight['text'])} chars, {verified_count}✅/{warning_count}⚠️")
+    except Exception as e:
+        print(f"  [bridge] LLM auto-scheduler exception: {e}")
+    finally:
+        from scripts.db import close_conn
+        close_conn()
+
 
 if __name__ == '__main__':
     port = int(sys.argv[1]) if len(sys.argv) > 1 else 8080
@@ -1115,27 +1939,24 @@ if __name__ == '__main__':
                       max_instances=1, misfire_grace_time=300)
     # 竞价5维快照：9:28（竞价9:25结束，iwencai需~3min处理连板数据，太早拿不到连续涨停天数）
     def run_auction_snapshot():
-        import subprocess
-        snap_script = ROOT / "scripts" / "snapshot_auction.py"
-        subprocess.run(["python3", str(snap_script)], capture_output=True, timeout=120, cwd=str(ROOT))
+        from scripts.snapshot_auction import auction_catch_up
+        snap, action = auction_catch_up()
+        if action == "catch_up":
+            print(f"  [bridge] Auction snapshot catch-up: captured at {snap.get('captured_at','?')}")
+        elif action == "skip":
+            print(f"  [bridge] Auction snapshot already valid, skip")
+        elif action == "error":
+            print(f"  [bridge] Auction snapshot error: {snap.get('error','unknown')[:100]}")
     scheduler.add_job(run_auction_snapshot, 'cron', hour=9, minute=28, id='auction_0928',
+                      max_instances=1, misfire_grace_time=600)
+    # 竞价补抓：09:35 二次入口，已有效快照 skip，缺失/无效补抓
+    scheduler.add_job(run_auction_snapshot, 'cron', hour=9, minute=35, id='auction_0935_catchup',
                       max_instances=1, misfire_grace_time=600)
     # 收盘数据包（15:02 dump CACHE 全量快照）— 暂停，LLM 方案将替代
     # from scripts.snapshot_close import run_snapshot_close
     # scheduler.add_job(lambda: run_snapshot_close(CACHE, ROOT), 'cron', hour=15, minute=2,
     #                   id='snapshot_close_1502', max_instances=1, misfire_grace_time=300)
     # T4 收盘锚点（15:05：行情已收尾，取最后有效快照）
-    def run_closing_anchor():
-        from scripts.account_ssot import generate_closing_anchor
-        try:
-            result = generate_closing_anchor(CACHE.get('live_quotes', {}))
-            if result:
-                print(f"  [bridge] Closing anchor: {result}")
-            else:
-                print(f"  [bridge] Closing anchor: skipped (no today anchor)")
-        except Exception as e:
-            print(f"  [bridge] Closing anchor error: {e}")
-
     scheduler.add_job(run_closing_anchor, 'cron', hour=15, minute=5, id='closing_anchor_1505',
                       max_instances=1, misfire_grace_time=600)
 
@@ -1154,130 +1975,8 @@ if __name__ == '__main__':
                       max_instances=1, misfire_grace_time=600)
 
     # T4.5 日初健康检查（9:35：检查今日锚点是否存在）
-    def run_morning_health_check():
-        from scripts.db import query_account_baseline
-        today = datetime.now().strftime("%Y-%m-%d")
-        anchor = query_account_baseline(today)
-        if not anchor:
-            print(f"  [bridge] ⚠️  MISSING TODAY ANCHOR for {today} — open positions/assets NOT yet locked")
-            # 尝试从 pnl_history 补建
-            try:
-                from scripts.account_ssot import ensure_today_anchor, load_current_account_state
-                from pathlib import Path
-                dashboard_path = ROOT / "data" / "dashboard_data.json"
-                history_path = ROOT / "data" / "pnl_history.json"
-                if dashboard_path.exists() and history_path.exists():
-                    state = load_current_account_state(CACHE.get('live_quotes', {}))
-                    print(f"  [bridge] Auto-recovery anchor created: cash={state.get('cash')}, total_asset={state.get('total_asset')}")
-            except Exception as e:
-                print(f"  [bridge] Auto-recovery failed: {e}")
-        else:
-            print(f"  [bridge] Morning health check: anchor OK ({anchor.get('source')})")
-
     scheduler.add_job(run_morning_health_check, 'cron', hour=9, minute=35, id='morning_health_0935',
                       max_instances=1, misfire_grace_time=600)
-
-    # T5 LLM 自动研判（15min，盘中时段，浏览器关闭也能运行）
-    def trigger_llm_auto():
-        now = datetime.now()
-        h, m = now.hour, now.minute
-        total_min = h * 60 + m
-        # 非交易时段跳过（9:25 - 15:05）
-        if total_min < 565 or total_min > 905:
-            return
-        # 速率限制（14min 冷却，900s）
-        now_s = time.time()
-        with _llm_rate_lock:
-            recent = [t for t in CACHE.get('_llm_rate', {}).get('auto', [])
-                      if now_s - t < 900]
-            if len(recent) >= 100:   # 宽松限制，避免占满手动额度
-                return
-            CACHE.setdefault('_llm_rate', {})['auto'] = recent + [now_s]
-        # 直接调用内部 LLM 流程（复用 POST /api/llm 的逻辑，不走 HTTP）
-        node = now.strftime('%H:%M:%S')
-        weekday_cn = ['周一','周二','周三','周四','周五','周六','周日'][now.weekday()]
-        time_ctx = f"{now.strftime('%Y-%m-%d')} {weekday_cn} {node}"
-        try:
-            snapshot = _build_full_snapshot()
-
-            # ── 对话记忆：加载今日历史 ──
-            today_str = now.strftime('%Y-%m-%d')
-            insights = {}
-            if LLM_INSIGHTS_FILE.exists():
-                try:
-                    with open(LLM_INSIGHTS_FILE) as f:
-                        insights = json.load(f)
-                except Exception:
-                    pass
-            conversation = insights.get(today_str, {}).get('conversation', [])
-            messages = []
-            for m in conversation[-6:]:
-                if m.get('role') in ('user', 'assistant') and m.get('text', '').strip():
-                    messages.append({"role": m['role'], "content": m['text'].strip()})
-
-            w1_hint = ''
-            if '09:' in node or '10:0' in node:
-                w1_hint = ('\n\n⚠️ 当前是W1早盘时段(9:30-10:00)。'
-                           '请按W1特别关注4项评估：龙头状态、板块合力、候选标的、竞价三件套。'
-                           '连板池中标的的操作信号优先输出。')
-            prompt = f"当前时间: {time_ctx}{w1_hint}\n\n全盘数据:\n{json.dumps(snapshot, ensure_ascii=False, indent=2)}"
-            messages.append({"role": "user", "content": prompt})
-            result = _call_llm_api(messages)
-            if not result.get('ok'):
-                print(f"  [bridge] LLM auto error: {str(result.get('error',''))[:80]}")
-                return
-            raw_text = result['text']
-            text_part = raw_text
-            signals_part = ''
-            if '[TEXT]' in raw_text and '[SIGNALS]' in raw_text:
-                parts = raw_text.split('[SIGNALS]')
-                text_part = parts[0].replace('[TEXT]', '').strip()
-                signals_part = parts[1].strip() if len(parts) > 1 else ''
-            if not raw_text.strip():
-                text_part = '(模型返回为空，请重试)'
-            verified_signals = []
-            if signals_part:
-                try:
-                    verified_signals = _verify_signals(signals_part, snapshot)
-                except Exception as e:
-                    print(f"  [bridge] signal verify error: {e}")
-            verified_count = sum(1 for v in verified_signals if v.get('status') == '\u2705')
-            warning_count = sum(1 for v in verified_signals if v.get('status') == '\u26a0\ufe0f')
-            insight = {
-                'timestamp': node,
-                'node': node,
-                'mode': 'auto',
-                'text': text_part,
-                'signals': verified_signals,
-                'verified_count': verified_count,
-                'warning_count': warning_count,
-            }
-            # 持久化（复用上方已加载的 insights）
-            if today_str not in insights:
-                insights[today_str] = {'meta': {}, 'conversation': []}
-            meta = insights[today_str].setdefault('meta', {})
-            if 'started_at' not in meta:
-                meta['started_at'] = node
-            meta['last_assistant_ts'] = node
-            meta['auto_trigger_count'] = meta.get('auto_trigger_count', 0) + 1
-            insights[today_str]['conversation'].append({
-                'role': 'assistant',
-                'ts': node,
-                'text': text_part,
-                'signals': verified_signals,
-                'auto': True,
-            })
-            LLM_INSIGHTS_FILE.parent.mkdir(parents=True, exist_ok=True)
-            atomic_write_json(LLM_INSIGHTS_FILE, insights)
-            try:
-                from scripts.db import insert_llm
-                insert_llm(today_str, node, text_part, verified_signals,
-                           verified_count, warning_count)
-            except Exception as e:
-                print(f"  [bridge] SQLite LLM insert error: {e}")
-            print(f"  [bridge] LLM [auto-scheduler] {node}: {len(text_part)} chars, {verified_count}\u2705/{warning_count}\u26a0\ufe0f")
-        except Exception as e:
-            print(f"  [bridge] LLM auto-scheduler exception: {e}")
 
     # 每14分钟触发一次（留1分钟缓冲，比前端的15min间隔略快以避免漂移）
     scheduler.add_job(trigger_llm_auto, 'interval', seconds=840, id='llm_auto_14min',

@@ -1,0 +1,21 @@
+# 弈沐资本数据看板 — Python 依赖
+# 安装: pip install -r requirements.txt
+
+# Core
+apscheduler>=3.10.0
+filelock>=3.9.0
+
+# 测试
+pytest>=7.0.0
+
+# 数据管道（见下方安装说明）
+# ym_stock_data — 弈沐资本 A 股统一数据管道
+#   安装方式（选择一种）:
+#   1. 从源码（推荐）:
+#      cd ~/Documents/YM_Capital/YM-data-pipeline
+#      pip install -e .
+#   2. 从 PyPI（如果已发布）:
+#      pip install ym_stock_data
+#   3. 使用环境变量指定本地路径（开发模式）:
+#      export YM_DATA_PIPELINE_PATH=/Users/xxx/YM_Capital/YM-data-pipeline
+#      然后在脚本中使用 os.environ.get("YM_DATA_PIPELINE_PATH") 解析导入路径
