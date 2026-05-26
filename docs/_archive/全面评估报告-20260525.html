@@ -1,0 +1,552 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>弈沐资本数据看板 v2.5 — 全面评估报告 2026-05-25</title>
+<style>
+  :root {
+    --bg: #F7F5F3; --bg-card: #FFFFFF; --text: #2D2926; --muted: #78716C;
+    --border: #E3DACC; --accent: #D97706; --p0: #DC2626; --p1: #EA580C;
+    --p2: #CA8A04; --p3: #78716C; --ok: #059669;
+    --shadow: rgba(45,41,38,0.08); --radius: 10px;
+    --font: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    --serif: Georgia, "Noto Serif SC", ui-serif, serif;
+  }
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html { scroll-behavior: smooth; }
+  body { font-family: var(--font); background: var(--bg); color: var(--text); font-size: 14px; line-height: 1.7; }
+
+  nav {
+    position: fixed; top: 0; left: 0; right: 0;
+    background: rgba(247,245,243,0.95); backdrop-filter: blur(12px);
+    border-bottom: 1.5px solid var(--border); z-index: 100;
+    padding: 0 32px; display: flex; align-items: center; gap: 24px; height: 52px;
+  }
+  nav .logo { font-family: var(--serif); font-size: 15px; font-weight: 700; color: var(--accent); white-space: nowrap; }
+  nav .nav-links { display: flex; gap: 4px; overflow-x: auto; scrollbar-width: none; }
+  nav .nav-links::-webkit-scrollbar { display: none; }
+  nav a { text-decoration: none; color: var(--muted); font-size: 12.5px; padding: 4px 10px; border-radius: 6px; white-space: nowrap; transition: background 0.15s, color 0.15s; }
+  nav a:hover, nav a.active { background: var(--border); color: var(--text); }
+
+  .container { max-width: 1100px; margin: 0 auto; padding: 32px 24px 80px; }
+
+  .hero { padding: 64px 0 48px; text-align: center; }
+  .hero .eyebrow { display: inline-flex; align-items: center; gap: 6px; background: #FFF7ED; border: 1px solid #FED7AA; color: var(--accent); font-size: 11.5px; font-weight: 600; letter-spacing: 0.5px; padding: 4px 12px; border-radius: 20px; margin-bottom: 20px; text-transform: uppercase; }
+  .hero h1 { font-family: var(--serif); font-size: 36px; font-weight: 700; letter-spacing: -0.5px; margin-bottom: 10px; }
+  .hero .subtitle { font-size: 16px; color: var(--muted); margin-bottom: 28px; }
+  .hero .meta-row { display: flex; justify-content: center; gap: 24px; flex-wrap: wrap; }
+  .meta-pill { background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px; padding: 6px 14px; font-size: 12.5px; color: var(--muted); }
+  .meta-pill strong { color: var(--text); }
+
+  .summary-row { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px; margin-bottom: 48px; }
+  .sum-card { background: var(--bg-card); border: 1.5px solid var(--border); border-radius: var(--radius); padding: 16px 18px; transition: box-shadow 0.2s, transform 0.2s; }
+  .sum-card:hover { box-shadow: 0 4px 20px var(--shadow); transform: translateY(-1px); }
+  .sum-card .sum-label { font-size: 11px; font-weight: 600; letter-spacing: 0.4px; text-transform: uppercase; color: var(--muted); margin-bottom: 6px; }
+  .sum-card .sum-value { font-size: 26px; font-weight: 700; font-family: ui-monospace, 'SF Mono', monospace; line-height: 1.1; }
+  .sum-card .sum-sub { font-size: 11.5px; color: var(--muted); margin-top: 4px; }
+
+  .section { margin-bottom: 56px; }
+  .section-header { display: flex; align-items: center; gap: 12px; margin-bottom: 20px; padding-bottom: 12px; border-bottom: 1.5px solid var(--border); }
+  .section-num { width: 32px; height: 32px; background: var(--accent); color: #fff; border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 13px; font-weight: 700; font-family: ui-monospace, monospace; flex-shrink: 0; }
+  .section-title { font-family: var(--serif); font-size: 20px; font-weight: 700; }
+  .section-badge { margin-left: auto; font-size: 11px; font-weight: 600; padding: 3px 10px; border-radius: 12px; background: #FEF3C7; color: var(--p2); border: 1px solid #FDE68A; }
+
+  .sub-header { font-size: 13.5px; font-weight: 700; color: var(--text); margin: 20px 0 10px; padding-left: 10px; border-left: 3px solid var(--accent); }
+
+  .check-list { list-style: none; display: flex; flex-direction: column; gap: 6px; margin-bottom: 16px; }
+  .check-list li { display: flex; align-items: flex-start; gap: 8px; font-size: 13.5px; line-height: 1.6; }
+  .check-list li::before { content: '✓'; color: var(--ok); font-weight: 700; flex-shrink: 0; margin-top: 1px; }
+
+  .p-badge { display: inline-block; font-size: 10px; font-weight: 700; font-family: ui-monospace, monospace; padding: 1px 6px; border-radius: 4px; letter-spacing: 0.3px; text-transform: uppercase; }
+  .p-badge.p0 { background: #FEE2E2; color: var(--p0); border: 1px solid #FECACA; }
+  .p-badge.p1 { background: #FFF7ED; color: var(--p1); border: 1px solid #FED7AA; }
+  .p-badge.p2 { background: #FEFCE8; color: var(--p2); border: 1px solid #FEF08A; }
+  .p-badge.p3 { background: #F5F5F4; color: var(--p3); border: 1px solid #E7E5E4; }
+  .p-badge.ok { background: #D1FAE5; color: var(--ok); border: 1px solid #A7F3D0; }
+
+  .table-wrap { overflow-x: auto; margin-bottom: 20px; border-radius: var(--radius); border: 1.5px solid var(--border); }
+  table { width: 100%; border-collapse: collapse; font-size: 12.5px; background: var(--bg-card); }
+  thead { background: var(--bg); }
+  th { text-align: left; font-weight: 600; color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.4px; padding: 10px 14px; border-bottom: 1.5px solid var(--border); white-space: nowrap; }
+  td { padding: 9px 14px; border-bottom: 1px solid var(--border); vertical-align: top; line-height: 1.5; }
+  tr:last-child td { border-bottom: none; }
+  tr:nth-child(even) td { background: #FDFCFB; }
+  tr:hover td { background: #FFFBF5; }
+  td code { font-family: ui-monospace, monospace; font-size: 11.5px; background: var(--bg); padding: 1px 5px; border-radius: 4px; color: var(--accent); }
+
+  .issue-card { background: var(--bg-card); border: 1.5px solid var(--border); border-radius: var(--radius); padding: 14px 16px; margin-bottom: 10px; transition: box-shadow 0.15s; }
+  .issue-card:hover { box-shadow: 0 3px 14px var(--shadow); }
+  .issue-card.p0-border { border-left: 4px solid var(--p0); }
+  .issue-card.p1-border { border-left: 4px solid var(--p1); }
+  .issue-card.p2-border { border-left: 4px solid var(--p2); }
+  .issue-card.p3-border { border-left: 4px solid var(--p3); }
+  .issue-card.ok-border { border-left: 4px solid var(--ok); }
+  .issue-title { font-weight: 600; font-size: 13.5px; margin-bottom: 6px; display: flex; align-items: center; gap: 8px; }
+  .issue-desc { font-size: 12.5px; color: var(--muted); line-height: 1.65; }
+
+  .comp-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 8px; margin-bottom: 16px; }
+  .comp-item { background: var(--bg-card); border: 1.5px solid var(--border); border-radius: 8px; padding: 10px 12px; font-size: 12px; font-family: ui-monospace, monospace; font-weight: 600; text-align: center; transition: transform 0.15s, box-shadow 0.15s; }
+  .comp-item:hover { transform: translateY(-1px); box-shadow: 0 3px 12px var(--shadow); }
+  .comp-item.ok { border-color: #A7F3D0; background: #F0FDF4; color: var(--ok); }
+  .comp-item.warn { border-color: #FED7AA; background: #FFFBEB; color: var(--p1); }
+  .comp-item.bad { border-color: #FECACA; background: #FEF2F2; color: var(--p0); }
+  .comp-item .comp-tag { display: inline-block; font-size: 9.5px; font-weight: 700; letter-spacing: 0.3px; text-transform: uppercase; margin-top: 3px; padding: 1px 5px; border-radius: 4px; }
+  .comp-item.ok .comp-tag { background: #D1FAE5; color: var(--ok); }
+  .comp-item.warn .comp-tag { background: #FFF7ED; color: var(--p1); }
+  .comp-item.bad .comp-tag { background: #FEE2E2; color: var(--p0); }
+
+  .callout { background: #FFFBEB; border: 1.5px solid #FDE68A; border-radius: var(--radius); padding: 14px 16px; margin: 16px 0; font-size: 13px; color: #92400E; display: flex; gap: 10px; align-items: flex-start; }
+  .callout .callout-icon { font-size: 16px; flex-shrink: 0; }
+  .callout strong { display: block; margin-bottom: 3px; font-size: 12.5px; }
+
+  footer { text-align: center; padding: 32px 0; border-top: 1.5px solid var(--border); font-size: 12px; color: var(--muted); margin-top: 16px; }
+
+  @media (max-width: 640px) {
+    .hero h1 { font-size: 26px; }
+    .summary-row { grid-template-columns: 1fr 1fr; }
+    .container { padding: 24px 16px 60px; }
+    nav { padding: 0 16px; }
+    .comp-grid { grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); }
+  }
+  @media print { nav { display: none; } body { background: white; } .issue-card, .sum-card { break-inside: avoid; } }
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: var(--bg); }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+</style>
+</head>
+<body>
+
+<nav>
+  <span class="logo">弈沐资本</span>
+  <div class="nav-links">
+    <a href="#s1">数据管线</a>
+    <a href="#s2">组件质量</a>
+    <a href="#s3">AI 系统</a>
+    <a href="#s4">UI/UX</a>
+    <a href="#s5">交易决策</a>
+    <a href="#s6">场景适配</a>
+    <a href="#s7">架构质量</a>
+    <a href="#s8">改进优先级</a>
+  </div>
+</nav>
+
+<div class="container">
+
+<div class="hero" id="top">
+  <div class="eyebrow">全面评估报告</div>
+  <h1>弈沐资本数据看板 v2.5</h1>
+  <p class="subtitle">22 组件 + 后端管线 + AI 系统 + UI/UX + 交易决策 &middot; 2026-05-25</p>
+  <div class="meta-row">
+    <span class="meta-pill"><strong>22</strong> 组件</span>
+    <span class="meta-pill"><strong>3</strong> 层数据管线</span>
+    <span class="meta-pill"><strong>20+</strong> 后端定时任务</span>
+    <span class="meta-pill"><strong>25</strong> 待改进项</span>
+    <span class="meta-pill"><strong>4</strong> P0 问题</span>
+  </div>
+</div>
+
+<div class="summary-row">
+  <div class="sum-card">
+    <div class="sum-label">P0 问题</div>
+    <div class="sum-value" style="color:var(--p0)">4</div>
+    <div class="sum-sub">必须立即处理</div>
+  </div>
+  <div class="sum-card">
+    <div class="sum-label">P1 问题</div>
+    <div class="sum-value" style="color:var(--p1)">8</div>
+    <div class="sum-sub">本周处理</div>
+  </div>
+  <div class="sum-card">
+    <div class="sum-label">P2 问题</div>
+    <div class="sum-value" style="color:var(--p2)">8</div>
+    <div class="sum-sub">下周处理</div>
+  </div>
+  <div class="sum-card">
+    <div class="sum-label">P3 问题</div>
+    <div class="sum-value" style="color:var(--muted)">5</div>
+    <div class="sum-sub">规划中</div>
+  </div>
+  <div class="sum-card">
+    <div class="sum-label">高质量组件</div>
+    <div class="sum-value" style="color:var(--ok)">7</div>
+    <div class="sum-sub">W17&middot;W19&middot;W18&middot;W07&middot;W15&middot;W04&middot;W22</div>
+  </div>
+  <div class="sum-card">
+    <div class="sum-label">有问题的组件</div>
+    <div class="sum-value" style="color:var(--p1)">9</div>
+    <div class="sum-sub">需修复或重构</div>
+  </div>
+</div>
+
+<!-- S1 -->
+<div class="section" id="s1">
+  <div class="section-header">
+    <div class="section-num">1</div>
+    <div class="section-title">数据管线 &mdash; 可靠性与盲区</div>
+    <span class="section-badge">架构核心</span>
+  </div>
+  <div class="sub-header">做得好的</div>
+  <ul class="check-list">
+    <li>CACHE 热启动（<code>cache_dump.json</code>）保证 bridge 重启后不白屏</li>
+    <li><code>atomic_write_json</code> + FileLock 防止多进程写入损坏</li>
+    <li>竞价快照选在 9:28（给 iwencai 留足处理时间）</li>
+    <li>三层 PnL 保护机制（gen 不覆盖实时持仓）</li>
+    <li>成交额对比用 <code>update()</code> 而非赋值——避免了昨天数据被抹的问题</li>
+  </ul>
+
+  <div class="issue-card p0-border">
+    <div class="issue-title"><span class="p-badge p0">P0</span> iwencai 数据质量隐患</div>
+    <div class="issue-desc">10 分钟轮询一次，但 pywencai fallback 是同步阻塞的，每次 poll 要跑 8 个查询。若 OpenAPI 超限或 pywencai 报错，整个 iwencai 数据域会静默退化为旧值，前端没有任何「数据过期」警告。建议在 <code>CACHE["iwencai"]</code> 增加一个 <code>_fetch_time</code> 字段，前端组件据此显示「数据已过时 N 分钟」警告。</div>
+  </div>
+  <div class="issue-card p1-border">
+    <div class="issue-title"><span class="p-badge p1">P1</span> 竞价快照只跑一次</div>
+    <div class="issue-desc"><code>snapshot_auction.py</code> 只在 9:28 执行一次，如果当天 bridge 重启，竞价快照永远是 9:28 的数据，W06 会持续显示过时的 5 维信号灯。建议增加一个 10:00 备份快照。</div>
+  </div>
+  <div class="issue-card p1-border">
+    <div class="issue-title"><span class="p-badge p1">P1</span> yesterday_compare 数据脆弱</div>
+    <div class="issue-desc">昨日成交额对比依赖 PyTDX 的 15 分钟 K 线数据，连接在行情波动时容易抖动。当前 <code>collect_yesterday_compare</code> 没有独立日志，如果这个数据丢了，W04 成交额对比就永久空白。建议增加采集成功率的监控指标。</div>
+  </div>
+  <div class="issue-card p2-border">
+    <div class="issue-title"><span class="p-badge p2">P2</span> sentiment_auto.json 是 append 操作</div>
+    <div class="issue-desc">每次快照追加到文件末尾，若当机时文件写入一半，可能损坏 JSON 结构导致 W05 读取崩溃。建议换成 append-only 格式（每行一个 JSON），或者写临时文件再 rename。</div>
+  </div>
+</div>
+
+<!-- S2 -->
+<div class="section" id="s2">
+  <div class="section-header">
+    <div class="section-num">2</div>
+    <div class="section-title">22 组件质量</div>
+    <span class="section-badge">Widget 生态</span>
+  </div>
+  <div class="sub-header">高质量组件 <span style="font-weight:400;color:var(--muted);font-size:12px">— 代码简洁、错误处理完善、数据流清晰</span></div>
+  <div class="comp-grid">
+    <div class="comp-item ok">W17<div class="comp-tag">56行&middot;无冗余</div></div>
+    <div class="comp-item ok">W19<div class="comp-tag">午盘复核</div></div>
+    <div class="comp-item ok">W18<div class="comp-tag">锚定&middot;清晰</div></div>
+    <div class="comp-item ok">W07<div class="comp-tag">高潮守护</div></div>
+    <div class="comp-item ok">W15<div class="comp-tag">交互完善</div></div>
+    <div class="comp-item ok">W04<div class="comp-tag">全景&middot;丰富</div></div>
+    <div class="comp-item ok">W22<div class="comp-tag">PnL曲线</div></div>
+  </div>
+  <div class="sub-header">需修复的组件</div>
+
+  <div class="issue-card p0-border">
+    <div class="issue-title"><span class="p-badge p0">P0</span> W05、W06 数据源不规范</div>
+    <div class="issue-desc">这两个组件不通过 DataStore 订阅，而是直接 <code>fetch()</code> 文件。破坏了 SSOT 架构——数据不会随 bridge CACHE 更新而刷新，GridStack 重排时组件行为不一致。应该将这两个文件也纳入 DataStore 的订阅体系。</div>
+  </div>
+  <div class="issue-card p0-border">
+    <div class="issue-title"><span class="p-badge p0">P0</span> W12、W13 代码重复</div>
+    <div class="issue-desc">两个组件近 100 行几乎完全相同，只是数据源不同（连板池 vs 趋势池）。维护成本翻倍——改一个逻辑要改两处。应该抽象出 <code>StockPoolWidget</code> 基类或共享渲染函数。</div>
+  </div>
+  <div class="issue-card p1-border">
+    <div class="issue-title"><span class="p-badge p1">P1</span> W11、W12、W13、W16 事件监听器泄漏</div>
+    <div class="issue-desc"><code>addEventListener</code> 没有通过 <code>_domListeners</code> 追踪，组件销毁时监听器残留在 DOM 上。每次数据刷新都添加新监听器，造成内存泄漏。建议统一改用事件委托模式，在基类层统一处理。</div>
+  </div>
+  <div class="issue-card p1-border">
+    <div class="issue-title"><span class="p-badge p1">P1</span> W14 缺少 <code>updateTimestamp()</code></div>
+    <div class="issue-desc">风控面板 W14 在 <code>render()</code> 末尾没有调用 <code>this.updateTimestamp()</code>，导致数据新鲜度指示器始终显示灰色（dead）状态。</div>
+  </div>
+  <div class="issue-card p2-border">
+    <div class="issue-title"><span class="p-badge p2">P2</span> W08、W09 <code>profitFx.indexOf('好')</code> 逻辑 bug</div>
+    <div class="issue-desc"><code>"不好"</code> 会被错误匹配为正收益。字符串判断太粗糙，建议用精确的 <code>===</code> 或枚举对照。</div>
+  </div>
+  <div class="issue-card p2-border">
+    <div class="issue-title"><span class="p-badge p2">P2</span> W10、W21 每次 render 都发 fetch</div>
+    <div class="issue-desc">W10（板块）和 W21（梯队）每次 <code>_renderBody()</code> 都调用 <code>_loadInsights()</code>，没有 <code>_loading</code> 状态锁，导致频繁重复请求。</div>
+  </div>
+  <div class="issue-card p2-border">
+    <div class="issue-title"><span class="p-badge p2">P2</span> W12/W13 买入颜色语义不一致</div>
+    <div class="issue-desc">W12 的「追」用红色，W13 的「买入」用绿色。两者都是买入信号但颜色相反，容易混淆。建议统一：买入 = <code>up</code>（红），红色代表「可执行/积极」。</div>
+  </div>
+</div>
+
+<!-- S3 -->
+<div class="section" id="s3">
+  <div class="section-header">
+    <div class="section-num">3</div>
+    <div class="section-title">AI / LLM 系统</div>
+    <span class="section-badge">潜力最大</span>
+  </div>
+  <div class="sub-header">做得好的</div>
+  <ul class="check-list">
+    <li>14 分钟自动研判，后台运行，浏览器关了也跑</li>
+    <li>ReAct 信号验证层，防止幻觉信号</li>
+    <li>3 轮对话记忆，W20 监控卡片 + 浮动聊天框双入口</li>
+    <li>DeepSeek V4-Flash 成本可控（Flash 模型）</li>
+  </ul>
+
+  <div class="issue-card p1-border">
+    <div class="issue-title"><span class="p-badge p1">P1</span> LLM 输出格式依赖标记词</div>
+    <div class="issue-desc">后端用 <code>[TEXT]</code>/<code>[SIGNALS]</code> 字符串分割来解析输出，如果模型格式稍变就静默失败。当前没有对解析结果的 schema 校验——<code>signals</code> 数组可能为空或格式错误，前端显示无信号但不报错。建议增加 JSON-mode 输出或在 prompt 中要求能被 <code>json.loads</code> 解析的格式。</div>
+  </div>
+  <div class="issue-card p1-border">
+    <div class="issue-title"><span class="p-badge p1">P1</span> ReAct 验证过于宽松</div>
+    <div class="issue-desc">对每个信号只检查基础条件，但不验证信号与当前情绪区间的匹配度。例如在冰点（情绪 &lt;20%）时，模型输出 BUY 信号仍会被标记为 verified。建议增加情绪-信号的联动校验：冰点不输出 BUY，双冰不追涨，高潮期不追连板。</div>
+  </div>
+  <div class="issue-card p2-border">
+    <div class="issue-title"><span class="p-badge p2">P2</span> 系统 Prompt 无版本控制</div>
+    <div class="issue-desc"><code>LLM_RULES.md</code> 是纯文本，每次修改即时生效，没有版本记录。如果改错了规则，LLM 的行为会悄悄改变，但没有回滚机制。建议在 <code>llm_insights.json</code> 的每条记录中保存当时使用的 rules hash。</div>
+  </div>
+  <div class="issue-card p2-border">
+    <div class="issue-title"><span class="p-badge p2">P2</span> 手动/自动模式共享同一个流</div>
+    <div class="issue-desc">如果自动研判出错（iwencai 数据异常），手动问答也会受影响。建议分离处理：自动研判在发送前增加数据完整性校验，手动问答更宽容。</div>
+  </div>
+  <div class="issue-card p3-border">
+    <div class="issue-title"><span class="p-badge p3">P3</span> 对话历史只存今天</div>
+    <div class="issue-desc">历史对话没有长期保存，如果想回顾「上周五 AI 说了什么」只能翻笔记。建议增加周度归档，或在 <code>pnl.db</code> 的 <code>llm_insights</code> 表中保留所有历史。</div>
+  </div>
+</div>
+
+<!-- S4 -->
+<div class="section" id="s4">
+  <div class="section-header">
+    <div class="section-num">4</div>
+    <div class="section-title">UI/UX 设计 &mdash; 暖砚风格</div>
+    <span class="section-badge">体验层</span>
+  </div>
+  <div class="sub-header">做得好的</div>
+  <ul class="check-list">
+    <li>CSS 变量系统（54 个变量）覆盖完整，主题一致性高</li>
+    <li><code>tabular-nums lining-nums</code> 数字等宽，阅读体验好</li>
+    <li>红涨绿跌 + 符号双保险，符合 A 股习惯</li>
+    <li>Widget 分类色条（决策/数据/风控/工具）视觉清晰</li>
+    <li>GridStack 可拖拽布局，个性化体验好</li>
+  </ul>
+
+  <div class="issue-card p1-border">
+    <div class="issue-title"><span class="p-badge p1">P1</span> W20 浮动聊天框层级冲突风险</div>
+    <div class="issue-desc"><code>z-index: 3000</code> 硬编码，如果将来有其他浮层需要更高层级会产生覆盖问题。建议改用 CSS 变量管理层级。</div>
+  </div>
+  <div class="issue-card p1-border">
+    <div class="issue-title"><span class="p-badge p1">P1</span> 没有暗色模式</div>
+    <div class="issue-desc">长时间盯盘的投资者（尤其是晚盘）会希望暗色主题。当前后台主题色是暖砚白（<code>#F7F5F3</code>）。建议增加 <code>prefers-color-scheme: dark</code> 支持，或提供主题切换开关。</div>
+  </div>
+  <div class="issue-card p2-border">
+    <div class="issue-title"><span class="p-badge p2">P2</span> 响应式布局缺失</div>
+    <div class="issue-desc">GridStack 配置固定 <code>column: 12</code>，笔记本（1366&times;768）上组件过于拥挤。W22 的 Canvas 图虽然处理了 DPR 缩放，但图表区域在窄屏下容易被压缩。</div>
+  </div>
+  <div class="issue-card p2-border">
+    <div class="issue-title"><span class="p-badge p2">P2</span> 组件刷新时无骨架屏/过渡</div>
+    <div class="issue-desc">数据刷新时组件内容直接替换，没有淡入淡出或骨架占位。对于 W04（全景）和 W10（板块）这类数据量大的组件，刷新瞬间的视觉跳变明显。</div>
+  </div>
+  <div class="issue-card p3-border">
+    <div class="issue-title"><span class="p-badge p3">P3</span> 全局快捷键无冲突检测</div>
+    <div class="issue-desc"><code>R/P/Ctrl+S/A/Ctrl+F</code> 等快捷键没有检查是否与浏览器或系统快捷键冲突。<code>A</code> 键在某些输入法下可能失效。</div>
+  </div>
+</div>
+
+<!-- S5 -->
+<div class="section" id="s5">
+  <div class="section-header">
+    <div class="section-num">5</div>
+    <div class="section-title">交易决策支持</div>
+    <span class="section-badge">核心闭环</span>
+  </div>
+
+  <div class="callout">
+    <div class="callout-icon">&#9654;</div>
+    <div>
+      <strong>当前链路</strong>
+      LLM_RULES.md (规则) &rarr; W08/W09 (规则执行检查) &rarr; W15 (操作录入) &rarr; W17 (今日操作展示) &rarr; W22 (PnL闭环)
+    </div>
+  </div>
+
+  <div class="issue-card p1-border">
+    <div class="issue-title"><span class="p-badge p1">P1</span> 缺少「信号 &rarr; 操作」的确认流程</div>
+    <div class="issue-desc">W08/W09 显示「买入/等待/降级」信号，但信号到 W15 录入之间是手动操作。这个 3 秒的摩擦在紧张的盘前/盘中会显著影响决策执行率。建议在 W08/W09 增加「录入操作」快捷入口，直接调起 W15 的买入表单并预填标的名称。</div>
+  </div>
+  <div class="issue-card p1-border">
+    <div class="issue-title"><span class="p-badge p1">P1</span> W03 仓位上限不响应熔断</div>
+    <div class="issue-desc">W03（仓位计算）的上限从 <code>data.style.总仓位上限</code> 读取，这是每日基线。但如果熔断触发（由 W07 检测），W03 不会自动更新上限。需要增加一个 DataStore 订阅：当 <code>risk.熔断触发</code> 变化时，W03 重新渲染。</div>
+  </div>
+  <div class="issue-card p2-border">
+    <div class="issue-title"><span class="p-badge p2">P2</span> W02 风格检测是每日一次静态值</div>
+    <div class="issue-desc">风格分数在每日 8:30 由 <code>style_detect.py</code> 生成，但盘中风格可能改变（W02 无法感知）。建议增加盘中风格再评估机制，用 iwencai 的板块热度数据驱动动态调整。</div>
+  </div>
+  <div class="issue-card p2-border">
+    <div class="issue-title"><span class="p-badge p2">P2</span> 没有止损提醒的实际触发</div>
+    <div class="issue-desc">LLM_RULES 里明确写了止损规则（连板 5%、趋势 7%），但当前系统只做「展示」，没有主动提醒。W14 可以显示持仓成本和现价，但没有计算哪个持仓已触及止损线并主动报警。</div>
+  </div>
+  <div class="issue-card p3-border">
+    <div class="issue-title"><span class="p-badge p3">P3</span> 冰点/双冰检测是静态的</div>
+    <div class="issue-desc">W19 只在午盘复核时展示双冰状态，但双冰是前置条件，应该在开盘前就判断（gen 阶段）。建议将双冰检测自动化：用 <code>sentiment_auto.json</code> 的历史情绪数据自动计算。</div>
+  </div>
+</div>
+
+<!-- S6 -->
+<div class="section" id="s6">
+  <div class="section-header">
+    <div class="section-num">6</div>
+    <div class="section-title">个人投资者场景适配</div>
+    <span class="section-badge">信息降噪</span>
+  </div>
+
+  <div class="callout">
+    <div class="callout-icon">&#9888;</div>
+    <div>
+      <strong>核心痛点</strong>
+      作为个人股票投资者，核心痛点是个<strong>信息过载</strong>和<strong>决策疲劳</strong>。系统当前 22 个组件是信息密集型设计，但有些地方反而制造噪音。
+    </div>
+  </div>
+
+  <div class="sub-header">需要精简的</div>
+
+  <div class="issue-card p1-border">
+    <div class="issue-title"><span class="p-badge p1">P1</span> 22 个组件过多了</div>
+    <div class="issue-desc">实际盘中操作只需要盯 5-8 个核心组件：W04（全景）、W07（高潮守护）、W08/W09（W1/W2 窗口）、W15（持仓）、W22（PnL）。其余组件可以折叠或默认隐藏。建议增加「精简模式」开关，切换后只显示核心组件，减少认知负担。</div>
+  </div>
+  <div class="issue-card p2-border">
+    <div class="issue-title"><span class="p-badge p2">P2</span> W21 梯队面板太复杂</div>
+    <div class="issue-desc">571 行代码，日期 tabs、概念 tags、多选排序、LLM 洞察、板块过滤——信息量过大。实际盘中查看梯队只需要：今天有哪些连板梯队、各梯队高标是哪只。建议拆分为「盘中快速查看」（表格）和「盘后复盘」（完整面板）两个视图。</div>
+  </div>
+  <div class="issue-card p2-border">
+    <div class="issue-title"><span class="p-badge p2">P2</span> 数据新鲜度显示不统一</div>
+    <div class="issue-desc">部分组件有 <code>data-timestamp</code> 指示器，部分没有（W14 就缺少 <code>updateTimestamp()</code>）。在长时间运行时，用户无法判断哪个数据已经过期。建议统一所有组件的数据新鲜度指示器。</div>
+  </div>
+
+  <div class="sub-header">需要增强的</div>
+
+  <div class="issue-card p1-border">
+    <div class="issue-title"><span class="p-badge p1">P1</span> 增加「盘前预案」功能</div>
+    <div class="issue-desc">当前系统以盘中盯盘为主，缺少盘前决策文档化。可以在 W16（报数面板）增加一个「今日预案」文本区，记录开盘前的核心判断：今天的主要机会在哪、哪些标的不碰、如果高开/低开怎么处理。</div>
+  </div>
+  <div class="issue-card p1-border">
+    <div class="issue-title"><span class="p-badge p1">P1</span> 成交额感知的量化阈值</div>
+    <div class="issue-desc">W04 显示成交额和「较昨日同期」，但没有告诉你这个变化是好是坏。A 股经验规则：成交额较前日放大 30% 以上是活跃信号，萎缩 20% 以上是冷清信号。建议增加「量能信号」指示（放大/正常/萎缩），直接显示在 W04 成交额旁边。</div>
+  </div>
+  <div class="issue-card p2-border">
+    <div class="issue-title"><span class="p-badge p2">P2</span> 持仓联动到 LLM 研判</div>
+    <div class="issue-desc">如果持仓中有股票出现异常波动（跌幅 &gt; 3%、涨停、炸板），应该主动触发专项研判，而不是等 15 分钟一次的自动轮询。建议增加持仓异常监测：一旦持仓标的价格变化触发阈值，立即在 W20 显示「持仓异动提醒」。</div>
+  </div>
+  <div class="issue-card p2-border">
+    <div class="issue-title"><span class="p-badge p2">P2</span> 增加交易日志的「原因-结果」对照</div>
+    <div class="issue-desc">W15 的操作录入有「原因」字段，但 W17 展示时没有充分利用。建议盘后（15:05）自动拉取当日收盘数据，计算每个操作的实际效果（买在 X，收在 Y，盈亏 Z），作为 AI 复盘的学习素材。</div>
+  </div>
+</div>
+
+<!-- S7 -->
+<div class="section" id="s7">
+  <div class="section-header">
+    <div class="section-num">7</div>
+    <div class="section-title">架构与代码质量</div>
+    <span class="section-badge">工程化</span>
+  </div>
+  <div class="sub-header">做得好的</div>
+  <ul class="check-list">
+    <li><code>YiMuWidget</code> 基类设计合理，生命周期清晰</li>
+    <li>DataStore 的三层合并架构是正确的抽象</li>
+    <li>SSOT 审计已识别并记录了关键数据域</li>
+    <li>CSS 变量系统避免了样式碎片化</li>
+  </ul>
+
+  <div class="issue-card p1-border">
+    <div class="issue-title"><span class="p-badge p1">P1</span> 组件间通信机制缺失</div>
+    <div class="issue-desc">当前组件完全独立（通过 DataStore），但有些场景需要跨组件协调：W08 买入信号 &rarr; 自动触发 W15 表单预填，W07 高潮告警 &rarr; 同步关闭 W03 的可开仓位显示。这种联动目前靠 <code>window._llmChat</code> 这样的全局 hack 实现。建议在 <code>store.js</code> 增加一个事件总线：<code>DataStore.on('signal:buy', callback)</code>。</div>
+  </div>
+  <div class="issue-card p1-border">
+    <div class="issue-title"><span class="p-badge p1">P1</span> <code>_domListeners</code> 追踪不完整</div>
+    <div class="issue-desc">基类设计了 <code>_domListeners</code> 数组来管理事件清理，但 W11/W12/W13/W16 都没有使用它。建议在基类的 <code>mount()</code> 里增加一个 lint 提示，如果组件添加了未追踪的监听器就报警。</div>
+  </div>
+  <div class="issue-card p2-border">
+    <div class="issue-title"><span class="p-badge p2">P2</span> gen_dashboard_data.py 是单点依赖</div>
+    <div class="issue-desc">整个系统的 Layer 1 基线依赖 <code>gen_dashboard_data.py</code> 的正确运行，但格式没有 schema 校验。如果复盘笔记格式稍有变化，gen 可能静默失败或输出错误数据。建议增加 JSON schema 校验，gen 完成后输出校验报告。</div>
+  </div>
+  <div class="issue-card p2-border">
+    <div class="issue-title"><span class="p-badge p2">P2</span> CACHE 的字段没有标准化文档</div>
+    <div class="issue-desc"><code>CACHE</code> 字典是事实上的数据结构，但没有 schema 定义。不同 collector 写入的字段名不一致（iwencai 的晋级率是 <code>晋级率</code> 还是 <code>一进二晋级率</code>，量比是百分数还是小数）。建议建立 <code>CACHE_SCHEMA.md</code>，每个字段注明类型、单位、来源、刷新频率。</div>
+  </div>
+  <div class="issue-card p3-border">
+    <div class="issue-title"><span class="p-badge p3">P3</span> 没有单元测试</div>
+    <div class="issue-desc">整个项目没有测试文件。<code>gen_dashboard_data.py</code> 的解析逻辑（尤其是占位符 "—" 回退机制）如果有 bug，会影响所有组件。建议为 gen 的核心函数和 DataStore 的 merge 逻辑增加 pytest 测试。</div>
+  </div>
+</div>
+
+<!-- S8 -->
+<div class="section" id="s8">
+  <div class="section-header">
+    <div class="section-num">8</div>
+    <div class="section-title">改进优先级总览</div>
+    <span class="section-badge">行动路线图</span>
+  </div>
+
+  <div class="sub-header">P0 &mdash; 必须立即处理</div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>#</th><th>优先级</th><th>问题</th><th>涉及文件</th></tr></thead>
+      <tbody>
+        <tr><td>1</td><td><span class="p-badge p0">P0</span></td><td>W12/W13 代码重复（~100行完全相同）</td><td><code>widgets/lianban-pool.js</code>, <code>trend-pool.js</code></td></tr>
+        <tr><td>2</td><td><span class="p-badge p0">P0</span></td><td>W05/W06 不走 DataStore（破坏 SSOT）</td><td><code>widgets/sentiment-dash.js</code>, <code>auction-5d.js</code></td></tr>
+        <tr><td>3</td><td><span class="p-badge p0">P0</span></td><td>W11/W12/W13/W16 事件监听器泄漏</td><td>多个 widget 文件</td></tr>
+        <tr><td>4</td><td><span class="p-badge p0">P0</span></td><td>iwencai 静默降级无告警</td><td><code>scripts/collectors/iwencai_poll.py</code></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="sub-header">P1 &mdash; 本周处理</div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>#</th><th>优先级</th><th>问题</th><th>涉及文件</th></tr></thead>
+      <tbody>
+        <tr><td>5</td><td><span class="p-badge p1">P1</span></td><td>W14 缺少 <code>updateTimestamp()</code></td><td><code>widgets/risk-panel.js</code></td></tr>
+        <tr><td>6</td><td><span class="p-badge p1">P1</span></td><td>W08/W09 <code>profitFx.indexOf('好')</code> bug</td><td><code>widgets/w1-check.js</code>, <code>w2-check.js</code></td></tr>
+        <tr><td>7</td><td><span class="p-badge p1">P1</span></td><td>LLM 输出格式无 schema 校验</td><td><code>scripts/bridge.py</code></td></tr>
+        <tr><td>8</td><td><span class="p-badge p1">P1</span></td><td>W20 无持仓异常主动提醒</td><td><code>widgets/llm-monitor.js</code></td></tr>
+        <tr><td>9</td><td><span class="p-badge p1">P1</span></td><td>竞价快照只跑一次（无备份）</td><td><code>scripts/snapshot_auction.py</code></td></tr>
+        <tr><td>10</td><td><span class="p-badge p1">P1</span></td><td>W08 信号无到 W15 操作确认流</td><td><code>widgets/w1-check.js</code>, <code>positions.js</code></td></tr>
+        <tr><td>11</td><td><span class="p-badge p1">P1</span></td><td>W03 仓位上限不响应熔断</td><td><code>widgets/position-calc.js</code></td></tr>
+        <tr><td>12</td><td><span class="p-badge p1">P1</span></td><td>缺少「精简模式」开关</td><td><code>index.html</code></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="sub-header">P2 &mdash; 下周处理</div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>#</th><th>优先级</th><th>问题</th><th>涉及文件</th></tr></thead>
+      <tbody>
+        <tr><td>13</td><td><span class="p-badge p2">P2</span></td><td>LLM ReAct 验证过宽松（冰点期 BUY 信号也 verified）</td><td><code>scripts/bridge.py</code></td></tr>
+        <tr><td>14</td><td><span class="p-badge p2">P2</span></td><td>W10/W21 每次 render 发 fetch（无状态锁）</td><td><code>widgets/sector-heat.js</code>, <code>zt-echelon.js</code></td></tr>
+        <tr><td>15</td><td><span class="p-badge p2">P2</span></td><td>W22 Canvas 无响应式适配</td><td><code>widgets/pnl-curve.js</code></td></tr>
+        <tr><td>16</td><td><span class="p-badge p2">P2</span></td><td>无暗色模式</td><td><code>css/theme.css</code></td></tr>
+        <tr><td>17</td><td><span class="p-badge p2">P2</span></td><td>W21 梯队面板过于复杂（571行）</td><td><code>widgets/zt-echelon.js</code></td></tr>
+        <tr><td>18</td><td><span class="p-badge p2">P2</span></td><td>gen 无 JSON schema 校验</td><td><code>scripts/gen_dashboard_data.py</code></td></tr>
+        <tr><td>19</td><td><span class="p-badge p2">P2</span></td><td>缺少止损主动提醒</td><td><code>widgets/risk-panel.js</code></td></tr>
+        <tr><td>20</td><td><span class="p-badge p2">P2</span></td><td>成交额无量化信号（放大/萎缩）</td><td><code>widgets/market-overview.js</code></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="sub-header">P3 &mdash; 规划中</div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>#</th><th>优先级</th><th>问题</th><th>涉及文件</th></tr></thead>
+      <tbody>
+        <tr><td>21</td><td><span class="p-badge p3">P3</span></td><td>DataStore 无组件间事件总线</td><td><code>store.js</code></td></tr>
+        <tr><td>22</td><td><span class="p-badge p3">P3</span></td><td>无单元测试</td><td>全局</td></tr>
+        <tr><td>23</td><td><span class="p-badge p3">P3</span></td><td>CACHE 字段无标准化文档</td><td><code>scripts/collectors/*.py</code></td></tr>
+        <tr><td>24</td><td><span class="p-badge p3">P3</span></td><td>LLM 系统 Prompt 无版本控制</td><td><code>LLM_RULES.md</code></td></tr>
+        <tr><td>25</td><td><span class="p-badge p3">P3</span></td><td>LLM 历史对话不跨天保存</td><td><code>scripts/bridge.py</code></td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<footer>弈沐资本数据看板 v2.5 &middot; 全面评估报告 &middot; 2026-05-25 &middot; 25 项改进建议</footer>
+</div>
+
+<script>
+const sections = document.querySelectorAll('.section[id]');
+const navLinks = document.querySelectorAll('nav a');
+function onScroll() {
+  let current = '';
+  sections.forEach(s => { if (window.scrollY >= s.offsetTop - 80) current = s.id; });
+  navLinks.forEach(a => { a.classList.toggle('active', a.getAttribute('href') === '#' + current); });
+}
+window.addEventListener('scroll', onScroll, { passive: true });
+onScroll();
+</script>
+
+</body>
+</html>

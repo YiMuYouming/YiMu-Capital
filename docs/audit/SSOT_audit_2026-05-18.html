@@ -1,0 +1,873 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>弈沐资本 全量数据 SSOT 审计 · 2026-05-18</title>
+<style>
+:root {
+  --ivory:#FAF9F5; --slate:#141413; --clay:#D97757; --oat:#E3DACC;
+  --olive:#788C5D; --rust:#B04A3F; --sky:#6A8CAF; --amber:#C2780A;
+  --g150:#F0EEE6; --g300:#D1CFC5; --g500:#87867F; --g700:#3D3D3A;
+  --serif:Georgia,'Noto Serif SC',ui-serif,serif;
+  --sans:system-ui,-apple-system,'Noto Sans SC',sans-serif;
+  --mono:ui-monospace,'SF Mono',Menlo,monospace;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+html{scroll-behavior:smooth;scroll-padding-top:24px}
+body{background:var(--ivory);color:var(--g700);font-family:var(--sans);font-size:14px;line-height:1.65;-webkit-font-smoothing:antialiased;padding:0 24px 80px}
+.page{max-width:1200px;margin:0 auto}
+
+/* ── header ── */
+.report-header{margin:48px 0 36px}
+.eyebrow{font-family:var(--mono);font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--g500);margin-bottom:10px}
+h1{font-family:var(--serif);font-weight:500;font-size:32px;color:var(--slate);letter-spacing:-.01em;margin-bottom:10px;line-height:1.2}
+.meta-row{display:flex;gap:20px;flex-wrap:wrap;font-size:13px;color:var(--g500);margin-bottom:8px}
+.meta-row .tag{background:var(--oat);color:var(--slate);padding:2px 10px;border-radius:999px;font-family:var(--mono);font-size:11px}
+.lead{max-width:720px;font-size:14px;color:var(--g500);line-height:1.6;padding-top:12px;border-top:1.5px solid var(--g300)}
+
+/* ── stats bar ── */
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-bottom:32px}
+.stat{background:#fff;border:1.5px solid var(--g300);border-radius:10px;padding:14px 16px;text-align:center}
+.stat .val{font-family:var(--serif);font-size:30px;font-weight:600;color:var(--slate);display:block;line-height:1.2}
+.stat .val.crit{color:var(--rust)}
+.stat .val.high{color:var(--clay)}
+.stat .val.med{color:var(--amber)}
+.stat .val.low{color:var(--olive)}
+.stat .lbl{font-size:11px;color:var(--g500);text-transform:uppercase;letter-spacing:.04em;font-family:var(--mono);margin-top:2px}
+
+/* ── sections ── */
+section{margin-bottom:44px}
+h2{font-family:var(--serif);font-weight:500;font-size:24px;color:var(--slate);margin-bottom:14px;letter-spacing:-.01em;padding-bottom:8px;border-bottom:1.5px solid var(--g300)}
+h3{font-family:var(--serif);font-weight:500;font-size:18px;color:var(--slate);margin:20px 0 10px}
+h4{font-size:14px;font-weight:600;margin:14px 0 6px;color:var(--g700);display:flex;align-items:center;gap:6px}
+
+/* ── source cards ── */
+.src-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px;margin-bottom:20px}
+.src-card{background:#fff;border:1.5px solid var(--g300);border-radius:10px;padding:14px 16px}
+.src-card .nm{font-size:14px;font-weight:700;color:var(--slate);margin-bottom:4px}
+.src-card .det{font-family:var(--mono);font-size:11px;color:var(--g500);line-height:1.8}
+.src-card .freq{margin-top:8px}
+
+/* ── tables ── */
+.tw{overflow-x:auto;margin-bottom:14px}
+table{width:100%;border-collapse:collapse;font-size:12px;background:#fff;border:1.5px solid var(--g300);border-radius:8px;overflow:hidden}
+th{font-family:var(--mono);font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--g500);font-weight:500;background:var(--g150);padding:8px 10px;text-align:left;border-bottom:1.5px solid var(--g300);white-space:nowrap}
+td{padding:7px 10px;border-bottom:1px solid var(--g150);white-space:nowrap}
+td.wrap{white-space:normal;min-width:200px}
+tr:hover td{background:rgba(217,119,87,.04)}
+tr:nth-child(even) td{background:rgba(0,0,0,.012)}
+tr:nth-child(even):hover td{background:rgba(217,119,87,.06)}
+.gap td{background:var(--g150)!important;font-weight:600;color:var(--slate);font-size:11px;border-bottom:1.5px solid var(--g300)}
+
+/* ── badges ── */
+.badge{display:inline-block;padding:1px 8px;border-radius:6px;font-size:10px;font-weight:600;font-family:var(--mono);white-space:nowrap}
+.badge-crit{background:rgba(176,74,63,.12);color:var(--rust)}
+.badge-high{background:rgba(217,119,87,.12);color:var(--clay)}
+.badge-med{background:rgba(194,120,10,.12);color:var(--amber)}
+.badge-low{background:rgba(120,140,93,.12);color:var(--olive)}
+.badge-info{background:rgba(106,140,175,.12);color:var(--sky)}
+.badge-ok{background:rgba(120,140,93,.1);color:var(--olive)}
+.badge-warn{background:rgba(217,119,87,.1);color:var(--clay)}
+.badge-err{background:rgba(176,74,63,.1);color:var(--rust)}
+
+/* ── issue cards ── */
+.issue-cards{display:grid;gap:10px;margin-bottom:16px}
+.issue{background:#fff;border:1.5px solid var(--g300);border-radius:10px;overflow:hidden}
+.issue.crit{border-left:4px solid var(--rust)}
+.issue.high{border-left:4px solid var(--clay)}
+.issue.med{border-left:4px solid var(--amber)}
+.issue.low{border-left:4px solid var(--olive)}
+.issue-head{padding:12px 16px 8px;display:flex;justify-content:space-between;align-items:flex-start;gap:12px}
+.issue-head .t{font-size:14px;font-weight:700;color:var(--slate);flex:1}
+.issue-meta{padding:0 16px 6px;font-family:var(--mono);font-size:11px;color:var(--g500);display:flex;gap:16px;flex-wrap:wrap}
+.issue-body{padding:0 16px 12px;font-size:13px;color:var(--g700);line-height:1.6}
+.issue-fix{padding:0 16px 14px;font-size:12px;color:var(--olive);line-height:1.5}
+.issue-fix strong{color:var(--slate);font-weight:600}
+.issue code{background:var(--g150);padding:1px 5px;border-radius:4px;font-family:var(--mono);font-size:11px}
+
+/* ── flow box ── */
+.flow{background:var(--g150);border:1.5px solid var(--g300);border-radius:8px;padding:14px 18px;margin-bottom:14px;font-family:var(--mono);font-size:12px;line-height:1.9}
+.flow .a{color:var(--clay);margin:0 4px}
+.flow .l1{display:inline-block;padding:1px 6px;border-radius:4px;font-size:10px;background:rgba(106,140,175,.12);color:var(--sky);margin-right:3px}
+.flow .l2{display:inline-block;padding:1px 6px;border-radius:4px;font-size:10px;background:rgba(120,140,93,.12);color:var(--olive);margin-right:3px}
+.flow .l3{display:inline-block;padding:1px 6px;border-radius:4px;font-size:10px;background:rgba(217,119,87,.12);color:var(--clay);margin-right:3px}
+.flow .l4{display:inline-block;padding:1px 6px;border-radius:4px;font-size:10px;background:rgba(176,74,63,.08);color:var(--rust);margin-right:3px}
+
+/* ── val display ── */
+.val-ok{font-family:var(--mono);font-size:13px;font-weight:600;color:var(--olive)}
+.val-bad{font-family:var(--mono);font-size:13px;font-weight:600;color:var(--rust)}
+.val-warn{font-family:var(--mono);font-size:13px;font-weight:600;color:var(--clay)}
+
+/* ── path text ── */
+.path{font-family:var(--mono);font-size:11px;color:var(--g500);line-height:1.7}
+
+/* ── conclusion ── */
+.conclusion{border-top:2px solid var(--g300);padding-top:20px;margin-top:40px;font-size:13px;color:var(--g500);line-height:1.8}
+.conclusion ol{margin:10px 0 0 18px}
+.conclusion li{margin-bottom:6px}
+.conclusion li strong{color:var(--slate)}
+
+/* ── responsive ── */
+@media(max-width:768px){
+  body{padding:0 12px 60px}
+  h1{font-size:24px}
+  .stats{grid-template-columns:repeat(3,1fr)}
+  .src-grid{grid-template-columns:1fr}
+}
+</style>
+</head>
+<body>
+<div class="page">
+
+<!-- ═══════════ HEADER ═══════════ -->
+<header class="report-header">
+  <div class="eyebrow">SSOT Audit · 2026-05-18</div>
+  <h1>弈沐资本 全量数据 SSOT 审计</h1>
+  <div class="meta-row">
+    <span>审计范围：live-dashboard / 复盘笔记 / YM-data-pipeline</span>
+    <span class="tag">30 字段血缘</span>
+    <span class="tag">10 数据源</span>
+    <span class="tag">8 存储单元</span>
+  </div>
+  <div class="lead">
+    两周密集改造（Phase 0–3 · 35 commits · APScheduler 统一调度 · LLM 5 Hook 上线）后，三个系统的数据是否同一个真相？<br>
+    本报告逐字段追踪 lineage，标注分歧点，按严重程度排序问题清单。
+  </div>
+</header>
+
+<!-- ═══════════ SUMMARY BAR ═══════════ -->
+<div class="stats">
+  <div class="stat"><span class="val crit">3</span><span class="lbl">严重 · 数据错误或 null</span></div>
+  <div class="stat"><span class="val high">5</span><span class="lbl">高 · 分歧 &gt;20%</span></div>
+  <div class="stat"><span class="val med">4</span><span class="lbl">中 · 延迟 / 未对齐</span></div>
+  <div class="stat"><span class="val low">4</span><span class="lbl">低 · 改善建议</span></div>
+  <div class="stat"><span class="val">10</span><span class="lbl">数据源</span></div>
+  <div class="stat"><span class="val">30</span><span class="lbl">字段完成追踪</span></div>
+</div>
+
+<!-- ═══════════ 1. DATA SOURCES ═══════════ -->
+<section>
+  <h2>1. 数据源清单</h2>
+  <div class="src-grid">
+
+    <div class="src-card">
+      <div class="nm">PyTDX · 通达信行情</div>
+      <div class="det">
+        TCP 6×IP:7709 · 零鉴权<br>
+        模块：collectors/quotes.py → pytdx.py<br>
+        字段：三大指数/涨跌家数/个股 MA5-20/板块 MA/15min K线/涨跌分布<br>
+        CACHE：live_index · live_quotes · live_sectors · breadth
+      </div>
+      <div class="freq"><span class="badge badge-ok">5s / 30s</span></div>
+    </div>
+
+    <div class="src-card">
+      <div class="nm">问财 OpenAPI</div>
+      <div class="det">
+        openapi.iwencai.com · Bearer Token<br>
+        模块：collectors/iwencai_poll.py → iwencai.py<br>
+        字段：封板率/炸板率/晋级率/最高板/涨停收益/连板收益/炸板收益/连板风险值/赚钱效应<br>
+        CACHE：iwencai（8 条查询 / 2min）
+      </div>
+      <div class="freq"><span class="badge badge-ok">2min</span></div>
+    </div>
+
+    <div class="src-card">
+      <div class="nm">同花顺热点</div>
+      <div class="det">
+        zx.10jqka.com.cn · 零鉴权<br>
+        模块：collectors/quotes.py → ths_hot.py<br>
+        字段：热点概念/热度排名/题材归因/涨停统计<br>
+        CACHE：hot_list
+      </div>
+      <div class="freq"><span class="badge badge-ok">5min</span></div>
+    </div>
+
+    <div class="src-card">
+      <div class="nm">北向资金</div>
+      <div class="det">
+        data.hexin.cn/hsgtApi · 零鉴权<br>
+        模块：collectors/quotes.py → northbound.py<br>
+        字段：沪深股通分钟级累计净流入（262 点）<br>
+        自缓存：本地 CSV 历史
+      </div>
+      <div class="freq"><span class="badge badge-ok">60s</span></div>
+    </div>
+
+    <div class="src-card">
+      <div class="nm">同花顺行业板块</div>
+      <div class="det">
+        q.10jqka.com.cn · 零鉴权 · HTML 解析<br>
+        模块：collectors/market_data.py → ths_industry.py<br>
+        字段：行业板块 TOP20 净流入<br>
+        CACHE：sector_inflow
+      </div>
+      <div class="freq"><span class="badge badge-ok">5min</span></div>
+    </div>
+
+    <div class="src-card">
+      <div class="nm">腾讯财经</div>
+      <div class="det">
+        qt.gtimg.cn · 零鉴权 · 88 字段<br>
+        模块：tencent.py<br>
+        字段：PE / PB / 市值 / 换手率<br>
+        用途：离线估值（非盘中）
+      </div>
+      <div class="freq"><span class="badge badge-info">按需</span></div>
+    </div>
+
+    <div class="src-card">
+      <div class="nm">东方财富</div>
+      <div class="det">
+        datacenter-web.eastmoney.com · Referer<br>
+        模块：eastmoney.py<br>
+        字段：全市场龙虎榜（席位/买卖金额）<br>
+        限流：≤ 3 次/分钟
+      </div>
+      <div class="freq"><span class="badge badge-info">按需</span></div>
+    </div>
+
+    <div class="src-card">
+      <div class="nm">财联社电报</div>
+      <div class="det">
+        cls.cn/nodeapi · 零鉴权<br>
+        模块：collectors/market_data.py → news.py<br>
+        字段：实时新闻电报（最新 20 条）<br>
+        CACHE：news
+      </div>
+      <div class="freq"><span class="badge badge-ok">5min</span></div>
+    </div>
+
+    <div class="src-card">
+      <div class="nm">复盘笔记 Frontmatter</div>
+      <div class="det">
+        Vault/复盘笔记/W*/*ReviewNote.md · 32 YAML 字段<br>
+        模块：gen_dashboard_data.py（8:30 + 15:10）<br>
+        写入方：稳米（Claude Agent）+ 弈沐哥盘中数据<br>
+        输出：dashboard_data.json + pools.json
+      </div>
+      <div class="freq"><span class="badge badge-ok">每日 2 次</span></div>
+    </div>
+
+    <div class="src-card">
+      <div class="nm">W16 手工报数 + style_detect</div>
+      <div class="det">
+        localStorage dash_inputs · 15 字段<br>
+        POST /api/sync → dashboard_data.json + pnl.db<br>
+        style_detect.py → 四维度分数/风格判定/分配表<br>
+        gen_dashboard_data.py 调用
+      </div>
+      <div class="freq"><span class="badge badge-info">随录 / 每日盘后</span></div>
+    </div>
+
+  </div>
+</section>
+
+<!-- ═══════════ 2. FIELD LINEAGE ═══════════ -->
+<section>
+  <h2>2. 30 字段血缘</h2>
+  <p style="font-size:13px;color:var(--g500);margin-bottom:12px">逐个字段追踪：源 API → 中间存储 → 前端 Widget → 复盘笔记位置 → 分歧风险点</p>
+
+  <div class="tw">
+  <table>
+    <thead>
+      <tr><th>#</th><th>字段</th><th>源 API / 首次写入</th><th>中间存储</th><th>前端 Widget</th><th>复盘笔记</th><th>风险</th></tr>
+    </thead>
+    <tbody>
+
+      <tr class="gap"><td colspan="7">行情</td></tr>
+      <tr>
+        <td>1</td><td>上证指数</td>
+        <td class="path">PyTDX → collectors/quotes.py</td>
+        <td class="path">CACHE[live_index] → dashboard_live.json</td>
+        <td>W04 / W11</td>
+        <td>表1 + frontmatter</td>
+        <td><span class="badge badge-ok">低</span></td>
+      </tr>
+      <tr>
+        <td>2</td><td>上证涨幅</td>
+        <td class="path">PyTDX → collectors/quotes.py</td>
+        <td class="path">CACHE[live_index]</td>
+        <td>W04</td>
+        <td>frontmatter</td>
+        <td><span class="badge badge-med">中</span> 日内 vs 收盘</td>
+      </tr>
+      <tr>
+        <td>3</td><td>市场量能</td>
+        <td class="path">PyTDX 成交额 → collectors/quotes.py</td>
+        <td class="path">CACHE[live_index].成交额</td>
+        <td>W04</td>
+        <td>表1 + frontmatter</td>
+        <td><span class="badge badge-med">中</span> 日内累积 vs 收盘</td>
+      </tr>
+      <tr>
+        <td>4</td><td>涨跌比</td>
+        <td class="path">PyTDX breadth → collectors/quotes.py (30s)</td>
+        <td class="path">CACHE[breadth] / live_index.上涨家数</td>
+        <td>W05</td>
+        <td>表1 五节点</td>
+        <td><span class="badge badge-ok">低</span></td>
+      </tr>
+
+      <tr class="gap"><td colspan="7">情绪</td></tr>
+      <tr>
+        <td>5</td><td><strong>情绪值</strong></td>
+        <td class="path"><span class="l1">T3</span> store.js: 上涨÷(上涨+下跌)×100<br><span class="l2">T2</span> iwencai 校验 · <span class="l4">T4</span> 手工覆盖</td>
+        <td class="path">前端 computed · 不复写磁盘</td>
+        <td>W04 / W05</td>
+        <td>frontmatter + 表1</td>
+        <td><span class="badge badge-err">高</span> 三路径分歧</td>
+      </tr>
+      <tr>
+        <td>6</td><td>竞价情绪值</td>
+        <td class="path">snapshot_auction.py 9:25 → auction_snapshot.json</td>
+        <td class="path">auction_snapshot.json 情绪指标 / 高潮保护</td>
+        <td>W06 / W07</td>
+        <td>表2 竞价列</td>
+        <td><span class="badge badge-err">高</span> 高潮保护=0</td>
+      </tr>
+      <tr>
+        <td>7</td><td>赚钱效应</td>
+        <td class="path">iwencai_poll.py Q4 阈值判定 · store.js 手工覆盖</td>
+        <td class="path">CACHE[iwencai] → store.js computed</td>
+        <td>W05</td>
+        <td>frontmatter + 表2</td>
+        <td><span class="badge badge-med">中</span> 复盘=差 s_auto=一般</td>
+      </tr>
+
+      <tr class="gap"><td colspan="7">涨停</td></tr>
+      <tr>
+        <td>8</td><td>涨停家数</td>
+        <td class="path"><span class="l1">T1</span> PyTDX breadth.涨停 (30s) · <span class="l4">T4</span> frontmatter</td>
+        <td class="path">CACHE[breadth].涨停 → sentiment_auto.json</td>
+        <td>W05 / W04</td>
+        <td>frontmatter + 表1</td>
+        <td><span class="badge badge-err">高</span> dashboard="待收盘" s_auto=0</td>
+      </tr>
+      <tr>
+        <td>9</td><td>跌停家数</td>
+        <td class="path"><span class="l1">T1</span> PyTDX breadth.跌停 (30s)</td>
+        <td class="path">同上</td>
+        <td>W05</td>
+        <td>frontmatter + 表1</td>
+        <td><span class="badge badge-err">高</span> 同上</td>
+      </tr>
+      <tr>
+        <td>10</td><td><strong>炸板率</strong></td>
+        <td class="path">iwencai_poll.py Q1 → CACHE[iwencai]</td>
+        <td class="path">CACHE[iwencai].炸板率 → sentiment_auto.json</td>
+        <td>W05</td>
+        <td>frontmatter + 表2</td>
+        <td><span class="badge badge-err">严重</span> s_auto=72% vs 复盘=30%</td>
+      </tr>
+      <tr>
+        <td>11</td><td>封板率</td>
+        <td class="path">iwencai_poll.py Q1 → CACHE[iwencai]</td>
+        <td class="path">CACHE[iwencai].封板率 → sentiment_auto.json</td>
+        <td>W05</td>
+        <td>frontmatter + 表2</td>
+        <td><span class="badge badge-ok">低</span> 基本一致 70%</td>
+      </tr>
+      <tr>
+        <td>12</td><td><strong>整体晋级率</strong></td>
+        <td class="path">iwencai_poll.py Q2 → CACHE[iwencai]</td>
+        <td class="path">CACHE[iwencai].晋级率 → sentiment_auto (0.23)</td>
+        <td>W05 / W02</td>
+        <td>frontmatter + 表2</td>
+        <td><span class="badge badge-err">高</span> s_auto=23% vs 复盘=16.7%</td>
+      </tr>
+      <tr>
+        <td>13</td><td>一进二晋级率</td>
+        <td class="path">style_detect.py 问财查询 → dashboard_data.json</td>
+        <td class="path">dashboard_data.json style._iwencai_*</td>
+        <td>W02</td>
+        <td>frontmatter</td>
+        <td><span class="badge badge-ok">低</span></td>
+      </tr>
+      <tr>
+        <td>14</td><td>二进三晋级率</td>
+        <td class="path">同上</td>
+        <td class="path">同上</td>
+        <td>W02</td>
+        <td>frontmatter</td>
+        <td><span class="badge badge-ok">低</span></td>
+      </tr>
+      <tr>
+        <td>15</td><td>三进四晋级率</td>
+        <td class="path">同上</td>
+        <td class="path">同上</td>
+        <td>W02</td>
+        <td>frontmatter</td>
+        <td><span class="badge badge-ok">低</span></td>
+      </tr>
+      <tr>
+        <td>16</td><td>最高板</td>
+        <td class="path">iwencai_poll.py Q3: max(连板天数)</td>
+        <td class="path">CACHE[iwencai].最高板</td>
+        <td>W05</td>
+        <td>frontmatter + 表2</td>
+        <td><span class="badge badge-ok">低</span> 一致=6</td>
+      </tr>
+      <tr>
+        <td>17</td><td>次高板</td>
+        <td class="path">T4 复盘笔记 frontmatter → dashboard_data.json</td>
+        <td class="path">dashboard_data.json sentiment.次高板</td>
+        <td>W05 / W09</td>
+        <td>frontmatter</td>
+        <td><span class="badge badge-ok">低</span> 纯手工</td>
+      </tr>
+
+      <tr class="gap"><td colspan="7">收益</td></tr>
+      <tr>
+        <td>18</td><td>昨日涨停收益</td>
+        <td class="path">iwencai_poll.py Q4 → CACHE[iwencai].昨日涨停收益</td>
+        <td class="path">CACHE → store.js merge Step2 → sentiment_auto.json</td>
+        <td>W05</td>
+        <td>frontmatter + 表2</td>
+        <td><span class="badge badge-med">中</span> 复盘=1.2% dash=1.14 s_auto=0.44</td>
+      </tr>
+      <tr>
+        <td>19</td><td>昨日连板收益</td>
+        <td class="path">iwencai_poll.py Q6 → CACHE[iwencai].连板收益</td>
+        <td class="path">CACHE → store.js merge Step2</td>
+        <td>W05</td>
+        <td>frontmatter + 表2</td>
+        <td><span class="badge badge-med">中</span> 复盘=4.76% dash=5.16</td>
+      </tr>
+      <tr>
+        <td>20</td><td>昨日炸板收益</td>
+        <td class="path">iwencai_poll.py Q7 → CACHE[iwencai].炸板收益</td>
+        <td class="path">同上</td>
+        <td>W05</td>
+        <td>frontmatter + 表2</td>
+        <td><span class="badge badge-ok">低</span> 基本一致</td>
+      </tr>
+      <tr>
+        <td>21</td><td><strong>连板风险值</strong></td>
+        <td class="path">iwencai_poll.py Q5: 1−晋级率 = 0.77</td>
+        <td class="path">CACHE → sentiment_auto (=0.77)</td>
+        <td>W05 / W08 / W09</td>
+        <td>frontmatter (=0.27)</td>
+        <td><span class="badge badge-err">严重</span> 差值 0.50</td>
+      </tr>
+
+      <tr class="gap"><td colspan="7">资金</td></tr>
+      <tr>
+        <td>22</td><td>北向资金</td>
+        <td class="path">北向 API → collectors/quotes.py (60s)</td>
+        <td class="path">CACHE[northbound] → dashboard_live.json</td>
+        <td>W10</td>
+        <td>—</td>
+        <td><span class="badge badge-ok">低</span></td>
+      </tr>
+      <tr>
+        <td>23</td><td>板块主力净流入</td>
+        <td class="path">同花顺行业 → collectors/market_data.py (5min)</td>
+        <td class="path">CACHE[sector_inflow]</td>
+        <td>W10</td>
+        <td>—</td>
+        <td><span class="badge badge-ok">低</span></td>
+      </tr>
+
+      <tr class="gap"><td colspan="7">自选池</td></tr>
+      <tr>
+        <td>24</td><td>自选池标的（连板）</td>
+        <td class="path">附录A → pools.json (7 标的) · 数据附录 → dashboard_data.json (6 标的)</td>
+        <td class="path">pools.json (SSOT) / dashboard_data.json (次源)</td>
+        <td>W12</td>
+        <td>附录A + 数据附录</td>
+        <td><span class="badge badge-err">高</span> pools=7 vs dash=6</td>
+      </tr>
+      <tr>
+        <td>25</td><td>自选池标的（趋势）</td>
+        <td class="path">附录A → pools.json (5 标的+MA) · 数据附录 → dash (2 标的)</td>
+        <td class="path">pools.json (SSOT) / dashboard_data.json (次源)</td>
+        <td>W13</td>
+        <td>附录A + 数据附录</td>
+        <td><span class="badge badge-err">高</span> pools=5 vs dash=2</td>
+      </tr>
+      <tr>
+        <td>26</td><td>锚定股状态</td>
+        <td class="path">数据附录 → dashboard_data.json · 附录A → pools.json</td>
+        <td class="path">dash decision.锚定股 / pools anchor_stocks</td>
+        <td>W18</td>
+        <td>数据附录 + 附录A</td>
+        <td><span class="badge badge-med">中</span> 两源结构一致</td>
+      </tr>
+
+      <tr class="gap"><td colspan="7">风控 / 账户</td></tr>
+      <tr>
+        <td>27</td><td>风格分数 / 判定</td>
+        <td class="path">style_detect.py → dashboard_data.json style 域</td>
+        <td class="path">dashboard_data.json style.*</td>
+        <td>W02</td>
+        <td>风格检测结果表</td>
+        <td><span class="badge badge-med">中</span> 数值微差</td>
+      </tr>
+      <tr>
+        <td>28</td><td>W1 / W2 状态</td>
+        <td class="path">T4 复盘笔记 frontmatter → dashboard_data.json time_window</td>
+        <td class="path">dashboard_data.json time_window</td>
+        <td>W08 / W09</td>
+        <td>frontmatter + 阶段 D</td>
+        <td><span class="badge badge-ok">低</span></td>
+      </tr>
+      <tr>
+        <td>29</td><td>熔断触发 / 连亏天数</td>
+        <td class="path">T4 复盘笔记 frontmatter → dashboard_data.json risk 域</td>
+        <td class="path">dashboard_data.json risk.*</td>
+        <td>W14</td>
+        <td>frontmatter + 账户风控表</td>
+        <td><span class="badge badge-med">中</span> 手工更新延迟</td>
+      </tr>
+      <tr>
+        <td>30</td><td><strong>P&L NAV / 总资产 / 总盈亏</strong></td>
+        <td class="path"><span class="l2">T2</span> pnl.db daily_summary · <span class="l1">T1</span> log_pnl_snapshot() 300s</td>
+        <td class="path">pnl.db intraday_snapshots (nav=1.0 硬编码 ❌) + pnl_history.json</td>
+        <td>W14 / W22</td>
+        <td>frontmatter + 账户风控表</td>
+        <td><span class="badge badge-err">严重</span> nav=1.0 · sh/sz/cy=0</td>
+      </tr>
+
+    </tbody>
+  </table>
+  </div>
+</section>
+
+<!-- ═══════════ 3. CONSISTENCY CHECK ═══════════ -->
+<section>
+  <h2>3. 多系统一致性</h2>
+
+  <h3>情绪值 · 三路径分歧</h3>
+  <div class="flow">
+    <span class="l1">T3 主源</span> store.js：上涨家数 ÷ (上涨+下跌) × 100
+    <span class="a">→</span> <span class="l2">T2 校验</span> iwencai（偏差 &gt;15% 时记录但不覆盖）
+    <span class="a">→</span> <span class="l4">T4 覆盖</span> W16 手工（需 checkbox）
+    <span class="a">→</span> 前端 Widget 显示计算值<br>
+    <span class="a" style="color:var(--rust)">⚠</span> <strong style="color:var(--rust)">sentiment_auto.json 情绪值始终 = null</strong>——snapshot 读 iwencai.情绪值，但 iwencai CACHE 无此键<br>
+    <span class="a" style="color:var(--clay)">⚠</span> <strong style="color:var(--clay)">dashboard_data.json 情绪值 = 33.0（午盘值），非收盘 43%</strong>——gen 在 15:10 跑但用了早盘段数据
+  </div>
+
+  <div class="tw">
+  <table>
+    <thead><tr><th>数据位置</th><th>情绪值</th><th>时间</th><th>来源路径</th><th></th></tr></thead>
+    <tbody>
+      <tr><td>复盘笔记 frontmatter</td><td class="val-ok">43%</td><td>收盘</td><td>弈沐哥 → 稳米填入</td><td><span class="badge badge-ok">SSOT</span></td></tr>
+      <tr><td>dashboard_data.json</td><td class="val-bad">33.0</td><td>午盘</td><td>gen 解析早盘段</td><td><span class="badge badge-warn">过时</span></td></tr>
+      <tr><td>auction_snapshot.json</td><td class="val-bad">"33%"</td><td>13:54</td><td>snapshot_auction.py</td><td><span class="badge badge-warn">过时</span></td></tr>
+      <tr><td>sentiment_auto.json</td><td class="val-bad">null</td><td>全天</td><td>iwencai.情绪值（不存在）</td><td><span class="badge badge-err">BUG</span></td></tr>
+    </tbody>
+  </table>
+  </div>
+
+  <h3>全字段一致性对比（5 月 18 日）</h3>
+  <div class="tw">
+  <table>
+    <thead><tr><th>字段</th><th>复盘笔记<br>(收盘 SSOT)</th><th>dashboard_data<br>.json</th><th>sentiment_auto<br>.json（最新）</th><th>偏差</th><th>判定</th></tr></thead>
+    <tbody>
+      <tr>
+        <td>情绪值</td><td>43%</td><td>33.0</td><td>null</td><td>−10pp / BUG</td><td><span class="badge badge-err">不一致</span></td>
+      </tr>
+      <tr>
+        <td>上证指数</td><td>4131.53</td><td>4140.46</td><td>null</td><td>+8.93（时间差）</td><td><span class="badge badge-ok">可接受</span></td>
+      </tr>
+      <tr>
+        <td>涨停家数</td><td>102</td><td>"待收盘"</td><td>0 / null</td><td>全损</td><td><span class="badge badge-err">不一致</span></td>
+      </tr>
+      <tr>
+        <td>跌停家数</td><td>53</td><td>"待收盘"</td><td>null</td><td>全损</td><td><span class="badge badge-err">不一致</span></td>
+      </tr>
+      <tr>
+        <td><strong>炸板率</strong></td><td class="val-ok">29.82%</td><td>"待收盘"</td><td class="val-bad">72–74%</td><td><strong>+42–44pp</strong></td><td><span class="badge badge-err">严重</span></td>
+      </tr>
+      <tr>
+        <td>封板率</td><td>70.18%</td><td>"待收盘"</td><td>69–72%</td><td>−1–+2pp</td><td><span class="badge badge-ok">基本一致</span></td>
+      </tr>
+      <tr>
+        <td>整体晋级率</td><td class="val-ok">16.67%</td><td>"待收盘"</td><td class="val-bad">23.06%</td><td>+6.4pp</td><td><span class="badge badge-err">不一致</span></td>
+      </tr>
+      <tr>
+        <td>最高板</td><td>6 板</td><td>"6 板"</td><td>6</td><td>0</td><td><span class="badge badge-ok">一致</span></td>
+      </tr>
+      <tr>
+        <td><strong>连板风险值</strong></td><td class="val-ok">0.27</td><td>0.27</td><td class="val-bad">0.77</td><td><strong>+0.50</strong></td><td><span class="badge badge-err">严重</span></td>
+      </tr>
+      <tr>
+        <td>昨日涨停收益</td><td>1.2%</td><td>1.14</td><td>0.44</td><td>（时间差）</td><td><span class="badge badge-warn">时间差</span></td>
+      </tr>
+      <tr>
+        <td>昨日连板收益</td><td>4.76%</td><td>5.16</td><td>—</td><td>+0.40pp</td><td><span class="badge badge-warn">时间差</span></td>
+      </tr>
+      <tr>
+        <td>昨日炸板收益</td><td>0.44%</td><td>0.41</td><td>—</td><td>−0.03pp</td><td><span class="badge badge-ok">一致</span></td>
+      </tr>
+      <tr>
+        <td>赚钱效应</td><td>差</td><td>"差"</td><td>"一般"</td><td>判定分歧</td><td><span class="badge badge-warn">不一致</span></td>
+      </tr>
+      <tr>
+        <td>市场量能</td><td>3 万亿(−13%)</td><td>"2 万亿"</td><td>—</td><td>差 1 万亿</td><td><span class="badge badge-warn">时间差</span></td>
+      </tr>
+      <tr>
+        <td>竞价情绪值</td><td>25%</td><td>25.0</td><td>—</td><td>0</td><td><span class="badge badge-ok">一致</span></td>
+      </tr>
+    </tbody>
+  </table>
+  </div>
+</section>
+
+<!-- ═══════════ 4. STORAGE SSOT MATRIX ═══════════ -->
+<section>
+  <h2>4. 存储层 SSOT 矩阵</h2>
+
+  <div class="tw">
+  <table>
+    <thead>
+      <tr><th>存储</th><th>类型</th><th>唯一 SSOT</th><th>备份 / 同步</th><th>Schema 约束</th><th>冗余度</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><strong>pnl.db</strong></td><td>SQLite</td><td><span class="badge badge-ok">是</span> trade + daily summary</td><td><span class="badge badge-warn">无自动备份</span></td><td><span class="badge badge-ok">有</span> 4 表 + 索引 + UNIQUE</td><td><span class="badge badge-ok">低</span></td>
+      </tr>
+      <tr>
+        <td><strong>pools.json</strong></td><td>JSON</td><td><span class="badge badge-ok">是</span> 连板/趋势/锚定 SSOT</td><td><span class="badge badge-warn">gen 全量覆盖</span></td><td><span class="badge badge-med">半</span> 结构稳定无 schema</td><td><span class="badge badge-ok">低</span></td>
+      </tr>
+      <tr>
+        <td><strong>dashboard_data.json</strong></td><td>JSON</td><td><span class="badge badge-warn">次</span> 自选池非 SSOT</td><td><span class="badge badge-warn">gen 8:30+15:10 + sync POST</span></td><td><span class="badge badge-med">半</span> gen 脚本控制</td><td><span class="badge badge-err">高</span> 与 pools 自选池重复</td>
+      </tr>
+      <tr>
+        <td><strong>dashboard_live.json</strong></td><td>JSON</td><td><span class="badge badge-warn">否</span> CACHE 磁盘快照</td><td><span class="badge badge-warn">poll_live.py (legacy)</span></td><td><span class="badge badge-err">无</span></td><td><span class="badge badge-err">高</span> 与 CACHE 重复</td>
+      </tr>
+      <tr>
+        <td><strong>sentiment_auto.json</strong></td><td>JSON</td><td><span class="badge badge-warn">次</span> 情绪时间序列</td><td><span class="badge badge-ok">30min 追加 + 原子写入</span></td><td><span class="badge badge-med">半</span> 字段固定值常 null</td><td><span class="badge badge-ok">低</span></td>
+      </tr>
+      <tr>
+        <td><strong>auction_snapshot.json</strong></td><td>JSON</td><td><span class="badge badge-ok">是</span> 9:25 竞价快照</td><td><span class="badge badge-warn">每次覆盖无历史</span></td><td><span class="badge badge-ok">有</span> 固定结构</td><td><span class="badge badge-ok">低</span></td>
+      </tr>
+      <tr>
+        <td><strong>pnl_history.json</strong></td><td>JSON</td><td><span class="badge badge-warn">次</span> 与 pnl.db 冗余</td><td><span class="badge badge-err">无</span> 手动 backfill</td><td><span class="badge badge-ok">有</span> 但 sh/cy=0</td><td><span class="badge badge-err">高</span> 与 pnl.db 重叠</td>
+      </tr>
+      <tr>
+        <td><strong>localStorage (W16)</strong></td><td>Browser</td><td><span class="badge badge-warn">否</span> 手工临时数据</td><td><span class="badge badge-err">无</span> 无云备份</td><td><span class="badge badge-err">无</span> 自由表单</td><td><span class="badge badge-med">中</span></td>
+      </tr>
+      <tr>
+        <td><strong>CACHE (bridge 内存)</strong></td><td>Memory</td><td><span class="badge badge-ok">是</span> 实时数据运行时 SSOT</td><td><span class="badge badge-err">无</span> 重启丢失</td><td><span class="badge badge-err">无</span> dict 自由键值</td><td><span class="badge badge-ok">低</span></td>
+      </tr>
+    </tbody>
+  </table>
+  </div>
+
+  <h3>is_trading_time() · 四模块截止时间差异</h3>
+  <div class="tw">
+  <table>
+    <thead><tr><th>模块</th><th>上午</th><th>下午</th><th>截止</th><th>说明</th></tr></thead>
+    <tbody>
+      <tr><td>collectors/quotes.py</td><td>9:15–11:30</td><td>13:00–<strong>15:02</strong></td><td><span class="badge badge-med">15:02</span></td><td>最早停止</td></tr>
+      <tr><td>collectors/iwencai_poll.py</td><td><strong>9:25</strong>–11:30</td><td>13:00–15:10</td><td><span class="badge badge-ok">15:10</span></td><td>最晚开始</td></tr>
+      <tr><td>collectors/market_data.py</td><td>9:15–11:30</td><td>13:00–15:10</td><td><span class="badge badge-ok">15:10</span></td><td>标准</td></tr>
+      <tr><td>collectors/sentiment_snapshot.py</td><td colspan="2">9:25–15:10（连续，<span class="badge badge-warn">无午休断点</span>）</td><td><span class="badge badge-ok">15:10</span></td><td>11:30-13:00 CACHE 可能过期</td></tr>
+    </tbody>
+  </table>
+  </div>
+  <p style="font-size:12px;color:var(--g500);margin-top:8px">
+    <strong>影响：</strong>quotes 在 15:02 停采后，iwencai 仍运行 8 分钟——收盘最后 8 分钟的 iwencai 数据未被 sentiment_snapshot 的 15:00/15:30 快照使用（其依赖的 live_index 在 15:02 后不再更新）。午休期间 sentiment_snapshot 创建快照时 PyTDX 已断开，CACHE 中数据为旧值。
+  </p>
+</section>
+
+<!-- ═══════════ 5. ISSUES ═══════════ -->
+<section>
+  <h2>5. 问题清单</h2>
+  <p style="font-size:13px;color:var(--g500);margin-bottom:14px">按严重程度排序 · 共 16 项</p>
+
+  <h4>严重 · 数据错误或 null</h4>
+  <div class="issue-cards">
+
+    <div class="issue crit">
+      <div class="issue-head">
+        <div class="t">#1 sentiment_auto.json 情绪值始终为 null</div>
+        <span class="badge badge-crit">严重</span>
+      </div>
+      <div class="issue-meta"><span>文件：collectors/sentiment_snapshot.py:50</span><span>影响：30min 快照无核心指标</span></div>
+      <div class="issue-body">
+        代码第 50 行 <code>"情绪值": iwencai.get("情绪值")</code>——但 iwencai CACHE 中不存在 <code>"情绪值"</code> 键。iwencai_poll.py 写入的键是 封板率/炸板率/晋级率 等，从未写入 情绪值。情绪值由 store.js 前端从 T3 涨跌家数比计算。一个月来全部快照 情绪值=null。
+      </div>
+      <div class="issue-fix"><strong>修复：</strong>改为从 CACHE["live_index"] 计算：<code>上涨家数 / (上涨家数+下跌家数) × 100</code>，与 store.js T3 逻辑一致。</div>
+    </div>
+
+    <div class="issue crit">
+      <div class="issue-head">
+        <div class="t">#2 sentiment_auto.json 炸板率 72–74% vs 真实值 29.82%</div>
+        <span class="badge badge-crit">严重</span>
+      </div>
+      <div class="issue-meta"><span>sentiment_snapshot.py:55</span><span>偏差：+42–44pp</span></div>
+      <div class="issue-body">
+        复盘笔记炸板率 29.82%（封板率 70.18%，两者合计 100%）。但 sentiment_auto 记录炸板率 0.72–0.74（72–74%），与封板率 0.69–0.72 非常接近。怀疑 iwencai API 返回的“炸板率”字段定义为 已炸板数÷总涨停数，而非 炸板数÷曾涨停数，导致数值偏大。也可能是字段解读反转。
+      </div>
+      <div class="issue-fix"><strong>修复：</strong>验证 iwencai API 炸板率字段定义。如确认值不对，改为从封板率推算：<code>炸板率 = 1 − 封板率</code>。</div>
+    </div>
+
+    <div class="issue crit">
+      <div class="issue-head">
+        <div class="t">#3 P&L NAV 硬编码 = 1.0，sh/sz/cy_pct 恒为 0，日内追踪全不可用</div>
+        <span class="badge badge-crit">严重</span>
+      </div>
+      <div class="issue-meta"><span>collectors/quotes.py log_pnl_snapshot()</span><span>影响：W22 曲线 + 风控联动</span></div>
+      <div class="issue-body">
+        <code>log_pnl_snapshot()</code> 写入 pnl.db 时：nav=1.0 硬编码，sh_pct/sz_pct/cy_pct 全部 = 0。导致盘中 NAV 恒为 1.0，无法计算真正的 TWR NAV。W22 收益曲线日内数据不可用。pnl_history.json 的 <code>intraday_histories</code> 空字典——盘中 P&L 追踪全线瘫痪。
+      </div>
+      <div class="issue-fix"><strong>修复：</strong>接入真实账户数据：从 pnl_history.json meta 取 last_twr_nav，从 W16 localStorage 取当前总资产，计算 NAV = 当前总资产 / 初始入金。sh/sz/cy_pct 从 live_index 实时获取。</div>
+    </div>
+
+  </div>
+
+  <h4>高 · 分歧 &gt;20% 或结构性缺失</h4>
+  <div class="issue-cards">
+
+    <div class="issue high">
+      <div class="issue-head">
+        <div class="t">#4 连板风险值 s_auto = 0.77 vs 复盘 = 0.27 — 差值 0.50</div>
+        <span class="badge badge-high">高</span>
+      </div>
+      <div class="issue-meta"><span>iwencai_poll.py Q5：1−晋级率 vs 复盘笔记公式</span></div>
+      <div class="issue-body">iwencai 公式：连板风险值 = 1 − 晋级率 = 1 − 0.23 = 0.77。复盘笔记 = 0.27。两者使用完全不同的计算公式。0.27 可能从涨停收益/炸板收益等多因子综合计算，而非简单 1−晋级率。</div>
+      <div class="issue-fix"><strong>修复：</strong>确认复盘笔记 0.27 的计算逻辑，统一 iwencai_poll.py 的风险值公式。</div>
+    </div>
+
+    <div class="issue high">
+      <div class="issue-head">
+        <div class="t">#5 dashboard_data.json 7 个关键字段 = "待收盘"</div>
+        <span class="badge badge-high">高</span>
+      </div>
+      <div class="issue-meta"><span>dashboard_data.json market + sentiment 域</span></div>
+      <div class="issue-body">涨停家数/跌停家数/炸板率/封板率/晋级率及三分层晋级率 全部为 "待收盘"。gen_dashboard_data.py 在 15:10 运行时，稳米尚未完成复盘笔记收盘段填写。</div>
+      <div class="issue-fix"><strong>修复：</strong>gen 脚本增加回退逻辑——frontmatter 为空时解析五节点表格收盘行；或将 gen_baseline_1510 推迟到 16:30。</div>
+    </div>
+
+    <div class="issue high">
+      <div class="issue-head">
+        <div class="t">#6 sentiment_auto 涨停/跌停家数 = 0 或 null</div>
+        <span class="badge badge-high">高</span>
+      </div>
+      <div class="issue-meta"><span>sentiment_snapshot.py:51-52</span></div>
+      <div class="issue-body"><code>"涨停家数": breadth.get("涨停") or live_index.get("涨停")</code>——live_index 无 "涨停" 键。breadth 有 "涨停"/"跌停" 键但部分时段为空。收盘快照 涨停家数=0 是明显错误。</div>
+      <div class="issue-fix"><strong>修复：</strong>仅从 breadth 读取，不 fallback 到不存在的 live_index.涨停。breadth 为空时标记 null 并记日志。</div>
+    </div>
+
+    <div class="issue high">
+      <div class="issue-head">
+        <div class="t">#7 整体晋级率 s_auto = 23.06% vs 复盘 = 16.67% — 差值 6.4pp</div>
+        <span class="badge badge-high">高</span>
+      </div>
+      <div class="issue-meta"><span>iwencai Q2 聚合 vs 分层加权</span></div>
+      <div class="issue-body">iwencai Q2 "涨停晋级率 连板股数" 返回全市场聚合值。复盘笔记使用分层统计（一进二/二进三/三进四各层晋级率分别计算）。两者口径不同。</div>
+      <div class="issue-fix"><strong>修复：</strong>确认复盘 16.67% 的计算口径，iwencai_poll 改为分层查询或与复盘公式对齐。</div>
+    </div>
+
+    <div class="issue high">
+      <div class="issue-head">
+        <div class="t">#8 pools.json (7 标的) vs dashboard_data.json (6 标的) — lianban_pool 来源不同</div>
+        <span class="badge badge-high">高</span>
+      </div>
+      <div class="issue-meta"><span>pools ← 附录A（定稿）· dash ← 数据附录（中稿）</span></div>
+      <div class="issue-body">pools.json 从 附录A 次d日盘前速查 解析（含蒙娜丽莎共 7 标的）。dashboard_data.json 从 数据附录 解析（6 标的，缺蒙娜丽莎）。附录A 是定稿版本。</div>
+      <div class="issue-fix"><strong>修复：</strong>gen_dashboard_data.py 的 lianban_pool 优先从附录A 解析（与 pools.json 同源），数据附录回退。</div>
+    </div>
+
+  </div>
+
+  <h4>中 · 延迟 / 未对齐</h4>
+  <div class="issue-cards">
+
+    <div class="issue med">
+      <div class="issue-head">
+        <div class="t">#9 情绪值 dashboard = 33%（午盘）vs 复盘 = 43%（收盘）— 基线刷新时机过早</div>
+        <span class="badge badge-med">中</span>
+      </div>
+      <div class="issue-body">gen_baseline_1510 在 15:10 触发，但稳米填完复盘笔记收盘段通常要到 15:30-16:00，导致 dashboard_data.json 仍是午盘情绪值。</div>
+      <div class="issue-fix"><strong>修复：</strong>推迟 gen_baseline 到 16:30，或增加 17:00 第三次刷新。</div>
+    </div>
+
+    <div class="issue med">
+      <div class="issue-head">
+        <div class="t">#10 市场量能 dashboard = "2 万亿" vs 复盘 = "3 万亿"</div>
+        <span class="badge badge-med">中</span>
+      </div>
+      <div class="issue-body">同 #9 的时序问题——dashboard 存午盘量能，复盘存收盘量能。</div>
+      <div class="issue-fix"><strong>修复：</strong>同 #9。</div>
+    </div>
+
+    <div class="issue med">
+      <div class="issue-head">
+        <div class="t">#11 is_trading_time() 四模块截止时间不一致</div>
+        <span class="badge badge-med">中</span>
+      </div>
+      <div class="issue-body">quotes 比 iwencai 早 8 分钟停止。sentiment_snapshot 在午休期间也触发快照。15:00-15:02 间的快照缺少 iwencai 最后 8 分钟数据。</div>
+      <div class="issue-fix"><strong>修复：</strong>统一为 15:10 + 午休跳过。</div>
+    </div>
+
+    <div class="issue med">
+      <div class="issue-head">
+        <div class="t">#12 pnl_history.json 与 pnl.db daily_summary 数据冗余</div>
+        <span class="badge badge-med">中</span>
+      </div>
+      <div class="issue-body">两者 daily 数据完全重复。两个存储各自维护，存在不同步风险。</div>
+      <div class="issue-fix"><strong>修复：</strong>选定 pnl.db 为 P&L SSOT，废弃 pnl_history.json 或改为从 pnl.db 导出。</div>
+    </div>
+
+  </div>
+
+  <h4>低 · 改善建议</h4>
+  <div class="issue-cards">
+
+    <div class="issue low">
+      <div class="issue-head">
+        <div class="t">#13 dashboard_live.json 存在双写风险（poll_live.py legacy + collectors）</div>
+        <span class="badge badge-low">低</span>
+      </div>
+      <div class="issue-fix"><strong>修复：</strong>确认 poll_live.py 已停。改为 bridge 定期 dump CACHE 到磁盘（每 60s）。</div>
+    </div>
+
+    <div class="issue low">
+      <div class="issue-head">
+        <div class="t">#14 auction_snapshot 高潮保护.竞价情绪值 = 0</div>
+        <span class="badge badge-low">低</span>
+      </div>
+      <div class="issue-fix"><strong>修复：</strong>检查 snapshot_auction.py 高潮保护字段赋值逻辑。</div>
+    </div>
+
+    <div class="issue low">
+      <div class="issue-head">
+        <div class="t">#15 风格分数 dashboard (48 / 连板 56%) vs 复盘（连板行情置信 40% / 连板 59%）</div>
+        <span class="badge badge-low">低</span>
+      </div>
+      <div class="issue-fix"><strong>修复：</strong>gen 优先使用复盘笔记风格检测结果表中的最新数据。</div>
+    </div>
+
+    <div class="issue low">
+      <div class="issue-head">
+        <div class="t">#16 sentiment_snapshot 连板收益 / 炸板收益字段未写入快照</div>
+        <span class="badge badge-low">低</span>
+      </div>
+      <div class="issue-fix"><strong>修复：</strong>检查 iwencai_poll.py Q6/Q7 是否正确将结果写入 CACHE[iwencai]["连板收益"]。</div>
+    </div>
+
+  </div>
+</section>
+
+<!-- ═══════════ CONCLUSION ═══════════ -->
+<div class="conclusion">
+  <p><strong style="font-family:var(--serif);font-size:18px;color:var(--slate)">审计结论</strong></p>
+  <p style="margin-top:4px">数据管线整体架构合理——APScheduler 统一调度 + CACHE 内存层 + store.js 三层合并的设计方向正确。核心问题集中在三个层面：</p>
+  <ol>
+    <li><strong style="color:var(--rust)">sentiment_auto.json 数据质量</strong>——情绪值 null + 炸板率错误 + 涨停家数 0，三条都是代码层 bug，可快速修复</li>
+    <li><strong style="color:var(--clay)">多源定义不一致</strong>——晋级率/连板风险值的计算口径在 iwencai 和复盘笔记间不同，需要统一公式</li>
+    <li><strong style="color:var(--amber)">时序问题</strong>——gen_baseline 运行过早 + is_trading_time 四模块不一致，导致边界时段数据缺失、基线数据存午盘值</li>
+  </ol>
+  <p style="margin-top:14px;font-family:var(--mono);font-size:11px">
+    审计人：洋米（Claude Code）· 数据截止：2026-05-18 · 文件：~/Documents/YM_Capital/audit/SSOT_audit_2026-05-18.html
+  </p>
+</div>
+
+</div>
+</body>
+</html>

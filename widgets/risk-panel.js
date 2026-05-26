@@ -7,14 +7,16 @@ class RiskPanelWidget extends YiMuWidget {
     if (!body) return;
     var R = (data && data.risk) || {};
     var liveQ = (data && data.live_quotes) || {};
+    var pnlLive = (data && data.pnl_live) || {};
     var manual = DataStore.manualData.getAll();
 
-    // 持仓（从W15同源数据）
-    var basePos = JSON.parse(JSON.stringify((data && data.positions) || []));
+    // 持仓（从账户 SSOT 同源数据）
+    var hasSsotPositions = Array.isArray(pnlLive.positions);
+    var basePos = JSON.parse(JSON.stringify(hasSsotPositions ? pnlLive.positions : ((data && data.positions) || [])));
     var P = basePos;
     try {
       var mp = JSON.parse(manual['_positions'] || 'null');
-      if (mp && mp.length) {
+      if (!hasSsotPositions && mp && mp.length) {
         mp.forEach(function(m) {
           var idx = P.findIndex(function(p) { return p['标的'] === m['标的']; });
           if (idx >= 0) P[idx] = m; else P.push(m);
@@ -42,10 +44,13 @@ class RiskPanelWidget extends YiMuWidget {
     var realTimePnl = totalMV - totalCost;
     var realTimePnlPct = totalCost > 0 ? (realTimePnl / totalCost * 100) : 0;
 
-    // 总资产（从W16报数）
-    var totalAsset = parseFloat(manual['总资产']) || (totalMV + parseFloat(manual['可用资金']||0)) || totalMV;
+    // 账户口径优先使用日内快照，避免过期基线把仓位显示成 100%。
+    if (parseFloat(pnlLive.mv) > 0) totalMV = parseFloat(pnlLive.mv);
+    var totalAsset = parseFloat(pnlLive.total_asset)
+                  || parseFloat(((data && data.pnl) || {})['总资产'])
+                  || totalMV;
     var positionRatio = totalAsset > 0 ? (totalMV / totalAsset * 100) : 0;
-    var availFund = parseFloat(manual['可用资金']) || (totalAsset - totalMV);
+    var availFund = parseFloat(pnlLive.cash) || (totalAsset - totalMV);
 
     // 风控基线
     var meltdownLine = parseFloat(R['单日熔断线']) || -3;
@@ -67,10 +72,10 @@ class RiskPanelWidget extends YiMuWidget {
 
     var html = '';
 
-    // === 实时盈亏（大字）===
+    // === 持仓累计浮盈（大字）===
     var pnlCls = realTimePnl > 0 ? 'up' : realTimePnl < 0 ? 'down' : '';
     html += '<div style="text-align:center;padding:var(--sp-sm);margin-bottom:var(--sp-sm);background:var(--bg-base);border-radius:var(--radius-md)">'+
-      '<div style="font-size:var(--fs-label);color:var(--text-disabled)">实时盈亏 ⚡</div>'+
+      '<div style="font-size:var(--fs-label);color:var(--text-disabled)">持仓累计浮盈</div>'+
       '<div class="'+pnlCls+'" style="font-family:var(--font-mono);font-size:22px;font-weight:700">'+(realTimePnl>=0?'+':'')+money(realTimePnl)+'</div>'+
       '<div class="'+pnlCls+'" style="font-size:var(--fs-body)">'+pct(realTimePnlPct, true)+'</div>'+
       '</div>';
@@ -90,8 +95,8 @@ class RiskPanelWidget extends YiMuWidget {
     // === 风控线 ===
     html += '<div style="font-size:var(--fs-label);font-weight:600;color:var(--text-primary);margin-bottom:var(--sp-xs)">风控线</div>';
 
-    // 单日熔断（用实时盈亏判断）
-    var dayHit = realTimePnlPct <= meltdownLine && totalCost > 0;
+    // 单日熔断以风险域判定为准，累计浮盈不能替代当日账户收益。
+    var dayHit = !!meltdown;
     html += '<div style="display:flex;justify-content:space-between;padding:2px 0;font-size:var(--fs-body)">'+
       '<span style="color:var(--text-secondary)">单日熔断</span>'+
       '<span style="font-family:var(--font-mono)">阈值 '+meltdownLine+'%</span>'+

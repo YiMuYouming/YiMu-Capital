@@ -35,9 +35,12 @@ def collect_quotes(force=False):
         with _tdx_lock:
             r = _pipeline_fetch("quotes", codes=codes)
         if r:
-            if isinstance(r, dict): r.pop('_meta', None)
-            CACHE["live_quotes"] = r
-            CACHE["live_quotes"]["_updated"] = datetime.now().strftime("%Y-%m-%dT%H:%M:%S+08:00")
+            if isinstance(r, dict):
+                r.pop('_meta', None)
+            # 上游偶发只返回 _meta；不能用空负载擦掉上一笔有效行情。
+            if isinstance(r, dict) and r:
+                CACHE["live_quotes"] = r
+                CACHE["live_quotes"]["_updated"] = datetime.now().strftime("%Y-%m-%dT%H:%M:%S+08:00")
     except Exception as e:
         print(f"  [quotes] collect_quotes error: {e}", file=sys.stderr)
 
@@ -299,170 +302,84 @@ def collect_kline_15m(force=False):
         print(f"  [quotes] collect_kline_15m error: {e}", file=sys.stderr)
 
 
+def _authoritative_available_cash(pnl, history_meta, current_mv):
+    """Use settled cash from sync; fall back to the last close only when absent."""
+    available = float((pnl or {}).get("可用资金", 0) or 0)
+    if available > 0:
+        return available
+    last_asset = float((history_meta or {}).get("last_total_asset", 0) or 0)
+    last_mv = float((history_meta or {}).get("last_mv", 0) or 0)
+    if last_asset <= 0:
+        return 0
+    return max(0, last_asset - (last_mv if last_mv > 0 else current_mv))
+
+
+def _pct(raw):
+    try:
+        return float(str(raw or 0).replace("%", "").replace("+", ""))
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _snapshot_from_account(account_state, live_index, timestamp):
+    """Convert an authoritative valuation to one disposable chart snapshot."""
+    if not account_state.get("valuation_complete"):
+        return None
+    total_asset = float(account_state.get("total_asset", 0) or 0)
+    deposit = float(account_state.get("total_deposit", 0) or 0)
+    return {
+        "ts": timestamp,
+        "date": timestamp[:10],
+        "pnl_pct": float(account_state.get("pnl_pct", 0) or 0),
+        "nav": round(total_asset / deposit, 6) if deposit > 0 else 1.0,
+        "sh_pct": _pct(live_index.get("上证指数涨幅")),
+        "sz_pct": _pct(live_index.get("深证指数涨幅")),
+        "cy_pct": _pct(live_index.get("创业板指涨幅") or live_index.get("创业指数涨幅")),
+        "pos_pct": float(account_state.get("pos_pct", 0) or 0),
+        "mv": float(account_state.get("mv", 0) or 0),
+        "total_asset": total_asset,
+        "deposit": deposit,
+    }
+
+
 def log_pnl_snapshot(force=False):
-    """300s: P&L 快照写入 pnl.db（独立计算，不依赖前端组件）"""
+    """300s: persist one disposable snapshot derived from account SSOT."""
     if not force and not is_trading_time():
         return
     try:
-        from scripts.db import get_conn, init_db
+        from scripts.account_ssot import load_current_account_state
+        from scripts.db import init_db, insert_daily_summary, insert_snapshot, query_pnl_summary
         init_db()
-        conn = get_conn()
-        cur = conn.cursor()
         now = datetime.now()
-        ROOT = Path(__file__).resolve().parent.parent.parent
+        state = load_current_account_state(CACHE.get("live_quotes", {}))
 
-        # 1. 指数涨跌（来自 PyTDX 实时采集）
-        live_idx = CACHE.get("live_index") or {}
-        sh_pct_str = live_idx.get("上证指数涨幅", "0") or "0"
-        sz_pct_str = live_idx.get("深证指数涨幅", "0") or "0"
-        cy_pct_str = live_idx.get("创业板指涨幅") or live_idx.get("创业指数涨幅") or "0"
-        sh_pct = float(str(sh_pct_str).replace("%","").replace("+","")) if sh_pct_str else 0
-        sz_pct = float(str(sz_pct_str).replace("%","").replace("+","")) if sz_pct_str else 0
-        cy_pct = float(str(cy_pct_str).replace("%","").replace("+","")) if cy_pct_str else 0
+        # 快照偏差告警：对比最近一条快照与 SSOT 资产的偏离
+        recent = query_pnl_summary()
+        if recent.get("today_snapshots", 0) > 0 and recent.get("total_asset") is not None:
+            ssot_asset = state.get("total_asset", 0)
+            snap_asset = recent["total_asset"]
+            if snap_asset > 0:
+                deviation = abs(ssot_asset - snap_asset) / snap_asset
+                if deviation > 0.05:  # 偏离超过 5%
+                    print(f"  [quotes] ⚠️  SNAPSHOT DEVIATION: SSOT={ssot_asset} vs last_snapshot={snap_asset} ({deviation:.1%})")
+                    # 写入告警快照（低 authority 标记）
+                    CACHE["_snapshot_alert"] = {
+                        "ts": now.strftime("%Y-%m-%dT%H:%M:%S"),
+                        "ssot_asset": ssot_asset,
+                        "snap_asset": snap_asset,
+                        "deviation_pct": round(deviation * 100, 2),
+                    }
 
-        # 2. 从持仓+实时价计算总资产和仓位
-        mv = 0  # 持仓市值
-        pos_pct = 0
-        total_asset = 0
-        nav = 1.0
-        total_deposit = 0
-        pnl_pct = 0
+        row = _snapshot_from_account(
+            state, CACHE.get("live_index") or {}, now.strftime("%Y-%m-%dT%H:%M:%S")
+        )
+        if row is None:
+            print("  [quotes] PnL snapshot skipped: incomplete account valuation")
+            return
+        insert_snapshot(row)
 
-        try:
-            # 读持仓（dashboard_data.json + pools.json）
-            data_file = ROOT / "data" / "dashboard_data.json"
-            positions = []
-            if data_file.exists():
-                with open(data_file) as f:
-                    dd = json.load(f)
-                positions = [p for p in dd.get("positions", []) if (p.get('状态','') or '').find('清') < 0 and (p.get('状态','') or '').find('删') < 0]
-
-            # 读实时报价算市值
-            live_q = CACHE.get("live_quotes", {})
-            for p in positions:
-                code = str(p.get("代码", ""))
-                qty = float(str(p.get("数量", "0")).replace("股", "")) if p.get("数量") else 0
-                if not code or qty <= 0:
-                    continue
-                q = live_q.get(code, {})
-                price = float(q.get("最新价", 0)) if q else 0
-                if price <= 0:
-                    price = float(p.get("现价", 0)) if p.get("现价") else 0
-                mv += round(price * qty)
-
-            # 读可用资金（优先 CACHE pnl，其次 pnl_history.json）
-            available = 0
-            pnl = CACHE.get("pnl") or {}
-            available = float(pnl.get("可用资金", 0) or 0)
-
-            # 读累计入金（优先 CACHE pnl，其次 dashboard_data.json，最后 pnl_history.json）
-            pnl_hist_file = ROOT / "data" / "pnl_history.json"
-            total_deposit = float(pnl.get("累计入金", 0) or 0)
-            if not total_deposit:
-                if pnl_hist_file.exists():
-                    with open(pnl_hist_file) as f:
-                        ph = json.load(f)
-                    total_deposit = ph.get("meta", {}).get("total_deposit", 0) or 0
-            available_from_cache = True
-            if not available:
-                available_from_cache = False
-                # 从历史记录推算可用资金
-                if pnl_hist_file.exists():
-                    with open(pnl_hist_file) as f:
-                        ph = json.load(f)
-                    last_asset = ph.get("meta", {}).get("last_total_asset", 0) or 0
-                    last_mv = ph.get("meta", {}).get("last_mv", 0) or 0
-                    if last_asset > 0:
-                        if last_mv > 0:
-                            # 昨日现金 = 昨日总资产 - 昨日持仓市值（正确，不受日内MV变化影响）
-                            available = max(0, last_asset - last_mv)
-                        else:
-                            # 无 last_mv 记录（第一次升级后用旧模式）
-                            available = max(0, last_asset - mv)
-
-            # 扣减今日买入金额（买股票花掉的钱），交易记录来自 pnl.db
-            # 注意：仅当 available 来自 CACHE（盘前/日初未扣减过交易）时才扣。
-            # 若来自 pnl_history（15:00+已包含交易后数据），交易已体现在 last_asset 中，不重复扣。
-            today_buy_cost = 0
-            if available_from_cache:
-                try:
-                    db_path = ROOT / "data" / "pnl.db"
-                    if db_path.exists():
-                        import sqlite3
-                        conn2 = sqlite3.connect(str(db_path))
-                        cur2 = conn2.execute(
-                            "SELECT COALESCE(SUM(price * qty), 0) FROM trade_records WHERE trade_date = ? AND (action LIKE '%买入%' OR action LIKE '%追涨%')",
-                            (now.strftime('%Y-%m-%d'),)
-                        )
-                        row2 = cur2.fetchone()
-                        if row2 and row2[0]:
-                            today_buy_cost = float(row2[0])
-                        conn2.close()
-                except Exception:
-                    pass
-                available = max(0, available - today_buy_cost)
-
-            total_asset = mv + available
-            if total_asset > 0 and total_deposit > 0:
-                nav = round(total_asset / total_deposit, 6)
-                pos_pct = round(mv / total_asset * 100, 2)
-
-            # 当日盈亏：用昨日收盘总资产作为基准，不受盘前无市值影响
-            day_start_asset = 0
-            today_str = now.strftime("%Y-%m-%d")
-            if pnl_hist_file.exists():
-                with open(pnl_hist_file) as f:
-                    ph = json.load(f)
-                meta = ph.get("meta", {})
-                day_start_asset = meta.get("day_start_asset", 0) or 0
-                day_start_date = meta.get("day_start_date", "")
-                # 新的一天 → 用昨日收盘资产（last_total_asset）做基准
-                if day_start_date != today_str:
-                    day_start_asset = meta.get("last_total_asset", 0) or 0
-                    if day_start_asset <= 0 and total_asset > 0:
-                        # 首次运行无历史，用当前资产兜底
-                        day_start_asset = total_asset
-                    ph["meta"]["day_start_asset"] = day_start_asset
-                    ph["meta"]["day_start_date"] = today_str
-                    atomic_write_json(pnl_hist_file, ph)
-
-            if day_start_asset > 0:
-                pnl_pct = round((total_asset - day_start_asset) / day_start_asset * 100, 2)
-
-            # 收盘时更新 last_total_asset + 写入 daily_summary（供 W22 累计TWR）
-            if total_asset > 0 and now.hour >= 15:
-                try:
-                    if pnl_hist_file.exists():
-                        with open(pnl_hist_file) as f:
-                            ph_data = json.load(f)
-                    else:
-                        ph_data = {}
-                    ph_data["meta"] = ph_data.get("meta", {})
-                    ph_data["meta"]["last_total_asset"] = total_asset
-                    ph_data["meta"]["last_mv"] = mv
-                    ph_data["meta"]["last_twr_nav"] = nav
-                    ph_data["meta"]["last_updated"] = now.strftime("%Y-%m-%dT%H:%M:%S")
-                    atomic_write_json(pnl_hist_file, ph_data)
-                except Exception:
-                    pass
-                # 写入 daily_summary（每日一行，供 W22 累计曲线）
-                try:
-                    cur.execute("""INSERT OR REPLACE INTO daily_summary
-                        (date, nav, pnl_pct, sh_pct, sz_pct, cy_pct, pos_pct, deposit)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-                        (today_str, nav, pnl_pct, sh_pct, sz_pct, cy_pct, pos_pct, total_deposit))
-                    conn.commit()
-                except Exception:
-                    pass
-        except Exception:
-            pass
-
-        cur.execute("""INSERT OR REPLACE INTO intraday_snapshots
-            (ts, date, pnl_pct, nav, sh_pct, sz_pct, cy_pct, pos_pct, mv, total_asset)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (now.strftime("%Y-%m-%dT%H:%M:%S"), now.strftime("%Y-%m-%d"),
-             pnl_pct, nav, sh_pct, sz_pct, cy_pct, pos_pct, mv, total_asset))
-        conn.commit()
+        # 日结由 generate_closing_anchor（15:05）统一处理，避免双重写入
+        # 此处只写日内快照，不写 daily_summary；15:00 之后的快照仍写入但不加锁
     except Exception as e:
         print(f"  [quotes] log_pnl_snapshot error: {e}", file=sys.stderr)
 

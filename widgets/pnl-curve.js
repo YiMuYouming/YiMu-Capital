@@ -77,18 +77,23 @@ class PnLCurveWidget extends YiMuWidget {
     }
 
     var liveQ = (data && data.live_quotes) || {};
-    // 和 W15 同源：优先用 manualData._positions，其次 baseline
+    // 和 W15 同源：账户 SSOT 优先，旧本地持仓仅为接口不可用时兜底。
     var manual = DataStore.manualData.getAll();
     var positions;
-    try {
-      positions = JSON.parse(manual['_positions'] || 'null');
-      if (!positions || !positions.length) positions = (data && data.positions) || [];
-    } catch(e) {
-      positions = (data && data.positions) || [];
-    }
     var pnlCfg = (data && data.pnl) || {};
-    var totalAsset = parseFloat(pnlCfg['总资产']) || (this._state && this._state.totalAsset) || 0;
-    var totalDeposit = manual['累计入金'] || pnlCfg['累计入金'] || (this._state && this._state.totalDeposit) || 0;
+    var pnlLive = (data && data.pnl_live) || {};
+    if (Array.isArray(pnlLive.positions)) {
+      positions = pnlLive.positions;
+    } else {
+      try {
+        positions = JSON.parse(manual['_positions'] || 'null');
+        if (!positions || !positions.length) positions = (data && data.positions) || [];
+      } catch(e) {
+        positions = (data && data.positions) || [];
+      }
+    }
+    var totalAsset = parseFloat(pnlLive.total_asset) || parseFloat(pnlCfg['总资产']) || (this._state && this._state.totalAsset) || 0;
+    var totalDeposit = pnlLive.total_deposit || pnlCfg['累计入金'] || (this._state && this._state.totalDeposit) || 0;
 
     this._state = {
       period: (this._state && this._state.period) || 'today',
@@ -98,6 +103,7 @@ class PnLCurveWidget extends YiMuWidget {
       positions: positions,
       totalAsset: totalAsset,
       totalDeposit: totalDeposit,
+      pnlLive: pnlLive,
       _pnlSummary: this._state && this._state._pnlSummary,
     };
 
@@ -118,6 +124,9 @@ class PnLCurveWidget extends YiMuWidget {
           if (s) {
             self._state._pnlSummary = s;
             if (s.total_asset) self._state.totalAsset = s.total_asset;
+            self._state.pnlLive = s;
+            if (Array.isArray(s.positions)) self._state.positions = s.positions;
+            if (s.total_deposit != null) self._state.totalDeposit = s.total_deposit;
             self._updateSummary();
             // 用真实总资产刷新 KPI
             self._fetchChartData(function(cd) {
@@ -172,7 +181,7 @@ class PnLCurveWidget extends YiMuWidget {
       '</div>' +
       // KPI row 2: 今日（实时变）
       '<div class="pnl-kpi" id="pnl_kpi2_' + this.id + '">' +
-        '<div class="pnl-kpi-card pnl-kpi-dyn"><div class="pnl-kpi-lbl">今日浮动盈亏</div><div class="pnl-kpi-val" id="pnl_pnl">—</div><div class="pnl-kpi-sub" id="pnl_pnl_sub">—</div></div>' +
+        '<div class="pnl-kpi-card pnl-kpi-dyn"><div class="pnl-kpi-lbl">今日盈亏</div><div class="pnl-kpi-val" id="pnl_pnl">—</div><div class="pnl-kpi-sub" id="pnl_pnl_sub">—</div></div>' +
         '<div class="pnl-kpi-card pnl-kpi-dyn"><div class="pnl-kpi-lbl">今日仓位</div><div class="pnl-kpi-val" id="pnl_pos">—</div><div class="pnl-kpi-sub" id="pnl_pos_sub">—</div></div>' +
         '<div class="pnl-kpi-card pnl-kpi-dyn"><div class="pnl-kpi-lbl" id="pnl_period_label">今日TWR</div><div class="pnl-kpi-val" id="pnl_period_val">—</div><div class="pnl-kpi-sub" id="pnl_period_sub">—</div></div>' +
         '<div class="pnl-kpi-card pnl-kpi-dyn"><div class="pnl-kpi-lbl">今日超额 α</div><div class="pnl-kpi-val" id="pnl_today_alpha">—</div><div class="pnl-kpi-sub" id="pnl_today_alpha_sub">—</div></div>' +
@@ -297,25 +306,32 @@ class PnLCurveWidget extends YiMuWidget {
     asset.textContent = hasAsset ? ta.toLocaleString() : '—';
     document.getElementById('pnl_asset_sub').textContent = ta ? '累计入金 ' + _pnlFmtMoney(s.totalDeposit) : '—';
 
-    // Position P&L
-    var mv = 0, cost = 0;
+    // Position P&L: 今日盈亏 = 现价 - 昨收（从涨幅反推），不是累计成本浮盈
+    var mv = 0, todayChg = 0, missingQuotes = 0;
     (s.positions || []).forEach(function(p) {
       var st = p['状态'] || '';
       if (st.indexOf('清') >= 0 || st.indexOf('删除') >= 0) return;
       var qty = parseFloat(String(p['数量']||'0').replace('股','')) || 0;
-      var cp = parseFloat(p['成本']) || 0;
       var live = (s.liveQ || {})[p['代码']] || {};
-      var cur = parseFloat(live['最新价']) || cp;
+      var cur = parseFloat(live['最新价']) || 0;
+      if (!(cur > 0)) {
+        missingQuotes++;
+        return;
+      }
+      var chgPct = parseFloat(String(live['涨幅']||'0').replace('%','')) || 0;
+      var yestClose = chgPct !== 0 ? Math.round(cur / (1 + chgPct / 100) * 100) / 100 : cur;
       mv += qty * cur;
-      cost += qty * cp;
+      todayChg += qty * (cur - yestClose);
     });
-    var pnlAmount = mv - cost;
-    var pnlPct = ta > 0 ? (pnlAmount / ta * 100) : 0;
+    if (parseFloat((s.pnlLive || {}).mv) > 0) mv = parseFloat(s.pnlLive.mv);
+    var hasLivePnl = (s.pnlLive || {}).pnl_amount != null;
+    var todayPnl = hasLivePnl ? parseFloat(s.pnlLive.pnl_amount) : todayChg;
+    var todayPnlPct = (s.pnlLive || {}).pnl_pct != null ? parseFloat(s.pnlLive.pnl_pct) : (ta > 0 ? (todayChg / ta * 100) : 0);
     var posPct = ta > 0 ? (mv / ta * 100) : 0;
 
-    pnlEl.textContent = (pnlAmount >= 0 ? '+' : '') + pnlAmount.toLocaleString();
-    pnlEl.style.color = pnlAmount >= 0 ? 'var(--up)' : 'var(--down)';
-    document.getElementById('pnl_pnl_sub').textContent = (pnlPct >= 0 ? '+' : '') + pnlPct.toFixed(2) + '% 浮动';
+    pnlEl.textContent = !hasLivePnl && missingQuotes ? '—' : (todayPnl >= 0 ? '+' : '') + todayPnl.toLocaleString();
+    pnlEl.style.color = !hasLivePnl && missingQuotes ? 'var(--text-disabled)' : (todayPnl >= 0 ? 'var(--up)' : 'var(--down)');
+    document.getElementById('pnl_pnl_sub').textContent = !hasLivePnl && missingQuotes ? '行情缺失 ' + missingQuotes + ' 只' : (todayPnlPct >= 0 ? '+' : '') + todayPnlPct.toFixed(2) + '% 今日';
 
     posEl.textContent = posPct.toFixed(0) + '%';
     posEl.style.color = posPct > 80 ? 'var(--danger)' : posPct > 50 ? 'var(--warn)' : 'var(--accent)';
@@ -338,16 +354,19 @@ class PnLCurveWidget extends YiMuWidget {
     // 今日：用实时持仓浮动盈亏 + 日内的回撤/超额
     if (s.period === 'today') {
       if (chartData && chartData.portfolio && chartData.portfolio.length) {
-        var lastPnl = chartData.portfolio[chartData.portfolio.length - 1];
-        document.getElementById('pnl_period_val').textContent = (lastPnl >= 0 ? '+' : '') + lastPnl.toFixed(2) + '%';
-        document.getElementById('pnl_period_val').style.color = lastPnl >= 0 ? 'var(--up)' : 'var(--down)';
-        document.getElementById('pnl_period_sub').textContent = 'TWR 收益';
+        var _n = chartData.portfolio.length, _lastI = _n - 1;
+        while (_lastI >= 0 && chartData.portfolio[_lastI] == null) _lastI--;
+        var lastPnl = _lastI >= 0 ? chartData.portfolio[_lastI] : null;
+        var liveTodayPnl = (s.pnlLive || {}).pnl_pct != null ? parseFloat(s.pnlLive.pnl_pct) : lastPnl;
+        document.getElementById('pnl_period_val').textContent = liveTodayPnl != null ? ((liveTodayPnl >= 0 ? '+' : '') + liveTodayPnl.toFixed(2) + '%') : '—';
+        document.getElementById('pnl_period_val').style.color = liveTodayPnl >= 0 ? 'var(--up)' : 'var(--down)';
+        document.getElementById('pnl_period_sub').textContent = '实时收益';
         var ddI = this._calcDD(chartData);
         document.getElementById('pnl_dd_val').textContent = (ddI ? ddI.dd : 0).toFixed(2) + '%';
-        var lastB = chartData.benchmark && chartData.benchmark[chartData.benchmark.length-1];
+        var lastB = chartData.benchmark && _lastI >= 0 ? chartData.benchmark[_lastI] : null;
         var todayAlphaEl = document.getElementById('pnl_today_alpha');
         if (todayAlphaEl && lastB != null) {
-          var ta = (chartData.portfolio[chartData.portfolio.length-1]||0) - lastB;
+          var ta = liveTodayPnl - lastB;
           todayAlphaEl.textContent = (ta >= 0 ? '+' : '') + ta.toFixed(2) + '%';
           todayAlphaEl.style.color = ta >= 0 ? 'var(--up)' : 'var(--down)';
         }
@@ -387,11 +406,13 @@ class PnLCurveWidget extends YiMuWidget {
     }
     document.getElementById('pnl_dd_val').style.color = 'var(--down)';
 
-    // 今日超额 α α
+    // 今日超额 α
     var todayAlphaEl = document.getElementById('pnl_today_alpha');
     if (todayAlphaEl && chartData && chartData.portfolio && chartData.benchmark) {
-      var lastP = chartData.portfolio[chartData.portfolio.length - 1];
-      var lastB = chartData.benchmark[chartData.benchmark.length - 1];
+      var lastValid = chartData.portfolio.length - 1;
+      while (lastValid >= 0 && chartData.portfolio[lastValid] == null) lastValid--;
+      var lastP = lastValid >= 0 ? chartData.portfolio[lastValid] : null;
+      var lastB = lastValid >= 0 ? chartData.benchmark[lastValid] : null;
       if (lastP != null && lastB != null) {
         var ta = lastP - lastB;
         todayAlphaEl.textContent = (ta >= 0 ? '+' : '') + ta.toFixed(2) + '%';

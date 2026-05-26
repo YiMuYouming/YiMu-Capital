@@ -14,7 +14,11 @@ import json, os, sys, re, subprocess
 from datetime import datetime
 from pathlib import Path
 
-from scripts.file_utils import atomic_write_json
+try:
+    from scripts.file_utils import atomic_write_json
+except ModuleNotFoundError:
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+    from scripts.file_utils import atomic_write_json
 
 ROOT_DIR = Path(__file__).resolve().parent.parent  # live-dashboard/
 TRADING_DIR = Path.home() / "Documents/YouMingVault/10_⚡Now/01_💰弈沐资本"  # 交易系统根 (复盘笔记在此)
@@ -1128,7 +1132,11 @@ def _preserve_cleared(new_data):
 
 
 def _preserve_pnl(new_data):
-    """保留现有 dashboard_data.json 中的 pnl 字段（可用资金/总资产由W15实时维护）"""
+    """历史兼容：保留旧 dashboard_data.json 的 pnl 字段供前端展示降级兜底。
+
+    注意：pnl.可用资金/总资产 已由 account_ssot 接管权威来源，gen 仅做兼容保留。
+    每日只跑一次 gen，不覆盖当日由 bridge 维护的实时持仓/pnl 数据。
+    """
     if not OUTPUT_FILE.exists():
         return
     try:

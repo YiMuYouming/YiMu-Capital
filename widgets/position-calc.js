@@ -32,8 +32,10 @@ class PositionCalcWidget extends YiMuWidget {
 
     // ===== Layer 1: 总仓位上限 =====
     var manual = DataStore.manualData.getAll();
-    // 总资产来源链：W16 手动录入 → pnl 基线（含真实总资产）
-    var totalCapital = parseFloat(manual['总资产'])
+    var pnlLive = (data && data.pnl_live) || {};
+    var liveQ = (data && data.live_quotes) || {};
+    // 账户资金由后端 SSOT 提供，基线仅为接口不可用时兜底。
+    var totalCapital = parseFloat(pnlLive.total_asset)
                     || parseFloat((data.pnl||{})['总资产'])
                     || 0;
     // 已持仓市值：从实际持仓（状态=持有，排除清仓/删除）实时计算
@@ -41,10 +43,13 @@ class PositionCalcWidget extends YiMuWidget {
     (data.positions||[]).forEach(function(p){
       var s = String(p['状态']||'');
       if (s && s.indexOf('持有') >= 0 && s.indexOf('清') < 0 && s.indexOf('删') < 0) {
-        currentPosVal += Math.round((parseFloat(p['数量'])||0)*(parseFloat(p['现价'])||parseFloat(p['成本'])||0));
+        var q = liveQ[p['代码']] || {};
+        currentPosVal += Math.round((parseFloat(p['数量'])||0)*(parseFloat(q['最新价'])||parseFloat(p['现价'])||parseFloat(p['成本'])||0));
       }
     });
-    var availCash = parseFloat(manual['可用资金'])
+    if (parseFloat(pnlLive.mv) > 0) currentPosVal = parseFloat(pnlLive.mv);
+    var availCash = parseFloat(pnlLive.cash)
+                 || (totalCapital > 0 && parseFloat(pnlLive.mv) >= 0 ? totalCapital - parseFloat(pnlLive.mv) : 0)
                  || parseFloat((data.pnl||{})['可用资金'])
                  || (totalCapital - currentPosVal);
     var currentPosPct = totalCapital > 0 ? Math.round(currentPosVal / totalCapital * 100) : 0;

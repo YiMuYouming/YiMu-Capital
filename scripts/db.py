@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """db.py — SQLite 数据库管理层（零依赖，Python 内置 sqlite3）
 
-四张表：intraday_snapshots / daily_summary / trade_records / llm_insights
+核心表：account_baselines / trade_records / intraday_snapshots / daily_summary / llm_insights
 """
 import sqlite3, json, threading
 from pathlib import Path
@@ -69,6 +69,19 @@ def init_db():
         );
         CREATE INDEX IF NOT EXISTS idx_snap_date ON intraday_snapshots(date);
 
+        CREATE TABLE IF NOT EXISTS account_baselines (
+            date            TEXT PRIMARY KEY,
+            effective_at    TEXT NOT NULL,
+            trade_id_cutoff INTEGER NOT NULL DEFAULT 0,
+            cash            REAL NOT NULL DEFAULT 0,
+            day_start_asset REAL NOT NULL DEFAULT 0,
+            total_deposit   REAL NOT NULL DEFAULT 0,
+            positions_json  TEXT NOT NULL DEFAULT '[]',
+            source          TEXT NOT NULL DEFAULT 'recovery',
+            _meta_json      TEXT,
+            created_at      TEXT DEFAULT (datetime('now','localtime'))
+        );
+
         CREATE TABLE IF NOT EXISTS daily_summary (
             date        TEXT PRIMARY KEY,
             nav         REAL NOT NULL DEFAULT 1,
@@ -96,7 +109,9 @@ def init_db():
             window      TEXT,
             reason      TEXT,
             realized_pnl REAL,
-            fee         REAL DEFAULT 0
+            fee         REAL DEFAULT 0,
+            reversal_of_id INTEGER,
+            is_reversal INTEGER DEFAULT 0
         );
         CREATE UNIQUE INDEX IF NOT EXISTS idx_tr_uniq ON trade_records(trade_date, trade_time, code, action, price, qty);
         CREATE INDEX IF NOT EXISTS idx_tr_date ON trade_records(trade_date);
@@ -113,8 +128,70 @@ def init_db():
             warnings    INTEGER DEFAULT 0
         );
         CREATE INDEX IF NOT EXISTS idx_llm_date ON llm_insights(date);
+
+        CREATE TABLE IF NOT EXISTS fund_events (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            created_at  TEXT DEFAULT (datetime('now','localtime')),
+            event_date  TEXT NOT NULL,
+            event_type  TEXT NOT NULL,
+            amount      REAL NOT NULL,
+            balance_after REAL,
+            note        TEXT,
+            source      TEXT DEFAULT 'manual'
+        );
+        CREATE INDEX IF NOT EXISTS idx_fund_date ON fund_events(event_date);
     """)
+    columns = {row['name'] for row in conn.execute("PRAGMA table_info(account_baselines)").fetchall()}
+    if 'trade_id_cutoff' not in columns:
+        conn.execute("ALTER TABLE account_baselines ADD COLUMN trade_id_cutoff INTEGER NOT NULL DEFAULT 0")
+    if '_meta_json' not in columns:
+        conn.execute("ALTER TABLE account_baselines ADD COLUMN _meta_json TEXT")
+
+    trade_cols = {row['name'] for row in conn.execute("PRAGMA table_info(trade_records)").fetchall()}
+    if 'reversal_of_id' not in trade_cols:
+        conn.execute("ALTER TABLE trade_records ADD COLUMN reversal_of_id INTEGER")
+    if 'is_reversal' not in trade_cols:
+        conn.execute("ALTER TABLE trade_records ADD COLUMN is_reversal INTEGER DEFAULT 0")
     conn.commit()
+
+
+# ===== 账户锚点 =====
+
+def insert_account_baseline(data):
+    conn = get_conn()
+    cur = conn.cursor()
+    _meta = data.get("_meta")
+    cur.execute("""INSERT OR IGNORE INTO account_baselines
+        (date, effective_at, trade_id_cutoff, cash, day_start_asset, total_deposit, positions_json, source, _meta_json)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (data['date'], data['effective_at'], data.get('trade_id_cutoff', 0), data.get('cash', 0),
+         data.get('day_start_asset', 0), data.get('total_deposit', 0),
+         json.dumps(data.get('positions', []), ensure_ascii=False),
+         data.get('source', 'recovery'),
+         json.dumps(_meta, ensure_ascii=False) if _meta else None))
+    inserted = cur.rowcount > 0
+    conn.commit()
+    return inserted
+
+
+def query_account_baseline(date_str):
+    rows = _exec("SELECT * FROM account_baselines WHERE date = ?", (date_str,))
+    if not rows:
+        return None
+    result = dict(rows[0])
+    result['positions'] = json.loads(result.pop('positions_json') or '[]')
+    meta_raw = result.pop('_meta_json', None)
+    if meta_raw:
+        try:
+            result['_meta'] = json.loads(meta_raw)
+        except (json.JSONDecodeError, TypeError):
+            pass
+    return result
+
+
+def query_last_trade_id(date_str):
+    rows = _exec("SELECT MAX(id) AS last_id FROM trade_records WHERE trade_date = ?", (date_str,))
+    return int(rows[0]['last_id'] or 0) if rows else 0
 
 
 # ===== PnL 操作 =====
@@ -168,7 +245,10 @@ def query_pnl(range='today', index='sh'):
             try:
                 h, m = int(time_str[:2]), int(time_str[3:5])
                 m = (m // 5) * 5  # 对齐到5分钟
-                if h * 60 + m > 14 * 60 + 55:
+                minute_of_day = h * 60 + m
+                if 11 * 60 + 30 <= minute_of_day < 13 * 60:
+                    h, m = 11, 25  # 午休补写/校正 → 上午最后有效槽
+                elif minute_of_day > 14 * 60 + 55:
                     h, m = 14, 55  # 超出收盘时间 → 卡到最后槽
                 time_key = f"{h:02d}:{m:02d}"
             except (ValueError, IndexError):
@@ -207,6 +287,7 @@ def query_pnl(range='today', index='sh'):
             'benchmark': bm_vals,
             'position': pos_vals,
             'nav': nav_vals,
+            '_updated': rows[-1]['ts'] if rows else None,
         }
 
     # 计算 from_date / limit
@@ -306,8 +387,10 @@ def query_pnl_summary():
     # 盘中有日内快照时，用最新的实时总资产
     today_asset = None
     today_mv = None
+    today_pnl_pct = None
+    updated = None
     if intra_n > 0:
-        intra = _exec("SELECT ts, total_asset, mv FROM intraday_snapshots WHERE date = ? ORDER BY ts DESC LIMIT 2", (today_str,))
+        intra = _exec("SELECT ts, total_asset, mv, pnl_pct FROM intraday_snapshots WHERE date = ? ORDER BY ts DESC LIMIT 2", (today_str,))
         # 取最新一条，但如果 mv 突跳 >50%（如清仓后错误重算），用上一条
         if intra:
             latest = intra[0]
@@ -317,6 +400,16 @@ def query_pnl_summary():
                     latest = intra[1]
             today_asset = latest['total_asset']
             today_mv = latest['mv']
+            updated = latest['ts']
+            today_pnl_pct = latest['pnl_pct']
+    day_start_asset = None
+    try:
+        with open(ROOT / "data" / "pnl_history.json") as f:
+            pnl_meta = json.load(f).get("meta", {})
+        if pnl_meta.get("day_start_date") == today_str:
+            day_start_asset = pnl_meta.get("day_start_asset")
+    except Exception:
+        pass
     return {
         'last_nav': last['nav'] if last else 1.0,
         'last_date': last['date'] if last else None,
@@ -324,18 +417,57 @@ def query_pnl_summary():
         'today_snapshots': intra_n,
         'total_asset': today_asset if today_asset else (round(last['nav'] * last['deposit'], 1) if last else None),
         'mv': today_mv if today_mv else None,
+        'pnl_amount': round(today_asset - day_start_asset, 1) if today_asset is not None and day_start_asset else None,
+        'pnl_pct': today_pnl_pct,
+        'day_start_asset': day_start_asset,
+        '_updated': updated or (f"{last['date']}T15:00:00+08:00" if last else None),
     }
 
 
 # ===== 交易记录 =====
 
 def insert_trade(data):
-    _exec_write("""INSERT OR IGNORE INTO trade_records (trade_date, trade_time, action, code, name, price, qty, window, reason, realized_pnl, fee)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("""INSERT OR IGNORE INTO trade_records (trade_date, trade_time, action, code, name, price, qty, window, reason, realized_pnl, fee, reversal_of_id, is_reversal)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (data.get('trade_date', datetime.now().strftime('%Y-%m-%d')),
          data.get('trade_time'), data['action'], data['code'], data['name'],
          data.get('price'), data.get('qty'), data.get('window'),
-         data.get('reason'), data.get('realized_pnl'), data.get('fee', 0)))
+         data.get('reason'), data.get('realized_pnl'), data.get('fee', 0),
+         data.get('reversal_of_id'), int(data.get('is_reversal', 0))))
+    inserted = cur.rowcount > 0
+    conn.commit()
+    return inserted
+
+
+def insert_correction_trade(original_trade_id, correction_action, correction_price, correction_qty, note):
+    """冲销/修正一条已有成交：新增一条反向事件并标记 is_reversal=1。"""
+    original = _exec("SELECT * FROM trade_records WHERE id = ?", (original_trade_id,))
+    if not original:
+        raise ValueError(f"Original trade {original_trade_id} not found")
+    orig = original[0]
+    reversal_action = "卖出" if ("买入" in str(orig["action"])) else "买入"
+    if correction_action:
+        reversal_action = correction_action
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("""INSERT INTO trade_records
+        (trade_date, trade_time, action, code, name, price, qty, window, reason, fee, reversal_of_id, is_reversal)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)""",
+        (datetime.now().strftime('%Y-%m-%d'),
+         datetime.now().strftime('%H:%M:%S'),
+         reversal_action,
+         orig["code"], orig["name"],
+         correction_price if correction_price is not None else orig["price"],
+         correction_qty if correction_qty is not None else orig["qty"],
+         orig["window"],
+         f"[纠错] {note} (原id={original_trade_id})",
+         orig["fee"],
+         original_trade_id))
+    conn.commit()
+    new_id = cur.lastrowid
+    return new_id
 
 
 def query_trades(date_from=None, date_to=None, limit=50):
@@ -391,6 +523,48 @@ def import_trade_history(trades):
              t.get('name', ''), t.get('price'), t.get('qty', 0),
              t.get('realized_pnl', 0), t.get('fee', 0)))
     conn.commit()
+
+
+# ===== 资金事件 =====
+
+FUND_EVENT_TYPES = frozenset(["入金", "出金", "手续费", "红利", "税费", "利息", "其他"])
+
+
+def insert_fund_event(data):
+    """追加一条资金事件记录。返回是否新插入（重复提交返回 False）。"""
+    event_type = str(data.get("event_type", ""))
+    if event_type not in FUND_EVENT_TYPES:
+        raise ValueError(f"Invalid fund event type: {event_type}")
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("""INSERT INTO fund_events (event_date, event_type, amount, balance_after, note, source)
+        VALUES (?, ?, ?, ?, ?, ?)""",
+        (data.get("event_date", datetime.now().strftime("%Y-%m-%d")),
+         event_type,
+         float(data.get("amount", 0)),
+         data.get("balance_after"),
+         data.get("note"),
+         data.get("source", "manual")))
+    inserted = cur.rowcount > 0
+    conn.commit()
+    return inserted
+
+
+def query_fund_events(date_from=None, date_to=None, limit=100):
+    clauses, params = [], []
+    if date_from: clauses.append("event_date >= ?"); params.append(date_from)
+    if date_to: clauses.append("event_date <= ?"); params.append(date_to)
+    sql = "SELECT * FROM fund_events"
+    if clauses: sql += " WHERE " + " AND ".join(clauses)
+    sql += " ORDER BY event_date ASC, id ASC LIMIT ?"
+    params.append(limit)
+    return [dict(r) for r in _exec(sql, params)]
+
+
+def query_cumulative_deposit():
+    """查询累计入金总额（所有入金事件 amount 之和）。"""
+    rows = _exec("SELECT SUM(amount) AS total FROM fund_events WHERE event_type = '入金'")
+    return float(rows[0]["total"] or 0) if rows else 0.0
 
 
 if __name__ == '__main__':

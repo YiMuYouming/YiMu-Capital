@@ -66,12 +66,12 @@ live-dashboard/
 
 ## 关键架构决策
 
+- **账户 SSOT**：account_baselines（锚点）+ trade_records（追加流水）+ 实时行情（估值）→ 当前状态。pnl.db 快照仅派生，不可反写。
+- **gen 防覆盖**：每天只跑一次，盘中 bridge 重启不覆盖 W15 实时持仓
+- **竞价面板**：自选池自动过滤已清仓/不追标的，清仓标的 PyTDX 仍跟踪
 - **SSOT 全部一致**：8 大数据域唯一来源，2026-05-20 审计通过
 - **实时 vs 每日**：PyTDX 5s 行情实时，iwencai 10min 情绪准实时，复盘笔记每日基线
 - **W20 AI 系统**：DeepSeek V4-Flash → 浮动聊天框 → 15min自动研判+手动问答+3轮对话记忆+后端APScheduler
-- **PnL 曲线**：3层保护（gen冷启动守护+preserve_pnl+日内基准用昨日收盘）
-- **gen 防覆盖**：每天只跑一次，盘中bridge重启不覆盖W15实时持仓
-- **竞价面板**：自选池自动过滤已清仓/不追标的，清仓标的PyTDX仍跟踪
 
 ## API 端点
 
@@ -80,12 +80,14 @@ live-dashboard/
 | `/api/baseline` | GET | dashboard_data.json | 60s |
 | `/api/live/quotes` | GET | 实时行情(含iwencai/北向/热榜/15minK) | 5s |
 | `/api/live/iwencai` | GET | 情绪指标 | 10min |
+| `/api/account/state` | GET | 账户SSOT状态(锚点+流水+实时估值) | 实时 |
+| `/api/account/correct` | POST | 冲销/纠错一条成交记录 | 随录 |
 | `/api/llm` | POST | AI研判(支持mode=auto/manual+question+userMsg) | 实时 |
 | `/api/llm/history` | GET | 今日对话历史(v2 conversation) | — |
 | `/api/debug/snapshot` | GET | 全盘8域快照(调试) | — |
-| `/api/pnl?range=today&index=sh` | GET | PnL曲线 | 5min/日结 |
-| `/api/pnl/summary` | GET | PnL摘要 | 实时 |
-| `/api/sync` | POST | W15持仓同步 | 随录 |
+| `/api/pnl?range=today&index=sh` | GET | PnL曲线 | 5min |
+| `/api/pnl/summary` | GET | PnL摘要(SSOT资产+图表元信息) | 实时 |
+| `/api/sync` | POST | W15持仓同步(仅事件，拒绝pnl覆盖) | 随录 |
 | `/api/refresh` | POST | 触发gen | — |
 
 ## 股票数据处理
@@ -101,13 +103,17 @@ live-dashboard/
 
 | 症状 | 排查 |
 |------|------|
-| 看板白屏 | bridge在跑吗？`curl localhost:8088/api/pnl/summary` |
-| 情绪数据空/过时 | iwencai 10min轮询在跑吗？`/api/live/quotes` 有iwencai字段吗？ |
-| W22图跳70%+ | 检查`last_total_asset`和`day_start_asset`在 pnl_history.json 是否一致 |
-| 竞价面板无数据 | 9:28过了吗？auction_snapshot.json mtime 今天？ |
+| 看板白屏 | bridge 在跑吗？`curl localhost:8088/api/pnl/summary` |
+| 情绪数据空/过时 | iwencai 10min 轮询在跑吗？`/api/live/quotes` 有 iwencai 字段吗？ |
+| W22 图跳 70%+ | 检查 `day_start_asset` 与 pnl_history.json 是否一致；检查锚点 source 是否为 recovery |
+| 竞价面板无数据 | 9:28 过了吗？auction_snapshot.json mtime 今天？ |
 | 成交额对比无显示 | `collect_yesterday_compare` 数据被 collect_index 覆盖了？检查 quotes.py 是否用 update |
-| LLM研判不触发 | `~/.claude/settings.json` 有 ANTHROPIC_BASE_URL 和 ANTHROPIC_AUTH_TOKEN 吗？ |
+| LLM 研判不触发 | `~/.claude/settings.json` 有 ANTHROPIC_BASE_URL 和 ANTHROPIC_AUTH_TOKEN 吗？ |
 | 清仓跟踪现价空 | 清仓标的代码在 PyTDX 采集列表吗？bridge 重启会重新加载代码列表 |
+| 账户资产数据异常 | 检查 `GET /api/account/state` 返回值；`pnl_pct` 来源为锚点+流水+行情，缺行情会降级 |
+| 前端 sync 返回 409 | 前端仍在提交 `pnl` 字段，W16 已不允许直接写入资产 |
+| 锚点 recovery 日结后未切换 | 检查 `generate_closing_anchor` 日结日志；15:05 收盘 job 是否正常执行 |
+| snapshot 偏差告警 | bridge console 出现 `⚠️ SNAPSHOT DEVIATION`；检查 SSOT 总资产 vs 快照总资产偏离是否 >5% |
 
 ## 开发原则
 

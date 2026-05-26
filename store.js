@@ -185,13 +185,6 @@ const DataStore = (function() {
       if (cgVal) { d.sentiment = d.sentiment || {}; d.sentiment['次高板'] = cgVal; }
       var tdVal = manualData['梯队'] || '';
       if (tdVal) { d.sentiment = d.sentiment || {}; d.sentiment['连板梯队'] = tdVal; }
-      // 账户头寸 → d.pnl（W22 收益曲线依赖）
-      var zcVal = parseFloat(manualData['总资产']) || 0;
-      if (zcVal > 0) { d.pnl = d.pnl || {}; d.pnl['总资产'] = zcVal; }
-      var rjVal = manualData['可用资金'] || '';
-      if (rjVal) { d.pnl = d.pnl || {}; d.pnl['可用资金'] = parseFloat(rjVal) || 0; }
-      var ykVal = manualData['总盈亏'] || '';
-      if (ykVal) { d.pnl = d.pnl || {}; d.pnl['总盈亏'] = parseFloat(ykVal) || 0; }
     }
 
     // Step 3: liveData 覆盖（实时报价 + 15min量价 + 板块）
@@ -375,6 +368,17 @@ const DataStore = (function() {
         if (pnlLive) _pnlLive = pnlLive;
       });
     }).then(function() {
+      // 加载 sentiment_auto.json 快照（供 W05 等组件订阅）
+      return fetch('data/sentiment_auto.json?t=' + Date.now())
+        .then(function(r) { return r.ok ? r.json() : null; })
+        .catch(function() { return null; });
+    }).then(function(sentimentSnap) {
+      if (sentimentSnap) {
+        // 挂载到 merged.sentiment_nodes，供 DataStore 订阅路径 sentiment_nodes
+        var d = merged || {};
+        d._sentiment_auto = sentimentSnap;
+        setMerged(d);
+      }
       merge();
       notifyAll();
       notifyConnListeners();
@@ -452,10 +456,8 @@ const DataStore = (function() {
         try {
           manualData = JSON.parse(localStorage.getItem(STORAGE_KEYS.inputs) || '{}');
         } catch(e) { manualData = {}; }
-        delete manualData['总资产'];
-        ['可用资金','总盈亏'].forEach(function(k) {
-          var v = manualData[k];
-          if (v === '0' || v === 0 || v === '' || v == null) delete manualData[k];
+        ['总资产','可用资金','累计入金','总盈亏'].forEach(function(k) {
+          delete manualData[k];
         });
       },
       clear: function() {
@@ -476,6 +478,12 @@ const DataStore = (function() {
         return adapter.fetchLive();
       }).then(function(live) {
         if (live) liveData = live;
+        return fetch('data/sentiment_auto.json?t=' + Date.now())
+          .then(function(r) { return r.ok ? r.json() : null; })
+          .catch(function() { return null; });
+      }).then(function(sentimentSnap) {
+        var d = merged || {};
+        if (sentimentSnap) d._sentiment_auto = sentimentSnap;
         merge();
         notifyAll();
         notifyConnListeners();

@@ -1,36 +1,23 @@
-// widgets/sentiment-dash.js — W05 情绪节点对比 v4.0
+// widgets/sentiment-dash.js — W05 情绪节点对比 v4.1 (独立 fetch + 颜色修复)
 'use strict';
 
 class SentimentDashWidget extends YiMuWidget {
-  constructor(config) {
-    super(config);
-    this._data = null;
-  }
-
   render(data) {
     var body = this.getBody();
     if (!body) return;
 
     if (!this._data) {
-      this._loadData(body);
       body.innerHTML = '<div style="font-size:var(--fs-label);color:var(--text-disabled);text-align:center;padding:var(--sp-md)">加载节点数据...</div>';
-      return;
     }
 
-    this._renderTable(body);
-  }
-
-  _loadData(body) {
     var self = this;
     fetch('data/sentiment_auto.json?t=' + Date.now())
       .then(function(r) { return r.ok ? r.json() : null; })
-      .then(function(data) {
-        if (data) {
-          self._data = data;
-          self._renderBody();
-        }
-      })
-      .catch(function() {});
+      .catch(function() { return null; })
+      .then(function(json) {
+        if (json) self._data = json;
+        self._renderTable(body);
+      });
   }
 
   _renderTable(body) {
@@ -73,10 +60,7 @@ class SentimentDashWidget extends YiMuWidget {
     function cellCls(key, val) {
       var num = parseFloat(String(val).replace('%','').replace('亿',''));
       if (isNaN(num)) return '';
-      if (key === '炸板收益') return num < 0 ? 'up' : num > 1 ? 'down' : '';
-      if (key === '涨停收益' || key === '连板收益') return num >= 2 ? 'up' : num >= 0 ? '' : 'down';
-      if (key === '情绪值') return num >= 40 && num <= 60 ? 'up' : num < 20 ? 'down' : '';
-      return num >= 0 ? 'up' : 'down';
+      return num > 0 ? 'up' : num < 0 ? 'down' : '';
     }
 
     var rows = [

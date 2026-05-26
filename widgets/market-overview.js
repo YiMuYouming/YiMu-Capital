@@ -94,9 +94,15 @@ class MarketOverviewWidget extends YiMuWidget {
       ? Math.round(upCnt2 / (upCnt2 + dnCnt2) * 100) : null;
     html += '<div style="display:flex;gap:6px">';
     html += '<div class="kpi-card" style="flex:1;padding:6px 8px"><div class="kpi-label">情绪值</div><div class="kpi-value" style="font-size:14px">'+ (emotionVal != null ? emotionVal + '%' : '—') +'</div></div>';
-    html += '<div class="kpi-card" style="flex:1;padding:6px 8px"><div class="kpi-label">涨停收益</div><div class="kpi-value ' + (parseFloat(iw['昨日涨停收益'])>0?'up':'down') + '" style="font-size:14px">'+ (iw['昨日涨停收益'] != null ? (parseFloat(iw['昨日涨停收益'])>0?'+':'')+iw['昨日涨停收益']+'%' : '—') +'</div></div>';
-    html += '<div class="kpi-card" style="flex:1;padding:6px 8px"><div class="kpi-label">连板收益</div><div class="kpi-value ' + (parseFloat(iw['连板收益'])>0?'up':'down') + '" style="font-size:14px">'+ (iw['连板收益'] != null ? (parseFloat(iw['连板收益'])>0?'+':'')+iw['连板收益']+'%' : '—') +'</div></div>';
-    html += '<div class="kpi-card" style="flex:1;padding:6px 8px"><div class="kpi-label">炸板收益</div><div class="kpi-value ' + (parseFloat(iw['炸板收益'])>0?'up':'down') + '" style="font-size:14px">'+ (iw['炸板收益'] != null ? (parseFloat(iw['炸板收益'])>0?'+':'')+iw['炸板收益']+'%' : '—') +'</div></div>';
+    var ztVal = iw['昨日涨停收益'];
+    var ztCls = (ztVal != null && !isNaN(parseFloat(ztVal)) && parseFloat(ztVal) > 0) ? 'up' : (ztVal != null && !isNaN(parseFloat(ztVal)) && parseFloat(ztVal) < 0) ? 'down' : '';
+    html += '<div class="kpi-card" style="flex:1;padding:6px 8px"><div class="kpi-label">涨停收益</div><div class="kpi-value'+(ztCls?' '+ztCls:'')+'" style="font-size:14px">'+ (ztVal != null ? (parseFloat(ztVal)>0?'+':'')+ztVal+'%' : '—') +'</div></div>';
+    var lbVal = iw['连板收益'];
+    var lbCls = (lbVal != null && !isNaN(parseFloat(lbVal)) && parseFloat(lbVal) > 0) ? 'up' : (lbVal != null && !isNaN(parseFloat(lbVal)) && parseFloat(lbVal) < 0) ? 'down' : '';
+    html += '<div class="kpi-card" style="flex:1;padding:6px 8px"><div class="kpi-label">连板收益</div><div class="kpi-value'+(lbCls?' '+lbCls:'')+'" style="font-size:14px">'+ (lbVal != null ? (parseFloat(lbVal)>0?'+':'')+lbVal+'%' : '—') +'</div></div>';
+    var zbVal = iw['炸板收益'];
+    var zbCls = (zbVal != null && !isNaN(parseFloat(zbVal)) && parseFloat(zbVal) > 0) ? 'up' : (zbVal != null && !isNaN(parseFloat(zbVal)) && parseFloat(zbVal) < 0) ? 'down' : '';
+    html += '<div class="kpi-card" style="flex:1;padding:6px 8px"><div class="kpi-label">炸板收益</div><div class="kpi-value'+(zbCls?' '+zbCls:'')+'" style="font-size:14px">'+ (zbVal != null ? (parseFloat(zbVal)>0?'+':'')+zbVal+'%' : '—') +'</div></div>';
     html += '</div>';
 
     // === 北向资金 (60s 实时) ===

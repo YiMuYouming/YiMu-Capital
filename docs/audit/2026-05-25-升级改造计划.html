@@ -1,0 +1,722 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>弈沐资本数据看板 v2.5 — 升级改造计划 2026-05-25</title>
+<style>
+  :root {
+    --bg: #F7F5F3; --bg-card: #FFFFFF; --text: #2D2926; --muted: #78716C;
+    --border: #E3DACC; --accent: #D97706;
+    --p0: #DC2626; --p0-bg: #FEF2F2; --p0-border: #FECACA;
+    --p1: #EA580C; --p1-bg: #FFF7ED; --p1-border: #FED7AA;
+    --p2: #CA8A04; --p2-bg: #FEFCE8; --p2-border: #FEF08A;
+    --p3: #2563EB; --p3-bg: #EFF6FF; --p3-border: #BFDBFE;
+    --p4: #059669; --p4-bg: #F0FDF4; --p4-border: #A7F3D0;
+    --kpi: #7C3AED; --kpi-bg: #F5F3FF; --kpi-border: #DDD6FE;
+    --ok: #059669;
+    --shadow: rgba(45,41,38,0.08); --radius: 10px;
+    --font: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    --serif: Georgia, "Noto Serif SC", ui-serif, serif;
+  }
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html { scroll-behavior: smooth; }
+  body { font-family: var(--font); background: var(--bg); color: var(--text); font-size: 14px; line-height: 1.75; }
+
+  /* ── NAV ── */
+  nav {
+    position: fixed; top: 0; left: 0; right: 0;
+    background: rgba(247,245,243,0.95); backdrop-filter: blur(12px);
+    border-bottom: 1.5px solid var(--border); z-index: 100;
+    padding: 0 32px; display: flex; align-items: center; gap: 20px; height: 52px;
+  }
+  nav .logo { font-family: var(--serif); font-size: 15px; font-weight: 700; color: var(--accent); white-space: nowrap; }
+  nav .nav-links { display: flex; gap: 4px; overflow-x: auto; scrollbar-width: none; }
+  nav .nav-links::-webkit-scrollbar { display: none; }
+  nav a { text-decoration: none; color: var(--muted); font-size: 12.5px; padding: 4px 10px; border-radius: 6px; white-space: nowrap; transition: background 0.15s, color 0.15s; }
+  nav a:hover, nav a.active { background: var(--border); color: var(--text); }
+
+  .container { max-width: 1100px; margin: 0 auto; padding: 32px 24px 80px; }
+
+  /* ── HERO ── */
+  .hero { padding: 64px 0 40px; text-align: center; }
+  .hero .eyebrow { display: inline-flex; align-items: center; gap: 6px; background: #FFF7ED; border: 1px solid #FED7AA; color: var(--accent); font-size: 11.5px; font-weight: 600; letter-spacing: 0.5px; padding: 4px 12px; border-radius: 20px; margin-bottom: 20px; text-transform: uppercase; }
+  .hero h1 { font-family: var(--serif); font-size: 34px; font-weight: 700; letter-spacing: -0.5px; margin-bottom: 10px; }
+  .hero .subtitle { font-size: 15px; color: var(--muted); margin-bottom: 28px; line-height: 1.6; }
+  .hero .meta-row { display: flex; justify-content: center; gap: 14px; flex-wrap: wrap; }
+  .meta-pill { background: var(--bg-card); border: 1px solid var(--border); border-radius: 8px; padding: 6px 14px; font-size: 12.5px; color: var(--muted); }
+  .meta-pill strong { color: var(--text); }
+
+  /* ── PHASE BADGE ── */
+  .phase-badge { display: inline-flex; align-items: center; justify-content: center; width: 36px; height: 36px; border-radius: 10px; font-size: 13px; font-weight: 800; font-family: ui-monospace, monospace; color: #fff; flex-shrink: 0; }
+  .phase-badge.p0 { background: var(--p0); }
+  .phase-badge.p1 { background: var(--p1); }
+  .phase-badge.p2 { background: var(--p2); }
+  .phase-badge.p3 { background: var(--p3); }
+  .phase-badge.p4 { background: var(--p4); }
+  .phase-badge.kpi { background: var(--kpi); }
+
+  .phase-tag { font-size: 10.5px; font-weight: 700; padding: 2px 9px; border-radius: 10px; letter-spacing: 0.3px; text-transform: uppercase; }
+  .phase-tag.t0 { background: var(--p0-bg); color: var(--p0); border: 1px solid var(--p0-border); }
+  .phase-tag.t1 { background: var(--p1-bg); color: var(--p1); border: 1px solid var(--p1-border); }
+  .phase-tag.t3 { background: var(--p3-bg); color: var(--p3); border: 1px solid var(--p3-border); }
+  .phase-tag.t4 { background: var(--p4-bg); color: var(--p4); border: 1px solid var(--p4-border); }
+  .phase-tag.kpi { background: var(--kpi-bg); color: var(--kpi); border: 1px solid var(--kpi-border); }
+
+  /* ── GOAL GRID ── */
+  .goal-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px; margin-bottom: 48px; }
+  .goal-card { background: var(--bg-card); border: 1.5px solid var(--border); border-radius: var(--radius); padding: 16px 18px; transition: box-shadow 0.2s, transform 0.2s; }
+  .goal-card:hover { box-shadow: 0 4px 20px var(--shadow); transform: translateY(-1px); }
+  .goal-card .gc-num { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; color: var(--muted); margin-bottom: 6px; }
+  .goal-card .gc-title { font-size: 15px; font-weight: 700; font-family: var(--serif); margin-bottom: 6px; }
+  .goal-card .gc-desc { font-size: 12.5px; color: var(--muted); line-height: 1.65; }
+  .goal-card.g1 { border-top: 3px solid var(--ok); }
+  .goal-card.g2 { border-top: 3px solid var(--p3); }
+  .goal-card.g3 { border-top: 3px solid var(--accent); }
+  .goal-card.g4 { border-top: 3px solid var(--p4); }
+
+  /* ── SECTION ── */
+  .section { margin-bottom: 56px; }
+  .section-header { display: flex; align-items: center; gap: 14px; margin-bottom: 20px; padding-bottom: 12px; border-bottom: 1.5px solid var(--border); }
+  .section-title { font-family: var(--serif); font-size: 20px; font-weight: 700; }
+
+  .sub-header { font-size: 13px; font-weight: 700; color: var(--text); margin: 24px 0 10px; padding-left: 10px; border-left: 3px solid var(--accent); }
+
+  /* ── CHECK/X LIST ── */
+  .check-list, .x-list { list-style: none; display: flex; flex-direction: column; gap: 7px; margin: 12px 0; }
+  .check-list li, .x-list li { display: flex; align-items: flex-start; gap: 8px; font-size: 13.5px; line-height: 1.65; }
+  .check-list li::before { content: '✓'; color: var(--ok); font-weight: 700; flex-shrink: 0; margin-top: 1px; }
+  .x-list li::before { content: '✗'; color: var(--p0); font-weight: 700; flex-shrink: 0; margin-top: 1px; }
+  td code { font-family: ui-monospace, monospace; font-size: 11.5px; background: var(--bg); padding: 1px 5px; border-radius: 4px; color: var(--accent); }
+
+  /* ── PHASE CARDS ── */
+  .phase-card { background: var(--bg-card); border: 1.5px solid var(--border); border-radius: var(--radius); margin-bottom: 20px; overflow: hidden; transition: box-shadow 0.15s; }
+  .phase-card:hover { box-shadow: 0 4px 20px var(--shadow); }
+  .phase-card.p0 { border-top: 4px solid var(--p0); }
+  .phase-card.p1 { border-top: 4px solid var(--p1); }
+  .phase-card.p3 { border-top: 4px solid var(--p3); }
+  .phase-card.p4 { border-top: 4px solid var(--p4); }
+  .phase-card.kpi { border-top: 4px solid var(--kpi); }
+
+  .phase-header { display: flex; align-items: center; gap: 14px; padding: 16px 20px; border-bottom: 1px solid var(--border); background: #FDFCFB; }
+  .phase-title { font-size: 15px; font-weight: 700; flex: 1; }
+  .phase-body { padding: 18px 20px 20px; }
+
+  .phase-goal { background: #FAFAF9; border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px; margin-bottom: 14px; font-size: 13px; color: var(--muted); line-height: 1.65; }
+  .phase-goal strong { color: var(--text); }
+
+  .task-section { margin-bottom: 14px; }
+  .task-title { font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; color: var(--muted); margin-bottom: 8px; }
+  .task-list { list-style: none; display: flex; flex-direction: column; gap: 6px; }
+  .task-list li { display: flex; align-items: flex-start; gap: 8px; font-size: 13px; line-height: 1.6; }
+  .task-list li .bullet { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); flex-shrink: 0; margin-top: 7px; }
+
+  .files-row { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0; }
+  .file-tag { font-family: ui-monospace, monospace; font-size: 11px; background: var(--bg); border: 1px solid var(--border); border-radius: 5px; padding: 2px 8px; color: var(--accent); }
+
+  .verify-box { background: #F0FDF4; border: 1.5px solid var(--p4-border); border-radius: 8px; padding: 10px 14px; margin-top: 10px; font-size: 12.5px; color: #166534; line-height: 1.65; }
+  .verify-box strong { display: block; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.4px; margin-bottom: 4px; color: var(--p4); }
+
+  /* ── TIMELINE ── */
+  .timeline { display: flex; flex-direction: column; gap: 0; margin: 16px 0 24px; position: relative; }
+  .timeline::before { content: ''; position: absolute; left: 17px; top: 0; bottom: 0; width: 2px; background: var(--border); }
+  .timeline-item { display: flex; gap: 20px; align-items: flex-start; position: relative; }
+  .timeline-dot { width: 36px; height: 36px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 800; font-family: ui-monospace, monospace; color: #fff; flex-shrink: 0; z-index: 1; }
+  .timeline-content { flex: 1; padding-bottom: 20px; }
+  .timeline-content .tc-title { font-size: 13.5px; font-weight: 700; margin-bottom: 2px; }
+  .timeline-content .tc-desc { font-size: 12.5px; color: var(--muted); }
+
+  /* ── TABLES ── */
+  .table-wrap { overflow-x: auto; margin: 12px 0 20px; border-radius: var(--radius); border: 1.5px solid var(--border); }
+  table { width: 100%; border-collapse: collapse; font-size: 12.5px; background: var(--bg-card); }
+  thead { background: var(--bg); }
+  th { text-align: left; font-weight: 600; color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.4px; padding: 10px 14px; border-bottom: 1.5px solid var(--border); white-space: nowrap; }
+  td { padding: 8px 14px; border-bottom: 1px solid var(--border); vertical-align: top; line-height: 1.55; }
+  tr:last-child td { border-bottom: none; }
+  tr:nth-child(even) td { background: #FDFCFB; }
+  tr:hover td { background: #FFFBF5; }
+
+  /* ── SUMMARY CARDS ── */
+  .summary-row { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px; margin-bottom: 48px; }
+  .sum-card { background: var(--bg-card); border: 1.5px solid var(--border); border-radius: var(--radius); padding: 16px 18px; transition: box-shadow 0.2s, transform 0.2s; }
+  .sum-card:hover { box-shadow: 0 4px 20px var(--shadow); transform: translateY(-1px); }
+  .sum-card .sum-label { font-size: 11px; font-weight: 600; letter-spacing: 0.4px; text-transform: uppercase; color: var(--muted); margin-bottom: 6px; }
+  .sum-card .sum-value { font-size: 26px; font-weight: 700; font-family: ui-monospace, monospace; line-height: 1.1; }
+  .sum-card .sum-sub { font-size: 11.5px; color: var(--muted); margin-top: 4px; }
+
+  .p-badge { display: inline-block; font-size: 10px; font-weight: 700; font-family: ui-monospace, monospace; padding: 1px 6px; border-radius: 4px; letter-spacing: 0.3px; text-transform: uppercase; }
+  .p-badge.p0 { background: var(--p0-bg); color: var(--p0); border: 1px solid var(--p0-border); }
+  .p-badge.p1 { background: var(--p1-bg); color: var(--p1); border: 1px solid var(--p1-border); }
+  .p-badge.p2 { background: var(--p2-bg); color: var(--p2); border: 1px solid var(--p2-border); }
+  .p-badge.p3 { background: var(--p3-bg); color: var(--p3); border: 1px solid var(--p3-border); }
+  .p-badge.p4 { background: var(--p4-bg); color: var(--p4); border: 1px solid var(--p4-border); }
+
+  /* ── FILE TABLE ── */
+  .file-table td:first-child { white-space: nowrap; font-family: ui-monospace, monospace; font-size: 11px; color: var(--accent); }
+  .file-table td:last-child { white-space: nowrap; }
+
+  /* ── FOOTER ── */
+  footer { text-align: center; padding: 32px 0; border-top: 1.5px solid var(--border); font-size: 12px; color: var(--muted); margin-top: 16px; }
+
+  /* ── RESPONSIVE ── */
+  @media (max-width: 640px) { .hero h1 { font-size: 24px; } .container { padding: 24px 16px 60px; } nav { padding: 0 16px; } .goal-grid { grid-template-columns: 1fr; } }
+  @media print { nav { display: none; } body { background: white; } }
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: var(--bg); }
+  ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+</style>
+</head>
+<body>
+
+<nav>
+  <span class="logo">弈沐资本</span>
+  <div class="nav-links">
+    <a href="#goals">目标</a>
+    <a href="#status">现状</a>
+    <a href="#p0">P0 底座</a>
+    <a href="#p3">P3 规则</a>
+    <a href="#p1">P1 健康+精简</a>
+    <a href="#p4">P4 复盘</a>
+    <a href="#kpi">顶栏KPI</a>
+    <a href="#order">执行顺序</a>
+    <a href="#test">测试</a>
+  </div>
+</nav>
+
+<div class="container">
+
+<!-- ── HERO ── -->
+<div class="hero" id="top">
+  <div class="eyebrow">升级改造计划</div>
+  <h1>弈沐资本数据看板 v2.5</h1>
+  <p class="subtitle">评估报告 + 平台升级计划融合版 · 来源：全面评估报告 + 平台升级计划<br>P0 → P3 → P1 → P4 → 顶栏 KPI</p>
+  <div class="meta-row">
+    <span class="meta-pill"><strong>4</strong> 升级目标</span>
+    <span class="meta-pill"><strong>5</strong> 实施阶段</span>
+    <span class="meta-pill"><strong>2026-05-25</strong></span>
+  </div>
+</div>
+
+<!-- ── SUMMARY ── -->
+<div class="summary-row">
+  <div class="sum-card">
+    <div class="sum-label">P0 底座修复</div>
+    <div class="sum-value" style="color:var(--p0)">P0</div>
+    <div class="sum-sub">check_runtime.py + 路径可配置</div>
+  </div>
+  <div class="sum-card">
+    <div class="sum-label">P3 统一规则引擎</div>
+    <div class="sum-value" style="color:var(--p3)">P3</div>
+    <div class="sum-sub">rule_engine.py + AI schema</div>
+  </div>
+  <div class="sum-card">
+    <div class="sum-label">P1 健康+精简</div>
+    <div class="sum-value" style="color:var(--p1)">P1</div>
+    <div class="sum-sub">健康中心 + 精简模式 + 组件修复</div>
+  </div>
+  <div class="sum-card">
+    <div class="sum-label">P4 交易复盘</div>
+    <div class="sum-value" style="color:var(--p4)">P4</div>
+    <div class="sum-sub">trade-review.js + 归因闭环</div>
+  </div>
+  <div class="sum-card">
+    <div class="sum-label">顶栏 KPI</div>
+    <div class="sum-value" style="color:var(--kpi)">快速</div>
+    <div class="sum-sub">两小时内完成</div>
+  </div>
+</div>
+
+<!-- ── GOALS ── -->
+<div class="section" id="goals">
+  <div class="section-header">
+    <div class="phase-badge p0">目</div>
+    <div class="section-title">升级目标</div>
+  </div>
+  <div class="goal-grid">
+    <div class="goal-card g1">
+      <div class="gc-num">目标 01</div>
+      <div class="gc-title">可信</div>
+      <div class="gc-desc">盘前能快速判断数据是否新鲜、行情是否覆盖、PnL 是否正常。健康 API + 健康中心组件让系统状态一目了然。</div>
+    </div>
+    <div class="goal-card g2">
+      <div class="gc-num">目标 02</div>
+      <div class="gc-title">统一</div>
+      <div class="gc-desc">规则引擎、组件提示、AI 研判、风控判断共用同一套口径。禁买、熔断、连亏、高潮等只有一套解释，不再各讲各的。</div>
+    </div>
+    <div class="goal-card g3">
+      <div class="gc-num">目标 03</div>
+      <div class="gc-title">高效</div>
+      <div class="gc-desc">精简模式只盯核心组件，顶栏固定 KPI。减少盯盘认知负担，22 个组件按需使用而非全开。</div>
+    </div>
+    <div class="goal-card g4">
+      <div class="gc-num">目标 04</div>
+      <div class="gc-title">可复盘</div>
+      <div class="gc-desc">每笔交易能回到当时的规则判断和快照。盘后看决策质量而非只看盈亏，统计最常见的错误类型。</div>
+    </div>
+  </div>
+</div>
+
+<!-- ── STATUS ── -->
+<div class="section" id="status">
+  <div class="section-header">
+    <div class="phase-badge p1">二</div>
+    <div class="section-title">现状判断</div>
+  </div>
+
+  <div class="sub-header">做对的部分</div>
+  <ul class="check-list">
+    <li><code>bridge.py + store.js + widget</code> 完整数据闭环</li>
+    <li>SSOT 审计通过（8 大数据域唯一来源）</li>
+    <li>W03/W14/W15/W22 等核心交易视图</li>
+    <li><code>LLM_RULES.md</code> 把规则显式化，AI 不是黑盒</li>
+    <li>三层 PnL 保护机制 + CSS 变量系统</li>
+    <li><code>YiMuWidget</code> 基类生命周期清晰</li>
+  </ul>
+
+  <div class="sub-header">主要问题</div>
+  <ul class="x-list">
+    <li>Python 运行环境不完整，部分脚本导入会失败</li>
+    <li>采集路径存在硬编码，机器迁移后容易断</li>
+    <li><code>gen_dashboard_data.py</code> 无 schema 校验，静默失败风险高</li>
+    <li>W05/W06 不走 DataStore，破坏 SSOT 架构</li>
+    <li>W12/W13 代码重复（~100 行完全相同）</li>
+    <li>W11/W12/W13/W16 事件监听器泄漏</li>
+    <li>LLM 输出格式依赖标记词，无 schema 校验</li>
+    <li>ReAct 验证过宽松（冰点期 BUY 信号也被标记 verified）</li>
+    <li>交易规则分散在 LLM_RULES.md、widget 逻辑、AI prompt 中，口径不一致</li>
+    <li>22 个组件造成信息过载，缺少精简模式</li>
+    <li>W08 信号到 W15 操作之间断链（3 秒摩擦）</li>
+    <li>没有止损主动提醒，健康状态没有成为前端第一信息</li>
+  </ul>
+</div>
+
+<!-- ── P0 ── -->
+<div class="section" id="p0">
+  <div class="section-header">
+    <div class="phase-badge p0">P0</div>
+    <div class="section-title">P0：运行底座修复</div>
+    <span class="phase-tag t0">第一步 · 必须先做</span>
+  </div>
+
+  <div class="phase-card p0">
+    <div class="phase-header">
+      <div class="phase-badge p0">P0</div>
+      <div class="phase-title">运行底座修复</div>
+    </div>
+    <div class="phase-body">
+      <div class="phase-goal"><strong>目标：</strong>系统可启动、可采集、可验证。机器迁移后不崩溃，各路径可推导，依赖可检查。</div>
+
+      <div class="task-section">
+        <div class="task-title">主要任务</div>
+        <ul class="task-list">
+          <li><div class="bullet"></div>补齐 Python 依赖说明和安装方式</li>
+          <li><div class="bullet"></div>把写死的 <code>/Users/YouMing/...</code> 路径改成 <code>Path.home()</code> 推导或可配置路径</li>
+          <li><div class="bullet"></div>新增 <code>scripts/check_runtime.py</code>，检查：依赖导入、路径存在、桥接端口、关键数据文件</li>
+          <li><div class="bullet"></div>统一 README 和启动说明</li>
+        </ul>
+      </div>
+      <div class="task-section">
+        <div class="task-title">涉及文件</div>
+        <div class="files-row">
+          <span class="file-tag">scripts/bridge.py</span>
+          <span class="file-tag">scripts/collectors/quotes.py</span>
+          <span class="file-tag">scripts/collectors/market_data.py</span>
+          <span class="file-tag">scripts/collectors/iwencai_poll.py</span>
+          <span class="file-tag">scripts/snapshot_auction.py</span>
+          <span class="file-tag">scripts/style_detect.py</span>
+          <span class="file-tag">README.md</span>
+          <span class="file-tag">scripts/check_runtime.py</span>
+        </div>
+      </div>
+      <div class="verify-box">
+        <strong>验收标准</strong>
+        <code>python3 scripts/check_runtime.py</code> 能明确显示哪里正常、哪里失败。<br>
+        <code>python3 scripts/bridge.py 8088</code> 可以启动。<br>
+        <code>/api/pnl/summary</code>、<code>/api/live/quotes</code>、<code>/api/debug/snapshot</code> 都能返回可用数据。
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── P3 ── -->
+<div class="section" id="p3">
+  <div class="section-header">
+    <div class="phase-badge p3">P3</div>
+    <div class="section-title">P3：统一规则引擎</div>
+    <span class="phase-tag t3">第二步 · 核心枢纽</span>
+  </div>
+
+  <div class="phase-card p3">
+    <div class="phase-header">
+      <div class="phase-badge p3">P3</div>
+      <div class="phase-title">统一规则引擎</div>
+      <div style="margin-left:auto"><span class="phase-tag t3">核心枢纽</span></div>
+    </div>
+    <div class="phase-body">
+      <div class="phase-goal"><strong>目标：</strong>禁买、熔断、连亏、高潮、周五限制等规则只有一套口径。AI 不会直接输出未经规则验证的 BUY 结论。<br><br><strong>为什么是第二步：</strong>P3 是整个升级计划最关键的一步。做完 P3 后，很多组件逻辑会自动简化，界面上的"重点"自然清晰——不需要人工编排三套布局。</div>
+
+      <div class="task-section">
+        <div class="task-title">主要任务</div>
+        <ul class="task-list">
+          <li><div class="bullet"></div>新增 <code>scripts/rule_engine.py</code>：把交易规则结构化，提供统一查询接口</li>
+          <li><div class="bullet"></div>让 W03、W08、W09、W14、W15、W20 都读取同一份规则结果</li>
+          <li><div class="bullet"></div>AI 输出引用规则引擎的结果，不再自由解释硬规则</li>
+          <li><div class="bullet"></div>保留 <code>LLM_RULES.md</code> 作为人类说明文本，不再承担机器执行逻辑</li>
+          <li><div class="bullet"></div>LLM 输出改用 JSON schema 校验，替代 <code>[TEXT]</code>/<code>[SIGNALS]</code> 字符串分割</li>
+          <li><div class="bullet"></div>ReAct 验证增加情绪-信号联动校验：冰点不 BUY，双冰不追涨，高潮不追连板</li>
+        </ul>
+      </div>
+      <div class="task-section">
+        <div class="task-title">涉及文件</div>
+        <div class="files-row">
+          <span class="file-tag">scripts/rule_engine.py</span>
+          <span class="file-tag">scripts/bridge.py</span>
+          <span class="file-tag">widgets/w1-check.js</span>
+          <span class="file-tag">widgets/w2-check.js</span>
+          <span class="file-tag">widgets/position-calc.js</span>
+          <span class="file-tag">widgets/risk-panel.js</span>
+          <span class="file-tag">widgets/llm-monitor.js</span>
+          <span class="file-tag">widgets/llm-chat.js</span>
+          <span class="file-tag">LLM_RULES.md</span>
+        </div>
+      </div>
+      <div class="verify-box">
+        <strong>验收标准</strong>
+        禁买、熔断、连亏、高潮、周五限制等规则只有一套口径。AI 不会直接输出未经规则验证的 BUY 结论。冰点期 BUY 信号不会被标记 verified。LLM 输出能通过 schema 校验，格式漂移不静默失败。
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── P1 ── -->
+<div class="section" id="p1">
+  <div class="section-header">
+    <div class="phase-badge p1">P1</div>
+    <div class="section-title">P1：健康中心 + 精简模式</div>
+    <span class="phase-tag t1">第三步</span>
+  </div>
+
+  <div class="phase-card p1">
+    <div class="phase-header">
+      <div class="phase-badge p1">P1</div>
+      <div class="phase-title">健康中心 + 精简模式 + 组件修复</div>
+    </div>
+    <div class="phase-body">
+
+      <div class="task-section">
+        <div class="task-title">A. 健康中心</div>
+        <ul class="task-list">
+          <li><div class="bullet"></div>新增统一健康 API <code>/api/health</code></li>
+          <li><div class="bullet"></div>把 bridge、基线、行情覆盖、PnL、持仓一致性、竞价、AI 状态做成统一检查项</li>
+          <li><div class="bullet"></div>新增健康总览组件，放到第一屏或顶栏入口</li>
+          <li><div class="bullet"></div>让 <code>ymwm_report.json</code> 成为可视化入口</li>
+        </ul>
+      </div>
+
+      <div class="task-section">
+        <div class="task-title">B. 组件层修复</div>
+        <ul class="task-list">
+          <li><div class="bullet"></div>W14 增加 <code>updateTimestamp()</code></li>
+          <li><div class="bullet"></div>W08/W09 修复 <code>profitFx.indexOf('好')</code> bug（改为精确枚举判断）</li>
+          <li><div class="bullet"></div>W05、W06 纳入 DataStore 订阅体系（修复 SSOT 破坏）</li>
+          <li><div class="bullet"></div>W12/W13 抽象出 <code>StockPoolWidget</code> 基类（消除 ~100 行代码重复）</li>
+          <li><div class="bullet"></div>W11/W12/W13/W16 事件监听器全部通过 <code>_domListeners</code> 追踪</li>
+          <li><div class="bullet"></div>W21 梯队面板拆分：盘中快速查看（表格） + 盘后复盘（完整面板）</li>
+        </ul>
+      </div>
+
+      <div class="task-section">
+        <div class="task-title">C. 交易断链修复</div>
+        <ul class="task-list">
+          <li><div class="bullet"></div>W08/W09 增加「录入操作」快捷入口，直接调起 W15 买入表单并预填标的</li>
+          <li><div class="bullet"></div>W03 仓位上限响应熔断：当 <code>risk.熔断触发</code> 变化时重新渲染</li>
+          <li><div class="bullet"></div>W14 增加止损主动提醒：计算持仓触及止损线并报警</li>
+        </ul>
+      </div>
+
+      <div class="task-section">
+        <div class="task-title">D. 精简模式 + 盘前预案</div>
+        <ul class="task-list">
+          <li><div class="bullet"></div>增加「精简模式」开关，切换后只显示核心组件（W04/W07/W08/W09/W15/W22）</li>
+          <li><div class="bullet"></div>在 W16 增加「今日预案」文本区，记录开盘前核心判断</li>
+        </ul>
+      </div>
+
+      <div class="task-section">
+        <div class="task-title">E. 数据质量</div>
+        <ul class="task-list">
+          <li><div class="bullet"></div>iwencai CACHE 增加 <code>_fetch_time</code> 字段，前端组件显示「数据已过时 N 分钟」警告</li>
+          <li><div class="bullet"></div><code>snapshot_auction.py</code> 增加 10:00 备份快照</li>
+        </ul>
+      </div>
+
+      <div class="task-section">
+        <div class="task-title">涉及文件</div>
+        <div class="files-row">
+          <span class="file-tag">scripts/bridge.py</span>
+          <span class="file-tag">scripts/snapshot_auction.py</span>
+          <span class="file-tag">scripts/collectors/iwencai_poll.py</span>
+          <span class="file-tag">widgets/health-center.js</span>
+          <span class="file-tag">widgets/sentiment-dash.js</span>
+          <span class="file-tag">widgets/auction-5d.js</span>
+          <span class="file-tag">widgets/risk-panel.js</span>
+          <span class="file-tag">widgets/w1-check.js</span>
+          <span class="file-tag">widgets/w2-check.js</span>
+          <span class="file-tag">widgets/position-calc.js</span>
+          <span class="file-tag">widgets/lianban-pool.js</span>
+          <span class="file-tag">widgets/trend-pool.js</span>
+          <span class="file-tag">widgets/zt-echelon.js</span>
+          <span class="file-tag">widgets/positions.js</span>
+          <span class="file-tag">store.js</span>
+          <span class="file-tag">data/ymwm_report.json</span>
+        </div>
+      </div>
+      <div class="verify-box">
+        <strong>验收标准</strong>
+        <code>curl http://localhost:8088/api/health</code> 返回各检查项状态。精简模式下只显示 6 个核心组件。W08 显示买入信号后，一键录入 W15 操作表单。W14 持仓触及止损线时主动报警。W21 盘中视图只显示连板梯队表格。
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── P4 ── -->
+<div class="section" id="p4">
+  <div class="section-header">
+    <div class="phase-badge p4">P4</div>
+    <div class="section-title">P4：交易复盘闭环</div>
+    <span class="phase-tag t4">第四步</span>
+  </div>
+
+  <div class="phase-card p4">
+    <div class="phase-header">
+      <div class="phase-badge p4">P4</div>
+      <div class="phase-title">交易复盘闭环</div>
+    </div>
+    <div class="phase-body">
+      <div class="phase-goal"><strong>目标：</strong>每笔交易能回到当时的规则判断和快照。盘后看决策质量而非只看盈亏。</div>
+
+      <div class="task-section">
+        <div class="task-title">主要任务</div>
+        <ul class="task-list">
+          <li><div class="bullet"></div>扩展交易记录结构：保存当时快照、规则结果、人工备注、事后归因</li>
+          <li><div class="bullet"></div>新增 <code>widgets/trade-review.js</code>（复盘视图）</li>
+          <li><div class="bullet"></div>盘后（15:05）自动拉取收盘数据，计算每个操作的「买在 X、收在 Y、盈亏 Z」</li>
+          <li><div class="bullet"></div>按月/季度统计最常见的错误类型</li>
+        </ul>
+      </div>
+      <div class="task-section">
+        <div class="task-title">涉及文件</div>
+        <div class="files-row">
+          <span class="file-tag">scripts/db.py</span>
+          <span class="file-tag">scripts/bridge.py</span>
+          <span class="file-tag">widgets/trade-review.js</span>
+          <span class="file-tag">widgets/today-ops.js</span>
+          <span class="file-tag">widgets/positions.js</span>
+        </div>
+      </div>
+      <div class="verify-box">
+        <strong>验收标准</strong>
+        每笔交易记录带上当时快照和规则结果。可以统计最近交易里最常见的错误类型。盘后复盘视图显示「决策质量」而非只看收益曲线。
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── KPI ── -->
+<div class="section" id="kpi">
+  <div class="section-header">
+    <div class="phase-badge kpi">KPI</div>
+    <div class="section-title">顶栏固定 KPI（快速任务）</div>
+    <span class="phase-tag kpi">随时可做 · 两小时完成</span>
+  </div>
+
+  <div class="phase-card kpi">
+    <div class="phase-header">
+      <div class="phase-badge kpi">KPI</div>
+      <div class="phase-title">顶栏固定 KPI</div>
+    </div>
+    <div class="phase-body">
+      <div class="phase-goal"><strong>目标：</strong>立即减少盯盘认知负担。两小时内完成，做完立即有感。</div>
+
+      <div class="task-section">
+        <div class="task-title">主要任务</div>
+        <ul class="task-list">
+          <li><div class="bullet"></div>顶栏固定显示：情绪值、实时盈亏、仓位、可用资金、连接状态、健康状态</li>
+          <li><div class="bullet"></div>增加成交额量化信号（放大/正常/萎缩），显示在 W04 成交额旁边</li>
+          <li><div class="bullet"></div>统一所有组件的数据新鲜度指示器（<code>data-timestamp</code>）</li>
+          <li><div class="bullet"></div>W20 浮动聊天框 <code>z-index</code> 改用 CSS 变量管理（消除硬编码冲突风险）</li>
+        </ul>
+      </div>
+      <div class="task-section">
+        <div class="task-title">涉及文件</div>
+        <div class="files-row">
+          <span class="file-tag">index.html</span>
+          <span class="file-tag">widgets/market-overview.js</span>
+          <span class="file-tag">widget-base.js</span>
+          <span class="file-tag">widgets/llm-chat.js</span>
+        </div>
+      </div>
+      <div class="verify-box">
+        <strong>验收标准</strong>
+        顶栏一眼看到全部关键指标。成交额旁边有量化信号（放大&uarr;30% / 正常 / 萎缩&darr;20%）。所有组件数据新鲜度统一可见。
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── ORDER ── -->
+<div class="section" id="order">
+  <div class="section-header">
+    <div class="phase-badge p0">序</div>
+    <div class="section-title">推荐执行顺序</div>
+  </div>
+
+  <div class="timeline">
+    <div class="timeline-item">
+      <div class="timeline-dot" style="background:var(--p0)">1</div>
+      <div class="timeline-content">
+        <div class="tc-title">P0：运行底座修复</div>
+        <div class="tc-desc">修复 Python 依赖、路径配置、新增 check_runtime.py。这是所有后续工作的前提。</div>
+      </div>
+    </div>
+    <div class="timeline-item">
+      <div class="timeline-dot" style="background:var(--p3)">2</div>
+      <div class="timeline-content">
+        <div class="tc-title">P3：统一规则引擎（核心枢纽）</div>
+        <div class="tc-desc">新增 rule_engine.py，所有组件和 AI 都读取同一份规则结果。做完 P3 后很多组件逻辑自动简化。</div>
+      </div>
+    </div>
+    <div class="timeline-item">
+      <div class="timeline-dot" style="background:var(--p1)">3</div>
+      <div class="timeline-content">
+        <div class="tc-title">P1：健康中心 + 精简模式 + 组件修复</div>
+        <div class="tc-desc">做完 P3 之后，界面上的"重点"自然清晰，不需要人工编排布局。健康 API 复用 P0 的 check_runtime.py。</div>
+      </div>
+    </div>
+    <div class="timeline-item">
+      <div class="timeline-dot" style="background:var(--p4)">4</div>
+      <div class="timeline-content">
+        <div class="tc-title">P4：交易复盘闭环</div>
+        <div class="tc-desc">扩展交易记录结构，新增 trade-review.js。盘后不再只看收益曲线，而是看决策质量。</div>
+      </div>
+    </div>
+    <div class="timeline-item">
+      <div class="timeline-dot" style="background:var(--kpi)">&uarr;</div>
+      <div class="timeline-content">
+        <div class="tc-title">顶栏固定 KPI（随时可插）</div>
+        <div class="tc-desc">做完立即有感，两小时搞定。可以和 P0 并行做。</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ── TEST ── -->
+<div class="section" id="test">
+  <div class="section-header">
+    <div class="phase-badge p2">测</div>
+    <div class="section-title">测试与验收</div>
+  </div>
+
+  <div class="sub-header">启动检查</div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>检查项</th><th>命令</th><th>预期结果</th></tr></thead>
+      <tbody>
+        <tr><td>运行时检查</td><td><code>python3 scripts/check_runtime.py</code></td><td>明确显示正常项和失败项</td></tr>
+        <tr><td>桥接启动</td><td><code>python3 scripts/bridge.py 8088</code></td><td>无报错，正常监听端口</td></tr>
+        <tr><td>健康 API</td><td><code>curl http://localhost:8088/api/health</code></td><td>返回各检查项状态</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="sub-header">API 检查</div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>端点</th><th>预期结果</th></tr></thead>
+      <tbody>
+        <tr><td><code>/api/baseline</code></td><td>返回 dashboard_data.json</td></tr>
+        <tr><td><code>/api/live/quotes</code></td><td>返回 PyTDX 行情数据</td></tr>
+        <tr><td><code>/api/pnl/summary</code></td><td>返回账户资产和盈亏摘要</td></tr>
+        <tr><td><code>/api/debug/snapshot</code></td><td>返回 8 域完整快照</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="sub-header">规则检查</div>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>规则类型</th><th>验证条件</th><th>预期行为</th></tr></thead>
+      <tbody>
+        <tr><td>熔断归零</td><td>单日亏损 &ge; 3%</td><td>总仓位上限归零，W03 显示熔断状态</td></tr>
+        <tr><td>连亏空仓</td><td>连亏天数 &ge; 2</td><td>强制空仓，不再开新仓</td></tr>
+        <tr><td>周五趋势上限</td><td>周五 + 趋势风格</td><td>趋势仓位上限 15%</td></tr>
+        <tr><td>高潮保护</td><td>情绪 &ge; 85%</td><td>连板仓位减半或清零</td></tr>
+        <tr><td>W1 禁买</td><td>情绪 &lt; 60% 或涨停收益 &le; 2%</td><td>W08 显示"等待"信号</td></tr>
+        <tr><td>W2 禁买</td><td>情绪 &lt; 20% 或炸板率 &gt; 40%</td><td>W09 显示"降级"信号</td></tr>
+        <tr><td>AI 规则验证</td><td>冰点情绪下 AI 输出 BUY</td><td>不会被标记 verified</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- ── FILE TABLE ── -->
+<div class="section" id="files">
+  <div class="section-header">
+    <div class="phase-badge p2">文</div>
+    <div class="section-title">涉及文件总览</div>
+  </div>
+  <div class="table-wrap">
+    <table class="file-table">
+      <thead><tr><th>文件</th><th>所属阶段</th></tr></thead>
+      <tbody>
+        <tr><td>scripts/check_runtime.py</td><td><span class="p-badge p0">P0</span> 新建</td></tr>
+        <tr><td>scripts/rule_engine.py</td><td><span class="p-badge p3">P3</span> 新建</td></tr>
+        <tr><td>widgets/trade-review.js</td><td><span class="p-badge p4">P4</span> 新建</td></tr>
+        <tr><td>widgets/health-center.js</td><td><span class="p-badge p1">P1</span> 新建</td></tr>
+        <tr><td>scripts/bridge.py</td><td>P0 / P1 / P3 / P4</td></tr>
+        <tr><td>scripts/collectors/iwencai_poll.py</td><td>P0 / P1</td></tr>
+        <tr><td>scripts/snapshot_auction.py</td><td>P0 / P1</td></tr>
+        <tr><td>scripts/gen_dashboard_data.py</td><td><span class="p-badge p0">P0</span></td></tr>
+        <tr><td>scripts/db.py</td><td><span class="p-badge p4">P4</span></td></tr>
+        <tr><td>widgets/sentiment-dash.js</td><td><span class="p-badge p1">P1</span> SSOT修复</td></tr>
+        <tr><td>widgets/auction-5d.js</td><td><span class="p-badge p1">P1</span> SSOT修复</td></tr>
+        <tr><td>widgets/risk-panel.js</td><td><span class="p-badge p1">P1</span></td></tr>
+        <tr><td>widgets/w1-check.js</td><td><span class="p-badge p1">P1</span> / <span class="p-badge p3">P3</span></td></tr>
+        <tr><td>widgets/w2-check.js</td><td><span class="p-badge p1">P1</span> / <span class="p-badge p3">P3</span></td></tr>
+        <tr><td>widgets/position-calc.js</td><td><span class="p-badge p1">P1</span> / <span class="p-badge p3">P3</span></td></tr>
+        <tr><td>widgets/lianban-pool.js</td><td><span class="p-badge p1">P1</span> 消除重复</td></tr>
+        <tr><td>widgets/trend-pool.js</td><td><span class="p-badge p1">P1</span> 消除重复</td></tr>
+        <tr><td>widgets/zt-echelon.js</td><td><span class="p-badge p1">P1</span> 精简</td></tr>
+        <tr><td>widgets/positions.js</td><td><span class="p-badge p1">P1</span> / <span class="p-badge p4">P4</span></td></tr>
+        <tr><td>widgets/today-ops.js</td><td><span class="p-badge p4">P4</span></td></tr>
+        <tr><td>widgets/llm-monitor.js</td><td><span class="p-badge p1">P1</span> / <span class="p-badge p3">P3</span></td></tr>
+        <tr><td>widgets/llm-chat.js</td><td><span class="p-badge p1">P1</span> / <span class="p-badge p3">P3</span></td></tr>
+        <tr><td>index.html</td><td><span class="p-badge p1">P1</span> / 顶栏KPI</td></tr>
+        <tr><td>store.js</td><td><span class="p-badge p1">P1</span></td></tr>
+        <tr><td>widget-base.js</td><td>顶栏KPI</td></tr>
+        <tr><td>widgets/market-overview.js</td><td>顶栏KPI</td></tr>
+        <tr><td>LLM_RULES.md</td><td><span class="p-badge p3">P3</span></td></tr>
+        <tr><td>README.md</td><td><span class="p-badge p0">P0</span></td></tr>
+        <tr><td>data/ymwm_report.json</td><td><span class="p-badge p1">P1</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<footer>弈沐资本数据看板 v2.5 &middot; 升级改造计划 &middot; 2026-05-25 &middot; P0&rarr;P3&rarr;P1&rarr;P4&rarr;顶栏KPI</footer>
+</div>
+
+<script>
+const sections = document.querySelectorAll('.section[id]');
+const navLinks = document.querySelectorAll('nav a');
+function onScroll() {
+  let current = '';
+  sections.forEach(s => { if (window.scrollY >= s.offsetTop - 80) current = s.id; });
+  navLinks.forEach(a => { a.classList.toggle('active', a.getAttribute('href') === '#' + current); });
+}
+window.addEventListener('scroll', onScroll, { passive: true });
+onScroll();
+</script>
+
+</body>
+</html>

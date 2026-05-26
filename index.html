@@ -493,8 +493,6 @@ function _showInputPanel() {
   var manual = DataStore.manualData.getAll();
 
   var allFields = [
-    {id:'累计入金',type:'number',label:'累计入金(元)'},
-    {id:'可用资金',type:'number',label:'可用资金(元)'},
     {id:'情绪值',type:'number',label:'情绪值(%)'},
     {id:'上涨',type:'number',label:'上涨家数'},
     {id:'下跌',type:'number',label:'下跌家数'},
@@ -523,7 +521,6 @@ function _showInputPanel() {
   allFields.forEach(function(f) { fieldMeta[f.id] = f; });
 
   var groups = [
-    {name:'账户头寸',open:true,ids:['累计入金','可用资金']},
     {name:'情绪指标',open:true,ids:['情绪值','涨停收益','连板收益','炸板收益','赚钱效应']},
     {name:'盘面数据',open:true,ids:['上涨','下跌','涨停家数','跌停家数','晋级率','封板率']},
     {name:'连板生态',open:false,ids:['风险值','最高板','次高板','梯队']},
@@ -532,22 +529,11 @@ function _showInputPanel() {
   ];
 
   var html = '';
-  // 自动计算的概要栏
+  // 账户概要只展示后端 SSOT 输出。
   (function() {
-    var af = parseFloat(DataStore.manualData.getAll()['可用资金']) || 0;
-    var dp = parseFloat(DataStore.manualData.getAll()['累计入金']) || 0;
-    var mv2 = 0;
-    try {
-      var pos2 = JSON.parse(DataStore.manualData.getAll()['_positions'] || 'null');
-      if (!pos2 || !pos2.length) pos2 = (DataStore.merged || {}).positions || [];
-      (pos2 || []).forEach(function(p) {
-        if ((p['状态']||'').indexOf('清')>=0 || (p['状态']||'').indexOf('删除')>=0) return;
-        var q2 = parseFloat(String(p['数量']||'0').replace('股','')) || 0;
-        var pr2 = parseFloat(p['现价']) || parseFloat(p['成本']) || 0;
-        mv2 += Math.round(q2 * pr2);
-      });
-    } catch(e) {}
-    var ta2 = af + mv2;
+    var pnlLive = (DataStore.merged || {}).pnl_live || {};
+    var dp = parseFloat(pnlLive.total_deposit) || 0;
+    var ta2 = parseFloat(pnlLive.total_asset) || 0;
     var ret2 = dp > 0 ? ((ta2 - dp) / dp * 100) : 0;
     var rc = ret2 >= 0 ? 'var(--up)' : 'var(--down)';
     html += '<div style="margin-bottom:var(--sp-sm);padding:8px 10px;background:var(--bg-base);border-radius:var(--radius-sm);display:flex;justify-content:space-between;font-size:var(--fs-body);gap:var(--sp-md)">' +
@@ -608,27 +594,6 @@ function _showInputPanel() {
       var el = document.getElementById('in_' + f.id);
       if (el) DataStore.manualData.set(f.id, el.value);
     });
-    // 自动计算总资产 = 持仓市值 + 可用资金
-    var af = parseFloat(document.getElementById('in_可用资金')?.value) || 0;
-    var mv = 0;
-    try {
-      var pos = JSON.parse(DataStore.manualData.getAll()['_positions'] || 'null');
-      if (!pos || !pos.length) pos = (DataStore.merged || {}).positions || [];
-      (pos || []).forEach(function(p) {
-        if ((p['状态']||'').indexOf('清')>=0 || (p['状态']||'').indexOf('删除')>=0) return;
-        var q = parseFloat(String(p['数量']||'0').replace('股','')) || 0;
-        var pr = parseFloat(p['现价']) || parseFloat(p['成本']) || 0;
-        mv += Math.round(q * pr);
-      });
-    } catch(e) {}
-    var ta = af + mv;
-    DataStore.manualData.set('总资产', ta);
-    // 同步到 bridge
-    try {
-      fetch('/api/sync', {method:'POST',headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({pnl:{总资产:ta,累计入金:parseFloat(document.getElementById('in_累计入金')?.value)||0,可用资金:af}})
-      }).catch(function(){});
-    } catch(e) {}
     DataStore.merge();
     DataStore.notifyAll();
     var ts = document.getElementById('inputLastUpdate');

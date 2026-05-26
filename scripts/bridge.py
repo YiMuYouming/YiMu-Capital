@@ -70,15 +70,62 @@ def _dump_cache():
     except Exception:
         pass
 
+
+def _collect_stock_codes(data):
+    """Collect all instruments that must stay subscribed to live quotes."""
+    return list(set(
+        [s.get('代码') for s in data.get('lianban_pool', []) if s.get('代码')] +
+        [s.get('代码') for s in data.get('trend_pool', []) if s.get('代码')] +
+        [a.get('代码') for a in data.get('decision', {}).get('锚定股状态', []) if a.get('代码')] +
+        [p.get('代码') for p in data.get('positions', []) if p.get('代码')]
+    ))
+
+
+def _trade_cash_effect(op):
+    """Return the cash movement for one executed trade."""
+    amount = round(float(op.get('价格', 0) or 0) * float(op.get('数量', 0) or 0), 2)
+    action = str(op.get('动作', ''))
+    if '卖出' in action:
+        return amount
+    if '买入' in action or '追涨' in action:
+        return -amount
+    return 0
+
+
+def _payload_overwrites_account(payload):
+    """Asset state is server-owned; legacy browser PnL writes are forbidden."""
+    return isinstance(payload, dict) and 'pnl' in payload
+
 # SQLite db
 try:
     from scripts.db import init_db, query_pnl, query_trades, query_pnl_summary
+    from scripts.account_ssot import load_current_account_state
     init_db()
 except ImportError:
     _s = str(ROOT)
     if _s not in sys.path: sys.path.insert(0, _s)
     from scripts.db import init_db, query_pnl, query_trades, query_pnl_summary
+    from scripts.account_ssot import load_current_account_state
     init_db()
+
+
+def _merge_pnl_summary(snapshot_summary, account_state):
+    """Keep chart metadata, but source all live asset values from account SSOT."""
+    result = dict(snapshot_summary or {})
+    for key in [
+        'cash', 'positions', 'trades', 'mv', 'total_asset', 'day_start_asset',
+        'pnl_amount', 'pnl_pct', 'pos_pct', 'total_deposit',
+        'valuation_complete', 'anchor', '_updated',
+    ]:
+        if key in account_state:
+            result[key] = account_state[key]
+    return result
+
+
+def _current_pnl_summary():
+    legacy = query_pnl_summary()
+    state = load_current_account_state(CACHE.get('live_quotes', {}))
+    return _merge_pnl_summary(legacy, state)
 
 # === LLM System Prompt ===
 SYSTEM_PROMPT_HEADER = """你是弈沐盯盘助手，严格遵循弈沐交易规则做研判。
@@ -251,10 +298,16 @@ def _add_freshness(data, data_type, fetched_at=None):
     """为 API 响应附加 _freshness 字段（live/delayed/stale/dead）"""
     from datetime import datetime as _dt, time as _time, timedelta as _td
     now = _dt.now()
+    fetched_dt = None
     if fetched_at:
-        age = (now - _dt.fromisoformat(fetched_at)).total_seconds()
+        try:
+            fetched_dt = _dt.fromisoformat(fetched_at)
+            compare_now = _dt.now(fetched_dt.tzinfo) if fetched_dt.tzinfo else now
+            age = max(0, (compare_now - fetched_dt).total_seconds())
+        except (TypeError, ValueError):
+            age = None
     else:
-        age = 0
+        age = None
 
     freshness_rules = {
         'live_quote':   {'live': 15, 'delayed': 60, 'stale': 300},
@@ -268,11 +321,10 @@ def _add_freshness(data, data_type, fetched_at=None):
     if data_type == 'auction':
         today = _dt.now().date()
         t = now.time()
-        if fetched_at:
-            d = _dt.fromisoformat(fetched_at).date()
-        else:
-            d = today
-        if d == today and _time(9, 25) <= t <= _time(10, 0):
+        d = fetched_dt.date() if fetched_dt else None
+        if d is None:
+            level = 'dead'
+        elif d == today and _time(9, 25) <= t <= _time(10, 0):
             level = 'live'
         elif d == today and t <= _time(15, 0):
             level = 'delayed'
@@ -282,18 +334,17 @@ def _add_freshness(data, data_type, fetched_at=None):
             level = 'dead'
     elif data_type == 'baseline':
         today = _dt.now().date()
-        if fetched_at:
-            d = _dt.fromisoformat(fetched_at).date()
+        if fetched_dt:
+            diff = (today - fetched_dt.date()).days
+            level = 'live' if diff == 0 else ('delayed' if diff <= 1 else ('stale' if diff <= 2 else 'dead'))
         else:
-            d = today
-        diff = (today - d).days
-        level = 'live' if diff == 0 else ('delayed' if diff <= 1 else ('stale' if diff <= 2 else 'dead'))
+            level = 'dead'
     else:
         rule = freshness_rules.get(data_type, {'live': 300, 'delayed': 3600, 'stale': 86400})
-        level = 'live' if age < rule['live'] else ('delayed' if age < rule['delayed'] else ('stale' if age < rule['stale'] else 'dead'))
+        level = 'dead' if age is None else ('live' if age < rule['live'] else ('delayed' if age < rule['delayed'] else ('stale' if age < rule['stale'] else 'dead')))
 
     if isinstance(data, dict):
-        data['_freshness'] = {'level': level, 'type': data_type, 'age_seconds': int(age)}
+        data['_freshness'] = {'level': level, 'type': data_type, 'age_seconds': int(age) if age is not None else None}
     return data
 
 
@@ -424,12 +475,18 @@ def _build_full_snapshot():
         })
 
     # ── 7. 风控（从 gen 算好的 risk 域读取） ─────────────────
+    try:
+        pnl_live = _current_pnl_summary()
+    except Exception:
+        pnl_live = {}
+    total_asset = pnl_live.get('total_asset') or dd.get('pnl', {}).get('总资产', 0)
+    total_mv = pnl_live.get('mv') or 0
     risk_snap = {
         '连亏天数':    risk.get('连亏天数', 0),
         '周累计回撤':  risk.get('周累计回撤', 0),
         '月累计回撤':  risk.get('月累计回撤', 0),
-        '仓位':        0,          # 实时仓位在 quotes + positions 实时算
-        '总资产':      dd.get('pnl', {}).get('总资产', 0),
+        '仓位':        round(total_mv / total_asset * 100, 2) if total_asset else 0,
+        '总资产':      total_asset,
     }
 
     return {
@@ -450,7 +507,8 @@ class BridgeHandler(SimpleHTTPRequestHandler):
 
     def _serve_cached(self, key, data_type):
         result = CACHE.get(key, {})
-        result = _add_freshness(result, data_type)
+        fetched_at = result.get('_updated') if isinstance(result, dict) else None
+        result = _add_freshness(result, data_type, fetched_at)
         body = json.dumps(result, ensure_ascii=False).encode()
         self.send_response(200)
         self.send_header('Content-Type', 'application/json')
@@ -474,7 +532,8 @@ class BridgeHandler(SimpleHTTPRequestHandler):
                         result = json.load(f)
                 else:
                     result = {}
-                result = _add_freshness(result, 'baseline')
+                meta = result.get('meta', {}) if isinstance(result, dict) else {}
+                result = _add_freshness(result, 'baseline', meta.get('updated') or meta.get('date'))
                 body = json.dumps(result, ensure_ascii=False).encode()
                 self.send_response(200)
                 self.send_header('Content-Type', 'application/json')
@@ -491,7 +550,7 @@ class BridgeHandler(SimpleHTTPRequestHandler):
             index_val = qs.get('index', ['sh'])[0]
             try:
                 result = query_pnl(range_val, index_val)
-                result = _add_freshness(result, 'pnl')
+                result = _add_freshness(result, 'pnl', result.get('_updated'))
                 body = json.dumps(result, ensure_ascii=False).encode()
                 self.send_response(200)
                 self.send_header('Content-Type', 'application/json')
@@ -504,8 +563,8 @@ class BridgeHandler(SimpleHTTPRequestHandler):
             return
         elif parsed.path == '/api/pnl/summary':
             try:
-                result = query_pnl_summary()
-                result = _add_freshness(result, 'pnl')
+                result = _current_pnl_summary()
+                result = _add_freshness(result, 'pnl', result.get('_updated'))
                 body = json.dumps(result, ensure_ascii=False).encode()
                 self.send_response(200)
                 self.send_header('Content-Type', 'application/json')
@@ -515,6 +574,51 @@ class BridgeHandler(SimpleHTTPRequestHandler):
                 self.send_response(500)
                 self.end_headers()
                 self.wfile.write(json.dumps({'error': str(e)}).encode())
+            return
+        elif parsed.path == '/api/account/state':
+            try:
+                result = load_current_account_state(CACHE.get('live_quotes', {}))
+                result = _add_freshness(result, 'pnl', result.get('_updated'))
+                body = json.dumps(result, ensure_ascii=False).encode()
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/json')
+                self.end_headers()
+                self.wfile.write(body)
+            except Exception as e:
+                self.send_response(500)
+                self.end_headers()
+                self.wfile.write(json.dumps({'error': str(e)}).encode())
+            return
+        elif parsed.path == '/api/account/correct':
+            try:
+                length = int(self.headers.get('Content-Length', 0))
+                body = self.rfile.read(length)
+                payload = json.loads(body)
+                original_id = int(payload.get('original_trade_id', 0))
+                if original_id <= 0:
+                    self.send_response(400)
+                    self.send_header('Content-Type', 'application/json')
+                    self.end_headers()
+                    self.wfile.write(json.dumps({'ok': False, 'error': 'original_trade_id required'}).encode())
+                    return
+                from scripts.db import insert_correction_trade
+                new_id = insert_correction_trade(
+                    original_trade_id=original_id,
+                    correction_action=payload.get('action'),
+                    correction_price=payload.get('price'),
+                    correction_qty=payload.get('qty'),
+                    note=payload.get('note', 'manual correction'),
+                )
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/json')
+                self.end_headers()
+                self.wfile.write(json.dumps({'ok': True, 'correction_trade_id': new_id}).encode())
+                print(f"  [bridge] Corrected trade {original_id} → new trade {new_id}")
+            except Exception as e:
+                self.send_response(500)
+                self.send_header('Content-Type', 'application/json')
+                self.end_headers()
+                self.wfile.write(json.dumps({'ok': False, 'error': str(e)}).encode())
             return
         elif parsed.path == '/api/trades':
             try:
@@ -553,7 +657,7 @@ class BridgeHandler(SimpleHTTPRequestHandler):
                 '深证15min': CACHE.get('深证15min', []),
                 '创业15min': CACHE.get('创业15min', []),
             }
-            result = _add_freshness(result, 'live_quote')
+            result = _add_freshness(result, 'live_quote', CACHE.get('live_quotes', {}).get('_updated'))
             body = json.dumps(result, ensure_ascii=False).encode()
             self.send_response(200)
             self.send_header('Content-Type', 'application/json')
@@ -637,11 +741,24 @@ class BridgeHandler(SimpleHTTPRequestHandler):
             body = self.rfile.read(length)
             try:
                 payload = json.loads(body)
+                if _payload_overwrites_account(payload):
+                    self.send_response(409)
+                    self.send_header('Content-Type', 'application/json')
+                    self.end_headers()
+                    self.wfile.write(json.dumps({
+                        'ok': False,
+                        'error': 'account asset fields are server-owned; submit trade events only',
+                    }).encode())
+                    return
                 if DATA_FILE.exists():
                     with open(DATA_FILE) as f:
                         data = json.load(f)
                 else:
                     data = {}
+
+                # Lock the pre-command account state before applying a new event.
+                if payload.get('今日操作'):
+                    load_current_account_state(CACHE.get('live_quotes', {}))
 
                 if 'positions' in payload:
                     # merge by 标的: 更新已有或追加新标的，不删除 data 中已有的标的
@@ -649,23 +766,11 @@ class BridgeHandler(SimpleHTTPRequestHandler):
                     for p in payload['positions']:
                         existing[p.get('标的')] = p
                     data['positions'] = list(existing.values())
+                    CACHE['_stock_codes'] = _collect_stock_codes(data)
                 if '今日操作' in payload:
                     if 'decision' not in data:
                         data['decision'] = {}
                     data['decision']['今日操作'] = payload['今日操作']
-                if 'pnl' in payload:
-                    if 'pnl' not in data:
-                        data['pnl'] = {}
-                    for key in ['总资产', '累计入金', '可用资金']:
-                        if key in payload['pnl'] and payload['pnl'][key] is not None:
-                            data['pnl'][key] = payload['pnl'][key]
-                    # 同步到内存 CACHE（供 log_pnl_snapshot 使用）
-                    if 'pnl' not in CACHE:
-                        CACHE['pnl'] = {}
-                    for key in ['总资产', '累计入金', '可用资金']:
-                        if key in payload['pnl'] and payload['pnl'][key] is not None:
-                            CACHE['pnl'][key] = payload['pnl'][key]
-
                 # 同步写入 SQLite 交易记录（先写 DB，成功后再原子写 JSON）
                 db_error = None
                 try:
@@ -711,11 +816,11 @@ class BridgeHandler(SimpleHTTPRequestHandler):
                     capture_output=True, text=True, timeout=120,
                     cwd=str(ROOT)
                 )
-                self.send_response(200)
+                self.send_response(200 if result.returncode == 0 else 500)
                 self.send_header('Content-Type', 'application/json')
                 self.end_headers()
                 self.wfile.write(json.dumps({
-                    'ok': True,
+                    'ok': result.returncode == 0,
                     'output': result.stdout[-200:] if result.stdout else '',
                     'error': result.stderr[-200:] if result.stderr else ''
                 }).encode())
@@ -935,22 +1040,15 @@ class BridgeHandler(SimpleHTTPRequestHandler):
 
 if __name__ == '__main__':
     port = int(sys.argv[1]) if len(sys.argv) > 1 else 8080
-
-    # === 冷启动：从磁盘恢复 CACHE + 加载 pnl 数据
-    _load_cache()
     try:
-        if DATA_FILE.exists():
-            with open(DATA_FILE) as f:
-                dd = json.load(f)
-            pnl_data = dd.get("pnl", {})
-            if pnl_data:
-                CACHE["pnl"] = CACHE.get("pnl", {})
-                for k in ["总资产", "累计入金", "可用资金"]:
-                    if k in pnl_data and pnl_data[k] is not None:
-                        CACHE["pnl"][k] = pnl_data[k]
-                print(f'[bridge] PnL data loaded from dashboard_data.json')
-    except Exception:
-        pass
+        # Claim the singleton port before schedulers/bootstrap can mutate live data.
+        server = ThreadingHTTPServer(('', port), BridgeHandler)
+    except OSError as e:
+        print(f'[bridge] Cannot bind http://localhost:{port}: {e}', file=sys.stderr)
+        sys.exit(1)
+
+    # === 冷启动：从磁盘恢复采集缓存；账户资产由 account_ssot 单独加载
+    _load_cache()
 
     # === APScheduler 启动 ===
     from scripts.collectors import iwencai_poll, market_data, sentiment_snapshot, quotes
@@ -963,12 +1061,7 @@ if __name__ == '__main__':
     try:
         with open(DATA_FILE) as f:
             dd = json.load(f)
-        codes = list(set(
-            [s.get('代码') for s in dd.get('lianban_pool', []) if s.get('代码')] +
-            [s.get('代码') for s in dd.get('trend_pool', []) if s.get('代码')] +
-            [a.get('代码') for a in dd.get('decision', {}).get('锚定股状态', []) if a.get('代码')] +
-            [p.get('代码') for p in dd.get('positions', []) if p.get('代码') and '清' in str(p.get('状态',''))]
-        ))
+        codes = _collect_stock_codes(dd)
         quotes.set_stock_codes(codes)
         print(f'[bridge] Stock codes loaded: {len(codes)}')
     except Exception:
@@ -1031,14 +1124,57 @@ if __name__ == '__main__':
     # from scripts.snapshot_close import run_snapshot_close
     # scheduler.add_job(lambda: run_snapshot_close(CACHE, ROOT), 'cron', hour=15, minute=2,
     #                   id='snapshot_close_1502', max_instances=1, misfire_grace_time=300)
+    # T4 收盘锚点（15:05：行情已收尾，取最后有效快照）
+    def run_closing_anchor():
+        from scripts.account_ssot import generate_closing_anchor
+        try:
+            result = generate_closing_anchor(CACHE.get('live_quotes', {}))
+            if result:
+                print(f"  [bridge] Closing anchor: {result}")
+            else:
+                print(f"  [bridge] Closing anchor: skipped (no today anchor)")
+        except Exception as e:
+            print(f"  [bridge] Closing anchor error: {e}")
+
+    scheduler.add_job(run_closing_anchor, 'cron', hour=15, minute=5, id='closing_anchor_1505',
+                      max_instances=1, misfire_grace_time=600)
+
     # T4 基线刷新（盘前 + 盘后）
     def run_gen_baseline():
         import subprocess
         gen_script = ROOT / "scripts" / "gen_dashboard_data.py"
-        subprocess.run(["python3", str(gen_script)], capture_output=True, timeout=120, cwd=str(ROOT))
+        result = subprocess.run(["python3", str(gen_script)], capture_output=True, text=True, timeout=120, cwd=str(ROOT))
+        if result.returncode != 0:
+            print(f'  [bridge] gen_dashboard_data.py failed: {result.stderr[-200:]}')
+            return False
+        return True
     scheduler.add_job(run_gen_baseline, 'cron', hour=8, minute=30, id='gen_baseline_0830',
                       max_instances=1, misfire_grace_time=600)
     scheduler.add_job(run_gen_baseline, 'cron', hour=15, minute=10, id='gen_baseline_1510',
+                      max_instances=1, misfire_grace_time=600)
+
+    # T4.5 日初健康检查（9:35：检查今日锚点是否存在）
+    def run_morning_health_check():
+        from scripts.db import query_account_baseline
+        today = datetime.now().strftime("%Y-%m-%d")
+        anchor = query_account_baseline(today)
+        if not anchor:
+            print(f"  [bridge] ⚠️  MISSING TODAY ANCHOR for {today} — open positions/assets NOT yet locked")
+            # 尝试从 pnl_history 补建
+            try:
+                from scripts.account_ssot import ensure_today_anchor, load_current_account_state
+                from pathlib import Path
+                dashboard_path = ROOT / "data" / "dashboard_data.json"
+                history_path = ROOT / "data" / "pnl_history.json"
+                if dashboard_path.exists() and history_path.exists():
+                    state = load_current_account_state(CACHE.get('live_quotes', {}))
+                    print(f"  [bridge] Auto-recovery anchor created: cash={state.get('cash')}, total_asset={state.get('total_asset')}")
+            except Exception as e:
+                print(f"  [bridge] Auto-recovery failed: {e}")
+        else:
+            print(f"  [bridge] Morning health check: anchor OK ({anchor.get('source')})")
+
+    scheduler.add_job(run_morning_health_check, 'cron', hour=9, minute=35, id='morning_health_0935',
                       max_instances=1, misfire_grace_time=600)
 
     # T5 LLM 自动研判（15min，盘中时段，浏览器关闭也能运行）
@@ -1162,22 +1298,13 @@ if __name__ == '__main__':
                 print(f'[bridge] Gen already ran today, skipping cold-start to preserve live positions')
     except Exception:
         pass
-    if need_gen:
+    now_t = datetime.now().time()
+    in_trading_session = _time(9, 30) <= now_t <= _time(15, 0)
+    if need_gen and in_trading_session:
+        print(f'[bridge] Cold-start: stale baseline detected during trading; deferring gen to scheduled close refresh')
+    elif need_gen:
         print(f'[bridge] Cold-start: running gen_dashboard_data.py...')
         run_gen_baseline()
-    else:
-        # 即使跳过 gen，也要重新加载 pnl（W15 同步的值可能在冷启动恢复时丢失）
-        try:
-            with open(DATA_FILE) as f:
-                dd = json.load(f)
-            pnl = dd.get('pnl', {})
-            if pnl:
-                CACHE['pnl'] = CACHE.get('pnl', {})
-                for k in ['总资产', '累计入金', '可用资金']:
-                    if k in pnl and pnl[k] is not None:
-                        CACHE['pnl'][k] = pnl[k]
-        except Exception:
-            pass
 
     # 冷启动：强制执行一次初始采集填充缓存（不受 is_trading_time 限制）
     print(f'[bridge] Cold-start bootstrap: running initial collection...')
@@ -1187,7 +1314,6 @@ if __name__ == '__main__':
         except Exception as e:
             print(f'  [bridge] bootstrap warning: {e}')
 
-    server = ThreadingHTTPServer(('', port), BridgeHandler)
     print(f'[bridge] 看板桥接服务启动 → http://localhost:{port}')
     print(f'[bridge] W15 记流水自动同步到 {DATA_FILE}')
     try:

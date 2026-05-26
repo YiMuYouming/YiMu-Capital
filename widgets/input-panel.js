@@ -20,8 +20,6 @@ class InputPanelWidget extends YiMuWidget {
     if (!body) return;
 
     var fields = [
-      {id:'累计入金',type:'number',label:'累计入金(元)'},
-      {id:'可用资金',type:'number',label:'可用资金(元)'},
       {id:'情绪值',type:'number',label:'情绪值(%)'},
       {id:'上涨',type:'number',label:'上涨家数'},
       {id:'下跌',type:'number',label:'下跌家数'},
@@ -62,27 +60,10 @@ class InputPanelWidget extends YiMuWidget {
     });
     html += '</div>';
 
-    // 自动计算的 总资产 = 持仓市值 + 可用资金
-    var afAuto = parseFloat(manual['可用资金']) || 0;
-    var mv = 0;
-    try {
-      var pos = JSON.parse(manual['_positions'] || 'null');
-      if (!pos || !pos.length) {
-        var merged = DataStore.merged || {};
-        pos = merged.positions || [];
-      }
-      (pos || []).forEach(function(p) {
-        if ((p['状态']||'').indexOf('清')>=0 || (p['状态']||'').indexOf('删除')>=0) return;
-        var qty = parseFloat(String(p['数量']||'0').replace('股','')) || 0;
-        var pr = parseFloat(p['现价']) || parseFloat(p['成本']) || 0;
-        mv += Math.round(qty * pr);
-      });
-    } catch(e) {}
-    var totalAsset = afAuto + mv;
-    var totalPnL = parseFloat(manual['总盈亏']) || 0;
-    var deposit = parseFloat(manual['累计入金']) || 0;
+    var pnlLive = (data && data.pnl_live) || {};
+    var totalAsset = parseFloat(pnlLive.total_asset) || 0;
+    var deposit = parseFloat(pnlLive.total_deposit) || 0;
     var totalReturn = deposit > 0 ? ((totalAsset - deposit) / deposit * 100) : 0;
-    var pnlColor = totalPnL >= 0 ? 'var(--up)' : 'var(--down)';
     var retColor = totalReturn >= 0 ? 'var(--up)' : 'var(--down)';
     html += '<div style="margin-top:var(--sp-xs);padding:6px 10px;background:var(--bg-base);border-radius:var(--radius-sm);display:flex;justify-content:space-between;font-size:var(--fs-body);gap:var(--sp-md)">' +
       '<span><span style="color:var(--text-secondary)">总资产</span> <span style="font-family:var(--font-mono);font-weight:700;font-size:var(--fs-subtitle)">' + totalAsset.toLocaleString() + '</span></span>' +
@@ -127,33 +108,13 @@ class InputPanelWidget extends YiMuWidget {
   }
 
   _saveAndRefresh() {
-    var fields = ['可用资金','情绪值','上涨','下跌','涨停收益','连板收益','炸板收益','风险值','晋级率','封板率','涨停家数','跌停家数','赚钱效应','最高板','次高板','梯队','累计入金'];
+    var fields = ['情绪值','上涨','下跌','涨停收益','连板收益','炸板收益','风险值','晋级率','封板率','涨停家数','跌停家数','赚钱效应','最高板','次高板','梯队'];
     fields.forEach(function(f) {
       var el = document.getElementById('in_'+f);
       if (el) DataStore.manualData.set(f, el.value);
     });
     var overrideCb = document.getElementById('in_情绪值_手动覆盖');
     if (overrideCb) DataStore.manualData.set('_情绪值_手动覆盖', overrideCb.checked ? 'true' : 'false');
-
-    // 总资产 = 持仓市值 + 可用资金（自动计算）
-    var afAuto = parseFloat(document.getElementById('in_可用资金')?.value) || 0;
-    var mv = 0;
-    try {
-      var pos = JSON.parse(DataStore.manualData.getAll()['_positions'] || 'null');
-      if (!pos || !pos.length) { var m = DataStore.merged || {}; pos = (m && m.positions) || []; }
-      (pos || []).forEach(function(p) {
-        if ((p['状态']||'').indexOf('清')>=0 || (p['状态']||'').indexOf('删除')>=0) return;
-        var qty = parseFloat(String(p['数量']||'0').replace('股','')) || 0;
-        var pr = parseFloat(p['现价']) || parseFloat(p['成本']) || 0;
-        mv += Math.round(qty * pr);
-      });
-    } catch(e) {}
-    var totalAsset = afAuto + mv;
-    DataStore.manualData.set('总资产', totalAsset);
-
-    _bridgeSyncPnl(totalAsset,
-      parseFloat(document.getElementById('in_累计入金')?.value) || 0
-    );
 
     DataStore.merge();
     DataStore.notifyAll();
@@ -172,14 +133,3 @@ class InputPanelWidget extends YiMuWidget {
 }
 
 WidgetRegistry.register('W16', InputPanelWidget);
-
-function _bridgeSyncPnl(asset, deposit) {
-  if (location.protocol === 'file:') return;
-  try {
-    fetch('/api/sync', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({ pnl: { 总资产: asset, 累计入金: deposit } })
-    }).catch(function(){});
-  } catch(e) {}
-}
