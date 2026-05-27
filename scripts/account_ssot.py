@@ -59,10 +59,18 @@ def _open_positions(positions):
     return result
 
 
-def _quotes_are_current(quotes, now=None):
+def _quote_status(quotes, now=None):
+    """判断行情新鲜度：live / close_snapshot / stale / missing。
+
+    规则：先看交易时段，再看 age。
+    - 盘中(9:30-15:00)：age≤300s→live，否则→stale
+    - 收盘后(≥15:00)：当天≥15:00的行情→close_snapshot(可用)，否则→stale
+    - 无_updated/跨日→stale/missing
+    返回 (is_usable: bool, quote_status: str)
+    """
     updated = (quotes or {}).get("_updated")
     if not updated:
-        return False
+        return False, "missing"
     try:
         quote_time = datetime.fromisoformat(updated)
         ref_time = datetime.fromisoformat(now) if now else datetime.now(quote_time.tzinfo)
@@ -70,9 +78,31 @@ def _quotes_are_current(quotes, now=None):
             ref_time = ref_time.replace(tzinfo=quote_time.tzinfo)
         elif ref_time.tzinfo and not quote_time.tzinfo:
             quote_time = quote_time.replace(tzinfo=ref_time.tzinfo)
-        return 0 <= (ref_time - quote_time).total_seconds() <= 300
+        age = (ref_time - quote_time).total_seconds()
+        if age < 0:
+            return False, "stale"  # 未来时间不可用
+
+        quote_date = quote_time.strftime("%Y-%m-%d")
+        ref_date = ref_time.strftime("%Y-%m-%d")
+        if quote_date != ref_date:
+            return False, "stale"
+
+        quote_hhmm = quote_time.hour * 60 + quote_time.minute
+        ref_hhmm = ref_time.hour * 60 + ref_time.minute
+        MARKET_CLOSE = 15 * 60  # 15:00
+
+        if ref_hhmm < MARKET_CLOSE:
+            # 盘中：严格 300s
+            if age <= 300:
+                return True, "live"
+            return False, "stale"
+        else:
+            # 收盘后：当天≥15:00行情可用
+            if quote_hhmm >= MARKET_CLOSE:
+                return True, "close_snapshot"
+            return False, "stale"
     except (TypeError, ValueError):
-        return False
+        return False, "missing"
 
 
 def reduce_account_state(anchor, trades, quotes, now=None, fund_events=None):
@@ -86,7 +116,36 @@ def reduce_account_state(anchor, trades, quotes, now=None, fund_events=None):
     def event_order_trade(trade):
         return (_event_timestamp(trade), int(trade.get("id") or 0))
 
-    # 1. 重放交易流水
+    # Day-start prices per code from anchor (for overnight PnL)
+    anchor_day_prices = {}
+    anchor_meta = anchor.get("_meta")
+    if isinstance(anchor_meta, dict):
+        anchor_day_prices = anchor_meta.get("day_start_prices") or {}
+
+    # Today PnL tracking per code
+    today_pnl_map = {}      # code -> realized PnL from sells
+    today_basis_map = {}    # code -> denominator (day-start basis + buy amounts, never shrinks on sells)
+    closed_list = []        # fully-sold positions
+
+    # Per-code overnight tracking (keyed by code from anchor open positions)
+    overnight_remaining = {}  # code -> remaining overnight qty (shrinks on sells, FIFO)
+    overnight_ref = {}        # code -> day_start_price
+    original_anchor_codes = set()
+    for position in positions:
+        code = str(position.get("代码", ""))
+        qty = int(position.get("数量", 0))
+        original_anchor_codes.add(code)
+        overnight_remaining[code] = qty
+        ref = _number(anchor_day_prices.get(code))
+        overnight_ref[code] = ref if ref > 0 else None
+        if ref and ref > 0:
+            today_basis_map[code] = round(ref * qty, 2)
+
+    # Per-code bought tracking (new buys today, avg cost used for sell realized)
+    bought_qty = {}    # code -> remaining bought qty (shrinks on sells, FIFO after overnight)
+    bought_cost = {}   # code -> remaining bought cost basis
+
+    # 1. 重放交易流水（含逐股日内收益）
     for trade in sorted(trades or [], key=event_order_trade):
         if trade_id_cutoff is not None and trade.get("id") is not None:
             if int(trade["id"]) <= int(trade_id_cutoff):
@@ -102,15 +161,63 @@ def reduce_account_state(anchor, trades, quotes, now=None, fund_events=None):
         action = str(trade.get("action", ""))
         if "卖出" in action:
             if position:
-                position["数量"] = max(0, int(position.get("数量", 0)) - qty)
+                old_qty = int(position.get("数量", 0))
+                remaining_sell = min(qty, old_qty)
+                new_qty = max(0, old_qty - remaining_sell)
+                position["数量"] = new_qty
+                sell_price = _number(trade.get("price"))
+
+                # FIFO: deduct overnight first, then bought
+                # — Overnight portion
+                ov_qty = overnight_remaining.get(code, 0)
+                sold_overnight = min(remaining_sell, ov_qty)
+                if sold_overnight > 0 and overnight_ref.get(code) is not None:
+                    realized = round((sell_price - overnight_ref[code]) * sold_overnight, 2)
+                    today_pnl_map[code] = today_pnl_map.get(code, 0) + realized
+                overnight_remaining[code] = ov_qty - sold_overnight
+                remaining_sell -= sold_overnight
+
+                # — Bought portion (avg cost)
+                if remaining_sell > 0:
+                    bq = bought_qty.get(code, 0)
+                    bc = bought_cost.get(code, 0)
+                    sold_bought = min(remaining_sell, bq)
+                    if sold_bought > 0 and bq > 0 and bc > 0:
+                        avg_bought = bc / bq
+                        realized = round((sell_price - avg_bought) * sold_bought, 2)
+                        today_pnl_map[code] = today_pnl_map.get(code, 0) + realized
+                        # Shrink bought tracking proportionally
+                        bought_qty[code] = bq - sold_bought
+                        bought_cost[code] = round(bc - avg_bought * sold_bought, 2)
+
+                # Fully sold -> closed position
+                if new_qty == 0 and old_qty > 0:
+                    has_valid_ref = overnight_ref.get(code) is not None
+                    has_overnight = code in original_anchor_codes
+                    if has_overnight and not has_valid_ref:
+                        rpnl = None  # 缺日初基准，收益不可用
+                    else:
+                        rpnl = today_pnl_map.get(code, 0)
+                    closed_list.append({
+                        "name": position.get("标的", trade.get("name", "")),
+                        "code": code,
+                        "sell_time": str(trade.get("trade_time", "")),
+                        "sell_price": sell_price,
+                        "sell_qty": qty,
+                        "reason": str(trade.get("reason", "")),
+                        "realized_today_pnl": rpnl,
+                        "closed_date": str(trade.get("trade_date", "")),
+                        "close_trade_id": trade.get("id"),
+                    })
         elif "买入" in action or "追涨" in action:
+            trade_price = _number(trade.get("price"))
             if not position:
                 position = {
                     "标的": trade.get("name", ""),
                     "代码": code,
                     "数量": 0,
-                    "成本": _number(trade.get("price")),
-                    "现价": _number(trade.get("price")),
+                    "成本": trade_price,
+                    "现价": trade_price,
                     "状态": "持有",
                 }
                 positions.append(position)
@@ -120,9 +227,17 @@ def reduce_account_state(anchor, trades, quotes, now=None, fund_events=None):
             new_qty = old_qty + qty
             if new_qty:
                 position["成本"] = round(
-                    (old_cost * old_qty + _number(trade.get("price")) * qty) / new_qty, 2
+                    (old_cost * old_qty + trade_price * qty) / new_qty, 2
                 )
             position["数量"] = new_qty
+            # 若之前已标记为清仓，买入重新开仓后移除 stale closed entry
+            if old_qty == 0:
+                closed_list[:] = [c for c in closed_list if c.get("code") != code]
+            # Track bought
+            bought_qty[code] = bought_qty.get(code, 0) + qty
+            bought_cost[code] = bought_cost.get(code, 0) + round(trade_price * qty, 2)
+            # Today basis: add buy amount to denominator
+            today_basis_map[code] = today_basis_map.get(code, 0) + round(trade_price * qty, 2)
 
     # 2. 重放资金事件
     for event in sorted(fund_events or [], key=lambda e: (str(e.get("event_date", "")), int(e.get("id") or 0))):
@@ -133,15 +248,60 @@ def reduce_account_state(anchor, trades, quotes, now=None, fund_events=None):
 
     positions = [position for position in positions if int(position.get("数量", 0)) > 0]
     mv = 0
-    valuation_complete = not positions or _quotes_are_current(quotes, now)
+    quotes_ok, quote_status = _quote_status(quotes, now)
+    valuation_complete = not positions or quotes_ok
+
     for position in positions:
-        quote = (quotes or {}).get(str(position.get("代码", "")), {})
+        code = str(position.get("代码", ""))
+        quote = (quotes or {}).get(code, {})
         price = _number(quote.get("最新价"))
         if price <= 0:
             valuation_complete = False
             price = _number(position.get("现价")) or _number(position.get("成本"))
         position["现价"] = price
-        mv += round(price * int(position["数量"]))
+        qty = int(position.get("数量", 0))
+        position["市值"] = round(price * qty, 2)
+        mv += position["市值"]
+
+        avg_cost = _number(position.get("成本"))
+        position["成本价"] = round(avg_cost, 2)
+
+        # Total PnL (cumulative)
+        total_pnl = round((price - avg_cost) * qty, 2)
+        total_pnl_pct = round((price - avg_cost) / avg_cost * 100, 2) if avg_cost > 0 else None
+        position["total_pnl"] = total_pnl
+        position["total_pnl_pct"] = total_pnl_pct
+
+        # Today PnL: unrealized (overnight + bought portions) + realized (from sells)
+        realized = today_pnl_map.get(code, 0)
+        basis = today_basis_map.get(code, 0)
+        has_overnight = code in original_anchor_codes
+        has_valid_ref = overnight_ref.get(code) is not None
+
+        if has_overnight and not has_valid_ref:
+            # Overnight position without day_start_price — cannot compute
+            position["today_pnl"] = None
+            position["today_pnl_pct"] = None
+            position["_day_start_price"] = None
+        else:
+            # Compute unrealized: overnight residual + bought residual
+            unrealized = 0
+            ov_qty = overnight_remaining.get(code, 0)
+            if ov_qty > 0 and has_valid_ref:
+                unrealized += round((price - overnight_ref[code]) * ov_qty, 2)
+            bq = bought_qty.get(code, 0)
+            bc = bought_cost.get(code, 0)
+            if bq > 0 and bc > 0:
+                avg_bought = bc / bq
+                unrealized += round((price - avg_bought) * bq, 2)
+
+            if basis > 0:
+                position["today_pnl"] = round(realized + unrealized, 2)
+                position["today_pnl_pct"] = round(position["today_pnl"] / basis * 100, 2)
+            else:
+                position["today_pnl"] = None
+                position["today_pnl_pct"] = None
+            position["_day_start_price"] = overnight_ref.get(code) if has_valid_ref else None
 
     cash = round(cash, 2)
     total_asset = round(cash + mv, 2)
@@ -164,6 +324,8 @@ def reduce_account_state(anchor, trades, quotes, now=None, fund_events=None):
         "pos_pct": pos_pct,
         "total_deposit": _number(anchor.get("total_deposit")),
         "valuation_complete": valuation_complete,
+        "quote_status": quote_status,
+        "closed_positions": closed_list,
     }
 
 
@@ -181,6 +343,123 @@ def update_account_baseline_meta(date_str, meta, update_anchor=None):
             "UPDATE account_baselines SET _meta_json = ? WHERE date = ?",
             (json.dumps(meta, ensure_ascii=False), date_str)
         )
+
+
+def backfill_day_start_price(date_str, code, price, source, reason,
+                            dry_run=False, get_anchor=None, update_meta=None):
+    """受控补录缺失的日初基准价到 account_baselines._meta.day_start_prices。
+
+    day_start_prices 只保存 code -> number。
+    审计信息写入独立的 _meta.day_start_price_repairs 数组。
+
+    Args:
+        date_str: 锚点日期 (YYYY-MM-DD)
+        code: 股票代码
+        price: 日初价 (>0，人工确认后传入)
+        source: 价格来源，不可为空
+        reason: 修复原因，不可为空
+        dry_run: True 时只输出差异，不写入
+        get_anchor: fn(date_str) -> anchor dict，默认 db.query_account_baseline
+        update_meta: fn(date_str, new_meta_dict) -> None，默认写默认库
+
+    Returns:
+        dict: {action, code, price, before_prices, after_prices, repair_entry, error, dry_run}
+    """
+    if get_anchor is None:
+        from scripts.db import query_account_baseline as _qab
+        get_anchor = _qab
+    if update_meta is None:
+        from scripts.db import _exec_write as _ew
+        def _default_update(d, m):
+            _ew("UPDATE account_baselines SET _meta_json = ? WHERE date = ?",
+                (json.dumps(m, ensure_ascii=False), d))
+        update_meta = _default_update
+
+    # 校验 source / reason
+    if not source or not str(source).strip():
+        return {"action": "rejected", "code": code, "price": price,
+                "error": "source 不能为空"}
+    if not reason or not str(reason).strip():
+        return {"action": "rejected", "code": code, "price": price,
+                "error": "reason 不能为空"}
+
+    # 校验 price
+    try:
+        price_f = round(float(price), 2)
+    except (TypeError, ValueError):
+        return {"action": "rejected", "code": code, "price": price,
+                "error": f"price 非法: {price!r}"}
+    if price_f <= 0:
+        return {"action": "rejected", "code": code, "price": price_f,
+                "error": "price 必须 > 0"}
+
+    # 查询锚点
+    anchor = get_anchor(date_str)
+    if not anchor:
+        return {"action": "rejected", "code": code, "price": price_f,
+                "error": f"日期 {date_str} 无锚点"}
+
+    # 校验 code 在锚点持仓中
+    anchor_positions = anchor.get("positions") or []
+    anchor_codes = {str(p.get("代码", "")) for p in anchor_positions}
+    if code not in anchor_codes:
+        return {"action": "rejected", "code": code, "price": price_f,
+                "error": f"代码 {code} 不在 {date_str} 锚点持仓中 (codes: {sorted(anchor_codes)})"}
+
+    # 读取已有 _meta
+    existing_meta = anchor.get("_meta") or {}
+    existing_prices = dict(existing_meta.get("day_start_prices") or {})
+
+    # 幂等：已有价格时拒绝覆盖
+    if code in existing_prices:
+        return {"action": "idempotent", "code": code, "price": price_f,
+                "existing_price": existing_prices[code],
+                "error": f"代码 {code} 已有日初价 {existing_prices[code]}，拒绝覆盖"}
+
+    # 构建新 _meta
+    new_meta = dict(existing_meta)
+    # day_start_prices 只保存 code -> number
+    new_prices = dict(existing_prices)
+    new_prices[code] = price_f
+    new_meta["day_start_prices"] = new_prices
+
+    # 审计信息放入独立 day_start_price_repairs 数组
+    repair_entry = {
+        "code": code,
+        "price": price_f,
+        "source": str(source).strip(),
+        "reason": str(reason).strip(),
+        "timestamp": datetime.now().strftime("%Y-%m-%dT%H:%M:%S"),
+    }
+    repairs = list(existing_meta.get("day_start_price_repairs") or [])
+    repairs.append(repair_entry)
+    new_meta["day_start_price_repairs"] = repairs
+
+    result = {
+        "action": "would_write" if dry_run else "written",
+        "code": code,
+        "price": price_f,
+        "date": date_str,
+        "source": str(source).strip(),
+        "reason": str(reason).strip(),
+        "before_prices": existing_prices,
+        "after_prices": new_prices,
+        "repair_entry": repair_entry,
+        "dry_run": dry_run,
+        "error": None,
+    }
+
+    if dry_run:
+        return result
+
+    try:
+        update_meta(date_str, new_meta)
+        result["action"] = "written"
+    except Exception as e:
+        result["action"] = "rejected"
+        result["error"] = str(e)
+
+    return result
 
 
 def compute_max_drawdown(date_str):
@@ -223,7 +502,7 @@ def generate_closing_anchor(live_quotes, now=None, insert_anchor=None,
         pnl_history_path: pnl_history.json 输出路径，默认写入 data/pnl_history.json
                          测试应传入 tempfile 路径以避免污染真实文件。
     """
-    from scripts.db import query_account_baseline, query_trades, query_fund_events, insert_daily_summary
+    from scripts.db import query_account_baseline, query_trades, query_fund_events, insert_daily_summary, update_trade_outcomes
     if insert_anchor is None:
         from scripts.db import insert_account_baseline
         insert_anchor = insert_account_baseline
@@ -278,6 +557,39 @@ def generate_closing_anchor(live_quotes, now=None, insert_anchor=None,
         "max_dd_start": dd_start,
         "max_dd_end": dd_end,
     })
+
+    # 日结：补写 trade_records 的 outcome（买入含收盘价，卖出含盈亏，只补不改变原成交事实）
+    try:
+        day_trades = query_trades(date_from=date_str, date_to=date_str, limit=10000)
+        quotes = live_quotes or {}
+        outcomes = {}
+        for t in day_trades:
+            tid = t.get('id')
+            if not tid or t.get('outcome', ''):
+                continue
+            act = str(t.get('action', ''))
+            code = str(t.get('code', ''))
+            name = str(t.get('name', ''))
+            price = float(t.get('price') or 0)
+            pnl = float(t.get('realized_pnl') or 0)
+            q = quotes.get(code, {}) if code else {}
+            close_px = float(q.get('最新价') or 0) if q else 0
+            if '买入' in act or '追涨' in act:
+                if close_px and price:
+                    ret = round((close_px - price) / price * 100, 2)
+                    tag = '浮盈' if ret >= 0 else '浮亏'
+                    outcomes[tid] = f"买入 {name} {code} @{price} 收盘{close_px} {tag}{ret:+.2f}%"
+                else:
+                    outcomes[tid] = f"买入 {name} {code} @{price} 收盘无行情"
+            elif '卖出' in act:
+                tag = '盈利' if pnl > 0 else ('亏损' if pnl < 0 else '平出')
+                outcomes[tid] = f"卖出 {name} {code} {tag} {pnl:+.1f}" if pnl else f"卖出 {name} {code}"
+            elif '纠错' in str(t.get('reason', '')):
+                outcomes[tid] = f"纠错 {name} {code}"
+        if outcomes:
+            update_trade_outcomes(date_str, outcomes)
+    except Exception as e:
+        print(f"  [account_ssot] outcome update skipped: {e}")
 
     # 日结：更新 pnl_history.json（收盘权威值）
     # 可注入路径，避免测试污染真实 data/ 文件
@@ -334,6 +646,14 @@ def generate_closing_anchor(live_quotes, now=None, insert_anchor=None,
         next_date += _dt.timedelta(days=1)
     next_str = next_date.strftime("%Y-%m-%d")
 
+    # 固化次日日初参考价
+    day_start_prices = {}
+    for pos in state.get("positions", []):
+        code = str(pos.get("代码", ""))
+        px = _number(pos.get("现价")) or _number(pos.get("成本"))
+        if code and px > 0:
+            day_start_prices[code] = px
+
     inserted = insert_anchor({
         "date": next_str,
         "effective_at": f"{next_str}T09:25:00",
@@ -343,6 +663,7 @@ def generate_closing_anchor(live_quotes, now=None, insert_anchor=None,
         "total_deposit": state["total_deposit"],
         "positions": state["positions"],
         "source": "previous_close",
+        "_meta": {"day_start_prices": day_start_prices} if day_start_prices else None,
     })
     if inserted:
         print(f"  [account_ssot] Closing anchor: {next_str} written, cash={state['cash']}, total_asset={state['total_asset']}, nav={nav}, pnl={pnl_pct}%")
@@ -382,6 +703,16 @@ def ensure_today_anchor(data, day_start_asset, now=None, get_anchor=None, insert
     date_str = effective_at[:10]
     existing = get_anchor(date_str)
     if existing:
+        src = existing.get("source", "")
+        positions = existing.get("positions") or []
+        if src == "recovery" and len(positions) > 0:
+            return {
+                "date": date_str,
+                "source": "blocked",
+                "block_reason": "existing recovery anchor with positions — untrusted",
+                "existing_source": src,
+                "positions": positions,
+            }
         return existing
 
     # 优先用 previous_close 锚点（次日开盘锁定）
@@ -400,20 +731,91 @@ def ensure_today_anchor(data, day_start_asset, now=None, get_anchor=None, insert
         insert_anchor(anchor)
         return get_anchor(date_str) or anchor
 
-    # 无锚点时从 data 新建（仅用于事故恢复或首次初始化）
+    # 无 previous_close anchor：只允许首次初始化或显式 manual_correction
+    # 持仓账户缺 previous_close → 阻断，不允许自动生成可交易 anchor
     pnl = (data or {}).get("pnl", {})
+    positions = _open_positions((data or {}).get("positions", []))
+    pos_cost = sum(_number(p.get("成本", 0)) * _number(p.get("数量", 0)) for p in positions)
+    has_positions = len(positions) > 0
+
+    if has_positions:
+        # 持仓账户必须有 previous_close 或 manual_correction；
+        # 不可从 dashboard/pnl_history 自动推算 cash
+        print(f"  [account_ssot] BLOCKED: {date_str} has {len(positions)} positions but no previous_close anchor")
+        return {
+            "date": date_str,
+            "source": "blocked",
+            "block_reason": "positions without previous_close anchor",
+            "positions": positions,
+        }
+
+    # 首次初始化（无持仓）：允许 recovery
+    raw_cash = _number(pnl.get("可用资金"))
+    total_deposit = _number(pnl.get("累计入金"))
     anchor = {
         "date": date_str,
         "effective_at": effective_at,
         "trade_id_cutoff": get_last_trade_id(date_str),
-        "cash": _number(pnl.get("可用资金")),
+        "cash": raw_cash,
         "day_start_asset": _number(day_start_asset),
-        "total_deposit": _number(pnl.get("累计入金")),
-        "positions": _open_positions((data or {}).get("positions", [])),
+        "total_deposit": total_deposit,
+        "positions": positions,
         "source": "recovery",
     }
     insert_anchor(anchor)
     return get_anchor(date_str) or anchor
+
+
+def query_7day_closed_positions(date_str, get_anchor=None, get_trades=None):
+    """查询7日内（含当日）完全卖清的持仓，仅来自 SSOT 账本回放。
+
+    返回 list[dict]: 每项 {code, name, closed_date, sell_price, reason, ...}
+    去重：同一 code 只保留最近一次清仓日期。
+    """
+    from datetime import datetime as _dt, timedelta as _td
+
+    if get_anchor is None:
+        from scripts.db import query_account_baseline
+        get_anchor = query_account_baseline
+    if get_trades is None:
+        from scripts.db import query_trades
+        get_trades = query_trades
+
+    today = _dt.strptime(date_str, "%Y-%m-%d")
+    all_closed = {}  # code -> closed entry
+
+    # 收集7日内所有含 is_reversal=1 的纠错交易，提取被撤销的原始交易 ID
+    start_date = (today - _td(days=6)).strftime("%Y-%m-%d")
+    all_trades = get_trades(date_from=start_date, date_to=date_str, limit=10000)
+    reversed_trade_ids = set()
+    for t in (all_trades or []):
+        if int(t.get("is_reversal") or 0) == 1:
+            orig_id = t.get("reversal_of_id")
+            if orig_id is not None:
+                reversed_trade_ids.add(int(orig_id))
+
+    # 逐日回放，收集 closed_positions
+    for offset in range(7):
+        day = (today - _td(days=offset)).strftime("%Y-%m-%d")
+        anchor = get_anchor(day)
+        if not anchor:
+            continue
+        trades = get_trades(date_from=day, date_to=day, limit=10000)
+        if not trades:
+            continue
+        state = reduce_account_state(anchor, trades, {}, now=f"{day}T23:59:59")
+        for closed in state.get("closed_positions") or []:
+            code = closed.get("code")
+            if not code:
+                continue
+            # 若清仓交易被纠错链撤销，排除
+            close_tid = closed.get("close_trade_id")
+            if close_tid is not None and int(close_tid) in reversed_trade_ids:
+                continue
+            if code not in all_closed or closed.get("closed_date", "") > all_closed[code].get("closed_date", ""):
+                all_closed[code] = closed
+
+    return sorted(all_closed.values(), key=lambda c: c.get("closed_date", ""), reverse=True)
 
 
 def load_current_account_state(live_quotes, now=None, data_file=None, history_file=None):
@@ -442,15 +844,44 @@ def load_current_account_state(live_quotes, now=None, data_file=None, history_fi
         insert_anchor=insert_account_baseline,
         get_last_trade_id=query_last_trade_id,
     )
+    if isinstance(anchor, dict) and anchor.get("source") == "blocked":
+        return {
+            "date": date_str,
+            "anchor_blocked": True,
+            "block_reason": anchor.get("block_reason", ""),
+            "valuation_complete": False,
+            "total_asset": None,
+            "cash": None,
+            "mv": None,
+            "pnl_pct": None,
+            "positions": [],
+            "closed_positions": [],
+            "trades": [],
+            "quote_status": "missing",
+            "source": "blocked",
+        }
     trades = query_trades(date_from=date_str, date_to=date_str, limit=10000)
     fund_events = query_fund_events(date_from=date_str, date_to=date_str, limit=10000)
     state = reduce_account_state(anchor, trades, live_quotes or {}, now=effective_at, fund_events=fund_events)
+    # 扩展为7日内清仓（含当日 + 前6日）
+    seven_day = query_7day_closed_positions(date_str,
+                                            get_anchor=query_account_baseline,
+                                            get_trades=query_trades)
+    # 当日 closed_positions 已由 reduce_account_state 精确计算，优先保留
+    today_codes = {c.get("code") for c in state.get("closed_positions") or []}
+    for c in seven_day:
+        if c.get("code") not in today_codes:
+            state.setdefault("closed_positions", []).append(c)
     state["trades"] = sorted(trades, key=lambda trade: (_event_timestamp(trade), int(trade.get("id") or 0)))
     state["_updated"] = (live_quotes or {}).get("_updated") or effective_at
+    anchor_source = anchor.get("source", "recovery")
+    anchor_positions = anchor.get("positions") or []
     state["anchor"] = {
         "date": anchor["date"],
         "effective_at": anchor["effective_at"],
         "trade_id_cutoff": anchor.get("trade_id_cutoff", 0),
-        "source": anchor.get("source", "recovery"),
+        "source": anchor_source,
     }
+    state["anchor_trusted"] = (anchor_source in ("previous_close", "manual_correction")
+                               or (anchor_source == "recovery" and len(anchor_positions) == 0))
     return state

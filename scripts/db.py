@@ -175,10 +175,24 @@ def init_db():
         conn.execute("ALTER TABLE account_baselines ADD COLUMN _meta_json TEXT")
 
     trade_cols = {row['name'] for row in conn.execute("PRAGMA table_info(trade_records)").fetchall()}
-    if 'reversal_of_id' not in trade_cols:
-        conn.execute("ALTER TABLE trade_records ADD COLUMN reversal_of_id INTEGER")
-    if 'is_reversal' not in trade_cols:
-        conn.execute("ALTER TABLE trade_records ADD COLUMN is_reversal INTEGER DEFAULT 0")
+    for col, col_type in [
+        ('reversal_of_id', 'INTEGER'),
+        ('is_reversal', 'INTEGER DEFAULT 0'),
+        ('rule_state_json', 'TEXT'),
+        ('market_snapshot_json', 'TEXT'),
+        ('outcome', "TEXT DEFAULT ''"),
+        ('review_note', "TEXT DEFAULT ''"),
+        ('event_id', 'TEXT'),
+    ]:
+        if col not in trade_cols:
+            conn.execute(f"ALTER TABLE trade_records ADD COLUMN {col} {col_type}")
+    # Drop old unconditional unique index; replace with conditional ones
+    conn.execute("DROP INDEX IF EXISTS idx_tr_uniq")
+    conn.execute("""CREATE UNIQUE INDEX IF NOT EXISTS idx_tr_uniq
+        ON trade_records(trade_date, trade_time, code, action, price, qty)
+        WHERE event_id IS NULL OR event_id = ''""")
+    conn.execute("""CREATE UNIQUE INDEX IF NOT EXISTS idx_tr_event_id
+        ON trade_records(event_id) WHERE event_id IS NOT NULL AND event_id <> ''""")
     conn.commit()
 
 
@@ -249,6 +263,7 @@ def query_pnl(range='today', index='sh'):
 
     # today: 走 intraday_snapshots（5分钟粒度），填充完整时段9:30-15:00
     if range == 'today':
+        is_fallback = False
         rows = _exec(
             f"SELECT ts, pnl_pct, {idx_field} AS bm_pct, pos_pct, nav FROM intraday_snapshots WHERE date = ? ORDER BY ts",
             (today,))
@@ -257,6 +272,7 @@ def query_pnl(range='today', index='sh'):
                 "SELECT date FROM intraday_snapshots ORDER BY date DESC LIMIT 1")
             if last_date_row:
                 today = last_date_row[0]['date']
+                is_fallback = True
                 rows = _exec(
                     f"SELECT ts, pnl_pct, {idx_field} AS bm_pct, pos_pct, nav FROM intraday_snapshots WHERE date = ? ORDER BY ts",
                     (today,))
@@ -268,7 +284,12 @@ def query_pnl(range='today', index='sh'):
         row_map = {}
         for r in rows:
             ts = r['ts']
-            time_str = ts[-8:-3] if 'T' in ts else ts[-5:]
+            # 兼容无时区和 +08:00 时区的 ts 格式
+            if 'T' in ts:
+                time_part = ts.split('T')[1]
+                time_str = time_part[:5]  # HH:MM
+            else:
+                time_str = ts[-5:]
             try:
                 h, m = int(time_str[:2]), int(time_str[3:5])
                 m = (m // 5) * 5  # 对齐到5分钟
@@ -309,6 +330,8 @@ def query_pnl(range='today', index='sh'):
 
         return {
             'type': 'intraday',
+            'data_date': today,
+            'is_fallback': is_fallback,
             'labels': labels,
             'portfolio': pnl_vals,
             'benchmark': bm_vals,
@@ -442,9 +465,9 @@ def query_pnl_summary():
         'last_date': last['date'] if last else None,
         'daily_count': daily_n,
         'today_snapshots': intra_n,
-        'total_asset': today_asset if today_asset else (round(last['nav'] * last['deposit'], 1) if last else None),
-        'mv': today_mv if today_mv else None,
-        'pnl_amount': round(today_asset - day_start_asset, 1) if today_asset is not None and day_start_asset else None,
+        'total_asset': today_asset if today_asset is not None else (round(last['nav'] * last['deposit'], 1) if last else None),
+        'mv': today_mv if today_mv is not None else None,
+        'pnl_amount': round(today_asset - day_start_asset, 1) if (today_asset is not None and day_start_asset is not None) else None,
         'pnl_pct': today_pnl_pct,
         'day_start_asset': day_start_asset,
         '_updated': updated or (f"{last['date']}T15:00:00+08:00" if last else None),
@@ -466,6 +489,149 @@ def insert_trade(data):
     inserted = cur.rowcount > 0
     conn.commit()
     return inserted
+
+
+def insert_trade_with_context(data, rule_state=None, market_snapshot=None):
+    """插入成交并绑定后端可信上下文。event_id 有唯一约束，并发冲突由 DB 处理。
+
+    卖出动作在 BEGIN IMMEDIATE 事务内原子校验可用数量，防止并发超卖。
+    返回 (inserted: bool, trade_id: int|None, status: 'inserted'|'idempotent')
+    """
+    conn = get_conn()
+    cur = conn.cursor()
+    evt_id = data.get('event_id')
+    action = str(data.get('action') or '')
+    is_sell = '卖' in action
+    start_immediate = is_sell and (not evt_id or evt_id == '')
+
+    try:
+        if is_sell:
+            # 原子卖出门禁：BEGIN IMMEDIATE + 查库存 + 插入
+            if not start_immediate:
+                # 仍用 IMMEDIATE 确保库存检查和插入在同一事务
+                conn.execute("BEGIN IMMEDIATE")
+
+            sell_code = str(data.get('code') or '')
+            sell_qty = int(data.get('qty') or 0)
+            trade_date = str(data.get('trade_date') or datetime.now().strftime('%Y-%m-%d'))
+
+            # 查询锚点持仓
+            anchor_row = cur.execute(
+                "SELECT positions_json FROM account_baselines WHERE date = ?",
+                (trade_date,)).fetchone()
+            anchor_qty = 0
+            if anchor_row:
+                positions = json.loads(anchor_row[0] or '[]')
+                for p in positions:
+                    if str(p.get('代码', '')) == sell_code:
+                        anchor_qty = int(p.get('数量', 0) or 0)
+                        break
+
+            # 查询当日已成交 net qty（买入+追涨-卖出）
+            net_row = cur.execute("""
+                SELECT COALESCE(SUM(CASE WHEN action IN ('买入','W1追涨','W2买入')
+                                    THEN qty ELSE -qty END), 0) AS net
+                FROM trade_records
+                WHERE trade_date = ? AND code = ?
+            """, (trade_date, sell_code)).fetchone()
+            net_traded = int(net_row[0]) if net_row else 0
+
+            available = anchor_qty + net_traded
+            if sell_qty > available:
+                conn.rollback()
+                raise ValueError(
+                    f'sell qty {sell_qty} exceeds available {available} for {sell_code}')
+
+        if evt_id and evt_id != '':
+            cur.execute("""INSERT INTO trade_records
+            (trade_date, trade_time, action, code, name, price, qty, window, reason,
+             realized_pnl, fee, reversal_of_id, is_reversal,
+             rule_state_json, market_snapshot_json, event_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (data.get('trade_date', datetime.now().strftime('%Y-%m-%d')),
+             data.get('trade_time'), data['action'], data['code'], data['name'],
+             data.get('price'), data.get('qty'), data.get('window'),
+             data.get('reason'), data.get('realized_pnl'), data.get('fee', 0),
+             data.get('reversal_of_id'), int(data.get('is_reversal', 0)),
+             json.dumps(rule_state, ensure_ascii=False) if rule_state else None,
+             json.dumps(market_snapshot, ensure_ascii=False) if market_snapshot else None,
+             str(evt_id)))
+            conn.commit()
+            return True, cur.lastrowid, 'inserted'
+        else:
+            cur.execute("""INSERT OR IGNORE INTO trade_records
+            (trade_date, trade_time, action, code, name, price, qty, window, reason,
+             realized_pnl, fee, reversal_of_id, is_reversal,
+             rule_state_json, market_snapshot_json)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (data.get('trade_date', datetime.now().strftime('%Y-%m-%d')),
+             data.get('trade_time'), data['action'], data['code'], data['name'],
+             data.get('price'), data.get('qty'), data.get('window'),
+             data.get('reason'), data.get('realized_pnl'), data.get('fee', 0),
+             data.get('reversal_of_id'), int(data.get('is_reversal', 0)),
+             json.dumps(rule_state, ensure_ascii=False) if rule_state else None,
+             json.dumps(market_snapshot, ensure_ascii=False) if market_snapshot else None))
+            conn.commit()
+            inserted = cur.rowcount > 0
+            return inserted, (cur.lastrowid if inserted else None), ('inserted' if inserted else 'duplicate')
+    except sqlite3.IntegrityError:
+        if evt_id and evt_id != '':
+            try:
+                existing = cur.execute(
+                    "SELECT id FROM trade_records WHERE event_id = ?", (str(evt_id),)).fetchone()
+                if existing:
+                    conn.commit()
+                    return False, existing[0], 'idempotent'
+            except Exception:
+                pass
+        raise
+
+
+def update_trade_outcomes(date_str, outcomes):
+    """日结补写 outcome：仅写 outcome 列，不修改原成交事实/纠错链/锚点/资产。
+    outcomes: {trade_id: outcome_text, ...}
+    同时按 trade_date 约束，拒绝跨日误写。
+    """
+    conn = get_conn()
+    cur = conn.cursor()
+    for tid, outcome_text in outcomes.items():
+        cur.execute(
+            "UPDATE trade_records SET outcome = ? WHERE id = ? AND trade_date = ? AND outcome = ''",
+            (str(outcome_text)[:500], int(tid), date_str))
+    conn.commit()
+
+
+def update_trade_review_note(trade_id, note_text):
+    """事后写入 review_note（不修改资产/锚点/成交事实）。
+    返回 True 表示实际更新到记录，False 表示 trade_id 不存在。
+    """
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("UPDATE trade_records SET review_note = ? WHERE id = ?",
+                (str(note_text)[:2000], int(trade_id)))
+    conn.commit()
+    return cur.rowcount > 0
+
+
+def query_trade_reviews(date_str):
+    """按日期读取逐笔复盘上下文（只读）。"""
+    rows = _exec("""SELECT id, created_at, trade_date, trade_time, action, code, name,
+        price, qty, window, reason, realized_pnl, fee, reversal_of_id, is_reversal,
+        rule_state_json, market_snapshot_json, outcome, review_note
+        FROM trade_records WHERE trade_date = ? ORDER BY id""", (date_str,))
+    results = []
+    for r in rows:
+        d = dict(r)
+        for col in ('rule_state_json', 'market_snapshot_json'):
+            raw = d.get(col)
+            if raw:
+                try:
+                    d[col.replace('_json', '')] = json.loads(raw)
+                except (json.JSONDecodeError, TypeError):
+                    pass
+            d.pop(col, None)
+        results.append(d)
+    return results
 
 
 def insert_correction_trade(original_trade_id, correction_action, correction_price, correction_qty, note):

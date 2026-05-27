@@ -131,7 +131,8 @@ def _merge_pnl_summary(snapshot_summary, account_state):
     for key in [
         'cash', 'positions', 'trades', 'mv', 'total_asset', 'day_start_asset',
         'pnl_amount', 'pnl_pct', 'pos_pct', 'total_deposit',
-        'valuation_complete', 'anchor', '_updated',
+        'valuation_complete', 'anchor', '_updated', 'closed_positions',
+        'quote_status',
     ]:
         if key in account_state:
             result[key] = account_state[key]
@@ -697,8 +698,11 @@ def _build_rule_inputs(now=None, account_state=None):
         pnl_pct = float(pnl_pct_raw) if pnl_pct_raw is not None else None
     except (TypeError, ValueError):
         pnl_pct = None
+    anchor_trusted = bool(pnl_live.get("anchor_trusted", True))
     valuation_complete = bool(pnl_live.get("valuation_complete"))
-    if "valuation_complete" not in pnl_live:
+    if not anchor_trusted:
+        valuation_complete = False  # force DATA_UNTRUSTED for untrusted anchor
+    elif "valuation_complete" not in pnl_live:
         valuation_complete = pnl_live.get("mv") is not None
 
     # ── risk ──
@@ -1087,7 +1091,7 @@ def _build_health():
     bf = _baseline_freshness()
     result["baseline"] = {"status": bf}
 
-    # quotes — freshness + coverage
+    # quotes — freshness + coverage (先算裸缓存，后由 account quote_status 修正)
     qf = _compute_freshness("live_quote", CACHE.get("live_quotes", {}))
     covered, total, missing_pos = _quotes_coverage()
     quotes_result = {"status": qf, "covered": covered, "total": total}
@@ -1097,7 +1101,6 @@ def _build_health():
             quotes_result["detail"] = f"zero coverage ({total} tracked)"
         elif missing_pos:
             quotes_result["detail"] = f"{len(missing_pos)} positions missing quotes"
-            # If freshness was live but positions aren't covered, downgrade
             if quotes_result["status"] == "live":
                 quotes_result["status"] = "delayed"
     elif qf == "live":
@@ -1108,13 +1111,31 @@ def _build_health():
     if_ = _compute_freshness("iwencai", CACHE.get("iwencai", {}))
     result["iwencai"] = {"status": if_}
 
-    # account
+    # account — 加载后同时修正 quotes status（收盘快照不应判dead）
     try:
         state = load_current_account_state(CACHE.get("live_quotes", {}))
-        if state and state.get("total_asset") is not None:
+        acct_quote_status = (state or {}).get("quote_status", "")
+        if acct_quote_status == "close_snapshot":
+            qr = result.setdefault("quotes", {})
+            if qr.get("status") in ("dead", "stale"):
+                if qr.get("covered", 0) > 0:
+                    qr["status"] = "close_snapshot"
+                    qr["detail"] = (qr.get("detail", "") + " (post-close snapshot)").strip()
+        anchor_source = (state.get("anchor") or {}).get("source", "") if state else ""
+        anchor_trusted = state.get("anchor_trusted", True) if state else True
+        anchor_blocked = state.get("anchor_blocked") if state else False
+        if anchor_blocked:
+            result["account"] = {"status": "error",
+                "detail": f"anchor blocked: {state.get('block_reason','')}"}
+        elif not anchor_trusted:
+            result["account"] = {"status": "error",
+                "detail": f"untrusted anchor (source={anchor_source})"}
+        elif state and state.get("total_asset") is not None:
             vc = state.get("valuation_complete")
             if vc is False:
                 result["account"] = {"status": "incomplete", "detail": "valuation_complete is false"}
+            elif anchor_source == "manual_correction":
+                result["account"] = {"status": "ok", "detail": "manual_correction"}
             else:
                 result["account"] = {"status": "ok"}
         else:
@@ -1317,6 +1338,25 @@ class BridgeHandler(SimpleHTTPRequestHandler):
             self.wfile.write(json.dumps({'ok': False, 'error': 'Method Not Allowed: use POST'}).encode())
             self._db_close()
             return
+        elif parsed.path == '/api/trades/review':
+            _ensure_db()
+            try:
+                qs = parse_qs(parsed.query)
+                date_str = qs.get('date', [datetime.now().strftime('%Y-%m-%d')])[0]
+                from scripts.db import query_trade_reviews
+                result = query_trade_reviews(date_str)
+                body = json.dumps(result, ensure_ascii=False).encode()
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/json')
+                self.end_headers()
+                self.wfile.write(body)
+            except Exception as e:
+                self.send_response(500)
+                self.end_headers()
+                self.wfile.write(json.dumps({'error': str(e)}).encode())
+            finally:
+                self._db_close()
+            return
         elif parsed.path == '/api/trades':
             _ensure_db()
             try:
@@ -1477,49 +1517,196 @@ class BridgeHandler(SimpleHTTPRequestHandler):
                 else:
                     data = {}
 
-                # Lock the pre-command account state before applying a new event.
-                if payload.get('今日操作'):
-                    load_current_account_state(CACHE.get('live_quotes', {}))
+                # 单笔新成交事件写入
+                entry = payload.get('entry')
+                tlist = payload.get('今日操作')
+                has_entry = bool(entry and not tlist)
 
-                if 'positions' in payload:
+                # entry 请求不接受客户端 positions
+                if has_entry and 'positions' in payload:
+                    self.send_response(400)
+                    self.send_header('Content-Type', 'application/json')
+                    self.end_headers()
+                    self.wfile.write(json.dumps({
+                        'ok': False, 'error': 'entry request must not include positions'
+                    }).encode())
+                    return
+
+                # positions-only sync rejected BEFORE any mutation
+                if not has_entry and not tlist and 'positions' in payload:
+                    self.send_response(409)
+                    self.send_header('Content-Type', 'application/json')
+                    self.end_headers()
+                    self.wfile.write(json.dumps({
+                        'ok': False, 'error': 'positions-only sync deprecated; use entry for trades'
+                    }).encode())
+                    return
+
+                positions_updated = False
+                if not has_entry and 'positions' in payload:
                     existing = {p.get('标的'): p for p in data.get('positions', [])}
                     for p in payload['positions']:
                         existing[p.get('标的')] = p
                     data['positions'] = list(existing.values())
                     CACHE['_stock_codes'] = _collect_stock_codes(data)
-                if '今日操作' in payload:
-                    if 'decision' not in data:
-                        data['decision'] = {}
-                    data['decision']['今日操作'] = payload['今日操作']
-                # 同步写入 SQLite 交易记录
-                db_error = None
-                try:
-                    from scripts.db import insert_trade
-                    tdate = payload.get('_trade_date', datetime.now().strftime('%Y-%m-%d'))
-                    for op in (payload.get('今日操作') or []):
-                        insert_trade({
-                            'trade_date': tdate,
-                            'trade_time': op.get('时间'),
-                            'action': op.get('动作'),
-                            'code': op.get('代码', ''),
-                            'name': op.get('标的', ''),
-                            'price': op.get('价格'),
-                            'qty': op.get('数量'),
-                            'window': op.get('窗口'),
-                            'reason': op.get('原因'),
-                        })
-                except Exception as e:
-                    db_error = str(e)
-                    print(f"  [bridge] SQLite trade insert error: {e}")
+                    positions_updated = True
 
-                if not db_error:
-                    atomic_write_json(DATA_FILE, data)
+                if has_entry:
+                    # —— 成交输入校验 ——
+                    now = datetime.now()
+                    validation_error = None
 
-                self.send_response(200)
-                self.send_header('Content-Type', 'application/json')
-                self.end_headers()
-                self.wfile.write(json.dumps({'ok': True}).encode())
-                print(f"  [bridge] Synced {len(body)} bytes → {DATA_FILE}")
+                    # 动作枚举
+                    action = str(entry.get('动作', '') or '')
+                    ALLOWED_ACTIONS = {'W1追涨', 'W2买入', '买入', '卖出'}
+                    if action not in ALLOWED_ACTIONS:
+                        validation_error = f'动作非法: {action!r}，允许 {sorted(ALLOWED_ACTIONS)}'
+
+                    # 代码非空
+                    code = str(entry.get('代码', '') or '').strip()
+                    if not validation_error and not code:
+                        validation_error = '代码不能为空'
+
+                    # 名称非空
+                    name = str(entry.get('标的', '') or '').strip()
+                    if not validation_error and not name:
+                        validation_error = '标的名称不能为空'
+
+                    # 价格：有限正数
+                    import math as _math
+                    try:
+                        raw_price = entry.get('价格', 0)
+                        price = float(raw_price or 0)
+                        if not validation_error:
+                            if not _math.isfinite(price) or price <= 0:
+                                validation_error = f'价格必须为有限正数，收到 {raw_price!r}'
+                    except (TypeError, ValueError):
+                        validation_error = f'价格非法: {entry.get("价格")!r}'
+
+                    # 数量：严格正整数（拒绝小数/字符串小数/布尔值）
+                    try:
+                        raw_qty = entry.get('数量', 0)
+                        if isinstance(raw_qty, bool):
+                            validation_error = f'数量必须为正整数，收到布尔值'
+                        elif not validation_error:
+                            qty_f = float(raw_qty)
+                            qty = int(qty_f)
+                            if qty_f != qty or qty_f <= 0:
+                                validation_error = f'数量必须为正整数，收到 {raw_qty!r}'
+                    except (TypeError, ValueError):
+                        validation_error = f'数量非法: {entry.get("数量")!r}'
+
+                    # 时间 HH:MM 或 HH:MM:SS，不在未来
+                    trade_time = str(entry.get('时间', '') or '').strip()
+                    if not validation_error:
+                        import re
+                        if not re.match(r'^\d{2}:\d{2}(:\d{2})?$', trade_time):
+                            validation_error = f'时间格式非法: {trade_time!r}，期望 HH:MM 或 HH:MM:SS'
+                        else:
+                            try:
+                                parts = trade_time.split(':')
+                                h, m = int(parts[0]), int(parts[1])
+                                if h < 0 or h > 23 or m < 0 or m > 59:
+                                    validation_error = f'时间值非法: {trade_time!r}'
+                                elif len(parts) == 3:
+                                    s = int(parts[2])
+                                    if s < 0 or s > 59:
+                                        validation_error = f'秒值非法: {trade_time!r}'
+                                if not validation_error:
+                                    t_min = h * 60 + m
+                                    now_min = now.hour * 60 + now.minute + 1
+                                    if t_min > now_min:
+                                        validation_error = 'trade time is in the future'
+                            except (ValueError, IndexError):
+                                validation_error = f'时间解析失败: {trade_time!r}'
+
+                    if validation_error:
+                        self.send_response(400)
+                        self.send_header('Content-Type', 'application/json')
+                        self.end_headers()
+                        self.wfile.write(json.dumps({
+                            'ok': False, 'error': validation_error,
+                        }).encode())
+                        return
+
+                    # Sell quantity validation — done BEFORE insert, but note:
+                    # the atomic gate in insert_trade_with_context also checks this
+                    if '卖' in action:
+                        acct = load_current_account_state(CACHE.get('live_quotes', {}))
+                        positions = acct.get('positions') or []
+                        code = str(entry.get('代码', ''))
+                        sell_qty = int(entry.get('数量', 0) or 0)
+                        pos = next((p for p in positions if str(p.get('代码','')) == code), None)
+                        avail = int(pos.get('数量', 0) or 0) if pos else 0
+                        if sell_qty > avail:
+                            self.send_response(409)
+                            self.send_header('Content-Type', 'application/json')
+                            self.end_headers()
+                            self.wfile.write(json.dumps({
+                                'ok': False, 'error': f'sell qty {sell_qty} exceeds available {avail} for {code}'
+                            }).encode())
+                            return
+
+                    # Event idempotency
+                    evt_id = str(entry.get('event_id', '') or '')
+
+                    _ensure_db()
+                    try:
+                        from scripts.db import insert_trade_with_context
+                        today = now.strftime('%Y-%m-%d')
+                        inserted, trade_id, status = insert_trade_with_context({
+                            'trade_date': today, 'trade_time': trade_time,
+                            'action': action, 'code': entry.get('代码', ''),
+                            'name': entry.get('标的', ''), 'price': entry.get('价格'),
+                            'qty': entry.get('数量'), 'window': entry.get('窗口'),
+                            'reason': entry.get('原因'), 'event_id': evt_id,
+                        }, rule_state=None, market_snapshot=None)
+                    except ValueError as e:
+                        # 原子卖出门禁 → 409
+                        status_code = 409 if 'exceeds available' in str(e) else 400
+                        self.send_response(status_code)
+                        self.send_header('Content-Type', 'application/json')
+                        self.end_headers()
+                        self.wfile.write(json.dumps({'ok': False, 'error': str(e)}).encode())
+                        if status_code == 409:
+                            print(f"  [bridge] Atomic sell gate: {e}")
+                        else:
+                            print(f"  [bridge] SQLite trade insert error: {e}")
+                        return
+                    except Exception as e:
+                        self.send_response(400)
+                        self.send_header('Content-Type', 'application/json')
+                        self.end_headers()
+                        self.wfile.write(json.dumps({'ok': False, 'error': str(e)}).encode())
+                        print(f"  [bridge] SQLite trade insert error: {e}")
+                        return
+
+                    if positions_updated:
+                        atomic_write_json(DATA_FILE, data)
+
+                    self.send_response(200)
+                    self.send_header('Content-Type', 'application/json')
+                    self.end_headers()
+                    self.wfile.write(json.dumps({
+                        'ok': True, 'status': status, 'trade_id': trade_id,
+                    }).encode())
+                    print(f"  [bridge] Synced {status} trade_id={trade_id} → {DATA_FILE}")
+                elif tlist:
+                    self.send_response(409)
+                    self.send_header('Content-Type', 'application/json')
+                    self.end_headers()
+                    self.wfile.write(json.dumps({
+                        'ok': False, 'error': 'batch format deprecated; use single entry',
+                    }).encode())
+                    return
+                else:
+                    # positions-only sync (no entry)
+                    if positions_updated:
+                        atomic_write_json(DATA_FILE, data)
+                    self.send_response(200)
+                    self.send_header('Content-Type', 'application/json')
+                    self.end_headers()
+                    self.wfile.write(json.dumps({'ok': True}).encode())
             except Exception as e:
                 self.send_response(400)
                 self.end_headers()
@@ -1690,6 +1877,47 @@ class BridgeHandler(SimpleHTTPRequestHandler):
             finally:
                 self._db_close()
 
+        elif self.path == '/api/trades/review':
+            try:
+                length = int(self.headers.get('Content-Length', 0))
+                body = self.rfile.read(length)
+                if not body:
+                    self.send_response(400)
+                    self.send_header('Content-Type', 'application/json')
+                    self.end_headers()
+                    self.wfile.write(json.dumps({'ok': False, 'error': 'Missing body'}).encode())
+                    return
+                payload = json.loads(body)
+                trade_id = int(payload.get('trade_id', 0))
+                note = str(payload.get('review_note', '') or '')[:2000]
+                if trade_id <= 0 or not note:
+                    self.send_response(400)
+                    self.send_header('Content-Type', 'application/json')
+                    self.end_headers()
+                    self.wfile.write(json.dumps({'ok': False, 'error': 'trade_id and review_note required'}).encode())
+                    return
+                _ensure_db()
+                from scripts.db import update_trade_review_note
+                updated = update_trade_review_note(trade_id, note)
+                if not updated:
+                    self.send_response(404)
+                    self.send_header('Content-Type', 'application/json')
+                    self.end_headers()
+                    self.wfile.write(json.dumps({'ok': False, 'error': f'trade_id {trade_id} not found'}).encode())
+                    return
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/json')
+                self.end_headers()
+                self.wfile.write(json.dumps({'ok': True}).encode())
+                print(f"  [bridge] Review note written for trade {trade_id}")
+            except Exception as e:
+                self.send_response(500)
+                self.send_header('Content-Type', 'application/json')
+                self.end_headers()
+                self.wfile.write(json.dumps({'ok': False, 'error': str(e)}).encode())
+            finally:
+                self._db_close()
+
         elif self.path == '/api/account/correct':
             try:
                 length = int(self.headers.get('Content-Length', 0))
@@ -1775,24 +2003,21 @@ def run_closing_anchor(quotes=None, pnl_history_path=None):
 
 
 def run_morning_health_check():
-    """日初健康检查回调（9:35）：检查今日锚点是否存在，不存在则从 pnl_history 恢复"""
+    """日初健康检查回调（9:35）：检查今日锚点是否存在。
+    持仓账户缺 previous_close → 报警/阻断，不静默造 anchor。
+    """
     from scripts.db import query_account_baseline, close_conn
     try:
         today = datetime.now().strftime("%Y-%m-%d")
         anchor = query_account_baseline(today)
         if not anchor:
-            print(f"  [bridge] ⚠️  MISSING TODAY ANCHOR for {today} — open positions/assets NOT yet locked")
-            try:
-                from scripts.account_ssot import ensure_today_anchor, load_current_account_state
-                dashboard_path = ROOT / "data" / "dashboard_data.json"
-                history_path = ROOT / "data" / "pnl_history.json"
-                if dashboard_path.exists() and history_path.exists():
-                    state = load_current_account_state(CACHE.get('live_quotes', {}))
-                    print(f"  [bridge] Auto-recovery anchor created: cash={state.get('cash')}, total_asset={state.get('total_asset')}")
-            except Exception as e:
-                print(f"  [bridge] Auto-recovery failed: {e}")
+            print(f"  [bridge] BLOCKED: {today} anchor missing — positions not locked. Run closing anchor or create manual_correction.")
         else:
-            print(f"  [bridge] Morning health check: anchor OK ({anchor.get('source')})")
+            src = anchor.get("source", "")
+            if src == "recovery":
+                print(f"  [bridge] WARNING: {today} anchor is recovery (not previous_close)")
+            else:
+                print(f"  [bridge] Morning health check: anchor OK ({src})")
     finally:
         close_conn()
 

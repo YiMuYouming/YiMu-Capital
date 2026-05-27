@@ -1,230 +1,273 @@
-// widgets/positions.js — W15 持仓+记流水+清仓 v3.0
+// widgets/positions.js — W15 持仓+记流水+清仓 v4.0 (SSOT-only rendering)
 'use strict';
+
+function _esc(s) {
+  if (s == null) return '';
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function _fmtPrice(v) {
+  if (v == null || isNaN(v)) return '—';
+  return Number(v).toFixed(2);
+}
+
+function _fmtAmount(v) {
+  if (v == null || isNaN(v)) return '—';
+  return Number(v).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function _fmtPnL(v) {
+  if (v == null || isNaN(v)) return '—';
+  var n = Number(v);
+  return (n >= 0 ? '+' : '') + n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function _fmtPct(v) {
+  if (v == null || isNaN(v)) return '';
+  var n = Number(v);
+  return (n >= 0 ? '+' : '') + n.toFixed(2) + '%';
+}
 
 class PositionsWidget extends YiMuWidget {
   render(data) {
     var body = this.getBody();
     if (!body) return;
-    var manual = DataStore.manualData.getAll();
     var liveQ = (data && data.live_quotes) || {};
     var pnlLive = (data && data.pnl_live) || {};
 
-    // === 持仓（账户 SSOT 优先，旧基线仅为接口不可用时兜底）===
-    var hasSsotPositions = Array.isArray(pnlLive.positions);
-    var basePos = JSON.parse(JSON.stringify(hasSsotPositions ? pnlLive.positions : ((data && data.positions) || [])));
-    basePos.forEach(function(p) { if (!p['数量']) p['数量'] = 0; });
-    // SSOT 只含持有持仓，清仓跟踪数据从基线补充
-    if (hasSsotPositions && data && data.positions) {
-      (data.positions || []).forEach(function(p) {
-        if ((p['状态'] || '').indexOf('清') >= 0) basePos.push(JSON.parse(JSON.stringify(p)));
-      });
+    // === 可信状态检查 ===
+    var isBlocked = pnlLive.anchor_blocked === true;
+    var isValuationIncomplete = pnlLive.valuation_complete === false && !isBlocked;
+    var quoteStatus = pnlLive.quote_status || '';
+    var isPostClose = quoteStatus === 'close_snapshot';
+    var isLive = quoteStatus === 'live';
+
+    // === SSOT positions ===
+    var ssotPositions = Array.isArray(pnlLive.positions) ? pnlLive.positions : [];
+    var active = [];
+    ssotPositions.forEach(function(p) {
+      var st = (p['状态'] || '');
+      if (st.indexOf('清') >= 0 || st.indexOf('删') >= 0) return;
+      active.push(p);
+    });
+
+    // === Summary cards (SSOT) ===
+    var taNull = pnlLive.total_asset == null;
+    var mvNull = pnlLive.mv == null;
+    var cashNull = pnlLive.cash == null;
+    var ta = taNull ? 0 : parseFloat(pnlLive.total_asset);
+    var mv = mvNull ? 0 : parseFloat(pnlLive.mv);
+    var cash = cashNull ? 0 : parseFloat(pnlLive.cash);
+    var posPctNull = pnlLive.pos_pct == null;
+    var posPct = posPctNull ? 0 : parseFloat(pnlLive.pos_pct);
+
+    var tpNull = pnlLive.pnl_amount == null;
+    var ppNull = pnlLive.pnl_pct == null;
+    var tp = tpNull ? 0 : parseFloat(pnlLive.pnl_amount);
+    var pp = ppNull ? 0 : parseFloat(pnlLive.pnl_pct);
+    var tc = tp > 0 ? 'up' : tp < 0 ? 'down' : '';
+
+    // 卡片渲染
+    var naData = '<span style="color:var(--text-disabled)">— / 数据不可用</span>';
+    var naQuote = '<span style="color:var(--text-disabled)">— / 行情不可用</span>';
+    var naPostClose = '<span style="color:var(--text-disabled)">— / 收盘价 · 非实时</span>';
+    var naDash = '<span style="color:var(--text-disabled)">—</span>';
+    // 收盘快照：显示数值（即使 valuation_complete=false），标注非实时
+    var isUnavailable = isValuationIncomplete && !isPostClose;
+    var taDisplay = isUnavailable ? naQuote : (isPostClose ? (_fmtAmount(ta) + ' <span style="font-size:var(--fs-label);color:var(--text-disabled)">收盘</span>') : (taNull ? naData : _fmtAmount(ta)));
+    var mvDisplay = isUnavailable ? naQuote : (isPostClose ? (_fmtAmount(mv) + ' <span style="font-size:var(--fs-label);color:var(--text-disabled)">收盘</span>') : (mvNull ? naData : _fmtAmount(mv)));
+    var cashDisplay = isUnavailable ? naQuote : (cashNull ? naData : _fmtAmount(cash));
+    var posPctDisplay = isUnavailable ? naDash : (posPctNull ? naDash : posPct + '%');
+    var posPctColor = (isUnavailable || posPctNull) ? '' : (posPct > 80 ? 'var(--danger)' : posPct > 50 ? 'var(--warn)' : 'var(--info)');
+
+    var pnlCardHtml;
+    if (isUnavailable) {
+      pnlCardHtml = naQuote;
+    } else if (isPostClose) {
+      pnlCardHtml = _fmtPnL(tp) + ' <span style="font-size:var(--fs-body);font-weight:400">(' + (pp >= 0 ? '+' : '') + pp.toFixed(2) + '%)</span> <span style="font-size:var(--fs-label);color:var(--text-disabled)">收盘</span>';
+    } else if (tpNull && ppNull) {
+      pnlCardHtml = '<span style="color:var(--text-disabled)">— / 基准不可用</span>';
+    } else {
+      pnlCardHtml = _fmtPnL(tp) + ' <span style="font-size:var(--fs-body);font-weight:400">(' + (pp >= 0 ? '+' : '') + pp.toFixed(2) + '%)</span>';
     }
-
-    var P = basePos;
-    try {
-      var mp = JSON.parse(manual['_positions'] || 'null');
-      if (!hasSsotPositions && mp && mp.length) {
-        var merged = false;
-        mp.forEach(function(m) {
-          var idx = P.findIndex(function(p) { return p['标的'] === m['标的']; });
-          if (idx >= 0) { P[idx] = m; merged = true; }
-          else { P.push(m); merged = true; }
-        });
-        if (!merged) P = basePos;
-      }
-    } catch(e) {}
-
-    // 注入实时现价；缺少昨收的老持仓稍后由实时涨幅反推昨日收盘。
-    P.forEach(function(p) {
-      var q = liveQ[p['代码']] || {};
-      var livePrice = parseFloat(q['最新价']) || 0;
-      if (livePrice > 0) p['现价'] = livePrice;
-    });
-
-    var ledgerOps = Array.isArray(pnlLive.trades) ? pnlLive.trades.map(function(t) {
-      return {
-        '时间': t.trade_time, '动作': t.action, '标的': t.name, '代码': t.code,
-        '价格': t.price, '数量': t.qty, '窗口': t.window || '—', '原因': t.reason || ''
-      };
-    }) : [];
-    var serverOps = ledgerOps.length ? ledgerOps : ((data && data.decision && data.decision['今日操作']) || []);
-    var localOps = [];
-    try { localOps = JSON.parse(manual['_今日操作'] || '[]'); } catch(e) {}
-    // 服务端记录是权威展示源；本地只在刚提交且条数更多时作为短暂乐观显示。
-    var ops = localOps.length > serverOps.length ? localOps : serverOps;
-
-    var active = [], cleared = [];
-    P.forEach(function(p) {
-      if ((p['状态']||'').indexOf('删除')>=0) return;  // 跳过已删除
-      if ((p['状态']||'').indexOf('清')>=0) cleared.push(p); else active.push(p);
-    });
-
-    // 逐股计算：现价以实时行情为准（SSOT baseline 现价为兜底）
-    active.forEach(function(p) {
-      var qty = parseFloat(String(p['数量']||'0').replace('股',''))||0;
-      var cost = parseFloat(p['成本']) || 0;
-      var q = liveQ[p['代码']] || {};
-      var livePrice = parseFloat(q['最新价']) || parseFloat(p['现价']) || cost;
-      var chgPct = parseFloat(String(q['涨幅'] || '').replace('%','').replace('+',''));
-      var yc = parseFloat(p['昨收']) || (livePrice / (1 + chgPct / 100)) || cost;
-      p['_qty'] = qty;
-      p['_livePrice'] = livePrice;
-      p['_mv'] = Math.round(livePrice * qty);
-      p['_costBasis'] = cost;
-      // 累计总盈亏 = (现价 - 成本) × 数量
-      p['_totalPnl'] = Math.round((livePrice - cost) * qty);
-      p['_totalPct'] = cost > 0 ? ((livePrice - cost) / cost * 100) : 0;
-      // 今日盈亏 = (现价 - 昨收) × 数量
-      p['_todayPnl'] = isNaN(yc) ? 0 : Math.round((livePrice - yc) * qty);
-      p['_todayPct'] = yc > 0 ? ((livePrice - yc) / yc * 100) : 0;
-    });
-
-    // 今日已清仓的已实现盈亏
-    var today = new Date().toISOString().slice(0, 10);
-    var realizedPnL = 0;
-    cleared.forEach(function(p) {
-      if ((p['清仓日期']||'').slice(0,10) === today || !p['清仓日期']) {
-        var sellPrice = parseFloat(p['卖出价']||p['现价']) || 0;
-        var yc = parseFloat(p['昨收']) || parseFloat(p['成本']) || sellPrice;
-        var qty = parseFloat(String(p['数量']||'0').replace('股','')) || 0;
-        realizedPnL += Math.round((sellPrice - yc) * qty);
-      }
-    });
 
     var html = '';
 
-    // Prefill banner (from W08/W09 录入操作 — 只读，不自动提交)
+    // Trust-status banner
+    if (isBlocked) {
+      html += '<div style="margin-bottom:var(--sp-md);padding:var(--sp-sm);background:var(--danger-bg, #fef2f2);border:1px solid var(--danger);border-radius:var(--radius-md);font-size:var(--fs-body);color:var(--danger);font-weight:600">' +
+        '锚点被阻断 — 数据不可信' +
+        (pnlLive.block_reason ? ' <span style="font-weight:400;opacity:0.8">(' + _esc(pnlLive.block_reason) + ')</span>' : '') +
+        '</div>';
+    } else if (isValuationIncomplete) {
+      var bannerText = isPostClose ? '收盘行情 — 非实时估值' : '行情缺失 — 估值不可信';
+      var bannerBg = isPostClose ? 'var(--bg-card)' : 'var(--warn-bg, #fffbeb)';
+      var bannerBorder = isPostClose ? 'var(--border)' : 'var(--warn)';
+      var bannerColor = isPostClose ? 'var(--text-secondary)' : 'var(--warn)';
+      html += '<div style="margin-bottom:var(--sp-md);padding:var(--sp-sm);background:' + bannerBg + ';border:1px solid ' + bannerBorder + ';border-radius:var(--radius-md);font-size:var(--fs-body);color:' + bannerColor + ';font-weight:600">' +
+        bannerText + '</div>';
+    } else if (isPostClose && !isValuationIncomplete) {
+      html += '<div style="margin-bottom:var(--sp-md);padding:var(--sp-sm);background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-md);font-size:var(--fs-body);color:var(--text-secondary);font-weight:600">' +
+        '收盘快照 — 非实时行情</div>';
+    }
+
+    // Prefill banner
     var _pf = DataStore._prefill;
     if (_pf && Date.now() - (_pf.ts || 0) < 300000) {
       html += '<div class="prefill-banner">' +
         '<span style="font-weight:700;color:var(--info)">预填: </span>' +
-        '<span>' + _pf.name + ' ' + _pf.code + ' ' + _pf.window + '</span>' +
-        '<span style="margin-left:8px;font-size:10px;color:var(--text-secondary)">' + (_pf.evidence || '') + '</span>' +
+        '<span>' + _esc(_pf.name) + ' ' + _esc(_pf.code) + ' ' + _esc(_pf.window) + '</span>' +
+        '<span style="margin-left:8px;font-size:10px;color:var(--text-secondary)">' + _esc(_pf.evidence || '') + '</span>' +
         '<button onclick="DataStore._prefill=null;DataStore.notifyAll()" style="float:right;background:none;border:none;cursor:pointer;font-size:14px;color:var(--text-disabled)" title="关闭预填">x</button>' +
         '</div>';
     }
 
-    // 汇总卡片以日内账户快照为 SSOT；逐股计算仅作接口暂不可用时的兜底。
-    // pnlLive.mv=0 / total_asset=0 是合法值，用 != null 判断。
-    var dayStart = pnlLive.day_start_asset != null && !isNaN(parseFloat(pnlLive.day_start_asset))
-                 ? parseFloat(pnlLive.day_start_asset)
-                 : parseFloat((data.pnl||{})['总资产'] || '0') || 0;
-    var localPv=0; active.forEach(function(p){localPv+=p['_mv']||0;});
-    var localPnl = active.reduce(function(sum,p){return sum+(p['_todayPnl']||0);}, 0) + realizedPnL;
-    var pv = pnlLive.mv != null && !isNaN(parseFloat(pnlLive.mv))
-           ? parseFloat(pnlLive.mv)
-           : localPv;
-    var tp = pnlLive.pnl_amount != null ? parseFloat(pnlLive.pnl_amount) : localPnl;
-    var ta = pnlLive.total_asset != null && !isNaN(parseFloat(pnlLive.total_asset))
-           ? parseFloat(pnlLive.total_asset)
-           : (dayStart > 0 ? dayStart + tp : 0);
-    var af = ta - pv;
-    if (!ta || ta <= 0) ta = pv + af;
-    var tc=tp>0?'up':tp<0?'down':'';
-    var pp = pnlLive.pnl_pct != null ? parseFloat(pnlLive.pnl_pct) : (dayStart > 0 ? tp / dayStart * 100 : 0);
-    var pr=ta>0?Math.round(pv/ta*100):0;
-
-    html += '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:var(--sp-xs) var(--sp-sm);margin-bottom:var(--sp-md);padding:var(--sp-sm);background:var(--bg-base);border-radius:var(--radius-md);font-size:var(--fs-body)">'+
-      '<div style="text-align:center"><div class="kpi-label">总资产</div><div style="font-family:var(--font-mono);font-size:var(--fs-subtitle);font-weight:700">'+ta.toLocaleString()+'</div></div>'+
-      '<div style="text-align:center"><div class="kpi-label">持仓市值</div><div style="font-family:var(--font-mono);font-size:var(--fs-subtitle);font-weight:700">'+pv.toLocaleString()+'</div></div>'+
-      '<div style="text-align:center"><div class="kpi-label">今日盈亏</div><div style="font-family:var(--font-mono);font-size:var(--fs-subtitle);font-weight:700;color:var(--'+tc+')">'+(tp>=0?'+':'')+tp.toFixed(2)+'</div></div>'+
-      '<div style="text-align:center"><div class="kpi-label">今日盈亏%</div><div style="font-family:var(--font-mono);font-size:var(--fs-subtitle);font-weight:700;color:var(--'+tc+')">'+(pp>=0?'+':'')+pp.toFixed(2)+'%</div></div>'+
-      '<div style="text-align:center"><div class="kpi-label">可用资金</div><div style="font-family:var(--font-mono);font-size:var(--fs-subtitle);font-weight:700">'+af.toLocaleString()+'</div></div>'+
-      '<div style="text-align:center"><div class="kpi-label">仓位</div><div style="font-family:var(--font-mono);font-size:var(--fs-subtitle);font-weight:700;color:'+(pr>80?'var(--danger)':pr>50?'var(--warn)':'var(--info)')+'">'+pr+'%</div></div>'+
+    html += '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:var(--sp-xs) var(--sp-sm);margin-bottom:var(--sp-md);padding:var(--sp-sm);background:var(--bg-base);border-radius:var(--radius-md);font-size:var(--fs-body)">' +
+      '<div style="text-align:center"><div class="kpi-label">总资产</div><div style="font-family:var(--font-mono);font-size:var(--fs-subtitle);font-weight:700">' + taDisplay + '</div></div>' +
+      '<div style="text-align:center"><div class="kpi-label">持仓市值</div><div style="font-family:var(--font-mono);font-size:var(--fs-subtitle);font-weight:700">' + mvDisplay + '</div></div>' +
+      '<div style="text-align:center"><div class="kpi-label">今日盈亏</div><div style="font-family:var(--font-mono);font-size:var(--fs-subtitle);font-weight:700;color:var(--' + tc + ')">' + pnlCardHtml + '</div></div>' +
+      '<div style="text-align:center"><div class="kpi-label">可用资金</div><div style="font-family:var(--font-mono);font-size:var(--fs-subtitle);font-weight:700">' + cashDisplay + '</div></div>' +
+      '<div style="text-align:center"><div class="kpi-label">仓位</div><div style="font-family:var(--font-mono);font-size:var(--fs-subtitle);font-weight:700;color:' + posPctColor + '">' + posPctDisplay + '</div></div>' +
       '</div>';
 
-    // ===== 持仓 =====
+    // ===== 持仓 (SSOT) =====
+    if (isBlocked) {
+      html += '<div style="padding:var(--sp-md);text-align:center;color:var(--text-disabled);font-size:var(--fs-body)">数据不可用 — 锚点被阻断</div>';
+    } else {
     html += '<div style="font-size:var(--fs-body);font-weight:600;margin-bottom:var(--sp-xs)">持仓 <span style="font-weight:400;color:var(--text-disabled)">（由成交流水驱动）</span></div>';
     if (active.length) {
-      html += '<table class="data-table"><thead><tr><th>标的</th><th>市值</th><th>现价</th><th>成本</th><th>累计盈亏</th><th>今日盈亏</th><th>止损</th></tr></thead><tbody>';
-      active.forEach(function(p, pi) {
-        var tc = (p['_totalPnl']||0) > 0 ? 'up' : (p['_totalPnl']||0) < 0 ? 'down' : '';
-        var dc = (p['_todayPnl']||0) > 0 ? 'up' : (p['_todayPnl']||0) < 0 ? 'down' : '';
-        // 止损: 百分比 → 止损价
+      html += '<table class="data-table"><thead><tr><th>标的</th><th>市值</th><th>现价</th><th>成本</th><th>今日盈亏</th><th>累计盈亏</th><th>止损</th></tr></thead><tbody>';
+      active.forEach(function(p) {
+        var tPnL = p['today_pnl'], tPct = p['today_pnl_pct'];
+        var totPnL = p['total_pnl'], totPct = p['total_pnl_pct'];
+        var tdc = (tPnL || 0) > 0 ? 'up' : (tPnL || 0) < 0 ? 'down' : '';
+        var todc = (totPnL || 0) > 0 ? 'up' : (totPnL || 0) < 0 ? 'down' : '';
+
+        // 估值不可信时，价格相关字段标记不可用
+        var mvCell, priceCell, todayCell, totalCell;
+        if (isUnavailable) {
+          mvCell = naQuote;
+          priceCell = naQuote;
+          todayCell = naQuote;
+          totalCell = naQuote;
+        } else if (isPostClose) {
+          mvCell = _fmtAmount(p['市值']) + ' <span style="font-size:var(--fs-label);color:var(--text-disabled)">收盘</span>';
+          priceCell = _fmtPrice(p['现价']) + ' <span style="font-size:var(--fs-label);color:var(--text-disabled)">收盘</span>';
+          if (tPnL != null) {
+            todayCell = _fmtPnL(tPnL) + ' <span style="font-size:var(--fs-label)">' + _fmtPct(tPct) + '</span>';
+          } else {
+            todayCell = '<span style="color:var(--text-disabled);font-weight:400">— / 基准不可用</span>';
+          }
+          totalCell = _fmtPnL(totPnL) + ' <span style="font-size:var(--fs-label)">' + _fmtPct(totPct) + '</span>';
+        } else {
+          mvCell = _fmtAmount(p['市值']);
+          priceCell = _fmtPrice(p['现价']);
+          if (tPnL != null) {
+            todayCell = _fmtPnL(tPnL) + ' <span style="font-size:var(--fs-label)">' + _fmtPct(tPct) + '</span>';
+          } else {
+            todayCell = '<span style="color:var(--text-disabled);font-weight:400">— / 基准不可用</span>';
+          }
+          totalCell = _fmtPnL(totPnL) + ' <span style="font-size:var(--fs-label)">' + _fmtPct(totPct) + '</span>';
+        }
+
+        // 止损: percentage → stop-loss price
         var slRaw = p['止损'], slDisplay = '—';
         if (slRaw != null && slRaw !== '-' && slRaw !== '—') {
-          var slPct = parseFloat(String(slRaw).replace('%',''));
-          if (!isNaN(slPct) && slPct !== 0 && p['_costBasis'] > 0) {
-            slDisplay = Math.round(p['_costBasis'] * (1 + slPct/100) * 100) / 100;
+          var slPct = parseFloat(String(slRaw).replace('%', ''));
+          var cost = parseFloat(p['成本'] || p['成本价']) || 0;
+          if (!isNaN(slPct) && slPct !== 0 && cost > 0) {
+            slDisplay = (cost * (1 + slPct / 100)).toFixed(2);
           }
         }
-        html += '<tr><td style="font-size:var(--fs-body);font-weight:600">'+(p['标的']||'—')+' <span style="font-size:var(--fs-label);color:var(--text-disabled)">'+(p['代码']||'')+'</span></td>'+
-          '<td style="font-size:var(--fs-body);font-family:var(--font-mono);font-weight:600">'+(p['_mv']||0).toLocaleString()+'</td>'+
-          '<td style="font-size:var(--fs-body);font-family:var(--font-mono)">'+((p['_livePrice']||p['现价'])||'—')+'</td>'+
-          '<td style="font-size:var(--fs-body);font-family:var(--font-mono);color:var(--text-secondary)">'+(p['_costBasis']||'—')+'</td>'+
-          '<td class="'+tc+'" style="font-size:var(--fs-body);font-family:var(--font-mono);font-weight:600">'+(p['_totalPnl']>=0?'+':'')+(p['_totalPnl']||0).toLocaleString()+' <span style="font-size:var(--fs-label)">'+(p['_totalPct']>=0?'+':'')+(p['_totalPct']||0).toFixed(1)+'%</span></td>'+
-          '<td class="'+dc+'" style="font-size:var(--fs-body);font-family:var(--font-mono);font-weight:600">'+(p['_todayPnl']>=0?'+':'')+(p['_todayPnl']||0).toLocaleString()+' <span style="font-size:var(--fs-label)">'+(p['_todayPct']>=0?'+':'')+(p['_todayPct']||0).toFixed(1)+'%</span></td>'+
-          '<td style="font-size:var(--fs-body)">'+slDisplay+'</td></tr>';
+
+        html += '<tr>' +
+          '<td style="font-size:var(--fs-body);font-weight:600">' + _esc(p['标的']) + ' <span style="font-size:var(--fs-label);color:var(--text-disabled)">' + _esc(p['代码']) + '</span></td>' +
+          '<td style="font-size:var(--fs-body);font-family:var(--font-mono);font-weight:600">' + mvCell + '</td>' +
+          '<td style="font-size:var(--fs-body);font-family:var(--font-mono)">' + priceCell + '</td>' +
+          '<td style="font-size:var(--fs-body);font-family:var(--font-mono);color:var(--text-secondary)">' + _fmtPrice(p['成本价'] != null ? p['成本价'] : p['成本']) + '</td>' +
+          '<td class="' + (isValuationIncomplete ? '' : tdc) + '" style="font-size:var(--fs-body);font-family:var(--font-mono);font-weight:600">' + todayCell + '</td>' +
+          '<td class="' + (isValuationIncomplete ? '' : todc) + '" style="font-size:var(--fs-body);font-family:var(--font-mono);font-weight:600">' + totalCell + '</td>' +
+          '<td style="font-size:var(--fs-body)">' + (isValuationIncomplete ? naDash : _esc(slDisplay)) + '</td>' +
+          '</tr>';
       });
       html += '</tbody></table>';
-    } else { html += '<div style="padding:var(--sp-sm);text-align:center;color:var(--text-disabled);font-size:var(--fs-body)">空仓</div>'; }
+    } else {
+      html += '<div style="padding:var(--sp-sm);text-align:center;color:var(--text-disabled);font-size:var(--fs-body)">空仓</div>';
+    }
 
-    // ===== 今日记录 =====
-    html += '<div style="display:flex;align-items:center;gap:var(--sp-sm);margin-top:var(--sp-md);margin-bottom:var(--sp-xs)">'+
-      '<span style="font-size:var(--fs-body);font-weight:600">今日记录</span>'+
+    // ===== 今日记录 (SSOT trade_records) =====
+    html += '<div style="display:flex;align-items:center;gap:var(--sp-sm);margin-top:var(--sp-md);margin-bottom:var(--sp-xs)">' +
+      '<span style="font-size:var(--fs-body);font-weight:600">今日记录</span>' +
       '<button id="w15_add" style="background:var(--info);color:var(--text-inverse);border:none;padding:2px 10px;border-radius:var(--radius-sm);cursor:pointer;font-size:var(--fs-body);font-family:var(--font-sans)">记流水</button></div>';
 
-    if (ops.length) {
+    var trades = Array.isArray(pnlLive.trades) ? pnlLive.trades : [];
+    if (trades.length) {
       html += '<table class="data-table"><thead><tr><th>时间</th><th>动作</th><th>标的</th><th>代码</th><th>价格</th><th>数量</th><th>窗口</th><th>原因</th></tr></thead><tbody>';
-      ops.forEach(function(o, i) {
-        var act=o['动作']||'—', isBuy=act.indexOf('买入')>=0||act.indexOf('追')>=0;
-        html += '<tr><td style="font-size:var(--fs-body)">'+(o['时间']||'—')+'</td>'+
-          '<td><span class="tag" style="font-size:var(--fs-body);background:var(--'+(isBuy?'up-bg':'down-bg')+');color:var(--'+(isBuy?'up':'down')+')">'+act+'</span></td>'+
-          '<td style="font-size:var(--fs-body);font-weight:600">'+(o['标的']||'—')+'</td>'+
-          '<td style="font-size:var(--fs-body);font-family:var(--font-mono);color:var(--text-secondary)">'+(o['代码']||'—')+'</td>'+
-          '<td style="font-size:var(--fs-body);font-family:var(--font-mono)">'+(o['价格']||'—')+'</td>'+
-          '<td style="font-size:var(--fs-body);font-family:var(--font-mono)">'+(o['数量']||'—')+'</td>'+
-          '<td style="font-size:var(--fs-body)">'+(o['窗口']||'—')+'</td>'+
-          '<td style="font-size:var(--fs-body);color:var(--text-secondary);max-width:100px;white-space:normal">'+(o['原因']||'')+'</td></tr>';
+      trades.forEach(function(t) {
+        var act = t.action || '—';
+        var isBuy = act.indexOf('买入') >= 0 || act.indexOf('追') >= 0;
+        html += '<tr>' +
+          '<td style="font-size:var(--fs-body)">' + _esc(t.trade_time) + '</td>' +
+          '<td><span class="tag" style="font-size:var(--fs-body);background:var(--' + (isBuy ? 'up-bg' : 'down-bg') + ');color:var(--' + (isBuy ? 'up' : 'down') + ')">' + _esc(act) + '</span></td>' +
+          '<td style="font-size:var(--fs-body);font-weight:600">' + _esc(t.name) + '</td>' +
+          '<td style="font-size:var(--fs-body);font-family:var(--font-mono);color:var(--text-secondary)">' + _esc(t.code) + '</td>' +
+          '<td style="font-size:var(--fs-body);font-family:var(--font-mono)">' + _fmtPrice(t.price) + '</td>' +
+          '<td style="font-size:var(--fs-body);font-family:var(--font-mono)">' + _esc(String(t.qty || '—')) + '</td>' +
+          '<td style="font-size:var(--fs-body)">' + _esc(t.window || '—') + '</td>' +
+          '<td style="font-size:var(--fs-body);color:var(--text-secondary);max-width:100px;white-space:normal">' + _esc(t.reason || '') + '</td>' +
+          '</tr>';
       });
       html += '</tbody></table>';
     } else {
       html += '<div style="padding:var(--sp-sm);text-align:center;color:var(--text-disabled);font-size:var(--fs-body)">今日无操作</div>';
     }
 
-    // ===== 清仓跟踪 =====
-    if (cleared.length) {
-      var now=new Date();
-      var tracked=cleared.filter(function(p){var d=p['清仓日期'];if(!d)return true;try{return(now-new Date(d))/(86400000)<=7}catch(e){return true}});
+    // ===== 清仓跟踪 (SSOT closed_positions only, 7日内) =====
+    var closed = Array.isArray(pnlLive.closed_positions) ? pnlLive.closed_positions : [];
+    if (closed.length) {
+      var now = new Date();
+      var tracked = closed.filter(function(c) {
+        var d = c.closed_date;
+        if (!d) return true;
+        try { return (now - new Date(d)) / 86400000 <= 7; } catch (e) { return true; }
+      });
       if (tracked.length) {
         html += '<div style="margin-top:var(--sp-md)"><span style="font-size:var(--fs-body);font-weight:600">清仓跟踪（7日内）</span></div>';
-        html += '<table class="data-table"><thead><tr><th>标的</th><th>成本</th><th>卖出价</th><th>盈亏%</th><th>现价</th><th>卖出后涨跌</th><th>原因</th></tr></thead><tbody>';
-        tracked.forEach(function(p) {
-          var sp=parseFloat(p['卖出价']||p['现价'])||0, cp=parseFloat(p['成本'])||0;
-          var lq=liveQ[(p['代码']||'')]||{};
-          var liveOk = lq['最新价'] != null && parseFloat(lq['最新价']) > 0;
-          var cur = liveOk ? parseFloat(lq['最新价']) : 0;
-          var pl=cp>0?((sp-cp)/cp*100):0, pcls=pl>0?'up':'down';
-          var ap=liveOk&&sp>0?((cur-sp)/sp*100):0, acls=ap>0?'up':ap<0?'down':'';
-          html += '<tr><td style="font-size:var(--fs-body);font-weight:600">'+(p['标的']||'—')+'</td>'+
-            '<td style="font-size:var(--fs-body);font-family:var(--font-mono)">'+(cp||'—')+'</td>'+
-            '<td style="font-size:var(--fs-body);font-family:var(--font-mono)">'+(sp||'—')+'</td>'+
-            '<td class="'+pcls+'" style="font-size:var(--fs-body);font-family:var(--font-mono);font-weight:600">'+(pl>=0?'+':'')+pl.toFixed(2)+'%</td>'+
-            '<td style="font-size:var(--fs-body);font-family:var(--font-mono)">'+(liveOk?cur:'—')+'</td>'+
-            '<td class="'+acls+'" style="font-size:var(--fs-body);font-family:var(--font-mono);font-weight:600">'+(liveOk&&sp>0?(ap>=0?'+':'')+ap.toFixed(2)+'%':'—')+'</td>'+
-            '<td style="font-size:var(--fs-body);color:var(--text-secondary);max-width:100px;white-space:normal">'+(p['清仓原因']||'')+'</td></tr>';
+        html += '<table class="data-table"><thead><tr><th>标的</th><th>卖出价</th><th>已实现盈亏</th><th>现价</th><th>卖出后涨跌</th><th>原因</th></tr></thead><tbody>';
+        tracked.forEach(function(c) {
+          var sp = parseFloat(c.sell_price) || 0;
+          var lq = liveQ[(c.code || '')] || {};
+          var cur = parseFloat(lq['最新价']) || 0;
+          var liveOk = cur > 0;
+          var realized = c.realized_today_pnl != null ? parseFloat(c.realized_today_pnl) : null;
+          var realizedDisplay = realized != null ? _fmtPnL(realized) : '<span style="color:var(--text-disabled);font-weight:400">— / 基准不可用</span>';
+          var ap = liveOk && sp > 0 ? ((cur - sp) / sp * 100) : null;
+          var acls = ap != null ? (ap > 0 ? 'up' : ap < 0 ? 'down' : '') : '';
+
+          html += '<tr>' +
+            '<td style="font-size:var(--fs-body);font-weight:600">' + _esc(c.name) + '</td>' +
+            '<td style="font-size:var(--fs-body);font-family:var(--font-mono)">' + _fmtPrice(sp) + '</td>' +
+            '<td class="' + (realized != null ? (realized >= 0 ? 'up' : 'down') : '') + '" style="font-size:var(--fs-body);font-family:var(--font-mono);font-weight:600">' + realizedDisplay + '</td>' +
+            '<td style="font-size:var(--fs-body);font-family:var(--font-mono)">' + (liveOk ? _fmtPrice(cur) : '—') + '</td>' +
+            '<td class="' + acls + '" style="font-size:var(--fs-body);font-family:var(--font-mono);font-weight:600">' + (ap != null ? (ap >= 0 ? '+' : '') + ap.toFixed(2) + '%' : '—') + '</td>' +
+            '<td style="font-size:var(--fs-body);color:var(--text-secondary);max-width:100px;white-space:normal">' + _esc(c.reason || '') + '</td>' +
+            '</tr>';
         });
         html += '</tbody></table>';
       }
     }
+    } // end if (!isBlocked) — 持仓+记录+清仓区域
 
     body.innerHTML = html;
     this._bindEvents(active);
-
-    // 总资产由 pnl_live 实时推送，不再写 manualData
-    if (tp !== 0) DataStore.manualData.set('总盈亏', tp);   // tp = 浮动盈亏 + 今日已实现
-    DataStore.manualData.set('_realized_pnl', realizedPnL);
     this.updateTimestamp();
-
   }
 
   _bindEvents(active) {
     var self = this;
     var body = this.getBody();
-
     var addBtn = body.querySelector('#w15_add');
     if (addBtn) addBtn.onclick = function() { self._showForm(active); };
-
   }
 
   _showForm(active) {
@@ -234,36 +277,36 @@ class PositionsWidget extends YiMuWidget {
     var o = document.createElement('div');
     o.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.6);z-index:var(--z-toast);display:flex;align-items:center;justify-content:center';
 
-    var sellOpts = active.map(function(p){return '<option value="'+p['标的']+'" data-code="'+(p['代码']||'')+'" data-price="'+(p['现价']||'')+'" data-qty="'+(p['数量']||0)+'">'+p['标的']+' ('+(p['代码']||'')+')</option>';}).join('');
+    var sellOpts = active.map(function(p) {
+      return '<option value="' + _esc(p['标的']) + '" data-code="' + _esc(p['代码'] || '') + '" data-price="' + (p['现价'] || '') + '" data-qty="' + (p['数量'] || 0) + '">' + _esc(p['标的']) + ' (' + _esc(p['代码'] || '') + ')</option>';
+    }).join('');
 
-    o.innerHTML = '<div style="background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-lg);padding:var(--sp-lg);width:90%;max-width:400px">'+
-      '<div style="font-size:var(--fs-subtitle);font-weight:700;margin-bottom:var(--sp-md)">记流水</div>'+
-      '<div style="display:flex;gap:var(--sp-sm);margin-bottom:var(--sp-md)">'+
-        '<button id="f_buy" style="flex:1;padding:var(--sp-sm);border:none;border-radius:var(--radius-sm);cursor:pointer;font-size:var(--fs-body);font-weight:600;background:var(--up-bg);color:var(--up)">买入</button>'+
-        '<button id="f_sell" style="flex:1;padding:var(--sp-sm);border:none;border-radius:var(--radius-sm);cursor:pointer;font-size:var(--fs-body);font-weight:600;background:var(--down-bg);color:var(--down);opacity:0.4">卖出</button>'+
-      '</div>'+
-      '<div id="f_sell_select" style="display:none;margin-bottom:var(--sp-sm)"><div class="input-group"><label>选择持仓</label><select id="f_sel_stock" style="width:100%"><option value="">— 选择 —</option>'+sellOpts+'</select></div></div>'+
-      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:var(--sp-sm)">'+
-        '<div class="input-group"><label>股票代码</label><input id="f_code" value="'+(pf['代码']||'')+'" style="width:100%"></div>'+
-        '<div class="input-group"><label>时间</label><input id="f_time" value="'+(pf['时间']||_nowTime())+'" style="width:100%"></div>'+
-        '<div class="input-group" style="grid-column:1/-1"><label>标的名称</label><input id="f_stock" value="'+(pf['标的']||'')+'" style="width:100%"></div>'+
-        '<div class="input-group"><label>价格</label><input id="f_price" type="number" step="0.01" value="'+(pf['价格']||'')+'" style="width:100%"></div>'+
-        '<div class="input-group" id="f_qty_row"><label>数量(股)</label><input id="f_qty" type="number" value="'+(pf['数量']||'100')+'" style="width:100%"></div>'+
-        '<div class="input-group" id="f_win_row"><label>窗口</label><select id="f_win" style="width:100%"><option value="W1">W1</option><option value="W2">W2</option></select></div>'+
-        '<div class="input-group" style="grid-column:1/-1"><label>交易理由</label><input id="f_reason" value="'+(pf['原因']||'')+'" style="width:100%"></div>'+
-      '</div>'+
-      '<div style="display:flex;gap:var(--sp-sm);margin-top:var(--sp-md)">'+
-        '<button id="f_save" style="flex:1;background:var(--info);color:var(--text-inverse);border:none;padding:var(--sp-sm);border-radius:var(--radius-sm);cursor:pointer;font-size:var(--fs-body)">确认</button>'+
-        '<button id="f_cancel" style="flex:1;background:var(--bg-base);color:var(--text-primary);border:1px solid var(--border);padding:var(--sp-sm);border-radius:var(--radius-sm);cursor:pointer;font-size:var(--fs-body)">取消</button>'+
+    o.innerHTML = '<div style="background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-lg);padding:var(--sp-lg);width:90%;max-width:400px">' +
+      '<div style="font-size:var(--fs-subtitle);font-weight:700;margin-bottom:var(--sp-md)">记流水</div>' +
+      '<div style="display:flex;gap:var(--sp-sm);margin-bottom:var(--sp-md)">' +
+        '<button id="f_buy" style="flex:1;padding:var(--sp-sm);border:none;border-radius:var(--radius-sm);cursor:pointer;font-size:var(--fs-body);font-weight:600;background:var(--up-bg);color:var(--up)">买入</button>' +
+        '<button id="f_sell" style="flex:1;padding:var(--sp-sm);border:none;border-radius:var(--radius-sm);cursor:pointer;font-size:var(--fs-body);font-weight:600;background:var(--down-bg);color:var(--down);opacity:0.4">卖出</button>' +
+      '</div>' +
+      '<div id="f_sell_select" style="display:none;margin-bottom:var(--sp-sm)"><div class="input-group"><label>选择持仓</label><select id="f_sel_stock" style="width:100%"><option value="">— 选择 —</option>' + sellOpts + '</select></div></div>' +
+      '<div style="display:grid;grid-template-columns:1fr 1fr;gap:var(--sp-sm)">' +
+        '<div class="input-group"><label>股票代码</label><input id="f_code" value="' + _esc(pf['代码'] || '') + '" style="width:100%"></div>' +
+        '<div class="input-group"><label>时间</label><input id="f_time" value="' + _esc(pf['时间'] || _nowTime()) + '" style="width:100%"></div>' +
+        '<div class="input-group" style="grid-column:1/-1"><label>标的名称</label><input id="f_stock" value="' + _esc(pf['标的'] || '') + '" style="width:100%"></div>' +
+        '<div class="input-group"><label>价格</label><input id="f_price" type="number" step="0.01" value="' + (pf['价格'] || '') + '" style="width:100%"></div>' +
+        '<div class="input-group" id="f_qty_row"><label>数量(股)</label><input id="f_qty" type="number" value="' + (pf['数量'] || '100') + '" style="width:100%"></div>' +
+        '<div class="input-group" id="f_win_row"><label>窗口</label><select id="f_win" style="width:100%"><option value="W1">W1</option><option value="W2">W2</option></select></div>' +
+        '<div class="input-group" style="grid-column:1/-1"><label>交易理由</label><input id="f_reason" value="' + _esc(pf['原因'] || '') + '" style="width:100%"></div>' +
+      '</div>' +
+      '<div style="display:flex;gap:var(--sp-sm);margin-top:var(--sp-md)">' +
+        '<button id="f_save" style="flex:1;background:var(--info);color:var(--text-inverse);border:none;padding:var(--sp-sm);border-radius:var(--radius-sm);cursor:pointer;font-size:var(--fs-body)">确认</button>' +
+        '<button id="f_cancel" style="flex:1;background:var(--bg-base);color:var(--text-primary);border:1px solid var(--border);padding:var(--sp-sm);border-radius:var(--radius-sm);cursor:pointer;font-size:var(--fs-body)">取消</button>' +
       '</div></div>';
     document.body.appendChild(o);
 
-    // 买入/卖出切换
     var buyBtn2 = o.querySelector('#f_buy'), sellBtn2 = o.querySelector('#f_sell');
     var sellSelect2 = o.querySelector('#f_sell_select'), qtyRow2 = o.querySelector('#f_qty_row'), winRow2 = o.querySelector('#f_win_row');
     var qtyLabel2 = qtyRow2.querySelector('label');
 
-    // Prefill from DataStore._prefill if available
     if (pf && pf.code) {
       var fCode = o.querySelector('#f_code');
       var fStock = o.querySelector('#f_stock');
@@ -272,13 +315,13 @@ class PositionsWidget extends YiMuWidget {
       if (fCode) fCode.value = pf.code || '';
       if (fStock) fStock.value = pf.name || '';
       if (pf.window && fWin && fWin.options) {
-        var wOpts = fWin.options;
-        for (var wi = 0; wi < wOpts.length; wi++) {
-          if (wOpts[wi].value === pf.window) { wOpts[wi].selected = true; break; }
+        for (var wi = 0; wi < fWin.options.length; wi++) {
+          if (fWin.options[wi].value === pf.window) { fWin.options[wi].selected = true; break; }
         }
       }
       if (fReason) fReason.value = pf.evidence || '';
     }
+
     function toggle(buy) {
       buyBtn2.style.opacity = buy ? '1' : '0.4';
       sellBtn2.style.opacity = buy ? '0.4' : '1';
@@ -286,8 +329,8 @@ class PositionsWidget extends YiMuWidget {
       qtyLabel2.textContent = buy ? '数量(股)' : '卖出数量';
       winRow2.style.display = buy ? '' : 'none';
     }
-    buyBtn2.onclick = function(){toggle(true)};
-    sellBtn2.onclick = function(){toggle(false)};
+    buyBtn2.onclick = function() { toggle(true); };
+    sellBtn2.onclick = function() { toggle(false); };
 
     o.querySelector('#f_sel_stock').onchange = function() {
       var opt = this.selectedOptions[0];
@@ -298,66 +341,70 @@ class PositionsWidget extends YiMuWidget {
       o.querySelector('#f_qty').value = opt.dataset.qty || '';
     };
 
-    o.querySelector('#f_cancel').onclick = function() { o.remove(); };
+    o.querySelector('#f_cancel').onclick = function() { self._pendingEvtId = null; o.remove(); };
     o.querySelector('#f_save').onclick = function() {
-      var g = function(id) { return (o.querySelector('#'+id)||{}).value || ''; };
+      // pending 防重复点击
+      if (self._pending) return;
+      var saveBtn = o.querySelector('#f_save');
+      var g = function(id) { return (o.querySelector('#' + id) || {}).value || ''; };
       var buy = buyBtn2.style.opacity !== '0.4';
-      var price = parseFloat(g('f_price'))||0, qty = parseInt(g('f_qty'))||0;
+      var price = parseFloat(g('f_price')) || 0, qty = parseInt(g('f_qty')) || 0;
       var stock = g('f_stock'), code = g('f_code'), reason = g('f_reason');
-      var act = buy ? (g('f_win')==='W1'?'W1追涨':'W2买入') : '卖出';
+      var act = buy ? (g('f_win') === 'W1' ? 'W1追涨' : 'W2买入') : '卖出';
 
-      // 成交账本只允许新增事件，纠错需新增冲销记录。
-      var ops = []; try{ops=JSON.parse(DataStore.manualData.getAll()['_今日操作']||'[]')}catch(e){}
-      var entry = {'时间':g('f_time'),'动作':act,'标的':stock,'代码':code,'价格':price,'数量':qty,'窗口':buy?g('f_win'):'—','原因':reason};
-      ops.push(entry);
-      DataStore.manualData.set('_今日操作', JSON.stringify(ops));
-
-      // 更新持仓
-      var pos = []; try{pos=JSON.parse(DataStore.manualData.getAll()['_positions']||'null')}catch(e){}
-      if (!pos||!pos.length) pos=JSON.parse(JSON.stringify((DataStore.merged&&DataStore.merged.positions)||[]));
-
-      if (!buy) {
-        var f = pos.find(function(p){return p['标的']===stock;});
-        if (f) {
-          var oldQty = parseInt(f['数量'])||0;
-          var sellQty = qty;
-          if (sellQty >= oldQty) {
-            f['状态']='已清仓'; f['卖出价']=price; f['清仓原因']=reason; f['清仓日期']=new Date().toISOString().slice(0,10);
-          } else {
-            f['数量'] = oldQty - sellQty;
-          }
-        }
-      } else {
-        var e = pos.find(function(p){return p['标的']===stock;});
-        if (e) {
-          var oq=parseInt(e['数量'])||0, oc=parseFloat(e['成本'])||0, nq=oq+qty;
-          e['数量']=nq; e['成本']=oq>0?Math.round(((oc*oq)+(price*qty))/nq*100)/100:price; e['现价']=price; e['代码']=code||e['代码']; e['昨收']=e['昨收']||price;
-        } else {
-          pos.push({'标的':stock,'代码':code,'成本':price,'现价':price,'昨收':price,'数量':qty,'止损':'—','状态':'持有'});
-        }
+      // event_id：首次生成，重试复用
+      if (!self._pendingEvtId) {
+        self._pendingEvtId = 'w15-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
       }
-      DataStore.manualData.set('_positions', JSON.stringify(pos));
-      _bridgeSync(pos, ops);
-      o.remove(); self._renderBody();
+      var entry = { '时间': g('f_time'), '动作': act, '标的': stock, '代码': code, '价格': price, '数量': qty, '窗口': buy ? g('f_win') : '—', '原因': reason, 'event_id': self._pendingEvtId };
+
+      // 锁定按钮
+      self._pending = true;
+      saveBtn.disabled = true;
+      saveBtn.textContent = '提交中...';
+      saveBtn.style.opacity = '0.6';
+
+      _bridgeSync(entry, function onSuccess() {
+        self._pending = false;
+        self._pendingEvtId = null;
+        o.remove();
+      }, function onError() {
+        self._pending = false;
+        saveBtn.disabled = false;
+        saveBtn.textContent = '确认';
+        saveBtn.style.opacity = '';
+        // 保留表单 + event_id 供重试
+      });
     };
-    o.addEventListener('click', function(e){if(e.target===o)o.remove();});
+    o.addEventListener('click', function(e) { if (e.target === o) { self._pendingEvtId = null; o.remove(); } });
   }
 }
 
-function _nowTime() { var d=new Date(); return d.getHours()+':'+String(d.getMinutes()).padStart(2,'0'); }
+function _nowTime() {
+  var d = new Date();
+  return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+}
 
-function _bridgeSync(positions, ops) {
-  if (location.protocol === 'file:') return;
-  try {
-    fetch('/api/sync', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({
-        positions: positions,
-        '今日操作': ops
-      })
-    }).catch(function(){});
-  } catch(e) {}
+function _bridgeSync(entry, onSuccess, onError) {
+  if (location.protocol === 'file:') { if (onSuccess) onSuccess(); return; }
+  fetch('/api/sync', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ entry: entry })
+  }).then(function(r) { return r.ok ? r.json() : r.json().then(function(e) { throw e; }); })
+    .then(function(resp) {
+      if (!resp || !resp.ok) {
+        if (typeof showToast === 'function') showToast('成交写入失败: ' + ((resp && resp.error) || '未知错误'));
+        if (onError) onError();
+      } else {
+        if (typeof showToast === 'function') showToast('成交已记录' + (resp.trade_id ? ' #' + resp.trade_id : ''));
+        if (onSuccess) onSuccess();
+      }
+    })
+    .catch(function() {
+      if (typeof showToast === 'function') showToast('网络错误，成交未保存');
+      if (onError) onError();
+    });
 }
 
 WidgetRegistry.register('W15', PositionsWidget);

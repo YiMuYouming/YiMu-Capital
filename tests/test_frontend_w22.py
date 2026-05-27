@@ -1,0 +1,286 @@
+"""test_frontend_w22.py — W22 行为测试：不可信/回退 _updateKPI + _drawChart 不崩溃"""
+import json, os, subprocess, unittest
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+
+PREAMBLE = r"""
+if (typeof document === 'undefined') {
+  global.document = (function() {
+    var els = {};
+    var parentMock = { querySelector:function(sel){return els[sel]||null;}, querySelectorAll:function(){return[];} };
+    function makeEl(id) {
+      var self = { innerHTML:'', textContent:'', style:{}, className:'', id:id||'',
+        parentElement: parentMock,
+        classList:{contains:function(){return false},add:function(){},toggle:function(){},remove:function(c){}},
+        getAttribute:function(){return null}, setAttribute:function(){},
+        querySelector:function(sel){return els[sel]||null;},
+        querySelectorAll:function(){return[];},
+        addEventListener:function(){}, removeEventListener:function(){}, closest:function(){return null},
+        getBoundingClientRect:function(){return {left:0,top:0,width:800,height:300};},
+        getContext:function(ty) {
+          return { beginPath:function(){}, moveTo:function(){}, lineTo:function(){},
+            stroke:function(){}, fill:function(){}, fillText:function(){}, fillRect:function(){},
+            setLineDash:function(){}, arc:function(){}, restore:function(){}, save:function(){}, closePath:function(){},
+            measureText:function(){return {width:50};}, strokeText:function(){},
+            clearRect:function(){}, translate:function(){}, scale:function(){},
+            createLinearGradient:function(){return {addColorStop:function(){}};},
+            setTransform:function(){}, canvas:{width:800,height:300} };
+        },
+      };
+      if (id) els[id] = self;
+      return self;
+    }
+    function getById(id) { return els[id] || makeEl(id); }
+    return {
+      createElement:function(t){var e=makeEl();e.tagName=t;return e;},
+      querySelector:function(){return null;}, querySelectorAll:function(){return[];},
+      getElementById:getById, body:makeEl()
+    };
+  })();
+}
+var _SyncPromise = function(executor) {
+  var self = this;
+  this._resolved = false; this._value = null;
+  this._fulfillQueue = [];
+  executor(function(v) { self._resolve(v); }, function(e) { self._reject(e); });
+};
+_SyncPromise.prototype._resolve = function(v) {
+  if (this._resolved) return;
+  this._resolved = true; this._value = v;
+  for (var i = 0; i < this._fulfillQueue.length; i++) {
+    try { var r = this._fulfillQueue[i](v); if (this._chain) this._chain._resolve(r); } catch(e) { if (this._chain) this._chain._reject(e); }
+  }
+  this._fulfillQueue = [];
+};
+_SyncPromise.prototype._reject = function(e) {
+  if (this._rejected || this._resolved) return;
+  this._rejected = true; this._value = e;
+  for (var i = 0; i < this._rejectQueue.length; i++) {
+    try { this._rejectQueue[i](e); } catch(e2) {}
+  }
+};
+_SyncPromise.prototype.then = function(onFulfilled, onRejected) {
+  if (this._resolved && onFulfilled) { try { var r = onFulfilled(this._value); return _SyncPromise.resolve(r); } catch(e) { return _SyncPromise.reject(e); } }
+  if (this._rejected && onRejected) { try { var r2 = onRejected(this._value); return _SyncPromise.resolve(r2); } catch(e) { return _SyncPromise.reject(e); } }
+  if (this._rejected) return this;
+  if (onFulfilled) this._fulfillQueue.push(onFulfilled);
+  if (onRejected) (this._rejectQueue||[]).push(onRejected);
+  var chain = new _SyncPromise(function(){}); this._chain = chain; return chain;
+};
+_SyncPromise.prototype.catch = function(onRejected) { return this.then(null, onRejected); };
+_SyncPromise.resolve = function(v) { return new _SyncPromise(function(res) { res(v); }); };
+_SyncPromise.reject = function(e) { return new _SyncPromise(function(_, rej) { rej(e); }); };
+global.Promise = _SyncPromise;
+global.fetch = function(url, opts) { return _SyncPromise.resolve({ ok:true, status:200, json:function(){return _SyncPromise.resolve({});} }); };
+global.setTimeout = function(fn,ms){fn();};
+global.setInterval = function(){return 0;};
+global.YiMuWidget = function(){};
+YiMuWidget.prototype.getBody = function(){return document.createElement('div');};
+YiMuWidget.prototype.updateTimestamp = function(){};
+YiMuWidget.prototype._renderBody = function(){this.render({});};
+YiMuWidget.prototype._on = function(el,ev,fn){};
+YiMuWidget.prototype.unmount = function(){};
+global.WidgetRegistry = { _map:{}, register:function(id,cls){this._map[id]=cls;}, getClass:function(id){return this._map[id];}, getMeta:function(){return{tier:'manual',dataPaths:[]};} };
+global.DataStore = { _prefill:null, merged:{}, manualData:{getAll:function(){return{};}} };
+global.window = global;
+"""
+
+
+def _run_node(script, files=None):
+    if files is None: files = []
+    full = PREAMBLE + "\n"
+    for fp in files:
+        with open(ROOT / fp, "r", encoding="utf-8") as f:
+            full += f.read() + "\n"
+    full += "\n" + script
+    env = os.environ.copy()
+    env["TZ"] = "Asia/Shanghai"
+    r = subprocess.run(["node","--no-warnings","-e",full], capture_output=True, text=True, timeout=10, env=env, cwd=str(ROOT))
+    if r.returncode != 0: return {"_error": str(r.stderr).strip()[:600]}
+    try: return json.loads(r.stdout.strip().split("\n")[-1])
+    except json.JSONDecodeError: return {"_error": r.stdout.strip()[:400]}
+
+
+class W22UpdateKpiBehaviorTests(unittest.TestCase):
+    """_updateKPI 行为测试：不可信 & 回退 实际调用验证"""
+
+    def _run_kpi_test(self, state_overrides, chartData_overrides=None):
+        script = r"""
+var inst = new PnLCurveWidget({id:'W22'});
+inst.id = 'W22';
+inst._allDailyData = null;
+var state = {
+  period:'today', index:'sh', totalAsset:200000, totalDeposit:200000,
+  liveQ:{}, positions:[], pnlLive:{}
+};
+""" + "Object.assign(state, " + json.dumps(state_overrides) + ");\n" + r"""
+inst._state = state;
+var cd = { type:'intraday', labels:['09:30','09:35'], portfolio:[0.5, 0.8], benchmark:[0.2, 0.3], position:[50.0, 50.0], nav:[1.0, 1.0] };
+""" + ("Object.assign(cd, " + json.dumps(chartData_overrides) + ");" if chartData_overrides else "") + r"""
+try {
+  inst._updateKPI(cd);
+  var periodVal = document.getElementById('pnl_period_val');
+  var periodSub = document.getElementById('pnl_period_sub');
+  var ddVal = document.getElementById('pnl_dd_val');
+  var alphaEl = document.getElementById('pnl_today_alpha');
+  var alphaSub = document.getElementById('pnl_today_alpha_sub');
+  console.log(JSON.stringify({
+    asset: document.getElementById('pnl_asset').textContent,
+    assetSub: document.getElementById('pnl_asset_sub').textContent,
+    pnl: document.getElementById('pnl_pnl').textContent,
+    pnlSub: document.getElementById('pnl_pnl_sub').textContent,
+    pos: document.getElementById('pnl_pos').textContent,
+    periodVal: periodVal ? periodVal.textContent : '',
+    periodSub: periodSub ? periodSub.textContent : '',
+    ddVal: ddVal ? ddVal.textContent : '',
+    alpha: alphaEl ? alphaEl.textContent : '',
+    alphaSub: alphaSub ? alphaSub.textContent : '',
+    ok:true
+  }));
+} catch(e) {
+  console.log(JSON.stringify({ok:false, err: e.message}));
+}
+"""
+        return _run_node(script, files=["widgets/pnl-curve.js"])
+
+    def test_valuation_incomplete_shows_unavailable(self):
+        """valuation_complete=false → 全部估值字段不可用"""
+        result = self._run_kpi_test(
+            {"pnlLive": {"valuation_complete": False, "anchor_blocked": False}})
+        self.assertTrue(result.get("ok"), f"不应崩溃: {result}")
+        self.assertEqual(result.get("asset"), "—")
+        self.assertIn("不可信", result.get("assetSub", ""))
+        self.assertEqual(result.get("pnl"), "—")
+        self.assertIn("不可信", result.get("pnlSub", ""))
+        self.assertEqual(result.get("pos"), "—")
+        # 今日 TWR / 回撤 / 超额 不可用
+        self.assertEqual(result.get("periodVal"), "—",
+            f"valuationBad 时 periodVal 应为'—': {result}")
+        self.assertIn("不可信", result.get("periodSub", ""),
+            f"periodSub 应标注不可信: {result}")
+        self.assertEqual(result.get("ddVal"), "—",
+            f"valuationBad 时 ddVal 应为'—': {result}")
+        self.assertEqual(result.get("alpha"), "—",
+            f"valuationBad 时 alpha 应为'—': {result}")
+
+    def test_fallback_shows_date_not_realtime(self):
+        """is_fallback=true → 显示 data_date + 回退，无'实时收益'"""
+        result = self._run_kpi_test(
+            {"pnlLive": {"valuation_complete": True}},
+            {"is_fallback": True, "data_date": "2026-05-26"})
+        self.assertTrue(result.get("ok"), f"不应崩溃: {result}")
+        self.assertIn("2026-05-26", result.get("assetSub", ""))
+        self.assertIn("非今日实时", result.get("assetSub", ""))
+        self.assertIn("2026-05-26", result.get("periodSub", ""),
+            f"periodSub 应含回退日期: {result}")
+        self.assertIn("回退", result.get("periodSub", ""),
+            f"periodSub 应标注回退: {result}")
+        self.assertNotIn("实时收益", result.get("periodSub", ""),
+            f"fallback 不得显示'实时收益': {result}")
+        self.assertIn("2026-05-26", result.get("alphaSub", ""),
+            f"alphaSub 应含回退日期: {result}")
+
+    def test_normal_live_shows_values(self):
+        """正常状态显示实际数值 + '实时收益'"""
+        result = self._run_kpi_test(
+            {"pnlLive": {"valuation_complete": True, "pnl_amount": 500, "pnl_pct": 0.25, "pos_pct": 50, "mv": 100000}})
+        self.assertTrue(result.get("ok"), f"不应崩溃: {result}")
+        self.assertNotEqual(result.get("asset"), "—")
+        self.assertIn("实时收益", result.get("periodSub", ""),
+            f"正常应显示'实时收益': {result}")
+
+    def test_close_snapshot_shows_values_with_label(self):
+        """R3: quote_status=close_snapshot + valuation_complete=true → asset≠'—', 标注收盘"""
+        result = self._run_kpi_test(
+            {"pnlLive": {"valuation_complete": True, "quote_status": "close_snapshot",
+                         "pnl_amount": 500, "pnl_pct": 0.25, "pos_pct": 50, "mv": 100000}})
+        self.assertTrue(result.get("ok"), f"不应崩溃: {result}")
+        self.assertNotEqual(result.get("asset"), "—",
+            f"close_snapshot时asset应显示数值: {result}")
+        self.assertIn("收盘", result.get("assetSub", ""),
+            f"assetSub应标注收盘: {result}")
+        self.assertIn("收盘", result.get("pnlSub", ""),
+            f"P&L副标题应标注收盘: {result}")
+        self.assertNotEqual(result.get("pnl"), "—",
+            f"close_snapshot应显示P&L数值: {result}")
+        self.assertNotEqual(result.get("pos"), "—",
+            f"close_snapshot应显示仓位: {result}")
+
+    def test_blocked_anchor_shows_unavailable(self):
+        """anchor_blocked=true → 全部不可用"""
+        result = self._run_kpi_test(
+            {"pnlLive": {"anchor_blocked": True, "valuation_complete": False, "quote_status": "stale"}})
+        self.assertTrue(result.get("ok"), f"不应崩溃: {result}")
+        self.assertEqual(result.get("asset"), "—")
+        self.assertIn("不可信", result.get("assetSub", ""))
+        self.assertEqual(result.get("periodVal"), "—")
+        self.assertEqual(result.get("ddVal"), "—")
+
+
+class W22DrawChartBehaviorTests(unittest.TestCase):
+    """_drawChart 行为测试：null slot + 全零曲线 实际调用不崩溃"""
+
+    def test_draw_chart_with_null_slots(self):
+        script = r"""
+var inst = new PnLCurveWidget({id:'W22_D1'});
+inst.id = 'W22_D1';
+inst._state = { period:'today', index:'sh', totalAsset:200000, totalDeposit:200000, liveQ:{}, positions:[], pnlLive:{} };
+inst._lastChartData = {
+  type:'intraday', labels:['09:30','09:35','09:40'],
+  portfolio:[0.0, null, null], benchmark:[0.0, null, null],
+  position:[50.0, null, null], nav:[1.0, null, null]
+};
+try {
+  inst._drawChart(inst._lastChartData);
+  console.log(JSON.stringify({ok:true}));
+} catch(e) {
+  console.log(JSON.stringify({ok:false, err: e.message.substring(0,100)}));
+}
+"""
+        result = _run_node(script, files=["widgets/pnl-curve.js"])
+        self.assertTrue(result.get("ok"), f"null slot draw 不应崩溃: {result}")
+
+    def test_draw_chart_all_zero(self):
+        script = r"""
+var inst = new PnLCurveWidget({id:'W22_D2'});
+inst.id = 'W22_D2';
+inst._state = { period:'today', index:'sh', totalAsset:0, totalDeposit:0, liveQ:{}, positions:[], pnlLive:{} };
+inst._lastChartData = {
+  type:'intraday', labels:['09:30','09:35'],
+  portfolio:[0.0, 0.0], benchmark:[0.0, 0.0],
+  position:[0.0, 0.0], nav:[1.0, 1.0]
+};
+try {
+  inst._drawChart(inst._lastChartData);
+  console.log(JSON.stringify({ok:true}));
+} catch(e) {
+  console.log(JSON.stringify({ok:false, err: e.message.substring(0,100)}));
+}
+"""
+        result = _run_node(script, files=["widgets/pnl-curve.js"])
+        self.assertTrue(result.get("ok"), f"全零曲线 draw 不应崩溃: {result}")
+
+
+class W22CodeStructureTests(unittest.TestCase):
+    """W22 源码结构补充验证"""
+
+    def test_total_asset_not_null_check(self):
+        src = (ROOT / "widgets" / "pnl-curve.js").read_text()
+        self.assertIn("!= null", src, "应使用 != null 判断存在性")
+
+    def test_valuation_complete_consumed(self):
+        src = (ROOT / "widgets" / "pnl-curve.js").read_text()
+        self.assertIn("valuation_complete", src, "应消费 valuation_complete")
+
+    def test_data_date_consumed(self):
+        src = (ROOT / "widgets" / "pnl-curve.js").read_text()
+        self.assertIn("data_date", src, "应消费 data_date")
+
+    def test_absmax_zero_guard(self):
+        src = (ROOT / "widgets" / "pnl-curve.js").read_text()
+        self.assertIn("absMax === 0", src, "应有全零保护")
+
+
+if __name__ == "__main__":
+    unittest.main()

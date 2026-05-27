@@ -92,8 +92,8 @@ class PnLCurveWidget extends YiMuWidget {
         positions = (data && data.positions) || [];
       }
     }
-    var totalAsset = parseFloat(pnlLive.total_asset) || parseFloat(pnlCfg['总资产']) || (this._state && this._state.totalAsset) || 0;
-    var totalDeposit = pnlLive.total_deposit || pnlCfg['累计入金'] || (this._state && this._state.totalDeposit) || 0;
+    var totalAsset = pnlLive.total_asset != null ? parseFloat(pnlLive.total_asset) : (pnlCfg['总资产'] != null ? parseFloat(pnlCfg['总资产']) : ((this._state && this._state.totalAsset != null) ? this._state.totalAsset : 0));
+    var totalDeposit = pnlLive.total_deposit != null ? pnlLive.total_deposit : (pnlCfg['累计入金'] != null ? pnlCfg['累计入金'] : ((this._state && this._state.totalDeposit != null) ? this._state.totalDeposit : 0));
 
     this._state = {
       period: (this._state && this._state.period) || 'today',
@@ -123,7 +123,7 @@ class PnLCurveWidget extends YiMuWidget {
         .then(function(s) {
           if (s) {
             self._state._pnlSummary = s;
-            if (s.total_asset) self._state.totalAsset = s.total_asset;
+            if (s.total_asset != null) self._state.totalAsset = s.total_asset;
             self._state.pnlLive = s;
             if (Array.isArray(s.positions)) self._state.positions = s.positions;
             if (s.total_deposit != null) self._state.totalDeposit = s.total_deposit;
@@ -300,11 +300,30 @@ class PnLCurveWidget extends YiMuWidget {
     var pnlEl = document.getElementById('pnl_pnl');
     var posEl = document.getElementById('pnl_pos');
 
-    // Current asset
+    // Current asset — null=不可用, 0=合法零值
     var ta = s.totalAsset;
-    var hasAsset = ta && ta > 0;
-    asset.textContent = hasAsset ? ta.toLocaleString() : '—';
-    document.getElementById('pnl_asset_sub').textContent = ta ? '累计入金 ' + _pnlFmtMoney(s.totalDeposit) : '—';
+    var taNull = ta == null;
+    var pnlLive = s.pnlLive || {};
+    var valuationBad = pnlLive.valuation_complete === false || pnlLive.anchor_blocked === true;
+    var quoteStatus = pnlLive.quote_status || '';
+    var isPostClose = quoteStatus === 'close_snapshot';
+    var isQuoteUnavailable = valuationBad && !isPostClose;
+
+    if (valuationBad && !isPostClose) {
+      asset.textContent = '—';
+      document.getElementById('pnl_asset_sub').textContent = '行情缺失 — 估值不可信';
+    } else if (isPostClose) {
+      asset.textContent = taNull ? '—' : ta.toLocaleString();
+      document.getElementById('pnl_asset_sub').textContent = '收盘快照 · 非实时';
+    } else {
+      asset.textContent = taNull ? '—' : ta.toLocaleString();
+      var subText = taNull ? '—' : '累计入金 ' + _pnlFmtMoney(s.totalDeposit);
+      // 回退历史标记
+      if (chartData && chartData.is_fallback) {
+        subText = (chartData.data_date || '?') + ' 回退 · 非今日实时';
+      }
+      document.getElementById('pnl_asset_sub').textContent = subText;
+    }
 
     // Position P&L: 今日盈亏 = 现价 - 昨收（从涨幅反推），不是累计成本浮盈
     var mv = 0, todayChg = 0, missingQuotes = 0;
@@ -323,23 +342,45 @@ class PnLCurveWidget extends YiMuWidget {
       mv += qty * cur;
       todayChg += qty * (cur - yestClose);
     });
-    if (parseFloat((s.pnlLive || {}).mv) > 0) mv = parseFloat(s.pnlLive.mv);
+    // SSOT mv — null=不可用, 0=合法空仓
+    var ssotMv = (s.pnlLive || {}).mv;
+    if (ssotMv != null) mv = parseFloat(ssotMv);
     var hasLivePnl = (s.pnlLive || {}).pnl_amount != null;
     var todayPnl = hasLivePnl ? parseFloat(s.pnlLive.pnl_amount) : todayChg;
-    var todayPnlPct = (s.pnlLive || {}).pnl_pct != null ? parseFloat(s.pnlLive.pnl_pct) : (ta > 0 ? (todayChg / ta * 100) : 0);
-    var posPct = ta > 0 ? (mv / ta * 100) : 0;
+    var todayPnlPct = (s.pnlLive || {}).pnl_pct != null ? parseFloat(s.pnlLive.pnl_pct) : (taNull ? null : (ta > 0 ? (todayChg / ta * 100) : 0));
+    var ssotPosPct = (s.pnlLive || {}).pos_pct;
+    var posPct = ssotPosPct != null ? parseFloat(ssotPosPct) : (taNull ? 0 : (ta > 0 ? (mv / ta * 100) : 0));
 
-    pnlEl.textContent = !hasLivePnl && missingQuotes ? '—' : (todayPnl >= 0 ? '+' : '') + todayPnl.toLocaleString();
-    pnlEl.style.color = !hasLivePnl && missingQuotes ? 'var(--text-disabled)' : (todayPnl >= 0 ? 'var(--up)' : 'var(--down)');
-    document.getElementById('pnl_pnl_sub').textContent = !hasLivePnl && missingQuotes ? '行情缺失 ' + missingQuotes + ' 只' : (todayPnlPct >= 0 ? '+' : '') + todayPnlPct.toFixed(2) + '% 今日';
+    if (isQuoteUnavailable) {
+      pnlEl.textContent = '—';
+      pnlEl.style.color = 'var(--text-disabled)';
+      document.getElementById('pnl_pnl_sub').textContent = '估值不可信';
+      posEl.textContent = '—';
+      posEl.style.color = 'var(--text-disabled)';
+    } else if (isPostClose) {
+      pnlEl.textContent = !hasLivePnl && missingQuotes ? '—' : (todayPnl >= 0 ? '+' : '') + todayPnl.toLocaleString();
+      pnlEl.style.color = !hasLivePnl && missingQuotes ? 'var(--text-disabled)' : (todayPnl >= 0 ? 'var(--up)' : 'var(--down)');
+      document.getElementById('pnl_pnl_sub').textContent = !hasLivePnl && missingQuotes ? '行情缺失' : (todayPnlPct >= 0 ? '+' : '') + todayPnlPct.toFixed(2) + '% 收盘';
+      posEl.textContent = posPct.toFixed(0) + '%';
+      posEl.style.color = posPct > 80 ? 'var(--danger)' : posPct > 50 ? 'var(--warn)' : 'var(--accent)';
+    } else {
+      pnlEl.textContent = !hasLivePnl && missingQuotes ? '—' : (todayPnl >= 0 ? '+' : '') + todayPnl.toLocaleString();
+      pnlEl.style.color = !hasLivePnl && missingQuotes ? 'var(--text-disabled)' : (todayPnl >= 0 ? 'var(--up)' : 'var(--down)');
+      document.getElementById('pnl_pnl_sub').textContent = !hasLivePnl && missingQuotes ? '行情缺失 ' + missingQuotes + ' 只' : (todayPnlPct >= 0 ? '+' : '') + todayPnlPct.toFixed(2) + '% 今日';
 
-    posEl.textContent = posPct.toFixed(0) + '%';
-    posEl.style.color = posPct > 80 ? 'var(--danger)' : posPct > 50 ? 'var(--warn)' : 'var(--accent)';
+      posEl.textContent = posPct.toFixed(0) + '%';
+      posEl.style.color = posPct > 80 ? 'var(--danger)' : posPct > 50 ? 'var(--warn)' : 'var(--accent)';
+    }
     document.getElementById('pnl_pos_sub').textContent = (s.positions||[]).filter(function(p){return (p['状态']||'').indexOf('清')<0&&(p['状态']||'').indexOf('删除')<0}).length + ' 只持仓';
 
     // Period KPI — 标签联动
+    var isFallback = chartData && chartData.is_fallback;
+    var fbDate = isFallback ? (chartData.data_date || '?') : '';
     var periodLabel = { today:'今日', week:'近一周', month:'近一月', quarter:'近三月', year:'近一年' };
     var perStr = periodLabel[s.period] || s.period;
+    if (isFallback && s.period === 'today') {
+      perStr = fbDate + ' 回退';
+    }
     var pnlLabelEl = document.getElementById('pnl_period_label');
     if (pnlLabelEl) pnlLabelEl.textContent = perStr + ' TWR';
     var ddLabelEl = document.getElementById('pnl_dd_label');
@@ -353,14 +394,26 @@ class PnLCurveWidget extends YiMuWidget {
 
     // 今日：用实时持仓浮动盈亏 + 日内的回撤/超额
     if (s.period === 'today') {
-      if (chartData && chartData.portfolio && chartData.portfolio.length) {
+      if (isQuoteUnavailable) {
+        document.getElementById('pnl_period_val').textContent = '—';
+        document.getElementById('pnl_period_val').style.color = 'var(--text-disabled)';
+        document.getElementById('pnl_period_sub').textContent = '估值不可信';
+        document.getElementById('pnl_dd_val').textContent = '—';
+        document.getElementById('pnl_dd_val').style.color = 'var(--text-disabled)';
+        var todayAlphaEl2 = document.getElementById('pnl_today_alpha');
+        if (todayAlphaEl2) {
+          todayAlphaEl2.textContent = '—';
+          todayAlphaEl2.style.color = 'var(--text-disabled)';
+        }
+      } else if (chartData && chartData.portfolio && chartData.portfolio.length) {
         var _n = chartData.portfolio.length, _lastI = _n - 1;
         while (_lastI >= 0 && chartData.portfolio[_lastI] == null) _lastI--;
         var lastPnl = _lastI >= 0 ? chartData.portfolio[_lastI] : null;
         var liveTodayPnl = (s.pnlLive || {}).pnl_pct != null ? parseFloat(s.pnlLive.pnl_pct) : lastPnl;
         document.getElementById('pnl_period_val').textContent = liveTodayPnl != null ? ((liveTodayPnl >= 0 ? '+' : '') + liveTodayPnl.toFixed(2) + '%') : '—';
-        document.getElementById('pnl_period_val').style.color = liveTodayPnl >= 0 ? 'var(--up)' : 'var(--down)';
-        document.getElementById('pnl_period_sub').textContent = '实时收益';
+        document.getElementById('pnl_period_val').style.color = liveTodayPnl != null ? (liveTodayPnl >= 0 ? 'var(--up)' : 'var(--down)') : 'var(--text-disabled)';
+        var fallbackLabel = chartData.is_fallback ? (chartData.data_date || '?') + ' 回退' : '实时收益';
+        document.getElementById('pnl_period_sub').textContent = chartData.is_fallback ? fallbackLabel : '实时收益';
         var ddI = this._calcDD(chartData);
         document.getElementById('pnl_dd_val').textContent = (ddI ? ddI.dd : 0).toFixed(2) + '%';
         var lastB = chartData.benchmark && _lastI >= 0 ? chartData.benchmark[_lastI] : null;
@@ -369,6 +422,10 @@ class PnLCurveWidget extends YiMuWidget {
           var ta = liveTodayPnl - lastB;
           todayAlphaEl.textContent = (ta >= 0 ? '+' : '') + ta.toFixed(2) + '%';
           todayAlphaEl.style.color = ta >= 0 ? 'var(--up)' : 'var(--down)';
+        }
+        if (chartData.is_fallback) {
+          var alphaSubEl = document.getElementById('pnl_today_alpha_sub');
+          if (alphaSubEl) alphaSubEl.textContent = fallbackLabel + ' TWR−基准';
         }
       }
     } else {
@@ -544,7 +601,7 @@ class PnLCurveWidget extends YiMuWidget {
 
   _updateSummary() {
     var s = this._state;
-    var totalAsset = s.totalAsset || 0;
+    var totalAsset = s.totalAsset != null ? s.totalAsset : null;
 
     // 从 _allDailyData 实时算 TWR + 基准 + 回撤（和抽屉同源）
     var cumReturn = 0, bmTWR = 0, histMaxDD = 0;
@@ -659,6 +716,7 @@ class PnLCurveWidget extends YiMuWidget {
     var allVals = validP.concat(validB);
     if (!allVals.length) { allVals = [0, 0]; }
     var absMax = Math.max(Math.abs(Math.min.apply(null, allVals)), Math.abs(Math.max.apply(null, allVals)));
+    if (absMax === 0) absMax = 1;  // 全零序列避免 maxY=minY=0 导致 NaN
     var step = absMax < 2 ? 0.5 : absMax < 5 ? 1 : 2;
     var maxY = Math.ceil(absMax / step) * step;
     var minY = -maxY;
@@ -931,12 +989,16 @@ class PnLCurveWidget extends YiMuWidget {
         var isDaily = cd.type === 'daily';
         var lbl = cd.labels[idx];
         if (!isDaily && lbl.length > 5) lbl = lbl.split(' ')[0];
+        var pVal = cd.portfolio[idx];
+        var bVal = cd.benchmark[idx];
+        var hasP = pVal != null && !isNaN(pVal);
+        var hasB = bVal != null && !isNaN(bVal);
         tip.innerHTML =
           '<b>' + (isDaily ? '' : '') + lbl + '</b>' +
-          '<br>收益 <span style=\"color:' + (cd.portfolio[idx] >= 0 ? '#DC2626' : '#059669') + '\">' +
-          (cd.portfolio[idx] >= 0 ? '+' : '') + cd.portfolio[idx].toFixed(2) + '%</span>' +
-          '<br>指数 <span style=\"color:' + (cd.benchmark[idx] >= 0 ? '#DC2626' : '#059669') + '\">' +
-          (cd.benchmark[idx] >= 0 ? '+' : '') + cd.benchmark[idx].toFixed(2) + '%</span>' +
+          '<br>收益 <span style=\"color:' + (hasP ? (pVal >= 0 ? '#DC2626' : '#059669') : '#999') + '\">' +
+          (hasP ? ((pVal >= 0 ? '+' : '') + pVal.toFixed(2) + '%') : '—') + '</span>' +
+          '<br>指数 <span style=\"color:' + (hasB ? (bVal >= 0 ? '#DC2626' : '#059669') : '#999') + '\">' +
+          (hasB ? ((bVal >= 0 ? '+' : '') + bVal.toFixed(2) + '%') : '—') + '</span>' +
           (cd.position[idx] != null ? '<br>仓位 ' + cd.position[idx].toFixed(1) + '%' : '');
         tip.style.left = (e.clientX + 14) + 'px';
         tip.style.top = (e.clientY - 10) + 'px';

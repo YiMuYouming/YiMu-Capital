@@ -1,4 +1,7 @@
+import hashlib
 import json
+import os
+import sqlite3
 import unittest
 import tempfile
 import threading
@@ -10,11 +13,12 @@ import scripts.db as db
 from scripts.collectors import quotes
 
 try:
-    from scripts.account_ssot import ensure_today_anchor, load_current_account_state, reduce_account_state
+    from scripts.account_ssot import ensure_today_anchor, load_current_account_state, reduce_account_state, backfill_day_start_price
 except ImportError:
     ensure_today_anchor = None
     load_current_account_state = None
     reduce_account_state = None
+    backfill_day_start_price = None
 
 
 class AccountReducerTests(unittest.TestCase):
@@ -77,6 +81,76 @@ class AccountReducerTests(unittest.TestCase):
             now="2026-05-26T10:06:00",
         )
         self.assertFalse(state["valuation_complete"])
+
+    # —— R1: 收盘后行情新鲜度 ——
+
+    def test_post_close_quote_accepted_after_300s(self):
+        """15:30 使用当天 15:05 quote → close_snapshot, valuation_complete=true"""
+        state = reduce_account_state(
+            self.anchor,
+            [],
+            {"688981": {"最新价": 146}, "_updated": "2026-05-26T15:05:00"},
+            now="2026-05-26T15:30:00",
+        )
+        self.assertTrue(state["valuation_complete"])
+        self.assertEqual(state.get("quote_status"), "close_snapshot")
+
+    def test_intraday_stale_still_rejected(self):
+        """盘中 10:30 使用 10:20 quote → stale, valuation_complete=false"""
+        state = reduce_account_state(
+            self.anchor,
+            [],
+            {"688981": {"最新价": 146}, "_updated": "2026-05-26T10:20:00"},
+            now="2026-05-26T10:30:00",
+        )
+        self.assertFalse(state["valuation_complete"])
+        self.assertEqual(state.get("quote_status"), "stale")
+
+    def test_yesterday_quote_rejected_post_close(self):
+        """今天用昨天 quote → stale, valuation_complete=false"""
+        state = reduce_account_state(
+            self.anchor,
+            [],
+            {"688981": {"最新价": 146}, "_updated": "2026-05-25T15:05:00"},
+            now="2026-05-26T15:30:00",
+        )
+        self.assertFalse(state["valuation_complete"])
+        self.assertEqual(state.get("quote_status"), "stale")
+
+    def test_1501_with_1500_quote_is_close_snapshot(self):
+        """15:01 使用 15:00 quote → close_snapshot(收盘后，非live)"""
+        state = reduce_account_state(
+            self.anchor,
+            [],
+            {"688981": {"最新价": 146}, "_updated": "2026-05-26T15:00:00"},
+            now="2026-05-26T15:01:00",
+        )
+        self.assertTrue(state["valuation_complete"])
+        self.assertEqual(state.get("quote_status"), "close_snapshot",
+            "15:01已是收盘后，应返回close_snapshot")
+
+    def test_live_quote_returns_live_status(self):
+        """盘中实时行情返回 live"""
+        state = reduce_account_state(
+            self.anchor,
+            [],
+            {"688981": {"最新价": 146}, "_updated": "2026-05-26T10:00:01"},
+            now="2026-05-26T10:00:02",
+        )
+        self.assertTrue(state["valuation_complete"])
+        self.assertEqual(state.get("quote_status"), "live")
+
+    def test_1558_with_1557_quote_is_close_snapshot(self):
+        """R2: 15:57 quote + 15:58 now → close_snapshot, val_complete=true"""
+        state = reduce_account_state(
+            self.anchor,
+            [],
+            {"688981": {"最新价": 146}, "_updated": "2026-05-26T15:57:00"},
+            now="2026-05-26T15:58:00",
+        )
+        self.assertTrue(state["valuation_complete"])
+        self.assertEqual(state.get("quote_status"), "close_snapshot",
+            "收盘后1秒也不应返回live")
 
     def test_same_minute_trades_replay_in_append_id_order(self):
         anchor = dict(self.anchor, positions=[], cash=100000, effective_at="2026-05-26T09:00:00")
@@ -148,14 +222,13 @@ class AccountAnchorStorageTests(unittest.TestCase):
 
     def test_first_anchor_is_locked_and_reused(self):
         self.assertIsNotNone(ensure_today_anchor)
-        data = {"pnl": {"可用资金": 125279, "累计入金": 200000}, "positions": self._positions(300)}
-        first = ensure_today_anchor(
-            data,
-            day_start_asset=210477,
-            now="2026-05-26T11:37:10",
-            get_anchor=db.query_account_baseline,
-            insert_anchor=db.insert_account_baseline,
-        )
+        # Insert previous_close anchor (required by new trust rules)
+        db.insert_account_baseline({
+            "date": "2026-05-26", "effective_at": "2026-05-26T09:25:00",
+            "trade_id_cutoff": 0, "cash": 125279, "day_start_asset": 210477,
+            "total_deposit": 200000, "positions": self._positions(300),
+            "source": "previous_close",
+        })
         changed = {"pnl": {"可用资金": 0}, "positions": self._positions(0)}
         second = ensure_today_anchor(
             changed,
@@ -164,10 +237,9 @@ class AccountAnchorStorageTests(unittest.TestCase):
             get_anchor=db.query_account_baseline,
             insert_anchor=db.insert_account_baseline,
         )
-        self.assertEqual(first["cash"], 125279)
         self.assertEqual(second["cash"], 125279)
         self.assertEqual(second["positions"][0]["数量"], 300)
-        self.assertEqual(second["effective_at"], "2026-05-26T11:37:10")
+        self.assertEqual(second["effective_at"], "2026-05-26T09:25:00")
 
     def test_load_state_replays_only_new_transactions_after_persisted_anchor(self):
         self.assertIsNotNone(load_current_account_state)
@@ -180,6 +252,13 @@ class AccountAnchorStorageTests(unittest.TestCase):
         history_path.write_text(json.dumps({
             "meta": {"day_start_date": "2026-05-26", "day_start_asset": 210477}
         }, ensure_ascii=False), encoding="utf-8")
+        # Insert previous_close anchor with 1 position (中芯国际 300 shares)
+        db.insert_account_baseline({
+            "date": "2026-05-26", "effective_at": "2026-05-26T09:25:00",
+            "trade_id_cutoff": 0, "cash": 125279, "day_start_asset": 210477,
+            "total_deposit": 200000, "positions": self._positions(300),
+            "source": "previous_close",
+        })
         db.insert_trade({
             "trade_date": "2026-05-26", "trade_time": "10:59", "action": "卖出",
             "code": "688981", "name": "中芯国际", "price": 147.77, "qty": 200,
@@ -200,8 +279,9 @@ class AccountAnchorStorageTests(unittest.TestCase):
             data_file=dashboard_path,
             history_file=history_path,
         )
-        self.assertEqual(state["cash"], 113029)
-        self.assertEqual({p["代码"]: p["数量"] for p in state["positions"]}, {"688981": 300, "002463": 100})
+        # cash: 125279 + sell(200*147.77=29554) - buy(100*122.5=12250) = 142583
+        self.assertAlmostEqual(state["cash"], 142583.0, delta=1)
+        self.assertEqual({p["代码"]: p["数量"] for p in state["positions"]}, {"688981": 100, "002463": 100})
         self.assertEqual([trade["id"] for trade in state["trades"]], [2, 1])
         self.assertEqual(state["_updated"], "2026-05-26T13:02:00")
 
@@ -535,6 +615,760 @@ class FullLifecycleReplayTests(unittest.TestCase):
         pos_by_code = {p["代码"]: p["数量"] for p in state_day2_after_buy["positions"]}
         self.assertEqual(pos_by_code.get("000001"), 400)
         self.assertEqual(pos_by_code.get("600001"), 500)
+
+
+class BackfillDayStartPriceTests(unittest.TestCase):
+    """R7: backfill_day_start_price 受控补录（注入式回调 + 审计分离）"""
+
+    def setUp(self):
+        import tempfile, threading
+        self.tmp = tempfile.TemporaryDirectory()
+        self.original_path = db.DB_PATH
+        self.original_local = db._local
+        db.DB_PATH = Path(self.tmp.name) / "pnl.db"
+        db._local = threading.local()
+        db.init_db()
+
+    def tearDown(self):
+        conn = getattr(db._local, "conn", None)
+        if conn is not None: conn.close()
+        db._local = self.original_local
+        db.DB_PATH = self.original_path
+        self.tmp.cleanup()
+
+    def _callbacks(self):
+        """返回注入临时库的 get_anchor / update_meta"""
+        from scripts.db import query_account_baseline, _exec_write
+        def get_anchor(d):
+            return query_account_baseline(d)
+        def update_meta(d, m):
+            _exec_write(
+                "UPDATE account_baselines SET _meta_json = ? WHERE date = ?",
+                (json.dumps(m, ensure_ascii=False), d))
+        return get_anchor, update_meta
+
+    def _make_anchor(self, code="002436", qty=1500, cost=38.28,
+                     day_start_prices=None, source="manual_correction"):
+        """Helper: 在临时DB创建锚点"""
+        meta = None
+        if day_start_prices:
+            meta = {"day_start_prices": day_start_prices}
+        db.insert_account_baseline({
+            "date": "2026-05-27",
+            "effective_at": "2026-05-27T09:30:00",
+            "trade_id_cutoff": 0,
+            "cash": 100187,
+            "day_start_asset": 209786,
+            "total_deposit": 200000,
+            "positions": [{"标的": "兴森科技", "代码": code, "数量": qty,
+                           "成本": cost, "状态": "持有"}],
+            "source": source,
+            "_meta": meta,
+        })
+
+    # —— 拒绝场景 ——
+
+    def test_reject_source_empty(self):
+        self.assertIsNotNone(backfill_day_start_price)
+        self._make_anchor()
+        ga, um = self._callbacks()
+        for bad in ["", "  ", None]:
+            result = backfill_day_start_price(
+                "2026-05-27", "002436", 38.11,
+                bad, "reason ok", get_anchor=ga, update_meta=um)
+            self.assertEqual(result["action"], "rejected",
+                             f"source={bad!r} 应拒绝: {result}")
+            self.assertIn("source", result["error"].lower())
+
+    def test_reject_reason_empty(self):
+        self._make_anchor()
+        ga, um = self._callbacks()
+        for bad in ["", "  ", None]:
+            result = backfill_day_start_price(
+                "2026-05-27", "002436", 38.11,
+                "source ok", bad, get_anchor=ga, update_meta=um)
+            self.assertEqual(result["action"], "rejected",
+                             f"reason={bad!r} 应拒绝: {result}")
+            self.assertIn("reason", result["error"].lower())
+
+    def test_reject_code_not_in_anchor(self):
+        self.assertIsNotNone(backfill_day_start_price)
+        self._make_anchor(code="002436")
+        ga, um = self._callbacks()
+        result = backfill_day_start_price(
+            "2026-05-27", "999999", 38.11,
+            "test", "code不在锚点", get_anchor=ga, update_meta=um)
+        self.assertEqual(result["action"], "rejected")
+        self.assertIn("不在", result["error"])
+
+    def test_reject_price_zero_or_negative(self):
+        self._make_anchor()
+        ga, um = self._callbacks()
+        for bad in [0, -1, "abc"]:
+            result = backfill_day_start_price(
+                "2026-05-27", "002436", bad,
+                "test", "非法价格", get_anchor=ga, update_meta=um)
+            self.assertEqual(result["action"], "rejected",
+                             f"price={bad} 应拒绝: {result}")
+
+    def test_reject_already_exists(self):
+        self._make_anchor(day_start_prices={"002436": 38.28})
+        ga, um = self._callbacks()
+        result = backfill_day_start_price(
+            "2026-05-27", "002436", 38.11,
+            "test", "已有价格", get_anchor=ga, update_meta=um)
+        self.assertEqual(result["action"], "idempotent")
+        self.assertEqual(result["existing_price"], 38.28)
+
+    def test_reject_no_anchor_for_date(self):
+        ga, um = self._callbacks()
+        result = backfill_day_start_price(
+            "2026-05-20", "002436", 38.11,
+            "test", "无锚点", get_anchor=ga, update_meta=um)
+        self.assertEqual(result["action"], "rejected")
+        self.assertIn("无锚点", result["error"])
+
+    # —— 成功场景 ——
+
+    def test_backfill_restores_today_pnl(self):
+        """兴森风格：隔夜仓缺 day_start_price → 补入38.11后 today_pnl 恢复"""
+        self._make_anchor(code="002436", day_start_prices=None)
+        ga, um = self._callbacks()
+
+        quotes = {"002436": {"最新价": 37.69},
+                  "_updated": "2026-05-27T11:00:00+08:00"}
+        state_before = reduce_account_state(
+            db.query_account_baseline("2026-05-27"), [], quotes,
+            now="2026-05-27T11:00:00")
+        pos_before = state_before["positions"][0]
+        self.assertIsNone(pos_before["today_pnl"],
+            f"补录前应为None, 实为{pos_before['today_pnl']}")
+
+        result = backfill_day_start_price(
+            "2026-05-27", "002436", 38.11,
+            "sina_daily_2026-05-26_close",
+            "兴森科技隔夜仓缺日初基准，主人确认收盘价38.11补录",
+            get_anchor=ga, update_meta=um)
+        self.assertEqual(result["action"], "written",
+            f"应写入成功: {result}")
+        self.assertEqual(result["after_prices"]["002436"], 38.11)
+        # 审计字段独立
+        self.assertIsNotNone(result.get("repair_entry"))
+        self.assertEqual(result["repair_entry"]["code"], "002436")
+        self.assertEqual(result["repair_entry"]["price"], 38.11)
+
+        state_after = reduce_account_state(
+            db.query_account_baseline("2026-05-27"), [], quotes,
+            now="2026-05-27T11:00:01")
+        pos_after = state_after["positions"][0]
+        self.assertEqual(pos_after["today_pnl"], -630,
+            f"补录后应恢复today_pnl=-630, 实为{pos_after['today_pnl']}")
+        self.assertAlmostEqual(pos_after["today_pnl_pct"], -1.10, delta=0.05,
+            msg=f"today_pnl_pct={pos_after['today_pnl_pct']}")
+
+    def test_day_start_prices_clean_no_audit_inside(self):
+        """day_start_prices 只含 code->number，审计在 day_start_price_repairs"""
+        self._make_anchor(code="002436", day_start_prices=None)
+        ga, um = self._callbacks()
+        backfill_day_start_price(
+            "2026-05-27", "002436", 38.11,
+            "test_source", "test_reason",
+            get_anchor=ga, update_meta=um)
+
+        anchor = db.query_account_baseline("2026-05-27")
+        meta = anchor.get("_meta") or {}
+        prices = meta.get("day_start_prices") or {}
+        # day_start_prices 只含数字值
+        self.assertNotIn("_backfill", prices)
+        for k, v in prices.items():
+            self.assertIsInstance(v, (int, float), f"prices[{k}]={v!r} 应为数字")
+        # 审计在独立数组
+        repairs = meta.get("day_start_price_repairs") or []
+        self.assertEqual(len(repairs), 1)
+        self.assertEqual(repairs[0]["code"], "002436")
+        self.assertEqual(repairs[0]["source"], "test_source")
+
+    def test_backfill_does_not_change_cash_positions_trades(self):
+        """补录不改变 cash/positions/trades/day_start_asset"""
+        self._make_anchor(code="002436", day_start_prices=None)
+        ga, um = self._callbacks()
+
+        state_before = reduce_account_state(
+            db.query_account_baseline("2026-05-27"), [],
+            {"002436": {"最新价": 37.69},
+             "_updated": "2026-05-27T11:00:00+08:00"},
+            now="2026-05-27T11:00:00")
+
+        backfill_day_start_price(
+            "2026-05-27", "002436", 38.11,
+            "test", "测试不改变核心数据",
+            get_anchor=ga, update_meta=um)
+
+        state_after = reduce_account_state(
+            db.query_account_baseline("2026-05-27"), [],
+            {"002436": {"最新价": 37.69},
+             "_updated": "2026-05-27T11:00:01+08:00"},
+            now="2026-05-27T11:00:01")
+
+        self.assertEqual(state_before["cash"], state_after["cash"])
+        self.assertEqual(state_before["day_start_asset"], state_after["day_start_asset"])
+        self.assertEqual(state_before["total_deposit"], state_after["total_deposit"])
+        self.assertEqual(state_before["mv"], state_after["mv"])
+        self.assertEqual(len(state_before["positions"]), len(state_after["positions"]))
+        self.assertEqual(state_before["positions"][0]["数量"],
+                         state_after["positions"][0]["数量"])
+
+    def test_dry_run_does_not_write(self):
+        self._make_anchor(code="002436", day_start_prices=None)
+        ga, um = self._callbacks()
+        result = backfill_day_start_price(
+            "2026-05-27", "002436", 38.11,
+            "test", "dry-run测试", dry_run=True,
+            get_anchor=ga, update_meta=um)
+        self.assertEqual(result["action"], "would_write")
+
+        anchor = db.query_account_baseline("2026-05-27")
+        meta = anchor.get("_meta") or {}
+        prices = meta.get("day_start_prices") or {}
+        self.assertNotIn("002436", prices, "dry-run不应写入DB")
+
+    def test_repeat_backfill_idempotent(self):
+        self._make_anchor(code="002436", day_start_prices=None)
+        ga, um = self._callbacks()
+        r1 = backfill_day_start_price(
+            "2026-05-27", "002436", 38.11,
+            "test", "第一次", get_anchor=ga, update_meta=um)
+        self.assertEqual(r1["action"], "written")
+        r2 = backfill_day_start_price(
+            "2026-05-27", "002436", 38.50,
+            "test", "第二次应拒绝", get_anchor=ga, update_meta=um)
+        self.assertEqual(r2["action"], "idempotent")
+        anchor = db.query_account_baseline("2026-05-27")
+        prices = (anchor.get("_meta") or {}).get("day_start_prices") or {}
+        self.assertEqual(prices["002436"], 38.11)
+
+    def test_injected_callbacks_only_touch_temp_db(self):
+        """注入回调只操作临时库，不碰默认 data/pnl.db"""
+        import os
+        real_mtime_before = os.path.getmtime(self.original_path) if os.path.exists(str(self.original_path)) else None
+        self._make_anchor(code="002436", day_start_prices=None)
+        ga, um = self._callbacks()
+        backfill_day_start_price(
+            "2026-05-27", "002436", 38.11,
+            "test", "注入回调测试", get_anchor=ga, update_meta=um)
+        if real_mtime_before is not None:
+            real_mtime_after = os.path.getmtime(str(self.original_path))
+            self.assertEqual(real_mtime_before, real_mtime_after,
+                "真实 data/pnl.db 不得被注入回调修改")
+
+    # —— R8+R9: CLI 安全边界 ——
+
+    def test_dry_run_static_db_no_sidecar_created(self):
+        """无 WAL 的静态库 dry-run：主库 hash/mtime 不变，不新建 -wal/-shm"""
+        import hashlib, os
+
+        # 用 DELETE journal mode 自建干净 DB，绕过 db 模块的 WAL 默认
+        temp_db = Path(self.tmp.name) / "static.db"
+        conn = sqlite3.connect(str(temp_db))
+        conn.execute("PRAGMA journal_mode=DELETE")
+        conn.execute("CREATE TABLE account_baselines (date TEXT PRIMARY KEY,"
+                     " effective_at TEXT, cash REAL, day_start_asset REAL,"
+                     " total_deposit REAL, positions_json TEXT, source TEXT,"
+                     " _meta_json TEXT, trade_id_cutoff INTEGER)")
+        conn.execute("INSERT INTO account_baselines VALUES (?,?,?,?,?,?,?,?,?)",
+                     ("2026-05-27", "2026-05-27T09:30:00", 100187, 209786,
+                      200000,
+                      json.dumps([{"标的": "兴森", "代码": "002436", "数量": 1500,
+                                   "成本": 38.28, "状态": "持有"}]),
+                      "manual_correction", None, 0))
+        conn.commit()
+        conn.close()
+
+        # 确认无 sidecar
+        for suf in ["-wal", "-shm"]:
+            self.assertFalse(Path(str(temp_db) + suf).exists(),
+                             f"DELETE模式不应有{suf}")
+
+        hash_before = hashlib.sha256(temp_db.read_bytes()).hexdigest()
+        mtime_before = os.path.getmtime(str(temp_db))
+
+        from scripts.repair_day_start_price import _ro_query_anchor
+        anchor = _ro_query_anchor(str(temp_db), "2026-05-27")
+        self.assertIsNotNone(anchor)
+        self.assertEqual(anchor["source"], "manual_correction")
+        self.assertEqual(len(anchor.get("positions") or []), 1)
+
+        # hash/mtime 不变
+        self.assertEqual(hash_before,
+                         hashlib.sha256(temp_db.read_bytes()).hexdigest(),
+                         "只读连接不得修改源库 hash")
+        self.assertEqual(mtime_before, os.path.getmtime(str(temp_db)),
+                         "只读连接不得修改源库 mtime")
+
+        # 不新建 sidecar
+        for suf in ["-wal", "-shm"]:
+            self.assertFalse(Path(str(temp_db) + suf).exists(),
+                             f"只读连接不得创建{suf}")
+
+    def test_ro_query_reads_active_wal_data(self):
+        """保持 writer 连接 open，WAL 中有未 checkpoint 记录 → _ro_query 必须读到"""
+        import sqlite3
+
+        temp_db = Path(self.tmp.name) / "wal_active.db"
+        writer = sqlite3.connect(str(temp_db))
+        writer.execute("PRAGMA journal_mode=WAL")
+        # 关闭 autocheckpoint
+        writer.execute("PRAGMA wal_autocheckpoint=0")
+        writer.execute("CREATE TABLE account_baselines (date TEXT PRIMARY KEY,"
+                       " effective_at TEXT, cash REAL, day_start_asset REAL,"
+                       " total_deposit REAL, positions_json TEXT, source TEXT,"
+                       " _meta_json TEXT, trade_id_cutoff INTEGER)")
+        writer.execute("INSERT INTO account_baselines VALUES (?,?,?,?,?,?,?,?,?)",
+                       ("2026-05-27", "2026-05-27T09:30:00", 100187, 209786,
+                        200000,
+                        json.dumps([{"标的": "兴森", "代码": "002436", "数量": 1500,
+                                     "成本": 38.28, "状态": "持有"}]),
+                        "previous_close", None, 0))
+        writer.commit()
+
+        # 通过 writer 更新 _meta_json（写入 WAL，不 checkpoint）
+        new_meta = {"day_start_prices": {"002436": 38.11}}
+        writer.execute("UPDATE account_baselines SET _meta_json = ? WHERE date = ?",
+                       (json.dumps(new_meta), "2026-05-27"))
+        writer.commit()
+        # writer 保持 open，WAL 中有未 checkpoint 的 day_start_prices
+
+        # 另一只读连接应读取到 WAL 中的最新数据
+        from scripts.repair_day_start_price import _ro_query_anchor
+        anchor = _ro_query_anchor(str(temp_db), "2026-05-27")
+        self.assertIsNotNone(anchor, "应能读取 account_baselines 表")
+
+        meta = anchor.get("_meta") or {}
+        prices = meta.get("day_start_prices") or {}
+        self.assertIn("002436", prices,
+                      f"应读取到 WAL 中的 day_start_prices: {meta}")
+        self.assertEqual(prices["002436"], 38.11,
+                         "价格应为 WAL 中最新值")
+
+        writer.close()
+
+    def test_backup_includes_wal_data_and_integrity_ok(self):
+        """构造 WAL 中有已提交但未 checkpoint 记录的库，backup 包含这些记录"""
+        import sqlite3
+
+        temp_db = Path(self.tmp.name) / "test_wal.db"
+        backup_db = Path(self.tmp.name) / "test_backup.db"
+
+        # 创建库，启用 WAL，写入数据
+        conn = sqlite3.connect(str(temp_db))
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("CREATE TABLE IF NOT EXISTS account_baselines (date TEXT PRIMARY KEY)")
+        conn.execute("INSERT OR REPLACE INTO account_baselines VALUES ('test')")
+        conn.commit()
+        # 不关闭 conn — WAL 中有已提交但未 checkpoint 的记录
+
+        # 用 backup API 创建备份（另一连接）
+        from scripts.repair_day_start_price import _sqlite_backup, _integrity_check
+        _sqlite_backup(str(temp_db), str(backup_db))
+
+        # 备份库应有数据
+        bconn = sqlite3.connect(str(backup_db))
+        row = bconn.execute("SELECT date FROM account_baselines").fetchone()
+        self.assertIsNotNone(row, "备份应包含 WAL 中已提交记录")
+        self.assertEqual(row[0], "test")
+        bconn.close()
+
+        # integrity_check
+        ok, detail = _integrity_check(str(backup_db))
+        self.assertTrue(ok, f"备份 integrity_check 应为 ok: {detail}")
+
+        conn.close()
+
+    def test_apply_only_adds_target_price_and_audit(self):
+        """apply 后只新增 day_start_price + repair，不改 cash/positions"""
+        self._make_anchor(code="002436", day_start_prices=None)
+        ga, um = self._callbacks()
+
+        anchor_before = db.query_account_baseline("2026-05-27")
+        cash_before = anchor_before["cash"]
+        positions_before = json.dumps(anchor_before.get("positions", []))
+
+        backfill_day_start_price(
+            "2026-05-27", "002436", 38.11,
+            "test_source", "test_reason",
+            get_anchor=ga, update_meta=um)
+
+        anchor_after = db.query_account_baseline("2026-05-27")
+        self.assertEqual(anchor_after["cash"], cash_before)
+        self.assertEqual(json.dumps(anchor_after.get("positions", [])), positions_before)
+
+        meta = anchor_after.get("_meta") or {}
+        prices = meta.get("day_start_prices") or {}
+        self.assertIn("002436", prices)
+        self.assertEqual(prices["002436"], 38.11)
+        self.assertNotIn("_backfill", prices, "prices 不得含审计信息")
+
+        repairs = meta.get("day_start_price_repairs") or []
+        self.assertEqual(len(repairs), 1)
+        self.assertEqual(repairs[0]["source"], "test_source")
+
+
+class PerStockMetricsTest(unittest.TestCase):
+    """逐股 today_pnl / total_pnl / closed_positions 回归"""
+
+    def setUp(self):
+        import tempfile, threading
+        self.tmp = tempfile.TemporaryDirectory()
+        self.original_path = db.DB_PATH
+        self.original_local = db._local
+        db.DB_PATH = Path(self.tmp.name) / "pnl.db"
+        db._local = threading.local()
+        db.init_db()
+
+    def tearDown(self):
+        conn = getattr(db._local, "conn", None)
+        if conn is not None: conn.close()
+        db._local = self.original_local
+        db.DB_PATH = self.original_path
+        self.tmp.cleanup()
+
+    def test_ziguang_buy_today_pnl(self):
+        """紫光案例：今日买入600@87，现价88.50，today_pnl=900, today_pnl_pct≈1.72%"""
+        db.insert_account_baseline({
+            "date": "2026-05-27", "effective_at": "2026-05-27T09:30:00",
+            "trade_id_cutoff": 0, "cash": 100187, "day_start_asset": 209786,
+            "total_deposit": 200000, "positions": [], "source": "manual_correction",
+        })
+        db.insert_trade({
+            "trade_date": "2026-05-27", "trade_time": "10:03",
+            "action": "W1追涨", "code": "002049", "name": "紫光国微",
+            "price": 87.0, "qty": 600,
+        })
+        quotes = {"002049": {"最新价": 88.50}, "_updated": "2026-05-27T10:30:00+08:00"}
+        state = reduce_account_state(
+            db.query_account_baseline("2026-05-27"),
+            db.query_trades(date_from="2026-05-27", date_to="2026-05-27", limit=100),
+            quotes, now="2026-05-27T10:30:00")
+        pos = state["positions"][0]
+        self.assertEqual(pos["代码"], "002049")
+        self.assertAlmostEqual(pos["today_pnl"], 900, delta=5)
+        self.assertAlmostEqual(pos["today_pnl_pct"], 1.72, delta=0.1,
+            msg=f"紫光 today_pnl_pct={pos['today_pnl_pct']:.2f}% 不应接近 6.69%")
+
+    # —— R3 逐股盈亏账本测试 ——
+
+    def test_overnight_plus_buy_today_pnl(self):
+        """隔夜100@10 + 今日买100@20 + 现价21 => today_pnl=1200, pct=40.00"""
+        anchor = {
+            "date": "2026-05-27", "effective_at": "2026-05-27T09:30:00",
+            "cash": 100000, "day_start_asset": 101000,
+            "total_deposit": 100000, "source": "previous_close",
+            "positions": [{"标的": "TEST", "代码": "000001", "数量": 100, "成本": 10, "状态": "持有"}],
+            "_meta": {"day_start_prices": {"000001": 10}},
+        }
+        trades = [{"id": 1, "trade_date": "2026-05-27", "trade_time": "10:00",
+                    "action": "买入", "code": "000001", "name": "TEST",
+                    "price": 20, "qty": 100}]
+        quotes = {"000001": {"最新价": 21}, "_updated": "2026-05-27T10:30:00"}
+        state = reduce_account_state(anchor, trades, quotes, now="2026-05-27T10:30:00")
+        pos = state["positions"][0]
+        self.assertEqual(pos["today_pnl"], 1200)
+        self.assertEqual(pos["today_pnl_pct"], 40.0)
+
+    def test_overnight_partial_sell_not_closed(self):
+        """日初100@10 + 卖50@20 + 剩50现价21 => today_pnl=1050, pct=105.00, 不进closed"""
+        anchor = {
+            "date": "2026-05-27", "effective_at": "2026-05-27T09:30:00",
+            "cash": 100000, "day_start_asset": 101000,
+            "total_deposit": 100000, "source": "previous_close",
+            "positions": [{"标的": "TEST", "代码": "000001", "数量": 100, "成本": 10, "状态": "持有"}],
+            "_meta": {"day_start_prices": {"000001": 10}},
+        }
+        trades = [{"id": 1, "trade_date": "2026-05-27", "trade_time": "10:00",
+                    "action": "卖出", "code": "000001", "name": "TEST",
+                    "price": 20, "qty": 50}]
+        quotes = {"000001": {"最新价": 21}, "_updated": "2026-05-27T10:30:00"}
+        state = reduce_account_state(anchor, trades, quotes, now="2026-05-27T10:30:00")
+        pos = state["positions"][0]
+        self.assertEqual(pos["today_pnl"], 1050)
+        self.assertEqual(pos["today_pnl_pct"], 105.0)
+        self.assertEqual(pos["数量"], 50)
+        closed_codes = [c["code"] for c in state.get("closed_positions", [])]
+        self.assertNotIn("000001", closed_codes, "部分卖出不应进closed_positions")
+
+    def test_overnight_no_day_start_price_returns_none(self):
+        """隔夜持仓无day_start_price → today_pnl=None, 不伪算"""
+        anchor = {
+            "date": "2026-05-27", "effective_at": "2026-05-27T09:30:00",
+            "cash": 100000, "day_start_asset": 101000,
+            "total_deposit": 100000, "source": "manual_correction",
+            "positions": [{"标的": "OLD", "代码": "000002", "数量": 100, "成本": 50, "状态": "持有"}],
+            # No _meta / day_start_prices
+        }
+        trades = []
+        quotes = {"000002": {"最新价": 55}, "_updated": "2026-05-27T10:30:00"}
+        state = reduce_account_state(anchor, trades, quotes, now="2026-05-27T10:30:00")
+        pos = state["positions"][0]
+        self.assertIsNone(pos["today_pnl"], f"无day_start_price应返回None, 实为{pos['today_pnl']}")
+        self.assertIsNone(pos["today_pnl_pct"])
+
+    def test_new_buy_no_overnight_still_computes(self):
+        """纯今日新买（无隔夜）即使无day_start_prices也应计算"""
+        anchor = {
+            "date": "2026-05-27", "effective_at": "2026-05-27T09:30:00",
+            "cash": 100000, "day_start_asset": 100000,
+            "total_deposit": 100000, "source": "manual_correction",
+            "positions": [],
+        }
+        trades = [{"id": 1, "trade_date": "2026-05-27", "trade_time": "10:00",
+                    "action": "W2买入", "code": "000003", "name": "NEW",
+                    "price": 20, "qty": 100}]
+        quotes = {"000003": {"最新价": 21}, "_updated": "2026-05-27T10:30:00"}
+        state = reduce_account_state(anchor, trades, quotes, now="2026-05-27T10:30:00")
+        pos = state["positions"][0]
+        self.assertEqual(pos["today_pnl"], 100)
+        self.assertEqual(pos["today_pnl_pct"], 5.0)
+
+
+class ClosedPositionsTest(unittest.TestCase):
+
+    def setUp(self):
+        import tempfile, threading
+        self.tmp = tempfile.TemporaryDirectory()
+        self.original_path = db.DB_PATH
+        self.original_local = db._local
+        db.DB_PATH = Path(self.tmp.name) / "pnl.db"
+        db._local = threading.local()
+        db.init_db()
+
+    def tearDown(self):
+        conn = getattr(db._local, "conn", None)
+        if conn is not None: conn.close()
+        db._local = self.original_local
+        db.DB_PATH = self.original_path
+        self.tmp.cleanup()
+
+    def test_sold_today_appears_in_closed(self):
+        db.insert_account_baseline({
+            "date": "2026-05-27", "effective_at": "2026-05-27T09:30:00",
+            "trade_id_cutoff": 0, "cash": 100187, "day_start_asset": 209786,
+            "total_deposit": 200000,
+            "positions": [{"标的": "沪电股份", "代码": "002463", "数量": 300, "成本": 122.5, "状态": "持有"}],
+            "source": "manual_correction",
+        })
+        db.insert_trade({
+            "trade_date": "2026-05-27", "trade_time": "09:59",
+            "action": "卖出", "code": "002463", "name": "沪电股份",
+            "price": 131.0, "qty": 300, "reason": "走弱",
+        })
+        state = reduce_account_state(
+            db.query_account_baseline("2026-05-27"),
+            db.query_trades(date_from="2026-05-27", date_to="2026-05-27", limit=100),
+            {}, now="2026-05-27T10:00:00")
+        closed = state.get("closed_positions", [])
+        self.assertTrue(any(c["code"] == "002463" for c in closed), f"应有沪电清仓: {closed}")
+
+    def test_partial_sell_not_in_closed(self):
+        """部分卖出不进 closed_positions, 仅全部卖清才入"""
+        db.insert_account_baseline({
+            "date": "2026-05-27", "effective_at": "2026-05-27T09:30:00",
+            "trade_id_cutoff": 0, "cash": 100000, "day_start_asset": 200000,
+            "total_deposit": 100000,
+            "positions": [{"标的": "TEST", "代码": "000009", "数量": 100, "成本": 10, "状态": "持有"}],
+            "source": "previous_close",
+        })
+        db.insert_trade({
+            "trade_date": "2026-05-27", "trade_time": "10:00",
+            "action": "卖出", "code": "000009", "name": "TEST",
+            "price": 20, "qty": 50,
+        })
+        state = reduce_account_state(
+            db.query_account_baseline("2026-05-27"),
+            db.query_trades(date_from="2026-05-27", date_to="2026-05-27", limit=100),
+            {}, now="2026-05-27T10:01:00")
+        closed = state.get("closed_positions", [])
+        self.assertEqual(len(closed), 0, f"部分卖出不应进closed: {closed}")
+        self.assertEqual(state["positions"][0]["数量"], 50)
+
+    def test_overnight_no_day_start_price_fully_sold_realized_none(self):
+        """无日初价隔夜仓全部卖出 → closed_positions.realized_today_pnl=None"""
+        db.insert_account_baseline({
+            "date": "2026-05-27", "effective_at": "2026-05-27T09:30:00",
+            "trade_id_cutoff": 0, "cash": 100000, "day_start_asset": 200000,
+            "total_deposit": 100000,
+            "positions": [{"标的": "OLD", "代码": "000010", "数量": 100, "成本": 50, "状态": "持有"}],
+            "source": "manual_correction",
+            # No _meta → no day_start_prices
+        })
+        db.insert_trade({
+            "trade_date": "2026-05-27", "trade_time": "10:00",
+            "action": "卖出", "code": "000010", "name": "OLD",
+            "price": 55, "qty": 100,
+        })
+        state = reduce_account_state(
+            db.query_account_baseline("2026-05-27"),
+            db.query_trades(date_from="2026-05-27", date_to="2026-05-27", limit=100),
+            {}, now="2026-05-27T10:01:00")
+        closed = state.get("closed_positions", [])
+        self.assertEqual(len(closed), 1)
+        self.assertIsNone(closed[0]["realized_today_pnl"],
+            f"无日初价清仓收益应为None, 实为{closed[0]['realized_today_pnl']}")
+
+
+class SevenDayClosedPositionsTests(unittest.TestCase):
+    """YM-W15-02: 7日内清仓来自 SSOT 账本，昨日/6日前可显示，8日前不可"""
+
+    def setUp(self):
+        import tempfile, threading
+        self.tmp = tempfile.TemporaryDirectory()
+        self.original_path = db.DB_PATH
+        self.original_local = db._local
+        db.DB_PATH = Path(self.tmp.name) / "pnl.db"
+        db._local = threading.local()
+        db.init_db()
+
+    def tearDown(self):
+        conn = getattr(db._local, "conn", None)
+        if conn is not None: conn.close()
+        db._local = self.original_local
+        db.DB_PATH = self.original_path
+        self.tmp.cleanup()
+
+    def _make_anchor(self, date_str, positions, source="previous_close"):
+        db.insert_account_baseline({
+            "date": date_str,
+            "effective_at": f"{date_str}T09:30:00",
+            "trade_id_cutoff": 0,
+            "cash": 100000,
+            "day_start_asset": 200000,
+            "total_deposit": 100000,
+            "positions": positions,
+            "source": source,
+        })
+
+    def _add_sell(self, date_str, code, name, price, qty):
+        db.insert_trade({
+            "trade_date": date_str, "trade_time": "10:00",
+            "action": "卖出", "code": code, "name": name,
+            "price": price, "qty": qty,
+        })
+
+    def test_yesterday_close_appears_in_7day(self):
+        """昨日清仓出现在7日窗口内"""
+        self._make_anchor("2026-05-26",
+            [{"标的": "OLD", "代码": "000001", "数量": 100, "成本": 10, "状态": "持有"}])
+        self._add_sell("2026-05-26", "000001", "OLD", 20, 100)
+        self._make_anchor("2026-05-27", [], source="previous_close")
+
+        from scripts.account_ssot import query_7day_closed_positions
+        closed = query_7day_closed_positions("2026-05-27")
+        codes = [c["code"] for c in closed]
+        self.assertIn("000001", codes, f"昨日清仓应在7日内: {closed}")
+
+    def test_six_days_ago_appears_eight_days_ago_not(self):
+        """6日前可显示，8日前不可"""
+        # 8日前
+        self._make_anchor("2026-05-19",
+            [{"标的": "OLD8", "代码": "000008", "数量": 100, "成本": 10, "状态": "持有"}])
+        self._add_sell("2026-05-19", "000008", "OLD8", 20, 100)
+        # 6日前
+        self._make_anchor("2026-05-21",
+            [{"标的": "OLD6", "代码": "000006", "数量": 100, "成本": 10, "状态": "持有"}])
+        self._add_sell("2026-05-21", "000006", "OLD6", 20, 100)
+        self._make_anchor("2026-05-27", [], source="previous_close")
+
+        from scripts.account_ssot import query_7day_closed_positions
+        closed = query_7day_closed_positions("2026-05-27")
+        codes = [c["code"] for c in closed]
+        self.assertIn("000006", codes, f"6日前清仓应在7日内: {closed}")
+        self.assertNotIn("000008", codes, f"8日前清仓不应在7日内: {closed}")
+
+    def test_partial_sell_not_in_closed(self):
+        """部分卖出不出现在清仓跟踪"""
+        self._make_anchor("2026-05-26",
+            [{"标的": "HALF", "代码": "000010", "数量": 100, "成本": 10, "状态": "持有"}])
+        self._add_sell("2026-05-26", "000010", "HALF", 20, 50)  # 只卖一半
+        self._make_anchor("2026-05-27", [], source="previous_close")
+
+        from scripts.account_ssot import query_7day_closed_positions
+        closed = query_7day_closed_positions("2026-05-27")
+        codes = [c["code"] for c in closed]
+        self.assertNotIn("000010", codes, f"部分卖出不应在清仓: {closed}")
+
+    def test_correction_chain_not_fake_closed(self):
+        """纠错链不伪造成重复清仓"""
+        self._make_anchor("2026-05-25",
+            [{"标的": "CORR", "代码": "000020", "数量": 100, "成本": 10, "状态": "持有"}])
+        # 先卖再纠错买入（net qty 不变）
+        db.insert_trade({
+            "trade_date": "2026-05-25", "trade_time": "10:00",
+            "action": "卖出", "code": "000020", "name": "CORR",
+            "price": 20, "qty": 100,
+        })
+        db.insert_trade({
+            "trade_date": "2026-05-25", "trade_time": "10:01",
+            "action": "买入", "code": "000020", "name": "CORR",
+            "price": 20, "qty": 100, "reason": "纠错：误卖",
+        })
+        self._make_anchor("2026-05-27", [], source="previous_close")
+
+        from scripts.account_ssot import query_7day_closed_positions
+        closed = query_7day_closed_positions("2026-05-27")
+        codes = [c["code"] for c in closed]
+        self.assertNotIn("000020", codes,
+            f"纠错链（卖后买回）不应进清仓: {closed}")
+
+    def test_correction_reversal_excludes_closed(self):
+        """昨日误卖，今日 insert_correction_trade 买回 → 不显示清仓"""
+        # D-1 (5/26): 持仓100股，误卖全部
+        self._make_anchor("2026-05-26",
+            [{"标的": "CORRV", "代码": "000031", "数量": 100, "成本": 10, "状态": "持有"}])
+        db.insert_trade({
+            "trade_date": "2026-05-26", "trade_time": "14:00",
+            "action": "卖出", "code": "000031", "name": "CORRV",
+            "price": 20, "qty": 100,
+        })
+        trades_26 = db.query_trades(date_from="2026-05-26", date_to="2026-05-26", limit=10)
+        sell_id = trades_26[0]["id"]
+
+        # D日 (5/27): 空仓开盘锚点
+        self._make_anchor("2026-05-27", [], source="previous_close")
+        # D日调用 insert_correction_trade 买回纠错
+        db.insert_correction_trade(
+            original_trade_id=sell_id,
+            correction_action="买入",
+            correction_price=20, correction_qty=100,
+            note="纠错：D-1误卖")
+
+        from scripts.account_ssot import query_7day_closed_positions
+        closed = query_7day_closed_positions("2026-05-27")
+        codes = [c["code"] for c in closed]
+        self.assertNotIn("000031", codes,
+            f"is_reversal纠错链应排除清仓: {closed}")
+
+    def test_normal_rebuy_keeps_prior_closed(self):
+        """昨日正常卖清，今日普通买入同股 → 仍显示昨日清仓"""
+        # D-1 (5/26): 正常卖清
+        self._make_anchor("2026-05-26",
+            [{"标的": "KEEP", "代码": "000032", "数量": 100, "成本": 10, "状态": "持有"}])
+        db.insert_trade({
+            "trade_date": "2026-05-26", "trade_time": "14:00",
+            "action": "卖出", "code": "000032", "name": "KEEP",
+            "price": 20, "qty": 100,
+        })
+        # D日 (5/27): 空仓开盘，普通买入同股（非纠错，is_reversal=0）
+        self._make_anchor("2026-05-27", [], source="previous_close")
+        db.insert_trade({
+            "trade_date": "2026-05-27", "trade_time": "10:00",
+            "action": "W1追涨", "code": "000032", "name": "KEEP",
+            "price": 22, "qty": 100,
+        })
+
+        from scripts.account_ssot import query_7day_closed_positions
+        closed = query_7day_closed_positions("2026-05-27")
+        codes = [c["code"] for c in closed]
+        self.assertIn("000032", codes,
+            f"普通重新买入不得删除此前真实清仓: {closed}")
 
 
 if __name__ == "__main__":

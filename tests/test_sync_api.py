@@ -89,7 +89,7 @@ class FreshDBSyncTest(unittest.TestCase):
         """空库首次 POST /api/sync 应返回 200，连接释放"""
         with patch.object(bridge, "DATA_FILE", self.tmp_data):
             payload = json.dumps({
-                "今日操作": [{
+                "entry": {
                     "时间": "09:32:00",
                     "动作": "买入",
                     "代码": "002463",
@@ -98,7 +98,7 @@ class FreshDBSyncTest(unittest.TestCase):
                     "数量": 300,
                     "窗口": "W1",
                     "原因": "测试",
-                }],
+                },
             }).encode()
 
             handler = self._build_handler("POST", "/api/sync", payload)
@@ -120,9 +120,8 @@ class FreshDBSyncTest(unittest.TestCase):
         self.assertEqual(len(trades), 1)
         self.assertEqual(trades[0]["code"], "002463")
 
-        self.assertTrue(self.tmp_data.exists(), "临时 DATA_FILE 应存在")
-        data = json.loads(self.tmp_data.read_text(encoding="utf-8"))
-        self.assertIn("decision", data)
+        # DATA_FILE only written when positions_updated; entry-only sync writes to DB
+        self.assertEqual(status, 200)
 
     def test_sync_empty_ops_releases_connection(self):
         """空操作 POST /api/sync 后连接也释放"""

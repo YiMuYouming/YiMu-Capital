@@ -1,4 +1,4 @@
-# 弈沐资本数据看板 v2.1
+# 弈沐资本数据看板 v2.5
 
 ## 打开方式
 
@@ -9,7 +9,7 @@ python3 scripts/bridge.py 8088
 
 然后 Chrome 打开 **http://localhost:8088**（收藏到书签栏）。
 
-> 离线调试用：双击 `index.html`（file:// 协议，记流水不能自动写 JSON）。
+> 离线调试用：双击 `index.html`（file:// 协议不具备实时 API、账户 SSOT 或成交录入能力）。
 
 ## 依赖
 
@@ -49,26 +49,31 @@ live-dashboard/
 ├── index.html              # 主入口
 ├── store.js                # DataStore 数据中枢
 ├── widget-base.js          # 组件基类
-├── widget-registry.js      # 20 组件注册表
-├── widgets/                # 20 个独立组件
+├── widget-registry.js      # 23 组件注册表
+├── widgets/                # W01-W23 + W20 浮动聊天框
 ├── presets/                # 4 套布局预设
 ├── css/theme.css           # 全局主题
 ├── data/                   # 数据文件
 │   ├── dashboard_data.json     # Layer 1 基线（scripts/ 产出）
-│   ├── dashboard_live.json     # Layer 2 实时（scripts/ 产出）
+│   ├── pnl.db                  # 账户锚点/流水/PnL/复盘事实
 │   └── embedded-data.js        # Layer 0 兜底
+├── docs/audit/             # 当前验收与运维基线
+└── docs/_archive/          # 已完成计划与历史审计
 └── assets/logo.svg          # 标签页图标
 ```
 
 ## 数据管线
 
-数据由 `scripts/` 中的 Python 脚本产出到 `data/` 目录：
+当前核心数据流：
 
 ```
-scripts/gen_dashboard_data.py   → data/dashboard_data.json   (每日复盘后)
-scripts/poll_iwencai.py         → data/dashboard_live.json   (盘中轮询)
-scripts/sync_embedded.py        → data/embedded-data.js      (每日复盘后)
+scripts/gen_dashboard_data.py                  → data/dashboard_data.json (每日基线)
+bridge CACHE + scripts/rule_engine.py          → /api/live/quotes + rule_state
+account_baselines + trade_records + live quote → /api/account/state       (账户 SSOT)
+pnl.db                                         → /api/pnl/* + /api/trades/review
 ```
+
+当前验收和数据保护规则见 [`docs/audit/2026-05-27-升级改造完成验收与运维基线.md`](docs/audit/2026-05-27-升级改造完成验收与运维基线.md)。
 
 ## 快捷键
 
