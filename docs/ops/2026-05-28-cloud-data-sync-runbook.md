@@ -7,12 +7,12 @@
 
 ## 一句话原则
 
-- 代码走 git：`YiMu-Capital` 和 `YM-data-pipeline` 的代码改动必须 commit/push/pull。
+- 代码走 git：`YiMu-Capital` 和 `YM-data-pipeline` 的代码改动必须先本地 commit；是否 push/pull 或用 rsync 部署，按当次确认流程执行。
 - 实盘数据不走 git：`data/*.db`、盘中快照、收益曲线、交易流水用 SQLite backup + rsync/scp。
-- 盘中以云端为主：主人浏览器 `localhost:8088` 当前通过 SSH tunnel 看 hermes。
+- 盘中以云端为主：弈沐哥浏览器 `localhost:8088` 当前通过 SSH tunnel 看 hermes。
 - 本地只做预览：`localhost:18088` 用本地代码看效果，但 API 和数据读云端，写操作被代理拦截。
 - 收盘后把云端主库拉回本地归档，避免本地 DB 落后。
-- 复盘笔记在本地：云端没有主人本地 Vault，不能独立生成明日基线；生成后要把 JSON 同步上云。
+- 复盘笔记在本地：云端没有弈沐哥本地 Vault，不能独立生成明日基线；生成后要把 JSON 同步上云。
 
 ## 关键机器和路径
 
@@ -30,7 +30,7 @@
 
 ### 云端生产 8088
 
-`http://localhost:8088` 是主人盘中使用的生产看板。它不是本地服务，而是 SSH tunnel 转发到 hermes：
+`http://localhost:8088` 是弈沐哥盘中使用的生产看板。它不是本地服务，而是 SSH tunnel 转发到 hermes：
 
 ```bash
 ssh -fN -L 8088:127.0.0.1:8088 agentuser@43.132.146.234
@@ -40,12 +40,12 @@ ssh -fN -L 8088:127.0.0.1:8088 agentuser@43.132.146.234
 
 - W15 成交录入、纠错、账户状态写到云端 `data/pnl.db`。
 - PnL 曲线、盘中快照、情绪节点由云端 APScheduler 持续生成。
-- 主人电脑休眠、浏览器关闭后，云端服务仍会继续跑。
+- 弈沐哥电脑休眠、浏览器关闭后，云端服务仍会继续跑。
 
 云端限制：
 
 - hermes 香港节点不能稳定使用 PyTDX 裸 TCP，因此生产服务默认禁用 PyTDX。
-- 云端没有主人本地复盘笔记 Vault，不能自己跑完整 `gen_dashboard_data.py`。
+- 云端没有弈沐哥本地复盘笔记 Vault，不能自己跑完整 `gen_dashboard_data.py`。
 - 云端实时行情使用 Eastmoney/Tencent/iwencai/hot_list 等 fallback。足够保证账户曲线和关键节点不断，但部分精细字段会降级。
 
 ### 本地预览 18088
@@ -57,7 +57,7 @@ ssh -fN -L 8088:127.0.0.1:8088 agentuser@43.132.146.234
 - 可以用它验证前端改动。
 - 不在这里录真实交易。
 - 代理会拦截 `POST`、`PUT`、`DELETE`，避免误写云端。
-- 改完确认无误后，走 git 推送，再部署到云端 8088。
+- 改完确认无误后，先在本地 git commit；需要部署到云端 8088 时，再按弈沐哥确认后的 git/rsync 代码同步流程执行。
 
 ### 可选本地完整服务
 
@@ -141,13 +141,13 @@ curl -s http://127.0.0.1:8088/api/pnl/summary'
 通过条件：
 
 - API 返回 JSON，不是空文件或错误页。
-- 持仓和现金与主人确认口径一致。
+- 持仓和现金与弈沐哥确认口径一致。
 - PnL summary 有日初锚点。
 - W12/W13 池子来自上一交易日复盘笔记。
 
 ## 盘中操作流程
 
-### 主人做买卖
+### 弈沐哥做买卖
 
 1. 浏览器使用 `http://localhost:8088`。
 2. 在 W15/W17 的既有入口录入成交。
@@ -162,7 +162,7 @@ curl -s http://127.0.0.1:8088/api/pnl/summary'
 
 不要在 18088 或本地完整服务里录真实交易，除非当天已经明确切换生产账本。
 
-### 主人要外出或电脑休眠
+### 弈沐哥要外出或电脑休眠
 
 只要 hermes 服务还 active，云端会继续：
 
@@ -171,7 +171,7 @@ curl -s http://127.0.0.1:8088/api/pnl/summary'
 - 采集 iwencai/hot_list 等数据。
 - 保留成交和账户状态。
 
-主人本地电脑关机只会影响：
+弈沐哥本地电脑关机只会影响：
 
 - 本地预览 18088。
 - 本地 PyTDX 对照。
@@ -207,7 +207,7 @@ W04 当前展示规则：
 - 涨跌停缺数据时显示 `—/—`，不再显示误导性的 `0/6`。
 - 昨日收盘基线的指数卡片始终保留；缺值显示 `—`。
 
-如果以后需要完整 PyTDX 体验，优先方案是独立国内行情中转或国内云节点。不要让主人本机作为长期生产中转，否则主人电脑休眠后仍会断。
+如果以后需要完整 PyTDX 体验，优先方案是独立国内行情中转或国内云节点。不要让弈沐哥本机作为长期生产中转，否则弈沐哥电脑休眠后仍会断。
 
 ## 每日收盘同步流程
 
@@ -409,10 +409,10 @@ ssh agentuser@43.132.146.234 \
 
 1. 本地改代码。
 2. 本地跑相关测试。
-3. commit。
-4. push 到 GitHub。
-5. 云端 pull。
-6. 重启服务。
+3. 本地 commit。
+4. 需要部署云端时，先确认同步方式：git 远端同步或 rsync 代码同步。
+5. 云端更新代码。
+6. 如生产服务需要新代码，重启服务。
 7. 查 API 验收。
 
 示例：
@@ -422,7 +422,10 @@ cd /Users/yimu/Documents/YM_Capital/live-dashboard
 python3 -m unittest tests.test_account_ssot -v
 git add PATHS
 git commit -m "fix: short description"
-git push origin main
+
+# 需要部署云端时再二选一：
+# A. git 远端同步：push 后云端 pull
+# B. rsync 代码同步：只同步代码文件，绝不同步 data/*
 
 ssh agentuser@43.132.146.234 'set -e
 cd /home/agentuser/YiMu-Capital
@@ -439,7 +442,10 @@ cd /Users/yimu/Documents/YM_Capital/YM-data-pipeline
 python3 -m unittest discover tests -v
 git add PATHS
 git commit -m "fix: short description"
-git push origin main
+
+# 需要部署云端时再二选一：
+# A. git 远端同步：push 后云端 pull
+# B. rsync 代码同步：只同步代码文件，绝不同步 data/*
 
 ssh agentuser@43.132.146.234 'set -e
 cd /home/agentuser/YM-data-pipeline
@@ -519,7 +525,7 @@ PY'
 - （要修什么/查什么）
 
 生产入口：
-- 主人看 http://localhost:8088，这是 SSH tunnel 到 hermes 云端。
+- 弈沐哥看 http://localhost:8088，这是 SSH tunnel 到 hermes 云端。
 - 本地预览 http://localhost:18088 只看本地代码效果，不录真实交易。
 
 路径：
@@ -551,7 +557,7 @@ PY'
 - 不要把 `data/pnl.db` 提交到 git。
 - 不要把 `data/dashboard_data.json`、`data/pools.json` 当作代码部署文件提交，除非任务明确要求版本化样例。
 - 不要在云端直接跑依赖本地 Vault 的 `gen_dashboard_data.py`，云端没有复盘笔记源。
-- 不要把主人本机 PyTDX 中转当成长期生产依赖。
+- 不要把弈沐哥本机 PyTDX 中转当成长期生产依赖。
 - 不要为了让 `git pull` 成功而重置云端工作区，尤其不能误删云端运行数据。
 - 不要把 18088 当生产入口。
 - 不要用成本价伪造 `day_start_price`。
