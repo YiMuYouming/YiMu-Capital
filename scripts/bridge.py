@@ -15,7 +15,7 @@ class ThreadingHTTPServer(ThreadingMixIn, HTTPServer):
 from pathlib import Path
 from datetime import datetime, time as _time
 from urllib.parse import parse_qs, urlparse
-from threading import Lock
+from threading import Lock, Thread
 
 from apscheduler.schedulers.background import BackgroundScheduler
 
@@ -2345,6 +2345,28 @@ def trigger_llm_auto():
         close_conn()
 
 
+def _run_cold_bootstrap(bootstrap_fns):
+    """Run slow cold-start collectors without blocking HTTP readiness."""
+    print(f'[bridge] Cold-start bootstrap: running initial collection...')
+    for bootstrap_fn in bootstrap_fns:
+        try:
+            bootstrap_fn(force=True)
+        except Exception as e:
+            print(f'  [bridge] bootstrap warning: {e}')
+
+
+def start_cold_bootstrap(bootstrap_fns):
+    """Start cold bootstrap collectors in a daemon thread and return it."""
+    thread = Thread(
+        target=_run_cold_bootstrap,
+        args=(list(bootstrap_fns),),
+        name="bridge-cold-bootstrap",
+        daemon=True,
+    )
+    thread.start()
+    return thread
+
+
 if __name__ == '__main__':
     port = int(sys.argv[1]) if len(sys.argv) > 1 else 8080
     try:
@@ -2489,12 +2511,12 @@ if __name__ == '__main__':
         run_gen_baseline()
 
     # 冷启动：强制执行一次初始采集填充缓存（不受 is_trading_time 限制）
-    print(f'[bridge] Cold-start bootstrap: running initial collection...')
-    for bootstrap_fn in [quotes.collect_index, quotes.collect_quotes, quotes.collect_sectors, iwencai_poll.poll_iwencai_sentiment, quotes.collect_yesterday_compare, quotes.collect_kline_15m, quotes.log_pnl_snapshot, quotes.collect_hot_list]:
-        try:
-            bootstrap_fn(force=True)
-        except Exception as e:
-            print(f'  [bridge] bootstrap warning: {e}')
+    # 云端数据源可能慢或限流，不能阻塞 HTTP ready。
+    start_cold_bootstrap([
+        quotes.collect_index, quotes.collect_quotes, quotes.collect_sectors,
+        iwencai_poll.poll_iwencai_sentiment, quotes.collect_yesterday_compare,
+        quotes.collect_kline_15m, quotes.log_pnl_snapshot, quotes.collect_hot_list,
+    ])
 
     print(f'[bridge] 看板桥接服务启动 → http://localhost:{port}')
     print(f'[bridge] W15 记流水自动同步到 {DATA_FILE}')
