@@ -323,7 +323,12 @@ class SyncContextHandlerTest(unittest.TestCase):
 class ConcurrentSellGuardTests(unittest.TestCase):
     """YM-W15-01: 并发卖出原子门禁"""
 
-    def setUp(self): _setup(self); bridge.CACHE['live_quotes'] = {}
+    def setUp(self):
+        _setup(self)
+        bridge.CACHE['live_quotes'] = {}
+        from datetime import datetime
+        self.today = datetime.now().strftime("%Y-%m-%d")
+
     def tearDown(self): _teardown(self)
 
     def _insert_anchor_and_position(self):
@@ -335,8 +340,8 @@ class ConcurrentSellGuardTests(unittest.TestCase):
         }
         # 建锚点使卖出有持仓可查
         db.insert_account_baseline({
-            "date": "2026-05-27",
-            "effective_at": "2026-05-27T09:30:00",
+            "date": self.today,
+            "effective_at": f"{self.today}T09:30:00",
             "trade_id_cutoff": 0,
             "cash": 100000,
             "day_start_asset": 101000,
@@ -392,8 +397,8 @@ class ConcurrentSellGuardTests(unittest.TestCase):
 
         # 回放验证：持仓 0，现金正确
         from scripts.account_ssot import reduce_account_state
-        anchor = db.query_account_baseline("2026-05-27")
-        trades_list = db.query_trades(date_from="2026-05-27", date_to="2026-05-27", limit=10)
+        anchor = db.query_account_baseline(self.today)
+        trades_list = db.query_trades(date_from=self.today, date_to=self.today, limit=10)
         state = reduce_account_state(anchor, trades_list, {})
         self.assertEqual(state["cash"], 101500,  # 100000 + 100*15
             f"现金应为100000+1500=101500, 实为{state['cash']}")
