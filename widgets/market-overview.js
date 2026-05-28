@@ -159,7 +159,7 @@ class MarketOverviewWidget extends YiMuWidget {
       {name:'上证', chg:yb['上证昨涨幅']||'—', amt:yb['上证昨成交额']||'—', up:yb['上证昨上涨'], dn:yb['上证昨下跌']},
       {name:'深证', chg:yb['深证昨涨幅']||'—', amt:yb['深证昨成交额']||'—', up:yb['深证昨上涨'], dn:yb['深证昨下跌']},
       {name:'创业', chg:yb['创业昨涨幅']||'—', amt:yb['创业昨成交额']||'—', up:yb['创业昨上涨'], dn:yb['创业昨下跌']}
-    ].filter(function(yi) { return yi.chg !== '—' || yi.amt !== '—'; });
+    ];
     var hasYest = yestIndexes.some(function(yi) { return yi.chg !== '—' || yi.amt !== '—'; });
     if (hasYest) {
       var yestBody = '';
