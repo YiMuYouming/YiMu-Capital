@@ -1023,13 +1023,16 @@ def _live_index_with_baseline():
 
     fill('上证指数', '上证指数')
     fill('上证指数涨幅', '上证指数涨幅', '上证涨幅', transform=_format_pct_for_live_index)
+    fill('上证指数振幅', '上证指数振幅', '上证振幅', transform=_format_pct_for_live_index)
     fill('上证指数成交额', '上证指数成交额', '上证成交额', '市场量能', transform=_format_amount_for_live_index)
     fill('成交额', '成交额', '市场量能', transform=_format_amount_for_live_index)
     fill('深证指数', '深证指数', '深圳指数')
     fill('深证指数涨幅', '深证指数涨幅', '深证涨幅', '深圳涨幅', transform=_format_pct_for_live_index)
+    fill('深证指数振幅', '深证指数振幅', '深证振幅', '深圳振幅', transform=_format_pct_for_live_index)
     fill('深证指数成交额', '深证指数成交额', '深证成交额', '深圳成交额', transform=_format_amount_for_live_index)
     fill('创业指数', '创业指数', '创业板指', '创业板指数')
     fill('创业指数涨幅', '创业指数涨幅', '创业板指涨幅', '创业涨幅', '创业板涨幅', transform=_format_pct_for_live_index)
+    fill('创业指数振幅', '创业指数振幅', '创业板指振幅', '创业振幅', '创业板振幅', transform=_format_pct_for_live_index)
     fill('创业指数成交额', '创业指数成交额', '创业板成交额', '创业成交额', transform=_format_amount_for_live_index)
 
     up, down = _parse_up_down_ratio(market.get('涨跌比'))

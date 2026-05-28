@@ -106,6 +106,7 @@ class LiveIndexBaselineFallbackTests(unittest.TestCase):
             "market": {
                 "上证指数": 4093.73,
                 "上证涨幅": -1.25,
+                "上证振幅": 1.34,
                 "市场量能": 3.24,
                 "涨跌比": "2962/2147",
             },
@@ -123,6 +124,7 @@ class LiveIndexBaselineFallbackTests(unittest.TestCase):
 
         self.assertEqual(li["上证指数"], 4093.73)
         self.assertEqual(li["上证指数涨幅"], "-1.25%")
+        self.assertEqual(li["上证指数振幅"], "+1.34%")
         self.assertEqual(li["成交额"], "3.24万亿")
         self.assertEqual(li["上涨家数"], 2962)
         self.assertEqual(li["下跌家数"], 2147)
@@ -135,6 +137,7 @@ class LiveIndexBaselineFallbackTests(unittest.TestCase):
 
         self.assertEqual(payload["live_index"]["上证指数"], 4093.73)
         self.assertEqual(payload["live_index"]["上证指数涨幅"], "-1.25%")
+        self.assertEqual(payload["live_index"]["上证指数振幅"], "+1.34%")
         self.assertEqual(payload["live_index"]["成交额"], "3.24万亿")
         self.assertEqual(payload["rule_state"], {"status": "test"})
 

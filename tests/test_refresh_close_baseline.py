@@ -14,10 +14,13 @@ class RefreshCloseBaselineTests(unittest.TestCase):
         index_data = {
             "上证指数": 4098.64,
             "上证指数涨幅": "+0.12%",
+            "上证指数振幅": "1.34%",
             "深证指数": 15861.89,
             "深证指数涨幅": "+0.80%",
+            "深证指数振幅": "2.45%",
             "创业指数": 4125.07,
             "创业指数涨幅": "+1.96%",
+            "创业指数振幅": "4.05%",
             "成交额": "2.97万亿",
             "上涨家数": 2800,
             "下跌家数": 2335,
@@ -38,10 +41,13 @@ class RefreshCloseBaselineTests(unittest.TestCase):
 
         self.assertEqual(out["market"]["上证指数"], 4098.64)
         self.assertEqual(out["market"]["上证涨幅"], 0.12)
+        self.assertEqual(out["market"]["上证振幅"], 1.34)
         self.assertEqual(out["market"]["深证指数"], 15861.89)
         self.assertEqual(out["market"]["深证涨幅"], 0.8)
+        self.assertEqual(out["market"]["深证振幅"], 2.45)
         self.assertEqual(out["market"]["创业指数"], 4125.07)
         self.assertEqual(out["market"]["创业涨幅"], 1.96)
+        self.assertEqual(out["market"]["创业振幅"], 4.05)
         self.assertEqual(out["market"]["市场量能"], 2.97)
         self.assertEqual(out["market"]["涨跌比"], "2800/2335")
         self.assertEqual(out["market"]["涨停家数"], 100)
