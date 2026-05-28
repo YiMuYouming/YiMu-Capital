@@ -128,6 +128,16 @@ class LiveIndexBaselineFallbackTests(unittest.TestCase):
         self.assertEqual(li["下跌家数"], 2147)
         self.assertEqual(li["_source"], "baseline_close_fallback")
 
+    def test_live_payload_stream_uses_same_baseline_fallback(self):
+        bridge.CACHE["live_index"] = {}
+
+        payload = bridge._build_live_quotes_payload(rule_state={"status": "test"})
+
+        self.assertEqual(payload["live_index"]["上证指数"], 4093.73)
+        self.assertEqual(payload["live_index"]["上证指数涨幅"], "-1.25%")
+        self.assertEqual(payload["live_index"]["成交额"], "3.24万亿")
+        self.assertEqual(payload["rule_state"], {"status": "test"})
+
 
 if __name__ == "__main__":
     unittest.main()

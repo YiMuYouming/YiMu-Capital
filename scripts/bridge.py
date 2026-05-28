@@ -1046,6 +1046,24 @@ def _live_index_with_baseline():
     return li
 
 
+def _build_live_quotes_payload(rule_state=None):
+    """Build the live payload shared by polling and SSE endpoints."""
+    return {
+        'live_index': _live_index_with_baseline(),
+        'live_quotes': CACHE.get('live_quotes', {}),
+        'breadth': CACHE.get('breadth', {}),
+        'live_sectors': CACHE.get('live_sectors', {}),
+        'hot_list': CACHE.get('hot_list', {}),
+        'sector_inflow': CACHE.get('sector_inflow', {}),
+        'northbound': CACHE.get('northbound', {}),
+        'iwencai': CACHE.get('iwencai', {}),
+        '上证15min': CACHE.get('上证15min', []),
+        '深证15min': CACHE.get('深证15min', []),
+        '创业15min': CACHE.get('创业15min', []),
+        'rule_state': rule_state if rule_state is not None else _build_rule_state(),
+    }
+
+
 def _build_full_snapshot():
     """
     聚合所有数据源，构建供 LLM 研判使用的全盘快照。
@@ -1778,20 +1796,7 @@ class BridgeHandler(SimpleHTTPRequestHandler):
         elif parsed.path == '/api/live/quotes':
             _ensure_db()
             try:
-                result = {
-                    'live_index': _live_index_with_baseline(),
-                    'live_quotes': CACHE.get('live_quotes', {}),
-                    'breadth': CACHE.get('breadth', {}),
-                    'live_sectors': CACHE.get('live_sectors', {}),
-                    'hot_list': CACHE.get('hot_list', {}),
-                    'sector_inflow': CACHE.get('sector_inflow', {}),
-                    'northbound': CACHE.get('northbound', {}),
-                    'iwencai': CACHE.get('iwencai', {}),
-                    '上证15min': CACHE.get('上证15min', []),
-                    '深证15min': CACHE.get('深证15min', []),
-                    '创业15min': CACHE.get('创业15min', []),
-                    'rule_state': _build_rule_state(),
-                }
+                result = _build_live_quotes_payload()
                 # Phase 4: 健康门禁状态（供 W1/W2 按 trade_entry_allowed 开关入口）
                 # 直接复用 /api/health 的 critical 分层，避免两套逻辑不一致
                 try:
@@ -1831,20 +1836,7 @@ class BridgeHandler(SimpleHTTPRequestHandler):
                         rule = _build_rule_state()
                     finally:
                         self._db_close()
-                    result = {
-                        'live_index': CACHE.get('live_index', {}),
-                        'live_quotes': CACHE.get('live_quotes', {}),
-                        'breadth': CACHE.get('breadth', {}),
-                        'live_sectors': CACHE.get('live_sectors', {}),
-                        'hot_list': CACHE.get('hot_list', {}),
-                        'sector_inflow': CACHE.get('sector_inflow', {}),
-                        'northbound': CACHE.get('northbound', {}),
-                        'iwencai': CACHE.get('iwencai', {}),
-                        '上证15min': CACHE.get('上证15min', []),
-                        '深证15min': CACHE.get('深证15min', []),
-                        '创业15min': CACHE.get('创业15min', []),
-                        'rule_state': rule,
-                    }
+                    result = _build_live_quotes_payload(rule_state=rule)
                     result['_freshness'] = {'level': 'live', 'type': 'sse_stream'}
                     data = json.dumps(result, ensure_ascii=False)
                     self.wfile.write(f"data: {data}\n\n".encode())
