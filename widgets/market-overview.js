@@ -13,6 +13,7 @@ class MarketOverviewWidget extends YiMuWidget {
     var d = data || {};
     var li = d.live_index || {};
     var m = d.market || {};
+    var yb = d.yesterday_baseline || {};
 
     var html = '<div style="display:flex;flex-direction:column;gap:6px;height:100%">';
 
@@ -38,6 +39,21 @@ class MarketOverviewWidget extends YiMuWidget {
     var amtDiff = li['上证成交额差'] || '';
     var amtPct = li['上证成交额差百分比'] || '';
     var amtDir = amtDiff.charAt(0) === '+' ? 'up' : amtDiff.charAt(0) === '-' ? 'down' : '';
+    var amtEstimated = false;
+    if (!amtPct && li['上证指数成交额'] && yb['上证昨成交额']) {
+      var todayAmtYi = parseAmountYi(li['上证指数成交额']);
+      var yestFullYi = parseAmountYi(yb['上证昨成交额']);
+      var yestSameYi = yestFullYi * getTradeElapsedRatio(new Date());
+      if (todayAmtYi > 0 && yestSameYi > 0) {
+        var estimatePct = (todayAmtYi - yestSameYi) / yestSameYi * 100;
+        amtPct = (estimatePct >= 0 ? '+' : '') + estimatePct.toFixed(1) + '%';
+        amtDiff = formatAmtDiff(todayAmtYi - yestSameYi);
+        amtDir = estimatePct >= 0 ? 'up' : 'down';
+        amtEstimated = true;
+      }
+    }
+    var amtComparePrefix = amtEstimated ? '较昨进度 ' : '较昨同刻 ';
+    var amtCompareText = amtPct ? (amtPct.charAt(0) === '-' ? amtComparePrefix : amtComparePrefix + '+') + amtPct.replace('+', '') : '';
     var upCnt = li['上涨家数'];
     var dnCnt = li['下跌家数'];
     var udHtml = (upCnt != null && dnCnt != null)
@@ -49,7 +65,7 @@ class MarketOverviewWidget extends YiMuWidget {
     var dt = iw['跌停家数'];
 
     html += '<div style="display:flex;gap:6px">';
-    html += '<div class="kpi-card" style="flex:1;padding:6px 8px"><div class="kpi-label">成交额</div><div class="kpi-value" style="font-size:14px">'+(li['成交额']||'—')+'</div>'+(amtPct?'<div class="kpi-verdict ' + amtDir + '">较昨日此时 '+amtPct+'</div>':'')+'</div>';
+    html += '<div class="kpi-card" style="flex:1;padding:6px 8px"><div class="kpi-label">成交额</div><div class="kpi-value" style="font-size:14px">'+(li['成交额']||'—')+'</div>'+(amtCompareText?'<div class="kpi-verdict ' + amtDir + '">' + amtCompareText + (amtDiff?' · '+amtDiff:'') + '</div>':'')+'</div>';
     html += '<div class="kpi-card" style="flex:1;padding:6px 8px"><div class="kpi-label">涨跌比</div><div class="kpi-value" style="font-size:14px">'+udHtml+'</div></div>';
     html += '<div class="kpi-card" style="flex:1;padding:6px 8px"><div class="kpi-label">振幅</div><div class="kpi-value" style="font-size:14px;color:var(--warn)">'+amp+'</div></div>';
     html += '<div class="kpi-card" style="flex:1;padding:6px 8px"><div class="kpi-label">涨跌停</div><div class="kpi-value" style="font-size:14px"><span class="up">'+(zt!=null?zt:'—')+'</span>/<span class="down">'+(dt!=null?dt:'—')+'</span></div></div>';
@@ -59,6 +75,7 @@ class MarketOverviewWidget extends YiMuWidget {
     var br = d.live_breadth || {};
     var bt = br['_total'] || 0;
     if (bt > 0) {
+      var isCoarseBreadth = br['_source'] === 'live_index_fallback';
       var upCats = ['涨停', '>7%', '5~7%', '3~5%', '0~3%'];
       var dnCats = ['-0~-3%', '-3~-5%', '-5~-7%', '<-7%', '跌停'];
       var upColors = ['#DC2626', '#EF4444', '#F87171', '#FCA5A5', '#FEE2E2'];
@@ -66,23 +83,41 @@ class MarketOverviewWidget extends YiMuWidget {
       var allCats = upCats.concat(dnCats);
       var allColors = upColors.concat(dnColors);
       html += '<div style="flex:1;display:flex;flex-direction:column;justify-content:center">';
-      // 色条
-      html += '<div style="display:flex;align-items:center;gap:1px;height:16px;border-radius:3px;overflow:hidden">';
-      allCats.forEach(function(cat, i) {
-        var n = br[cat] || 0;
-        var pct = (n / bt * 100);
-        if (pct > 0.3) {
-          html += '<div title="' + cat + ': ' + n + ' (' + pct.toFixed(1) + '%)" style="width:' + pct.toFixed(1) + '%;height:100%;background:' + allColors[i] + ';cursor:pointer;min-width:2px;transition:opacity .15s" onmouseover="this.style.opacity=\'.7\'" onmouseout="this.style.opacity=\'1\'"></div>';
-        }
-      });
-      html += '</div>';
-      // 计数标签
-      html += '<div style="display:flex;justify-content:space-between;font-size:8px;color:var(--text-disabled);margin-top:2px">';
-      upCats.forEach(function(c) { html += '<span>' + (br[c]||0) + '</span>'; });
-      html += '<span style="width:6px"></span>';
-      dnCats.forEach(function(c) { html += '<span>' + (br[c]||0) + '</span>'; });
-      html += '<span style="color:var(--text-secondary);font-weight:600">' + bt + '只</span>';
-      html += '</div>';
+      if (isCoarseBreadth) {
+        var coarseUp = li['上涨家数'] != null ? li['上涨家数'] : (br['0~3%'] || 0);
+        var coarseDn = li['下跌家数'] != null ? li['下跌家数'] : (br['-0~-3%'] || 0);
+        var coarseTotal = Math.max(coarseUp + coarseDn, 1);
+        var upPct = coarseUp / coarseTotal * 100;
+        var dnPct = coarseDn / coarseTotal * 100;
+        html += '<div style="display:flex;align-items:center;height:16px;border-radius:3px;overflow:hidden;background:var(--bg-base)">';
+        if (upPct > 0) html += '<div title="上涨: '+coarseUp+'" style="width:'+upPct.toFixed(1)+'%;height:100%;background:#DC2626"></div>';
+        if (dnPct > 0) html += '<div title="下跌: '+coarseDn+'" style="width:'+dnPct.toFixed(1)+'%;height:100%;background:#059669"></div>';
+        html += '</div>';
+        html += '<div style="display:flex;align-items:center;gap:8px;font-size:9px;color:var(--text-secondary);margin-top:3px">'+
+          '<span class="up" style="font-weight:700">涨 '+coarseUp+'</span>'+
+          '<span class="down" style="font-weight:700">跌 '+coarseDn+'</span>'+
+          '<span style="color:var(--text-disabled)">粗分布</span>'+
+          '<span style="margin-left:auto;color:var(--text-secondary);font-weight:600">'+coarseTotal+'只</span>'+
+          '</div>';
+      } else {
+        // 色条
+        html += '<div style="display:flex;align-items:center;gap:1px;height:16px;border-radius:3px;overflow:hidden">';
+        allCats.forEach(function(cat, i) {
+          var n = br[cat] || 0;
+          var pct = (n / bt * 100);
+          if (pct > 0.3) {
+            html += '<div title="' + cat + ': ' + n + ' (' + pct.toFixed(1) + '%)" style="width:' + pct.toFixed(1) + '%;height:100%;background:' + allColors[i] + ';cursor:pointer;min-width:2px;transition:opacity .15s" onmouseover="this.style.opacity=\'.7\'" onmouseout="this.style.opacity=\'1\'"></div>';
+          }
+        });
+        html += '</div>';
+        // 计数标签
+        html += '<div style="display:flex;justify-content:space-between;font-size:8px;color:var(--text-disabled);margin-top:2px">';
+        upCats.forEach(function(c) { html += '<span>' + (br[c]||0) + '</span>'; });
+        html += '<span style="width:6px"></span>';
+        dnCats.forEach(function(c) { html += '<span>' + (br[c]||0) + '</span>'; });
+        html += '<span style="color:var(--text-secondary);font-weight:600">' + bt + '只</span>';
+        html += '</div>';
+      }
       html += '</div>';
     }
 
@@ -121,7 +156,6 @@ class MarketOverviewWidget extends YiMuWidget {
     }
 
     // === 昨日收盘基线 (折叠式，点击展开) ===
-    var yb = d.yesterday_baseline || {};
     var yestIndexes = [
       {name:'上证', chg:yb['上证昨涨幅']||'—', amt:yb['上证昨成交额']||'—', up:yb['上证昨上涨'], dn:yb['上证昨下跌']},
       {name:'深证', chg:yb['深证昨涨幅']||'—', amt:yb['深证昨成交额']||'—', up:yb['深证昨上涨'], dn:yb['深证昨下跌']},
@@ -207,6 +241,34 @@ class MarketOverviewWidget extends YiMuWidget {
       '<div style="font-size:var(--fs-label);font-weight:600;color:var(--text-primary);margin-bottom:var(--sp-xs);padding-bottom:2px;border-bottom:1px solid var(--border-light)">'+title+'</div>' +
       bodyContent + '</div>';
   }
+}
+
+function parseAmountYi(v) {
+  var s = String(v || '').replace(/,/g, '').trim();
+  if (!s || s === '—') return 0;
+  if (s.indexOf('万亿') >= 0) return parseFloat(s.replace('万亿', '')) * 10000 || 0;
+  if (s.indexOf('亿') >= 0) return parseFloat(s.replace('亿', '')) || 0;
+  return (parseFloat(s) || 0) / 100000000;
+}
+
+function getTradeElapsedRatio(now) {
+  var minutes = now.getHours() * 60 + now.getMinutes();
+  var open = 9 * 60 + 30;
+  var morningClose = 11 * 60 + 30;
+  var afternoonOpen = 13 * 60;
+  var close = 15 * 60;
+  var traded = 0;
+  if (minutes <= open) traded = 0;
+  else if (minutes <= morningClose) traded = minutes - open;
+  else if (minutes < afternoonOpen) traded = 120;
+  else if (minutes <= close) traded = 120 + minutes - afternoonOpen;
+  else traded = 240;
+  return Math.max(1, Math.min(240, traded)) / 240;
+}
+
+function formatAmtDiff(v) {
+  if (Math.abs(v) >= 10000) return (v >= 0 ? '+' : '') + (v / 10000).toFixed(2) + '万亿';
+  return (v >= 0 ? '+' : '') + v.toFixed(0) + '亿';
 }
 
 WidgetRegistry.register('W04', MarketOverviewWidget);

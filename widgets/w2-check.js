@@ -48,6 +48,24 @@ class W2CheckWidget extends YiMuWidget {
     var rsBlocks = (RS && RS.blocks) || [];
     var rsMissing = !RS;
 
+    function ruleLabel(code) {
+      var labels = {
+        LOSS_STREAK: '连亏保护',
+        DOUBLE_ICE: '连续冰点',
+        LIANBAN_SIDE_CLOSED: '连板侧关闭',
+        W1_EMOTION: 'W1情绪不足',
+        W1_LIMIT_UP_PROFIT: 'W1涨停收益不足',
+        W1_PROMOTION: 'W1晋级率不足',
+        W2_ICE: '冰点关闭',
+        W2_ICE_RISK: '冰点风险'
+      };
+      return labels[code] || code;
+    }
+
+    function scopeLabel(scope) {
+      return scope === 'all' ? '全局' : scope === 'w1' ? 'W1' : scope === 'w2' ? 'W2' : scope === 'lianban' ? '连板' : scope || '规则';
+    }
+
     // Phase 4: 健康门禁 — trade_entry_allowed=false 时整版关闭
     if (data && data.trade_entry_allowed === false) {
       var reason = data.trade_entry_reason || '系统健康检查未通过';
@@ -78,11 +96,12 @@ class W2CheckWidget extends YiMuWidget {
         'vertical-align:middle;margin:0 2px"></span>';
     }
     var overallColor = w2BuyAllowed ? 'var(--down)' : 'var(--danger)';
-    var overallLabel = w2BuyAllowed ? '✅ W2 允许买入' : '⚠️ W2 关闭' + (rsW2.in_session ? '' : '（非W2时段）');
-    html += '<div style="padding:6px 10px;background:var(--bg-base);border-radius:6px;'+
+    var overallLabel = w2BuyAllowed ? 'W2 允许买入' : 'W2 关闭' + (rsW2.in_session ? '' : ' · 非W2时段');
+    html += '<div style="padding:8px 10px;background:var(--bg-base);border-radius:6px;'+
       'border-left:3px solid '+overallColor+';margin-bottom:6px">'+
       '<div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">'+
-        '<span style="font-weight:700;font-size:13px;color:'+overallColor+'">'+overallLabel+'</span>'+
+        '<span style="display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;border-radius:50%;background:'+overallColor+';color:#fff;font-size:12px;font-weight:800">'+(w2BuyAllowed?'✓':'!')+'</span>'+
+        '<span style="font-weight:800;font-size:13px;color:'+overallColor+'">'+overallLabel+'</span>'+
         '<span style="flex:1"></span>'+
         '<span style="font-size:11px;color:var(--text-secondary)">'+(inW2?w2Label:'非W2时段')+'</span>'+
       '</div>'+
@@ -98,8 +117,14 @@ class W2CheckWidget extends YiMuWidget {
     // W2 阻断展示（rule_state blocks 中 scope=w2 或 scope=all 的项）
     var w2ScopeCodes = rsBlocks.filter(function(b){ return b.scope === 'w2' || b.scope === 'all'; });
     if (w2ScopeCodes.length) {
-      html += '<div style="margin-top:4px;padding:3px 6px;background:rgba(220,38,38,0.08);border-radius:4px;font-size:10px">';
-      w2ScopeCodes.forEach(function(b){ html += '<div style="color:var(--danger)">✕ '+b.code+': '+b.message+'</div>'; });
+      html += '<div style="margin-top:6px;display:flex;flex-direction:column;gap:4px">';
+      w2ScopeCodes.forEach(function(b){
+        html += '<div style="display:flex;align-items:flex-start;gap:6px;padding:5px 7px;background:rgba(220,38,38,0.06);border-radius:5px;border:1px solid rgba(220,38,38,0.12)">'+
+          '<span style="flex:0 0 auto;font-size:9px;font-weight:700;color:var(--danger);background:rgba(220,38,38,0.09);padding:1px 5px;border-radius:999px">'+scopeLabel(b.scope)+'</span>'+
+          '<div style="min-width:0"><span style="font-size:11px;font-weight:700;color:var(--danger)">'+ruleLabel(b.code)+'</span>'+
+          '<span style="font-size:11px;color:var(--text-secondary)"> · '+b.message+'</span></div>'+
+          '</div>';
+      });
       html += '</div>';
     }
     html += '</div>';

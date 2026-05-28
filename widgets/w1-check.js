@@ -89,6 +89,24 @@ class W1CheckWidget extends YiMuWidget {
     var rsBlocks = (RS && RS.blocks) || [];
     var rsMissing = !RS;
 
+    function ruleLabel(code) {
+      var labels = {
+        LOSS_STREAK: '连亏保护',
+        DOUBLE_ICE: '连续冰点',
+        LIANBAN_SIDE_CLOSED: '连板侧关闭',
+        W1_EMOTION: '情绪不足',
+        W1_LIMIT_UP_PROFIT: '涨停收益不足',
+        W1_PROMOTION: '晋级率不足',
+        W2_ICE: '冰点关闭',
+        W2_ICE_RISK: '冰点风险'
+      };
+      return labels[code] || code;
+    }
+
+    function scopeLabel(scope) {
+      return scope === 'all' ? '全局' : scope === 'w1' ? 'W1' : scope === 'w2' ? 'W2' : scope === 'lianban' ? '连板' : scope || '规则';
+    }
+
     // Phase 4: 健康门禁 — trade_entry_allowed=false 时整版关闭
     if (data && data.trade_entry_allowed === false) {
       var reason = data.trade_entry_reason || '系统健康检查未通过';
@@ -111,7 +129,7 @@ class W1CheckWidget extends YiMuWidget {
     // ===== 环境阻断（展示 rule_state blocks + 本地详情补充，结论一律服从 buy_allowed）=====
     var blocks = [];
     rsBlocks.forEach(function(b) {
-      blocks.push({label: b.code, detail: b.message + ' ['+b.scope+']'});
+      blocks.push({label: ruleLabel(b.code), detail: b.message, scope: scopeLabel(b.scope)});
     });
 
     // ===== 三件套 =====
@@ -132,15 +150,26 @@ class W1CheckWidget extends YiMuWidget {
 
     // rule_state 结论：W1 不允许买入时展示阻断原因
     if (!w1BuyAllowed) {
-      html += '<div style="text-align:center;padding:20px">'+
-        '<div style="display:inline-block;width:48px;height:48px;border-radius:50%;background:var(--danger);'+
-          'box-shadow:0 0 16px var(--danger);line-height:48px;font-size:22px;color:var(--text-inverse);margin-bottom:8px">✕</div>'+
-        '<div style="font-size:14px;font-weight:700;color:var(--danger);margin-bottom:6px">W1 关闭' + (rsW1.in_session ? '' : '（非W1时段）') + '</div>';
+      html += '<div style="height:100%;display:flex;flex-direction:column;justify-content:center;padding:14px 18px">'+
+        '<div style="display:flex;align-items:center;gap:12px;justify-content:center;margin-bottom:12px">'+
+          '<div style="width:42px;height:42px;border-radius:50%;background:var(--danger);box-shadow:0 8px 22px rgba(220,38,38,0.22);line-height:42px;font-size:22px;color:var(--text-inverse);text-align:center">✕</div>'+
+          '<div style="text-align:left">'+
+            '<div style="font-size:15px;font-weight:800;color:var(--danger)">W1 关闭' + (rsW1.in_session ? '' : ' · 非W1时段') + '</div>'+
+            '<div style="font-size:11px;color:var(--text-secondary);margin-top:2px">早盘追涨入口暂不可用</div>'+
+          '</div>'+
+        '</div>'+
+        '<div style="max-width:280px;margin:0 auto;display:flex;flex-direction:column;gap:5px">';
       blocks.forEach(function(b){
-        html += '<div style="font-size:12px;color:var(--text-secondary)">'+b.label+': '+b.detail+'</div>';
+        html += '<div style="display:flex;align-items:flex-start;gap:8px;text-align:left;padding:6px 8px;border-radius:6px;background:var(--bg-base);border:1px solid var(--border-light)">'+
+          '<span style="flex:0 0 auto;font-size:10px;font-weight:700;color:var(--danger);background:rgba(220,38,38,0.08);padding:1px 5px;border-radius:999px">'+b.scope+'</span>'+
+          '<div style="min-width:0">'+
+            '<div style="font-size:12px;font-weight:700;color:var(--text-primary)">'+b.label+'</div>'+
+            '<div style="font-size:11px;color:var(--text-secondary);line-height:1.35">'+b.detail+'</div>'+
+          '</div>'+
+          '</div>';
       });
-      if (!blocks.length) html += '<div style="font-size:12px;color:var(--text-secondary)">后端规则引擎判定不可交易</div>';
-      html += '</div>';
+      if (!blocks.length) html += '<div style="font-size:12px;color:var(--text-secondary);text-align:center">后端规则引擎判定不可交易</div>';
+      html += '</div></div>';
       body.innerHTML = html;
       this.updateTimestamp();
       return;
