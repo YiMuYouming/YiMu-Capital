@@ -10,6 +10,7 @@ try:
     parse_appendix_a = _gen.parse_appendix_a
     _build_pools_payload = getattr(_gen, "_build_pools_payload", None)
     _build_pools_payload_for_trading_day = getattr(_gen, "_build_pools_payload_for_trading_day", None)
+    build_dashboard_data = getattr(_gen, "build_dashboard_data", None)
     _select_machine_pool = getattr(_gen, "_select_machine_pool", None)
     _HAS_GEN = True
 except ImportError:
@@ -18,6 +19,7 @@ except ImportError:
     parse_appendix_a = None
     _build_pools_payload = None
     _build_pools_payload_for_trading_day = None
+    build_dashboard_data = None
     _select_machine_pool = None
     _HAS_GEN = False
 
@@ -191,3 +193,50 @@ date: 2026-05-27
         selfEqual(pools.get("source_note"), "2026_5_27_Wednesday_ReviewNote.md")
         selfEqual(pools["lianban_pool"], [])
         selfEqual([s.get("标的") for s in pools["trend_pool"]], ["紫光国微", "三安光电"])
+
+    def test_dashboard_adds_yesterday_baseline_from_previous_review(self):
+        self.assertIsNotNone(build_dashboard_data)
+        current_note = """---
+date: 2026-05-28
+weekday: 周四
+---
+# 今日盘中笔记
+
+## 数据附录（机器解析用）
+
+### 持仓明细
+| 标的 | 代码 | 方向 | 数量 | 成本 | 现价 | 浮盈% | 止损 | 状态 |
+|------|------|------|------|------|------|------|------|------|
+"""
+        previous_note = """---
+date: 2026-05-27
+weekday: 周三
+上证指数: 4093.73
+上证涨幅: -1.25
+市场量能: 3.24
+涨跌比: 1260 / 3890
+---
+# 昨日复盘
+
+## 数据附录（机器解析用）
+
+### 连板自选池
+| 标的 | 代码 | 板块 | 窗口 | 角色 | 操作 | 涨幅 | 收盘价 | MA5 | 量比 | 换手 | 备注 |
+|------|------|------|------|------|------|------|--------|-----|------|------|------|
+|  |  |  | W1/W2 |  |  |  |  |  |  |  |  |
+"""
+        with tempfile.TemporaryDirectory() as td:
+            review_root = Path(td) / "复盘笔记" / "W22_第22周"
+            review_root.mkdir(parents=True)
+            current = review_root / "2026_5_28_Thursday_ReviewNote.md"
+            previous = review_root / "2026_5_27_Wednesday_ReviewNote.md"
+            current.write_text(current_note)
+            previous.write_text(previous_note)
+
+            data = build_dashboard_data(str(current))
+
+        yb = data.get("yesterday_baseline") or {}
+        self.assertEqual(yb.get("上证昨涨幅"), "-1.25%")
+        self.assertEqual(yb.get("上证昨成交额"), "3.24万亿")
+        self.assertEqual(yb.get("上证昨上涨"), 1260)
+        self.assertEqual(yb.get("上证昨下跌"), 3890)

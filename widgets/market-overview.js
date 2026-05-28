@@ -96,8 +96,6 @@ class MarketOverviewWidget extends YiMuWidget {
         html += '<div style="display:flex;align-items:center;gap:8px;font-size:9px;color:var(--text-secondary);margin-top:3px">'+
           '<span class="up" style="font-weight:700">涨 '+coarseUp+'</span>'+
           '<span class="down" style="font-weight:700">跌 '+coarseDn+'</span>'+
-          '<span style="color:var(--text-disabled)">粗分布</span>'+
-          '<span style="margin-left:auto;color:var(--text-secondary);font-weight:600">'+coarseTotal+'只</span>'+
           '</div>';
       } else {
         // 色条

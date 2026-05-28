@@ -960,6 +960,70 @@ def _select_pools_review_path(current_path, as_of_date=None):
     return str(candidates[0][1])
 
 
+def _previous_review_path(current_path, as_of_date=None):
+    trading_date = as_of_date or os.environ.get("YIMU_TRADING_DATE") or datetime.now().strftime("%Y-%m-%d")
+    review_dir = Path(current_path).parent.parent
+    candidates = []
+    for f in sorted(review_dir.glob("**/*ReviewNote.md"), reverse=True):
+        note_date = _review_note_date(f)
+        if note_date and note_date < trading_date:
+            candidates.append((note_date, f))
+    if not candidates:
+        return None
+    candidates.sort(key=lambda item: item[0], reverse=True)
+    return str(candidates[0][1])
+
+
+def _fmt_pct(v):
+    if v in (None, "", "—"):
+        return None
+    s = str(v).strip()
+    if s.endswith("%"):
+        return s
+    try:
+        return f"{float(s):+.2f}%"
+    except ValueError:
+        return s
+
+
+def _fmt_wanyi(v):
+    if v in (None, "", "—"):
+        return None
+    s = str(v).strip()
+    if "万亿" in s or "亿" in s:
+        return s
+    try:
+        return f"{float(s):.2f}万亿"
+    except ValueError:
+        return s
+
+
+def _parse_up_down(raw):
+    m = re.search(r"(\d+)\s*/\s*(\d+)", str(raw or ""))
+    if not m:
+        return None, None
+    return int(m.group(1)), int(m.group(2))
+
+
+def _build_yesterday_baseline(current_path, as_of_date=None):
+    prev_path = _previous_review_path(current_path, as_of_date)
+    if not prev_path:
+        return {}
+    fm = parse_frontmatter(prev_path)
+    if not fm:
+        return {}
+    up, down = _parse_up_down(fm.get("涨跌比"))
+    baseline = {
+        "上证昨涨幅": _fmt_pct(fm.get("上证涨幅")),
+        "上证昨成交额": _fmt_wanyi(fm.get("市场量能")),
+        "上证昨上涨": up,
+        "上证昨下跌": down,
+        "_source_note": Path(prev_path).name,
+        "_source_note_date": _review_note_date(prev_path),
+    }
+    return {k: v for k, v in baseline.items() if v is not None}
+
+
 def _build_pools_payload_for_trading_day(current_path, as_of_date=None):
     pools_review_path = _select_pools_review_path(current_path, as_of_date)
     pools = _build_pools_payload(pools_review_path)
@@ -1078,6 +1142,7 @@ def build_dashboard_data(review_path):
         "lianban_pool": pools_payload.get("lianban_pool", []),
         "trend_pool": pools_payload.get("trend_pool", []),
         "sectors": sectors_a or appendix.get("sectors", []) or _fallback_appendix(review_path, "sectors"),
+        "yesterday_baseline": _build_yesterday_baseline(review_path, date_str),
         "上证15min": [],
         "live_index": {},
         "live_sectors": {},
