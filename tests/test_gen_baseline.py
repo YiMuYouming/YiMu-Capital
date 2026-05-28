@@ -9,6 +9,7 @@ try:
     parse_appendix = _gen.parse_appendix
     parse_appendix_a = _gen.parse_appendix_a
     _build_pools_payload = getattr(_gen, "_build_pools_payload", None)
+    _build_pools_payload_for_trading_day = getattr(_gen, "_build_pools_payload_for_trading_day", None)
     _select_machine_pool = getattr(_gen, "_select_machine_pool", None)
     _HAS_GEN = True
 except ImportError:
@@ -16,6 +17,7 @@ except ImportError:
     parse_appendix = None
     parse_appendix_a = None
     _build_pools_payload = None
+    _build_pools_payload_for_trading_day = None
     _select_machine_pool = None
     _HAS_GEN = False
 
@@ -143,3 +145,49 @@ date: 2026-05-27
         self.assertEqual(lb, [])
         self.assertEqual(tr[0].get("标的"), "三安光电")
         self.assertEqual(tr[0].get("代码"), "600703")
+
+    def test_trading_day_pools_use_previous_review_note(self):
+        self.assertIsNotNone(_build_pools_payload_for_trading_day)
+        current_note = """---
+date: 2026-05-28
+---
+# 今日盘中笔记
+
+## 数据附录（机器解析用）
+
+### 趋势自选池
+| 标的 | 代码 | 板块 | 窗口 | 角色 | 操作 | 涨幅 | 收盘价 | MA5 | MA20 | 量比 | 换手 | 备注 |
+|------|------|------|------|------|------|------|--------|-----|------|------|------|------|
+"""
+        previous_note = """---
+date: 2026-05-27
+---
+# 昨日复盘
+
+## 数据附录（机器解析用）
+
+### 连板自选池
+| 标的 | 代码 | 板块 | 窗口 | 角色 | 操作 | 涨幅 | 收盘价 | MA5 | 量比 | 换手 | 备注 |
+|------|------|------|------|------|------|------|--------|-----|------|------|------|
+|  |  |  | W1/W2 |  |  |  |  |  |  |  |  |
+
+### 趋势自选池
+| 标的 | 代码 | 板块 | 窗口 | 角色 | 操作 | 涨幅 | 收盘价 | MA5 | MA20 | 量比 | 换手 | 备注 |
+|------|------|------|------|------|------|------|--------|-----|------|------|------|------|
+| 紫光国微 | 002049 | 半导体 | — | 主趋势股 | 持有 | +2.54% | 85.06 | 82.13 | 79.36 | 1.45 | 9.74% | 持仓 |
+| 三安光电 | 600703 | 半导体 | W2 | 主趋势股 | W2回踩买入 | +4.79% | 16.61 | — | — | — | 8.71% | 中军 |
+"""
+        with tempfile.TemporaryDirectory() as td:
+            review_root = Path(td) / "复盘笔记" / "W22_第22周"
+            review_root.mkdir(parents=True)
+            current = review_root / "2026_5_28_Thursday_ReviewNote.md"
+            previous = review_root / "2026_5_27_Wednesday_ReviewNote.md"
+            current.write_text(current_note)
+            previous.write_text(previous_note)
+
+            pools = _build_pools_payload_for_trading_day(str(current), "2026-05-28")
+
+        selfEqual = self.assertEqual
+        selfEqual(pools.get("source_note"), "2026_5_27_Wednesday_ReviewNote.md")
+        selfEqual(pools["lianban_pool"], [])
+        selfEqual([s.get("标的") for s in pools["trend_pool"]], ["紫光国微", "三安光电"])

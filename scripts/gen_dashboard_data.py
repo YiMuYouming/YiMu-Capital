@@ -921,6 +921,52 @@ def _fallback_review_path(current_path):
             return str(f)
     return None
 
+def _review_note_date(path):
+    """Return YYYY-MM-DD for a review note from frontmatter or filename."""
+    fm_date = parse_frontmatter(str(path)).get("date")
+    if fm_date:
+        s = str(fm_date).strip()
+        if re.match(r"^\d{4}-\d{2}-\d{2}$", s):
+            return s
+    m = re.search(r"(\d{4})_(\d{1,2})_(\d{1,2})_", Path(path).name)
+    if m:
+        y, mo, d = m.groups()
+        return f"{int(y):04d}-{int(mo):02d}-{int(d):02d}"
+    return None
+
+
+def _pool_source_has_machine_section(path):
+    return (
+        _data_appendix_has_section(path, "连板自选池") or
+        _data_appendix_has_section(path, "趋势自选池")
+    )
+
+
+def _select_pools_review_path(current_path, as_of_date=None):
+    """Select the completed review note that defines today's W12/W13 pools."""
+    trading_date = as_of_date or os.environ.get("YIMU_TRADING_DATE") or datetime.now().strftime("%Y-%m-%d")
+    review_dir = Path(current_path).parent.parent
+    candidates = []
+    for f in sorted(review_dir.glob("**/*ReviewNote.md"), reverse=True):
+        note_date = _review_note_date(f)
+        if not note_date or note_date >= trading_date:
+            continue
+        if not _pool_source_has_machine_section(str(f)):
+            continue
+        candidates.append((note_date, f))
+    if not candidates:
+        return current_path
+    candidates.sort(key=lambda item: item[0], reverse=True)
+    return str(candidates[0][1])
+
+
+def _build_pools_payload_for_trading_day(current_path, as_of_date=None):
+    pools_review_path = _select_pools_review_path(current_path, as_of_date)
+    pools = _build_pools_payload(pools_review_path)
+    pools["source_note"] = Path(pools_review_path).name
+    pools["source_note_date"] = _review_note_date(pools_review_path)
+    return pools
+
 def build_dashboard_data(review_path):
     """组装完整的 dashboard_data.json"""
     fm = parse_frontmatter(review_path)
@@ -935,7 +981,7 @@ def build_dashboard_data(review_path):
     appendix = parse_appendix(review_path)
     # W12/W13 自选池使用「数据附录」个股表；附录A是盘前速查映射，不作为表格数据源。
     appendix_a = parse_appendix_a(review_path)
-    pools_payload = _build_pools_payload(review_path)
+    pools_payload = _build_pools_payload_for_trading_day(review_path)
     anchor_a = appendix_a.get("anchor_stocks", []) if appendix_a else []
     sectors_a = appendix_a.get("sectors", []) if appendix_a else []
     # 合并 frontmatter：今天有值用今天，空字段回退昨天
@@ -964,7 +1010,9 @@ def build_dashboard_data(review_path):
             "weekday": fm.get("weekday", get_weekday_str(date_str)),
             "updated": datetime.now().strftime("%Y-%m-%dT%H:%M:%S+08:00"),
             "source": "gen_dashboard_data.py",
-            "note": f"自动生成自 {os.path.basename(review_path)}"
+            "note": f"自动生成自 {os.path.basename(review_path)}",
+            "pools_note": pools_payload.get("source_note"),
+            "pools_note_date": pools_payload.get("source_note_date")
         },
         # === market 域：T1(实时)/T2(阶段) 优先，frontmatter 仅做收盘校验回退 ===
         "market": {
@@ -1284,7 +1332,7 @@ def watch_mode(review_path, interval=10):
             atomic_write_json(OUTPUT_FILE, data)
             print(f"  → {len(json.dumps(data, ensure_ascii=False))} bytes written")
             # 同步输出 pools.json（机器个股池；今天未填写时才回退昨天）
-            pools = _build_pools_payload(review_path)
+            pools = _build_pools_payload_for_trading_day(review_path)
             used_fallback = bool(pools.get("source", "").find("fallback") >= 0)
             if pools:
                 pools["version"] = 1
@@ -1319,7 +1367,7 @@ def main():
     print(f"[done] Written {len(json.dumps(data, ensure_ascii=False))} bytes → {OUTPUT_FILE}")
 
     # 输出 pools.json（机器个股池；今天未填写时才回退昨天）
-    pools = _build_pools_payload(review_path)
+    pools = _build_pools_payload_for_trading_day(review_path)
     used_fallback = bool(pools.get("source", "").find("fallback") >= 0)
     if pools:
         pools["version"] = 1
