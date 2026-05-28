@@ -51,6 +51,17 @@ CACHE = {}
 _tdx_lock = threading.Lock()  # PyTDX 共用连接保护锁
 
 
+def _pytdx_disabled():
+    return os.getenv("YIMU_DISABLE_PYTDX", "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _fetch_market_data(data_type, **kwargs):
+    if _pytdx_disabled():
+        return _pipeline_fetch(data_type, **kwargs)
+    with _tdx_lock:
+        return _pipeline_fetch(data_type, **kwargs)
+
+
 def is_trading_time():
     now = datetime.now()
     if now.weekday() >= 5:
@@ -67,8 +78,7 @@ def collect_quotes(force=False):
     if not codes:
         return
     try:
-        with _tdx_lock:
-            r = _pipeline_fetch("quotes", codes=codes)
+        r = _fetch_market_data("quotes", codes=codes)
         if r:
             if isinstance(r, dict):
                 r.pop('_meta', None)
@@ -85,8 +95,7 @@ def collect_index(force=False):
     if not force and not is_trading_time():
         return
     try:
-        with _tdx_lock:
-            r = _pipeline_fetch("index")
+        r = _fetch_market_data("index")
         if r:
             if isinstance(r, dict): r.pop('_meta', None)
             li = CACHE.get("live_index", {})
@@ -100,6 +109,8 @@ def collect_index(force=False):
 def collect_yesterday_compare(force=False):
     """30s: 成交额较昨日同时段对比"""
     if not force and not is_trading_time():
+        return
+    if _pytdx_disabled():
         return
     try:
         from datetime import datetime as _dt
@@ -189,8 +200,7 @@ def collect_breadth(force=False):
     if not force and not is_trading_time():
         return
     try:
-        with _tdx_lock:
-            r = _pipeline_fetch("breadth")
+        r = _fetch_market_data("breadth")
         if r:
             if isinstance(r, dict): r.pop('_meta', None)
             CACHE["breadth"] = r
@@ -207,9 +217,10 @@ def collect_sectors(force=False):
     names = _get_sector_names()
     if not names:
         return
+    if _pytdx_disabled():
+        return
     try:
-        with _tdx_lock:
-            r = _pipeline_fetch("sector_index", names=names)
+        r = _fetch_market_data("sector_index", names=names)
         if r:
             if isinstance(r, dict):
                 r.pop('_meta', None)
@@ -324,6 +335,8 @@ def _save_zt_snapshot(hot_data):
 def collect_kline_15m(force=False):
     """60s: 三大指数15分钟量价（同比昨日）"""
     if not force and not is_trading_time():
+        return
+    if _pytdx_disabled():
         return
     try:
         with _tdx_lock:
