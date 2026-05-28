@@ -404,6 +404,15 @@ def _snapshot_from_account(account_state, live_index, timestamp):
     }
 
 
+def _ensure_index_for_snapshot():
+    live_index = CACHE.get("live_index") or {}
+    required = ("上证指数涨幅", "深证指数涨幅")
+    if all(live_index.get(k) is not None for k in required):
+        return live_index
+    collect_index(force=True)
+    return CACHE.get("live_index") or live_index
+
+
 def log_pnl_snapshot(force=False):
     """300s: persist one disposable snapshot derived from account SSOT."""
     if not force and not is_trading_time():
@@ -434,9 +443,8 @@ def log_pnl_snapshot(force=False):
                         "deviation_pct": round(deviation * 100, 2),
                     }
 
-        row = _snapshot_from_account(
-            state, CACHE.get("live_index") or {}, now.strftime("%Y-%m-%dT%H:%M:%S")
-        )
+        live_index = _ensure_index_for_snapshot()
+        row = _snapshot_from_account(state, live_index, now.strftime("%Y-%m-%dT%H:%M:%S"))
         if row is None:
             print("  [quotes] PnL snapshot skipped: incomplete account valuation")
             return
