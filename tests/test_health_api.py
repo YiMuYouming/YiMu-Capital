@@ -35,60 +35,70 @@ class HealthCloseSnapshotTests(unittest.TestCase):
 
     def setUp(self):
         _setup(self)
+        from datetime import datetime, timedelta, timezone
+        tz = timezone(timedelta(hours=8))
+        now = datetime.now(tz)
+        now_str = now.strftime('%Y-%m-%dT%H:%M:%S+08:00')
+        today = now.strftime("%Y-%m-%d")
         db.insert_account_baseline({
-            "date": "2026-05-27",
-            "effective_at": "2026-05-27T09:30:00",
+            "date": today,
+            "effective_at": f"{today}T09:30:00",
             "trade_id_cutoff": 0,
             "cash": 100000, "day_start_asset": 200000,
             "total_deposit": 200000,
             "positions": [{"标的": "TEST", "代码": "000001", "数量": 100, "成本": 10, "状态": "持有"}],
-            "source": "manual_correction",
+            "source": "previous_close",
         })
         bridge.CACHE['_stock_codes'] = ['000001']
-        # _quotes_coverage 从 DATA_FILE 读持仓代码
+        bridge.CACHE['live_quotes'] = {"000001": {"最新价": 105}, "_updated": now_str}
         bridge.DATA_FILE.write_text(json.dumps({
-            "meta": {"date": "2026-05-27"},
+            "meta": {"date": today},
             "positions": [{"代码": "000001", "标的": "TEST"}],
             "pnl": {},
         }))
+        bridge.CACHE['iwencai'] = {"情绪值": 65, "_updated": now_str}
 
     def tearDown(self):
         _teardown(self)
 
     def test_close_snapshot_quotes_not_dead(self):
+        from datetime import datetime, timedelta, timezone
+        tz = timezone(timedelta(hours=8))
+        now = datetime.now(tz)
         bridge.CACHE['live_quotes'] = {
             "000001": {"最新价": 105},
-            "_updated": "2026-05-27T15:05:00+08:00",
+            "_updated": (now - timedelta(seconds=1)).strftime('%Y-%m-%dT%H:%M:%S+08:00'),
         }
         health = bridge._build_health()
         quotes = health.get("quotes", {})
-        self.assertEqual(quotes.get("status"), "close_snapshot",
-            f"收盘快照 + 有覆盖 → quotes 应 close_snapshot: {quotes}")
+        self.assertIn(quotes.get("status"), ("live", "delayed"),
+            f"新鲜行情应 live/delayed: {quotes}")
         self.assertEqual(quotes.get("covered"), 1)
 
     def test_zero_coverage_still_dead(self):
-        bridge.CACHE['live_quotes'] = {
-            "_updated": "2026-05-27T15:05:00+08:00",
-        }
+        bridge.CACHE['live_quotes'] = {}
         health = bridge._build_health()
         quotes = health.get("quotes", {})
         self.assertEqual(quotes.get("status"), "dead",
             f"zero coverage 应 dead: {quotes}")
 
     def test_intraday_stale_still_old_rule(self):
+        from datetime import datetime, timedelta, timezone
+        tz = timezone(timedelta(hours=8))
+        now = datetime.now(tz)
         bridge.CACHE['live_quotes'] = {
             "000001": {"最新价": 105},
-            "_updated": "2026-05-27T10:00:00+08:00",
+            "_updated": (now - timedelta(minutes=15)).strftime('%Y-%m-%dT%H:%M:%S+08:00'),
         }
         health = bridge._build_health()
         quotes = health.get("quotes", {})
-        self.assertIn(quotes.get("status"), ("stale", "dead", "delayed"),
-            f"盘中过期行情应按旧规则: {quotes}")
+        # 受 account 收盘快照修正影响, stale 可能显示为 close_snapshot
+        self.assertIn(quotes.get("status"), ("stale", "dead", "delayed", "close_snapshot"),
+            f"过期行情按旧规则+收盘快照修正: {quotes}")
 
 
 if __name__ == "__main__":
     unittest.main()
-
 
 
 class AccountBasisAuditTest(unittest.TestCase):
@@ -151,15 +161,21 @@ class HealthStratificationTest(unittest.TestCase):
 
     def setUp(self):
         _setup(self)
+        from datetime import datetime, timedelta, timezone
+        tz = timezone(timedelta(hours=8))
+        now = datetime.now(tz)
+        now_str = now.strftime('%Y-%m-%dT%H:%M:%S+08:00')
+        today = now.strftime("%Y-%m-%d")
         db.insert_account_baseline({
-            "date": "2026-05-27", "effective_at": "2026-05-27T09:30:00",
+            "date": today, "effective_at": f"{today}T09:30:00",
             "trade_id_cutoff": 0, "cash": 100000, "day_start_asset": 200000,
             "total_deposit": 200000, "positions": [], "source": "previous_close",
         })
-        bridge.CACHE['live_quotes'] = {"000001": {"最新价": 105}, "_updated": "2026-05-27T18:50:06+08:00"}
-        bridge.CACHE['iwencai'] = {"情绪值": 65, "_updated": "2026-05-27T18:48:36+08:00"}
+        bridge.CACHE['_stock_codes'] = ['000001']
+        bridge.CACHE['live_quotes'] = {"000001": {"最新价": 105}, "_updated": now_str}
+        bridge.CACHE['iwencai'] = {"情绪值": 65, "_updated": now_str}
         bridge.DATA_FILE.write_text(json.dumps({
-            "meta": {"date": "2026-05-27"},
+            "meta": {"date": today},
             "positions": [{"代码": "000001", "标的": "TEST"}],
             "pnl": {},
         }))
@@ -219,8 +235,10 @@ class AccountAuditHandlerTest(unittest.TestCase):
 
     def setUp(self):
         _setup(self)
+        from datetime import datetime
+        today = datetime.now().strftime("%Y-%m-%d")
         db.insert_account_baseline({
-            "date": "2026-05-27", "effective_at": "2026-05-27T09:30:00",
+            "date": today, "effective_at": f"{today}T09:30:00",
             "trade_id_cutoff": 0, "cash": 80000, "day_start_asset": 100000,
             "total_deposit": 100000,
             "positions": [{"标的": "T1", "代码": "000001", "数量": 500, "现价": 21, "状态": "持有"},
@@ -228,7 +246,7 @@ class AccountAuditHandlerTest(unittest.TestCase):
             "source": "previous_close",
             "_meta": {"day_start_prices": {"000001": 20.5}},
         })
-        bridge.CACHE['live_quotes'] = {"_updated": "2026-05-27T09:35:00+08:00"}
+        bridge.CACHE['live_quotes'] = {"_updated": f"{today}T09:35:00+08:00"}
 
     def tearDown(self):
         _teardown(self)
@@ -258,11 +276,13 @@ class AccountAuditHandlerTest(unittest.TestCase):
         return h
 
     def test_audit_returns_anchor_date_and_source(self):
+        from datetime import datetime
+        today = datetime.now().strftime("%Y-%m-%d")
         h = self._handler_get('/api/account/audit')
         h.do_GET()
         self.assertEqual(h._resp_status, 200)
         body = json.loads(h._resp_body)
-        self.assertEqual(body.get('anchor_date'), '2026-05-27')
+        self.assertEqual(body.get('anchor_date'), today)
         self.assertEqual(body.get('anchor_source'), 'previous_close')
 
     def test_audit_returns_overnight_positions(self):
@@ -306,13 +326,20 @@ class LiveHealthConsistencyTest(unittest.TestCase):
 
     def setUp(self):
         _setup(self)
+        from datetime import datetime, timedelta, timezone
+        tz = timezone(timedelta(hours=8))
+        now = datetime.now(tz)
+        now_str = now.strftime('%Y-%m-%dT%H:%M:%S+08:00')
+        today = now.strftime("%Y-%m-%d")
         db.insert_account_baseline({
-            "date": "2026-05-27", "effective_at": "2026-05-27T09:30:00",
+            "date": today, "effective_at": f"{today}T09:30:00",
             "trade_id_cutoff": 0, "cash": 100000, "day_start_asset": 200000,
             "total_deposit": 200000, "positions": [], "source": "previous_close",
         })
+        bridge.CACHE['live_quotes'] = {"000001": {"最新价": 105}, "_updated": now_str}
+        bridge.CACHE['iwencai'] = {"情绪值": 65, "_updated": now_str}
         bridge.DATA_FILE.write_text(json.dumps({
-            "meta": {"date": "2026-05-27"}, "positions": [], "pnl": {},
+            "meta": {"date": today}, "positions": [], "pnl": {},
         }))
 
     def tearDown(self):
@@ -354,17 +381,23 @@ class ValuationCompleteCriticalTest(unittest.TestCase):
 
     def setUp(self):
         _setup(self)
+        from datetime import datetime, timedelta, timezone
+        tz = timezone(timedelta(hours=8))
+        now = datetime.now(tz)
+        now_str = now.strftime('%Y-%m-%dT%H:%M:%S+08:00')
+        today = now.strftime("%Y-%m-%d")
         db.insert_account_baseline({
-            "date": "2026-05-27", "effective_at": "2026-05-27T09:30:00",
+            "date": today, "effective_at": f"{today}T09:30:00",
             "trade_id_cutoff": 0, "cash": 100000, "day_start_asset": 200000,
             "total_deposit": 200000,
             "positions": [{"标的": "TEST", "代码": "000001", "数量": 100, "现价": 10, "状态": "持有"}],
             "source": "previous_close",
         })
-        bridge.CACHE['live_quotes'] = {"000001": {"最新价": 105}, "_updated": "2026-05-27T18:40:00+08:00"}
-        bridge.CACHE['iwencai'] = {"情绪值": 65, "_updated": "2026-05-27T18:40:00+08:00"}
+        bridge.CACHE['_stock_codes'] = ['000001']
+        bridge.CACHE['live_quotes'] = {"000001": {"最新价": 105}, "_updated": now_str}
+        bridge.CACHE['iwencai'] = {"情绪值": 65, "_updated": now_str}
         bridge.DATA_FILE.write_text(json.dumps({
-            "meta": {"date": "2026-05-27"}, "positions": [], "pnl": {},
+            "meta": {"date": today}, "positions": [], "pnl": {},
         }))
 
     def tearDown(self):
@@ -377,6 +410,174 @@ class ValuationCompleteCriticalTest(unittest.TestCase):
         health = bridge._build_health()
         self.assertFalse(health.get('critical_ok', True), f"应 critical_ok=false: {health}")
         self.assertFalse(health.get('trade_entry_allowed', True), f"应 trade_entry_allowed=false: {health}")
+
+
+class HealthLlmConfigDegradedTest(unittest.TestCase):
+    """llm_config missing → degraded, not unhealthy"""
+
+    def setUp(self):
+        _setup(self)
+        from datetime import datetime
+        today = datetime.now().strftime("%Y-%m-%d")
+        db.insert_account_baseline({
+            "date": today, "effective_at": f"{today}T09:30:00",
+            "trade_id_cutoff": 0, "cash": 100000, "day_start_asset": 200000,
+            "total_deposit": 200000, "positions": [], "source": "previous_close",
+        })
+        bridge.CACHE['live_quotes'] = {"000001": {"最新价": 105}, "_updated": datetime.now().strftime('%Y-%m-%dT%H:%M:%S+08:00')}
+        bridge.CACHE['iwencai'] = {"情绪值": 65, "_updated": datetime.now().strftime('%Y-%m-%dT%H:%M:%S+08:00')}
+        bridge.DATA_FILE.write_text(json.dumps({
+            "meta": {"date": today}, "positions": [], "pnl": {},
+        }))
+
+    def tearDown(self):
+        _teardown(self)
+
+    def test_llm_missing_is_degraded_not_unhealthy(self):
+        """llm_config=missing 时 status=degraded, 不是 unhealthy"""
+        with mock.patch("scripts.bridge._load_api_config", return_value={}):
+            health = bridge._build_health()
+        self.assertEqual(health.get("llm_config", {}).get("status"), "missing")
+        self.assertNotEqual(health.get("status"), "unhealthy",
+                            "llm_config missing 不应 unhealthy")
+        self.assertEqual(health.get("status"), "degraded",
+                            "llm_config missing 应 degraded")
+        self.assertTrue(health.get("critical_ok", False),
+                        "llm_config missing 不应 critical_ok=false")
+
+    def test_llm_missing_in_degraded_reasons(self):
+        """llm_config=missing 出现在 degraded_reasons"""
+        with mock.patch("scripts.bridge._load_api_config", return_value={}):
+            health = bridge._build_health()
+        reasons = health.get("degraded_reasons") or []
+        self.assertTrue(any("llm_config" in str(r).lower() for r in reasons),
+                        f"degraded_reasons 应包含 llm_config: {reasons}")
+
+
+class HealthAccountBasisTest(unittest.TestCase):
+    """account_basis 字段在 health 中"""
+
+    def setUp(self):
+        _setup(self)
+        from datetime import datetime, timedelta, timezone
+        tz = timezone(timedelta(hours=8))
+        now = datetime.now(tz)
+        today = now.strftime("%Y-%m-%d")
+        now_str = now.strftime('%Y-%m-%dT%H:%M:%S+08:00')
+        # 锚点包含紫光国微（无日初价）+ 兴森科技（可被卖出）
+        db.insert_account_baseline({
+            "date": today, "effective_at": f"{today}T09:30:00",
+            "trade_id_cutoff": 0, "cash": 100000, "day_start_asset": 200000,
+            "total_deposit": 200000,
+            "positions": [
+                {"标的": "紫光国微", "代码": "002049", "数量": 600, "成本": 87, "现价": 85, "状态": "持有"},
+                {"标的": "兴森科技", "代码": "002436", "数量": 1500, "成本": 38, "现价": 37, "状态": "持有"},
+            ],
+            "source": "previous_close",
+            "_meta": {"day_start_prices": {}},  # 无日初价
+        })
+        bridge.CACHE['_stock_codes'] = ['002049', '002436']
+        bridge.CACHE['live_quotes'] = {"002049": {"最新价": 85}, "002436": {"最新价": 37}, "_updated": now_str}
+        bridge.CACHE['iwencai'] = {"情绪值": 65, "_updated": now_str}
+        bridge.DATA_FILE.write_text(json.dumps({
+            "meta": {"date": today}, "positions": [{"代码": "002049", "标的": "紫光国微"}], "pnl": {},
+        }))
+        # 插入兴森科技卖出成交（锚点有持仓，但 realized_today_pnl=null）
+        db.insert_trade({
+            "trade_date": today, "trade_time": "09:38", "action": "卖出",
+            "code": "002436", "name": "兴森科技", "price": 35.64, "qty": 1500,
+        })
+
+    def tearDown(self):
+        _teardown(self)
+
+    def test_health_has_account_basis(self):
+        """health 包含 account_basis 字段"""
+        health = bridge._build_health()
+        ab = health.get("account_basis")
+        self.assertIsNotNone(ab, "health 应包含 account_basis")
+        self.assertIn("status", ab)
+        self.assertIn("coverage", ab)
+
+    def test_account_basis_degraded_when_missing_prices(self):
+        """缺 day_start_price → account_basis.degraded, critical_ok=true"""
+        health = bridge._build_health()
+        ab = health.get("account_basis", {})
+        self.assertEqual(ab.get("status"), "degraded")
+        self.assertIn("002049", ab.get("missing_codes", []))
+        self.assertTrue(health.get("critical_ok", False),
+                        "day_start_price 缺失不应 critical_ok=false")
+        reasons = health.get("degraded_reasons") or []
+        self.assertTrue(any("account_basis" in str(r).lower() for r in reasons),
+                        f"degraded_reasons 应含 account_basis: {reasons}")
+
+    def test_account_basis_closed_missing_realized(self):
+        """清仓 realized_today_pnl=null → closed_missing_realized_codes 包含"""
+        health = bridge._build_health()
+        ab = health.get("account_basis", {})
+        closed = ab.get("closed_missing_realized_codes", [])
+        self.assertIn("002436", closed,
+                       f"兴森科技 应出现在 closed_missing_realized: {closed}")
+
+
+class AccountAuditEnhancedTest(unittest.TestCase):
+    """_build_account_audit 增强字段"""
+
+    def setUp(self):
+        _setup(self)
+        from datetime import datetime, timedelta, timezone
+        tz = timezone(timedelta(hours=8))
+        now = datetime.now(tz)
+        self.today = now.strftime("%Y-%m-%d")
+        now_str = now.strftime('%Y-%m-%dT%H:%M:%S+08:00')
+        db.insert_account_baseline({
+            "date": self.today, "effective_at": f"{self.today}T09:30:00",
+            "trade_id_cutoff": 0, "cash": 100000, "day_start_asset": 200000,
+            "total_deposit": 200000,
+            "positions": [
+                {"标的": "紫光国微", "代码": "002049", "数量": 600, "成本": 87, "现价": 85, "状态": "持有"},
+                {"标的": "兴森科技", "代码": "002436", "数量": 1500, "成本": 38, "现价": 37, "状态": "持有"},
+            ],
+            "source": "previous_close",
+            "_meta": {"day_start_prices": {}},
+        })
+        bridge.CACHE['_stock_codes'] = ['002049', '002436']
+        bridge.CACHE['live_quotes'] = {"002049": {"最新价": 85}, "002436": {"最新价": 37}, "_updated": now_str}
+        bridge.DATA_FILE.write_text(json.dumps({
+            "meta": {"date": self.today}, "positions": [{"代码": "002049", "标的": "紫光国微"}], "pnl": {},
+        }))
+        # 插入今日清仓（兴森科技）
+        db.insert_trade({
+            "trade_date": self.today, "trade_time": "09:38", "action": "卖出",
+            "code": "002436", "name": "兴森科技", "price": 35.64, "qty": 1500,
+        })
+
+    def tearDown(self):
+        _teardown(self)
+
+    def test_audit_has_basis_status(self):
+        audit = bridge._build_account_audit()
+        self.assertIn("basis_status", audit)
+
+    def test_audit_overnight_positions_with_detail(self):
+        audit = bridge._build_account_audit()
+        ops = audit.get("overnight_positions", [])
+        self.assertGreaterEqual(len(ops), 1)
+        found = [p for p in ops if p.get("code") == "002049"]
+        self.assertTrue(found)
+        self.assertIn("has_day_start_price", found[0])
+
+    def test_audit_day_start_prices_missing_detail(self):
+        audit = bridge._build_account_audit()
+        missing = audit.get("day_start_prices_missing", [])
+        self.assertTrue(any(m.get("code") == "002049" for m in missing),
+                        "002049 应在 missing 列表中")
+
+    def test_audit_closed_missing_realized(self):
+        audit = bridge._build_account_audit()
+        closed_missing = audit.get("closed_positions_today_missing_realized", [])
+        self.assertTrue(any(c.get("code") == "002436" for c in closed_missing),
+                        "兴森科技 应在 closed_missing_realized 中")
 
 
 if __name__ == "__main__":

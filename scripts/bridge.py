@@ -1195,23 +1195,32 @@ def _quotes_coverage():
     return covered, len(all_codes), missing_pos
 
 
-def _build_account_audit():
+def _build_account_audit(today=None):
     """只读 account basis audit：暴露今日锚点、隔夜持仓、当日清仓、day_start_prices 覆盖率。
 
-    返回 dict 供 /api/account/audit 使用。
+    today 可传入指定日期（默认 datetime.now），用于测试。
+    返回 dict 供 /api/account/audit + /api/health.account_basis 使用。
+    严格只读，不创建/修改锚点。
     """
     from scripts.db import query_account_baseline, query_trades
-    today = datetime.now().strftime('%Y-%m-%d')
+    if today is None:
+        today = datetime.now().strftime('%Y-%m-%d')
     result = {
+        'basis_status': 'missing_anchor',
         'anchor_date': None,
         'anchor_source': None,
         'anchor_effective_at': None,
         'overnight_positions_count': 0,
         'overnight_codes': [],
+        'overnight_positions': [],
+        'day_start_prices_covered': 0,
+        'day_start_prices_total': 0,
         'day_start_prices_coverage': None,
         'day_start_prices_missing_codes': [],
+        'day_start_prices_missing': [],
         'closed_positions_today_count': 0,
         'closed_positions_today': [],
+        'closed_positions_today_missing_realized': [],
     }
 
     anchor = query_account_baseline(today)
@@ -1226,17 +1235,30 @@ def _build_account_audit():
 
         meta = anchor.get('_meta') or {}
         prices = meta.get('day_start_prices') or {}
-        if prices:
-            covered = sum(1 for p in positions if p.get('代码') in prices)
-            missing = [p.get('代码', '') for p in positions if p.get('代码') not in prices]
-            result['day_start_prices_coverage'] = f'{covered}/{len(positions)}'
-            result['day_start_prices_missing_codes'] = missing
-        else:
-            result['day_start_prices_coverage'] = '0/%d' % len(positions) if positions else None
-            result['day_start_prices_missing_codes'] = [p.get('代码', '') for p in positions]
+        total = len(positions)
+        covered = sum(1 for p in positions if p.get('代码') in prices)
+        result['day_start_prices_covered'] = covered
+        result['day_start_prices_total'] = total
+        result['day_start_prices_coverage'] = f'{covered}/{total}' if total else None
+        missing_codes = [p.get('代码', '') for p in positions if p.get('代码') not in prices]
+        result['day_start_prices_missing_codes'] = missing_codes
 
-    # 当日清仓（纯只读：若锚点存在则用 reduce 回放流水，不创建/修复锚点）
-    if anchor:
+        # 增强：per-position detail + missing list with names
+        result['overnight_positions'] = [
+            {
+                'code': p.get('代码', ''),
+                'name': p.get('标的', ''),
+                'has_day_start_price': p.get('代码') in prices if prices else False,
+                'day_start_price': prices.get(p.get('代码')) if prices else None,
+            }
+            for p in positions
+        ]
+        result['day_start_prices_missing'] = [
+            {'code': p.get('代码', ''), 'name': p.get('标的', '')}
+            for p in positions if p.get('代码') not in prices
+        ]
+
+        # 当日清仓（纯只读：用 reduce 回放流水）
         from scripts.account_ssot import reduce_account_state
         trades = query_trades(date_from=today, date_to=today, limit=10000)
         if trades:
@@ -1248,6 +1270,20 @@ def _build_account_audit():
                  'sell_price': c.get('sell_price'), 'closed_date': c.get('closed_date', '')}
                 for c in closed
             ]
+            # 增强：列出 realized_today_pnl=null 的清仓
+            result['closed_positions_today_missing_realized'] = [
+                {'code': c.get('code', ''), 'name': c.get('name', ''),
+                 'closed_date': c.get('closed_date', '')}
+                for c in closed if c.get('realized_today_pnl') is None
+            ]
+
+        # basis_status
+        if missing_codes or result['closed_positions_today_missing_realized']:
+            result['basis_status'] = 'degraded'
+        else:
+            result['basis_status'] = 'ok'
+    else:
+        result['basis_status'] = 'missing_anchor'
 
     return result
 
@@ -1372,22 +1408,6 @@ def _build_health():
     has_cfg = bool(cfg.get("token") and cfg.get("base_url"))
     result["llm_config"] = {"status": "ok" if has_cfg else "missing", "configured": has_cfg}
 
-    # overall status
-    statuses = []
-    for k, v in result.items():
-        s = v.get("status", "unknown")
-        statuses.append((k, s))
-
-    dead_or_missing = [k for k, s in statuses if s in ("dead", "missing", "error")]
-    stale_or_delayed = [k for k, s in statuses if s in ("stale", "delayed", "incomplete")]
-
-    if dead_or_missing:
-        result["status"] = "unhealthy"
-    elif stale_or_delayed:
-        result["status"] = "degraded"
-    else:
-        result["status"] = "healthy"
-
     # Phase 4: 健康分层 — critical_ok / trade_entry_allowed / degraded_reasons
     critical_issues = []
     degraded_list = []
@@ -1422,9 +1442,56 @@ def _build_health():
     if bf_s in ("stale", "delayed"):
         degraded_list.append(f"baseline: {bf_s}")
 
+    # llm_config missing → degraded only (not critical)
+    llm_s = result.get("llm_config", {}).get("status", "")
+    if llm_s != "ok":
+        degraded_list.append(f"llm_config: {llm_s}")
+
+    # account_basis — 集成账户基准审计
+    try:
+        audit = _build_account_audit()
+        basis_status = audit.get("basis_status", "missing_anchor")
+        ab = {
+            "status": basis_status,
+            "coverage": audit.get("day_start_prices_coverage"),
+            "missing_codes": audit.get("day_start_prices_missing_codes", []),
+        }
+        closed_missing = [item.get("code") for item in audit.get("closed_positions_today_missing_realized", [])]
+        if closed_missing:
+            ab["closed_missing_realized_codes"] = closed_missing
+        if basis_status == "missing_anchor":
+            critical_issues.append("account_basis: missing_anchor")
+        elif basis_status == "degraded":
+            coverage = audit.get("day_start_prices_coverage", "?")
+            degraded_list.append(f"account_basis: {coverage} day_start_prices covered")
+            if closed_missing:
+                degraded_list.append(f"account_basis: {len(closed_missing)} closed positions missing realized_pnl")
+        result["account_basis"] = ab
+    except Exception as e:
+        result["account_basis"] = {"status": "error", "detail": str(e)[:120]}
+
     result["critical_ok"] = len(critical_issues) == 0
     result["trade_entry_allowed"] = len(critical_issues) == 0
     result["degraded_reasons"] = degraded_list if degraded_list else None
+
+    # overall status — 在 Phase 4 收集完成后最后计算（跳过非 dict 字段）
+    _STATUS_EXEMPT = {"llm_config", "auction"}
+    statuses = []
+    for k, v in result.items():
+        if not isinstance(v, dict):
+            continue
+        s = v.get("status", "unknown")
+        statuses.append((k, s))
+
+    dead_or_missing = [k for k, s in statuses if s in ("dead", "missing", "error") and k not in _STATUS_EXEMPT]
+    stale_or_delayed = [k for k, s in statuses if s in ("stale", "delayed", "incomplete")]
+
+    if dead_or_missing:
+        result["status"] = "unhealthy"
+    elif stale_or_delayed or degraded_list:
+        result["status"] = "degraded"
+    else:
+        result["status"] = "healthy"
 
     return result
 

@@ -1375,6 +1375,13 @@ class SevenDayClosedPositionsTests(unittest.TestCase):
 
     def test_correction_reversal_excludes_closed(self):
         """昨日误卖，今日 insert_correction_trade 买回 → 不显示清仓"""
+        from datetime import datetime as _dt
+
+        class FrozenDatetime(_dt):
+            @classmethod
+            def now(cls):
+                return cls(2026, 5, 27, 10, 0, 0)
+
         # D-1 (5/26): 持仓100股，误卖全部
         self._make_anchor("2026-05-26",
             [{"标的": "CORRV", "代码": "000031", "数量": 100, "成本": 10, "状态": "持有"}])
@@ -1389,11 +1396,12 @@ class SevenDayClosedPositionsTests(unittest.TestCase):
         # D日 (5/27): 空仓开盘锚点
         self._make_anchor("2026-05-27", [], source="previous_close")
         # D日调用 insert_correction_trade 买回纠错
-        db.insert_correction_trade(
-            original_trade_id=sell_id,
-            correction_action="买入",
-            correction_price=20, correction_qty=100,
-            note="纠错：D-1误卖")
+        with patch("scripts.db.datetime", FrozenDatetime):
+            db.insert_correction_trade(
+                original_trade_id=sell_id,
+                correction_action="买入",
+                correction_price=20, correction_qty=100,
+                note="纠错：D-1误卖")
 
         from scripts.account_ssot import query_7day_closed_positions
         closed = query_7day_closed_positions("2026-05-27")
