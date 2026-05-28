@@ -67,7 +67,7 @@ def is_trading_time():
     if now.weekday() >= 5:
         return False
     t = now.time()
-    return (_time_module(9, 15) <= t <= _time_module(11, 30)) or (_time_module(13, 0) <= t <= _time_module(15, 10))
+    return _time_module(9, 15) <= t <= _time_module(15, 10)
 
 
 def collect_quotes(force=False):

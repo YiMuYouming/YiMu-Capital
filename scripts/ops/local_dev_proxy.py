@@ -16,6 +16,13 @@ import urllib.request
 
 
 ROOT = Path(__file__).resolve().parents[2]
+CLOUD_DATA_PATHS = {
+    "/data/auction_snapshot.json",
+    "/data/pnl_history.json",
+    "/data/sentiment_auto.json",
+    "/data/ymwm_report.json",
+    "/data/zt_history.json",
+}
 
 
 class LocalDevProxyHandler(SimpleHTTPRequestHandler):
@@ -25,7 +32,8 @@ class LocalDevProxyHandler(SimpleHTTPRequestHandler):
         super().__init__(*args, directory=str(ROOT), **kwargs)
 
     def do_GET(self):
-        if self.path.startswith("/api/"):
+        request_path = self.path.split("?", 1)[0]
+        if self.path.startswith("/api/") or request_path in CLOUD_DATA_PATHS:
             self._proxy_get()
             return
         super().do_GET()
@@ -83,7 +91,7 @@ def main():
     LocalDevProxyHandler.cloud_base = args.cloud.rstrip("/")
     server = ThreadingHTTPServer(("127.0.0.1", args.port), LocalDevProxyHandler)
     print(f"[local-dev-proxy] local UI: http://127.0.0.1:{args.port}")
-    print(f"[local-dev-proxy] GET /api/* -> {LocalDevProxyHandler.cloud_base}")
+    print(f"[local-dev-proxy] GET /api/* and selected /data/*.json -> {LocalDevProxyHandler.cloud_base}")
     print("[local-dev-proxy] POST/PUT/DELETE blocked")
     server.serve_forever()
 
