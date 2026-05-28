@@ -207,9 +207,10 @@ const DataStore = (function() {
         d.live_sectors = d.live_sectors || {};
         for (var k in liveData.live_sectors) { d.live_sectors[k] = liveData.live_sectors[k]; }
       }
-      if (liveData.live_breadth) {
+      var breadthData = liveData.live_breadth || liveData.breadth;
+      if (breadthData) {
         d.live_breadth = d.live_breadth || {};
-        for (var k in liveData.live_breadth) { d.live_breadth[k] = liveData.live_breadth[k]; }
+        for (var k in breadthData) { d.live_breadth[k] = breadthData[k]; }
       }
       // iwencai 实时情绪数据（供 W04 等组件）
       if (liveData.iwencai) {
