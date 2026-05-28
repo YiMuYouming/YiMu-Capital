@@ -72,7 +72,16 @@ python3 scripts/bridge.py 18089
 
 ## 每日开盘前流程
 
-### 1. 本地生成今日基线
+推荐使用自动化脚本（默认 dry-run，加 `--apply` 才执行）：
+
+```bash
+cd /Users/yimu/Documents/YM_Capital/live-dashboard
+python3 scripts/ops/open_day.py --dry-run     # 预览步骤
+python3 scripts/ops/open_day.py --apply        # 执行生成+同步
+python3 scripts/ops/open_day.py --apply --restart-cloud  # 同步后重启云端
+```
+
+### 1. 本地生成今日基线（手动备选）
 
 复盘笔记是 SSOT。交易日 D 的 W12 连板池、W13 趋势池来自 D-1 晚上的复盘笔记；交易日 D 当晚写的复盘笔记用于 D+1。
 
@@ -104,7 +113,7 @@ print("trend:", len(data.get("trend_pool", [])))
 PY
 ```
 
-### 2. 同步今日基线上云
+### 2. 同步今日基线上云（手动备选）
 
 ```bash
 cd /Users/yimu/Documents/YM_Capital/live-dashboard
@@ -202,7 +211,15 @@ W04 当前展示规则：
 
 ## 每日收盘同步流程
 
-### 1. 先确认云端服务和 API 正常
+推荐使用自动化脚本（默认 dry-run，加 `--apply` 才执行）：
+
+```bash
+cd /Users/yimu/Documents/YM_Capital/live-dashboard
+python3 scripts/ops/close_day.py --dry-run     # 预览步骤
+python3 scripts/ops/close_day.py --apply        # 执行备份+同步
+```
+
+### 1. 先确认云端服务和 API 正常（手动备选）
 
 ```bash
 ssh -o ConnectTimeout=30 -o ServerAliveInterval=15 agentuser@43.132.146.234 \
