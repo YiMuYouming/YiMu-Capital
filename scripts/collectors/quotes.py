@@ -97,11 +97,15 @@ def collect_index(force=False):
     try:
         r = _fetch_market_data("index")
         if r:
-            if isinstance(r, dict): r.pop('_meta', None)
-            li = CACHE.get("live_index", {})
-            li.update(r)
-            li["_updated"] = datetime.now().strftime("%Y-%m-%dT%H:%M:%S+08:00")
-            CACHE["live_index"] = li
+            if isinstance(r, dict):
+                r.pop('_meta', None)
+            # 上游收盘后可能只返回 _meta；不能用空负载制造一个只有
+            # _updated 的 live_index，导致 W04 重启后失去收盘基线。
+            if isinstance(r, dict) and r:
+                li = CACHE.get("live_index", {})
+                li.update(r)
+                li["_updated"] = datetime.now().strftime("%Y-%m-%dT%H:%M:%S+08:00")
+                CACHE["live_index"] = li
     except Exception as e:
         print(f"  [quotes] collect_index error: {e}", file=sys.stderr)
 

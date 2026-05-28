@@ -97,6 +97,38 @@ class HealthCloseSnapshotTests(unittest.TestCase):
             f"过期行情按旧规则+收盘快照修正: {quotes}")
 
 
+class LiveIndexBaselineFallbackTests(unittest.TestCase):
+
+    def setUp(self):
+        _setup(self)
+        bridge.DATA_FILE.write_text(json.dumps({
+            "meta": {"date": "2026-05-28", "updated": "2026-05-28T15:00:00+08:00"},
+            "market": {
+                "上证指数": 4093.73,
+                "上证涨幅": -1.25,
+                "市场量能": 3.24,
+                "涨跌比": "2962/2147",
+            },
+            "positions": [],
+            "pnl": {},
+        }, ensure_ascii=False))
+
+    def tearDown(self):
+        _teardown(self)
+
+    def test_live_index_falls_back_to_close_baseline_after_restart(self):
+        bridge.CACHE["live_index"] = {"_updated": "2026-05-28T17:30:00+08:00"}
+
+        li = bridge._live_index_with_baseline()
+
+        self.assertEqual(li["上证指数"], 4093.73)
+        self.assertEqual(li["上证指数涨幅"], "-1.25%")
+        self.assertEqual(li["成交额"], "3.24万亿")
+        self.assertEqual(li["上涨家数"], 2962)
+        self.assertEqual(li["下跌家数"], 2147)
+        self.assertEqual(li["_source"], "baseline_close_fallback")
+
+
 if __name__ == "__main__":
     unittest.main()
 

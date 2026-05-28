@@ -959,6 +959,93 @@ def _load_dashboard_data():
     return {}
 
 
+def _format_pct_for_live_index(value):
+    if value in (None, '', '—'):
+        return None
+    s = str(value).strip()
+    if s.endswith('%'):
+        return s if s.startswith(('+', '-')) else f'+{s}'
+    try:
+        n = float(s)
+    except (TypeError, ValueError):
+        return s
+    return f'{n:+.2f}%'
+
+
+def _format_amount_for_live_index(value):
+    if value in (None, '', '—'):
+        return None
+    s = str(value).strip()
+    if '万亿' in s or s.endswith('亿'):
+        return s
+    try:
+        n = float(s)
+    except (TypeError, ValueError):
+        return s
+    if n < 100:
+        return f'{n:g}万亿'
+    if n >= 10000:
+        return f'{n / 10000:.2f}万亿'
+    return f'{n:g}亿'
+
+
+def _parse_up_down_ratio(value):
+    if not value:
+        return None, None
+    parts = str(value).replace('：', '/').split('/')
+    if len(parts) != 2:
+        return None, None
+    try:
+        return int(float(parts[0])), int(float(parts[1]))
+    except (TypeError, ValueError):
+        return None, None
+
+
+def _live_index_with_baseline():
+    """Return live_index with dashboard close baseline as post-restart fallback.
+
+    After market close, collectors stop. If the bridge restarts, in-memory
+    live_index may be empty while dashboard_data.json still has the close
+    baseline. W04 should continue showing the close state instead of blanks.
+    """
+    li = dict(CACHE.get('live_index') or {})
+    market = (_load_dashboard_data().get('market') or {})
+
+    def fill(target, *sources, transform=None):
+        if li.get(target) not in (None, '', '—'):
+            return
+        for source in sources:
+            raw = market.get(source)
+            if raw not in (None, '', '—'):
+                li[target] = transform(raw) if transform else raw
+                li.setdefault('_source', 'baseline_close_fallback')
+                return
+
+    fill('上证指数', '上证指数')
+    fill('上证指数涨幅', '上证指数涨幅', '上证涨幅', transform=_format_pct_for_live_index)
+    fill('上证指数成交额', '上证指数成交额', '上证成交额', '市场量能', transform=_format_amount_for_live_index)
+    fill('成交额', '成交额', '市场量能', transform=_format_amount_for_live_index)
+    fill('深证指数', '深证指数', '深圳指数')
+    fill('深证指数涨幅', '深证指数涨幅', '深证涨幅', '深圳涨幅', transform=_format_pct_for_live_index)
+    fill('深证指数成交额', '深证指数成交额', '深证成交额', '深圳成交额', transform=_format_amount_for_live_index)
+    fill('创业指数', '创业指数', '创业板指', '创业板指数')
+    fill('创业指数涨幅', '创业指数涨幅', '创业板指涨幅', '创业涨幅', '创业板涨幅', transform=_format_pct_for_live_index)
+    fill('创业指数成交额', '创业指数成交额', '创业板成交额', '创业成交额', transform=_format_amount_for_live_index)
+
+    up, down = _parse_up_down_ratio(market.get('涨跌比'))
+    if li.get('上涨家数') in (None, '', '—') and up is not None:
+        li['上涨家数'] = up
+        li.setdefault('_source', 'baseline_close_fallback')
+    if li.get('下跌家数') in (None, '', '—') and down is not None:
+        li['下跌家数'] = down
+        li.setdefault('_source', 'baseline_close_fallback')
+    if li.get('_updated') in (None, '', '—'):
+        updated = (_load_dashboard_data().get('meta') or {}).get('updated')
+        if updated:
+            li['_updated'] = updated
+    return li
+
+
 def _build_full_snapshot():
     """
     聚合所有数据源，构建供 LLM 研判使用的全盘快照。
@@ -1692,7 +1779,7 @@ class BridgeHandler(SimpleHTTPRequestHandler):
             _ensure_db()
             try:
                 result = {
-                    'live_index': CACHE.get('live_index', {}),
+                    'live_index': _live_index_with_baseline(),
                     'live_quotes': CACHE.get('live_quotes', {}),
                     'breadth': CACHE.get('breadth', {}),
                     'live_sectors': CACHE.get('live_sectors', {}),

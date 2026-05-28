@@ -1324,6 +1324,15 @@ class G5DegradeDisplayTest(unittest.TestCase):
         src = (ROOT / "widgets/market-overview.js").read_text(encoding="utf-8")
         self.assertIn("'—'", src, "涨跌停缺值应显示 —")
 
+    def test_w04_uses_baseline_when_iwencai_missing(self):
+        """W04 收盘/重启后 iwencai 缺失时应回退 baseline market/sentiment"""
+        src = (ROOT / "widgets/market-overview.js").read_text(encoding="utf-8")
+        self.assertIn("m['涨停家数']", src)
+        self.assertIn("m['跌停家数']", src)
+        self.assertIn("sent['情绪值']", src)
+        self.assertIn("sent['昨日涨停收益']", src)
+        self.assertIn("sent['昨日炸板收益']", src)
+
     def test_topbar_blocked_not_unhealthy(self):
         """顶栏 trade_entry_allowed=false 显示 '阻断' 而非 '不健康'"""
         html = (ROOT / "index.html").read_text(encoding="utf-8")

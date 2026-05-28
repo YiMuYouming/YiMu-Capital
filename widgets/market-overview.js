@@ -60,9 +60,10 @@ class MarketOverviewWidget extends YiMuWidget {
       : (m['涨跌比'] || '—');
     var amp = li['上证指数振幅'] || '—';
     var iw = d.iwencai || {};
-    var ztRaw = iw['涨停家数'];
+    var sent = d.sentiment || {};
+    var ztRaw = (iw['涨停家数'] != null && iw['涨停家数'] > 0) ? iw['涨停家数'] : m['涨停家数'];
     var zt = (ztRaw != null && ztRaw > 0) ? ztRaw : null;
-    var dt = iw['跌停家数'];
+    var dt = (iw['跌停家数'] != null && iw['跌停家数'] > 0) ? iw['跌停家数'] : m['跌停家数'];
 
     html += '<div style="display:flex;gap:6px">';
     html += '<div class="kpi-card" style="flex:1;padding:6px 8px"><div class="kpi-label">成交额</div><div class="kpi-value" style="font-size:14px">'+(li['成交额']||'—')+'</div>'+(amtCompareText?'<div class="kpi-verdict ' + amtDir + '">' + amtCompareText + '</div>':'')+'</div>';
@@ -126,14 +127,15 @@ class MarketOverviewWidget extends YiMuWidget {
     var emotionVal = (upCnt2 != null && dnCnt2 != null && upCnt2 + dnCnt2 > 0)
       ? Math.round(upCnt2 / (upCnt2 + dnCnt2) * 100) : null;
     html += '<div style="display:flex;gap:6px">';
-    html += '<div class="kpi-card" style="flex:1;padding:6px 8px"><div class="kpi-label">情绪值</div><div class="kpi-value" style="font-size:14px">'+ (emotionVal != null ? emotionVal + '%' : '—') +'</div></div>';
-    var ztVal = iw['昨日涨停收益'];
+    var emotionDisplay = emotionVal != null ? emotionVal + '%' : (sent['情绪值'] != null ? sent['情绪值'] + '%' : '—');
+    html += '<div class="kpi-card" style="flex:1;padding:6px 8px"><div class="kpi-label">情绪值</div><div class="kpi-value" style="font-size:14px">'+ emotionDisplay +'</div></div>';
+    var ztVal = iw['昨日涨停收益'] != null ? iw['昨日涨停收益'] : sent['昨日涨停收益'];
     var ztCls = (ztVal != null && !isNaN(parseFloat(ztVal)) && parseFloat(ztVal) > 0) ? 'up' : (ztVal != null && !isNaN(parseFloat(ztVal)) && parseFloat(ztVal) < 0) ? 'down' : '';
     html += '<div class="kpi-card" style="flex:1;padding:6px 8px"><div class="kpi-label">涨停收益</div><div class="kpi-value'+(ztCls?' '+ztCls:'')+'" style="font-size:14px">'+ (ztVal != null ? (parseFloat(ztVal)>0?'+':'')+ztVal+'%' : '—') +'</div></div>';
-    var lbVal = iw['连板收益'];
+    var lbVal = iw['连板收益'] != null ? iw['连板收益'] : sent['连板收益'];
     var lbCls = (lbVal != null && !isNaN(parseFloat(lbVal)) && parseFloat(lbVal) > 0) ? 'up' : (lbVal != null && !isNaN(parseFloat(lbVal)) && parseFloat(lbVal) < 0) ? 'down' : '';
     html += '<div class="kpi-card" style="flex:1;padding:6px 8px"><div class="kpi-label">连板收益</div><div class="kpi-value'+(lbCls?' '+lbCls:'')+'" style="font-size:14px">'+ (lbVal != null ? (parseFloat(lbVal)>0?'+':'')+lbVal+'%' : '—') +'</div></div>';
-    var zbVal = iw['炸板收益'];
+    var zbVal = iw['炸板收益'] != null ? iw['炸板收益'] : sent['昨日炸板收益'];
     var zbCls = (zbVal != null && !isNaN(parseFloat(zbVal)) && parseFloat(zbVal) > 0) ? 'up' : (zbVal != null && !isNaN(parseFloat(zbVal)) && parseFloat(zbVal) < 0) ? 'down' : '';
     html += '<div class="kpi-card" style="flex:1;padding:6px 8px"><div class="kpi-label">炸板收益</div><div class="kpi-value'+(zbCls?' '+zbCls:'')+'" style="font-size:14px">'+ (zbVal != null ? (parseFloat(zbVal)>0?'+':'')+zbVal+'%' : '—') +'</div></div>';
     html += '</div>';
