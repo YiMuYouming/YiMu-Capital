@@ -40,20 +40,19 @@ class MarketOverviewWidget extends YiMuWidget {
     var amtPct = li['上证成交额差百分比'] || '';
     var amtDir = amtDiff.charAt(0) === '+' ? 'up' : amtDiff.charAt(0) === '-' ? 'down' : '';
     var amtEstimated = false;
-    if (!amtPct && li['上证指数成交额'] && yb['上证昨成交额']) {
-      var todayAmtYi = parseAmountYi(li['上证指数成交额']);
+    if (!amtPct && li['成交额'] && yb['上证昨成交额']) {
+      var todayAmtYi = parseAmountYi(li['成交额']);
       var yestFullYi = parseAmountYi(yb['上证昨成交额']);
       var yestSameYi = yestFullYi * getTradeElapsedRatio(new Date());
       if (todayAmtYi > 0 && yestSameYi > 0) {
         var estimatePct = (todayAmtYi - yestSameYi) / yestSameYi * 100;
         amtPct = (estimatePct >= 0 ? '+' : '') + estimatePct.toFixed(1) + '%';
-        amtDiff = formatAmtDiff(todayAmtYi - yestSameYi);
+        amtDiff = '';
         amtDir = estimatePct >= 0 ? 'up' : 'down';
         amtEstimated = true;
       }
     }
-    var amtComparePrefix = amtEstimated ? '较昨进度 ' : '较昨同刻 ';
-    var amtCompareText = amtPct ? (amtPct.charAt(0) === '-' ? amtComparePrefix : amtComparePrefix + '+') + amtPct.replace('+', '') : '';
+    var amtCompareText = amtPct ? '昨日 ' + (amtPct.charAt(0) === '-' ? amtPct : '+' + amtPct.replace('+', '')) : '';
     var upCnt = li['上涨家数'];
     var dnCnt = li['下跌家数'];
     var udHtml = (upCnt != null && dnCnt != null)
@@ -61,7 +60,9 @@ class MarketOverviewWidget extends YiMuWidget {
       : (m['涨跌比'] || '—');
     var amp = li['上证指数振幅'] || '—';
     var iw = d.iwencai || {};
-    var zt = iw['涨停家数'];
+    var hot = d.hot_list || {};
+    var ztRaw = iw['涨停家数'];
+    var zt = (hot.total != null && hot.total > 0) ? hot.total : (ztRaw != null && ztRaw > 0 ? ztRaw : null);
     var dt = iw['跌停家数'];
 
     html += '<div style="display:flex;gap:6px">';
@@ -158,7 +159,7 @@ class MarketOverviewWidget extends YiMuWidget {
       {name:'上证', chg:yb['上证昨涨幅']||'—', amt:yb['上证昨成交额']||'—', up:yb['上证昨上涨'], dn:yb['上证昨下跌']},
       {name:'深证', chg:yb['深证昨涨幅']||'—', amt:yb['深证昨成交额']||'—', up:yb['深证昨上涨'], dn:yb['深证昨下跌']},
       {name:'创业', chg:yb['创业昨涨幅']||'—', amt:yb['创业昨成交额']||'—', up:yb['创业昨上涨'], dn:yb['创业昨下跌']}
-    ];
+    ].filter(function(yi) { return yi.chg !== '—' || yi.amt !== '—'; });
     var hasYest = yestIndexes.some(function(yi) { return yi.chg !== '—' || yi.amt !== '—'; });
     if (hasYest) {
       var yestBody = '';
@@ -176,8 +177,8 @@ class MarketOverviewWidget extends YiMuWidget {
 
       html += '<div style="border-top:1px solid var(--border-light);padding-top:4px">' +
         '<div id="w04_baseline_toggle" style="display:flex;align-items:center;gap:4px;cursor:pointer;user-select:none;font-size:9px;color:var(--text-disabled);text-transform:uppercase;letter-spacing:0.5px">' +
-        '<span style="font-size:8px;transition:transform .2s" id="w04_baseline_arrow">▶</span> 昨日收盘基线</div>' +
-        '<div id="w04_baseline_body" style="display:none;margin-top:4px;gap:6px;flex-wrap:wrap">' + yestBody + '</div>' +
+        '<span style="font-size:8px;transition:transform .2s;transform:rotate(90deg)" id="w04_baseline_arrow">▶</span> 昨日收盘基线</div>' +
+        '<div id="w04_baseline_body" style="display:flex;margin-top:4px;gap:6px;flex-wrap:wrap">' + yestBody + '</div>' +
         '</div>';
     }
 
