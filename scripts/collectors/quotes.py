@@ -201,6 +201,17 @@ def collect_breadth(force=False):
         return
     try:
         r = _fetch_market_data("breadth")
+        if (not r or (isinstance(r, dict) and not any(k in r for k in ("_total", "涨停", "0~3%", "-0~-3%")))) and _pytdx_disabled():
+            li = CACHE.get("live_index") or {}
+            up = int(float(li.get("上涨家数") or 0))
+            down = int(float(li.get("下跌家数") or 0))
+            if up or down:
+                r = {
+                    "涨停": 0, ">7%": 0, "5~7%": 0, "3~5%": 0,
+                    "0~3%": up, "-0~-3%": down,
+                    "-3~-5%": 0, "-5~-7%": 0, "<-7%": 0, "跌停": 0,
+                    "_total": up + down, "_source": "live_index_fallback",
+                }
         if r:
             if isinstance(r, dict): r.pop('_meta', None)
             CACHE["breadth"] = r
