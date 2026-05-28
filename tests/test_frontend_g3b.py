@@ -1301,5 +1301,63 @@ console.log(JSON.stringify(_detectRuntimeMode()));
         self.assertIn(".runtime-mode", css, "theme.css 应有 .runtime-mode 选择器")
 
 
+class G5DegradeDisplayTest(unittest.TestCase):
+    """V3.1 G5: W04/W22/顶栏降级展示收口"""
+
+    def test_w04_no_absolute_amt_diff(self):
+        """W04 成交额卡片不渲染绝对差额（只有百分比）"""
+        src = (ROOT / "widgets/market-overview.js").read_text(encoding="utf-8")
+        # 找成交额卡片的 html += 行
+        amtCardLine = None
+        for line in src.split('\n'):
+            if 'kpi-label\">成交额' in line:
+                amtCardLine = line
+                break
+        self.assertIsNotNone(amtCardLine, "应找到成交额 KPI 卡片行")
+        # 不应包含 amtDiff 渲染
+        self.assertNotIn("amtDiff", amtCardLine, "成交额卡片不应包含 amtDiff 渲染")
+        # 应有 amtCompareText
+        self.assertIn("amtCompareText", amtCardLine, "成交额卡片应含百分比比较")
+
+    def test_w04_zt_dt_show_dash_when_missing(self):
+        """涨跌停缺数据时显示 —/—"""
+        src = (ROOT / "widgets/market-overview.js").read_text(encoding="utf-8")
+        self.assertIn("'—'", src, "涨跌停缺值应显示 —")
+
+    def test_topbar_blocked_not_unhealthy(self):
+        """顶栏 trade_entry_allowed=false 显示 '阻断' 而非 '不健康'"""
+        html = (ROOT / "index.html").read_text(encoding="utf-8")
+        self.assertNotIn("'不健康'", html, "顶栏不应显示 '不健康'")
+        self.assertIn("'阻断'", html, "顶栏应显示 '阻断'")
+
+    def test_topbar_has_degraded(self):
+        """顶栏 degraded 时显示 '降级'"""
+        html = (ROOT / "index.html").read_text(encoding="utf-8")
+        self.assertIn("'降级'", html, "顶栏应含 '降级'")
+
+    def test_topbar_has_normal(self):
+        """顶栏正常时显示 '正常'"""
+        html = (ROOT / "index.html").read_text(encoding="utf-8")
+        self.assertIn("'正常'", html, "顶栏应含 '正常'")
+
+    def test_topbar_has_no_response(self):
+        """API 无响应时显示 '无响应'"""
+        html = (ROOT / "index.html").read_text(encoding="utf-8")
+        self.assertIn("'无响应'", html, "顶栏应含 '无响应'")
+
+    def test_topbar_labels_max_4_chars(self):
+        """顶栏健康标签最长 4 个字"""
+        html = (ROOT / "index.html").read_text(encoding="utf-8")
+        for label in ["'阻断'", "'降级'", "'正常'", "'无响应'"]:
+            self.assertIn(label, html, f"顶栏应含 {label}")
+
+    def test_store_has_fallback_source_comments(self):
+        """store.js 包含云端 fallback 数据源说明"""
+        src = (ROOT / "store.js").read_text(encoding="utf-8")
+        self.assertIn("fallback", src, "store.js 应含 fallback 说明")
+        self.assertIn("Tencent", src, "应含 Tencent fallback 说明")
+        self.assertIn("PyTDX", src, "应含 PyTDX 降级说明")
+
+
 if __name__ == "__main__":
     unittest.main()

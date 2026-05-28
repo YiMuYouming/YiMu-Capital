@@ -811,9 +811,10 @@ window._healthConfirmed = false;
     if (!hDot || !hLabel) return;
 
     fetch('/api/health').then(function(r) {
-      // HTTP non-2xx -> degrade immediately
+      // HTTP non-2xx -> 无响应
       if (!r.ok) {
-        hDot.className = 'health-dot dead'; hLabel.textContent = 'HTTP ' + r.status;
+        hDot.className = 'health-dot dead'; hLabel.textContent = '无响应';
+        hLabel.title = 'API 响应状态码 ' + r.status;
         hLabel.style.color = 'var(--danger)';
         window._healthCritical = true; window._healthConfirmed = false;
         var bar2 = document.getElementById('topbar');
@@ -837,7 +838,7 @@ window._healthConfirmed = false;
       _renderConnectionStatus(DataStore.getConnectionStatus());
       window._tradeEntryAllowed = te !== false;
       if (te === false) {
-        hDot.className = 'health-dot dead'; hLabel.textContent = '不健康'; hLabel.style.color = 'var(--danger)';
+        hDot.className = 'health-dot dead'; hLabel.textContent = '阻断'; hLabel.style.color = 'var(--danger)';
         window._healthCritical = true; window._healthConfirmed = false;
       } else if (degraded) {
         hDot.className = 'health-dot delayed'; hLabel.textContent = '降级'; hLabel.style.color = 'var(--warn)';

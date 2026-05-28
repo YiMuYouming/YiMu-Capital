@@ -18,7 +18,13 @@ const DataStore = (function() {
   var initialBase = null;      // baseData 首次加载快照（昨日收盘基线）
   var fallback = (typeof EMBEDDED_DATA !== 'undefined') ? EMBEDDED_DATA : null;  // 兜底数据
 
-  // === 刷新层级（v2.0 多源实时：PyTDX + 东方财富 + easyquotation）===
+  // === 刷新层级（v3.1 云端生产：Eastmoney/Tencent fallback + iwencai + hot_list）
+  //   live_index / breadth: Eastmoney/Tencent fallback + bridge CACHE
+  //   live_quotes:          Tencent HTTP fallback（PyTDX 云端降级不可用）
+  //   iwencai:              pywencai 零额度采集（云端可用）
+  //   hot_list:             同花顺热榜（云端可用，重启等首轮）
+  //   PyTDX 字段:           本地/可选/云端降级（hermes 香港节点 PyTDX dead 已知限制）
+  //   W12/W13:              交易日 D 使用 D-1 复盘笔记（SSOT 本地生成，rsync 上云）===
   var tiers = {
     tick:    { interval: 5000,   sources: ['live_index', 'live_quotes'], label: '5秒' },
     fast:    { interval: 30000,  sources: ['live_sectors'],               label: '30秒' },
@@ -599,14 +605,14 @@ const DataStore = (function() {
     // SSOT 溯源
     getSSOT: function(path) {
       var map = {
-        // === T1 实时（秒级，YM-data-pipeline → bridge APScheduler） ===
-        'live_index.*':           { source: 'YM-data-pipeline fetch(index) → collectors/quotes.py → bridge CACHE', freq: '5s', owner: 'bridge APScheduler' },
-        'live_quotes.*':          { source: 'YM-data-pipeline fetch(quotes) → collectors/quotes.py → bridge CACHE', freq: '5s', owner: 'bridge APScheduler' },
-        'live_breadth.*':         { source: 'YM-data-pipeline fetch(breadth) → collectors/quotes.py → bridge CACHE', freq: '30s', owner: 'bridge APScheduler' },
-        'live_sectors.*':         { source: 'YM-data-pipeline fetch(sector_index) → collectors/quotes.py → bridge CACHE', freq: '30s', owner: 'bridge APScheduler' },
-        '上证15min.*':             { source: 'PyTDX 5分钟K线 → poll_live.py (待迁入 quotes.py)', freq: '5min', owner: 'bridge APScheduler' },
-        '深证15min.*':             { source: 'PyTDX 5分钟K线 → poll_live.py (待迁入 quotes.py)', freq: '5min', owner: 'bridge APScheduler' },
-        '创业15min.*':             { source: 'PyTDX 5分钟K线 → poll_live.py (待迁入 quotes.py)', freq: '5min', owner: 'bridge APScheduler' },
+        // === T1 实时（秒级，云端 Eastmoney/Tencent fallback + bridge CACHE） ===
+        'live_index.*':           { source: 'Eastmoney/Tencent fallback → bridge CACHE (PyTDX 云端降级)', freq: '5s', owner: 'bridge APScheduler' },
+        'live_quotes.*':          { source: 'Tencent HTTP fallback → bridge CACHE (PyTDX 云端降级)', freq: '5s', owner: 'bridge APScheduler' },
+        'live_breadth.*':         { source: 'Eastmoney/Tencent fallback → bridge CACHE (云端仅粗略 up/down)', freq: '30s', owner: 'bridge APScheduler' },
+        'live_sectors.*':         { source: 'Eastmoney/Tencent fallback → bridge CACHE', freq: '30s', owner: 'bridge APScheduler' },
+        '上证15min.*':             { source: 'PyTDX → 云端降级不可用; 本地开发可配', freq: '5min', owner: '本地可选' },
+        '深证15min.*':             { source: 'PyTDX → 云端降级不可用; 本地开发可配', freq: '5min', owner: '本地可选' },
+        '创业15min.*':             { source: 'PyTDX → 云端降级不可用; 本地开发可配', freq: '5min', owner: '本地可选' },
         'northbound.*':           { source: 'YM-data-pipeline fetch(northbound) → collectors/quotes.py → bridge CACHE', freq: '60s', owner: 'bridge APScheduler' },
         // === T2 阶段（分钟/日级，iwencai/同花顺） ===
         'sentiment.涨停收益':       { source: 'iwencai 2min轮询 → CACHE[iwencai] → /api/live/iwencai', freq: '2min', owner: 'collectors/iwencai_poll.py' },
@@ -638,8 +644,8 @@ const DataStore = (function() {
         'market.赚钱效应':          { source: 'T3计算: 涨停收益阈值判定', freq: '2min', owner: 'store.js merge()' },
         // === T4 人工/复盘笔记（策略决策类字段） ===
         'style.*':                { source: 'style_detect.py → gen_dashboard_data.py → dashboard_data.json', freq: '每日盘前', owner: '稳米 + gen脚本' },
-        'lianban_pool.*':         { source: '复盘笔记附录A → pools.json / 数据附录 → dashboard_data.json', freq: '每日盘前', owner: '稳米 + gen脚本' },
-        'trend_pool.*':           { source: '复盘笔记附录A → pools.json / 数据附录 → dashboard_data.json', freq: '每日盘前', owner: '稳米 + gen脚本' },
+        'lianban_pool.*':         { source: 'D-1 复盘笔记附录A → pools.json (SSOT 本地生成, rsync 上云)', freq: '每日盘前', owner: '稳米 + gen脚本' },
+        'trend_pool.*':           { source: 'D-1 复盘笔记附录A → pools.json (SSOT 本地生成, rsync 上云)', freq: '每日盘前', owner: '稳米 + gen脚本' },
         'sectors.*':              { source: '复盘笔记数据附录 → dashboard_data.json', freq: '每日盘前', owner: '稳米 + gen脚本' },
         'anchor_stocks.*':        { source: '复盘笔记附录A → pools.json', freq: '每日盘前', owner: '稳米 + gen脚本' },
         'positions.*':            { source: 'W16输入面板/W15记流水 → pnl.db + localStorage', freq: '随录', owner: '弈沐哥' },

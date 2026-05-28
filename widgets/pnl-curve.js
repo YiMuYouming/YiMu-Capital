@@ -326,15 +326,25 @@ class PnLCurveWidget extends YiMuWidget {
     }
 
     // Position P&L: 今日盈亏 = 现价 - 昨收（从涨幅反推），不是累计成本浮盈
-    var mv = 0, todayChg = 0, missingQuotes = 0;
+    var mv = 0, todayChg = 0, missingQuotes = 0, missingBaseline = 0, missingRealized = 0;
     (s.positions || []).forEach(function(p) {
       var st = p['状态'] || '';
-      if (st.indexOf('清') >= 0 || st.indexOf('删除') >= 0) return;
+      if (st.indexOf('清') >= 0 || st.indexOf('删除') >= 0) {
+        if (p['realized_today_pnl'] == null && p['today_pnl'] == null) {
+          missingRealized++;
+        }
+        return;
+      }
       var qty = parseFloat(String(p['数量']||'0').replace('股','')) || 0;
       var live = (s.liveQ || {})[p['代码']] || {};
       var cur = parseFloat(live['最新价']) || 0;
       if (!(cur > 0)) {
         missingQuotes++;
+        return;
+      }
+      if (p['_day_start_price'] == null && p['today_pnl'] == null) {
+        missingBaseline++;
+        mv += qty * cur;
         return;
       }
       var chgPct = parseFloat(String(live['涨幅']||'0').replace('%','')) || 0;
@@ -350,6 +360,14 @@ class PnLCurveWidget extends YiMuWidget {
     var todayPnlPct = (s.pnlLive || {}).pnl_pct != null ? parseFloat(s.pnlLive.pnl_pct) : (taNull ? null : (ta > 0 ? (todayChg / ta * 100) : 0));
     var ssotPosPct = (s.pnlLive || {}).pos_pct;
     var posPct = ssotPosPct != null ? parseFloat(ssotPosPct) : (taNull ? 0 : (ta > 0 ? (mv / ta * 100) : 0));
+    var missingPnlBasis = !hasLivePnl && (missingQuotes > 0 || missingBaseline > 0 || missingRealized > 0);
+    function _missingPnlBasisText(isClose) {
+      var parts = [];
+      if (missingQuotes > 0) parts.push(isClose ? '行情缺失' : '行情缺失 ' + missingQuotes + ' 只');
+      if (missingBaseline > 0) parts.push('基线缺失 ' + missingBaseline + ' 只');
+      if (missingRealized > 0) parts.push('今日收益基线缺失 ' + missingRealized + ' 只');
+      return parts.join(' · ');
+    }
 
     if (isQuoteUnavailable) {
       pnlEl.textContent = '—';
@@ -358,15 +376,25 @@ class PnLCurveWidget extends YiMuWidget {
       posEl.textContent = '—';
       posEl.style.color = 'var(--text-disabled)';
     } else if (isPostClose) {
-      pnlEl.textContent = !hasLivePnl && missingQuotes ? '—' : (todayPnl >= 0 ? '+' : '') + todayPnl.toLocaleString();
-      pnlEl.style.color = !hasLivePnl && missingQuotes ? 'var(--text-disabled)' : (todayPnl >= 0 ? 'var(--up)' : 'var(--down)');
-      document.getElementById('pnl_pnl_sub').textContent = !hasLivePnl && missingQuotes ? '行情缺失' : (todayPnlPct >= 0 ? '+' : '') + todayPnlPct.toFixed(2) + '% 收盘';
+      pnlEl.textContent = missingPnlBasis ? '—' : (todayPnl >= 0 ? '+' : '') + todayPnl.toLocaleString();
+      pnlEl.style.color = missingPnlBasis ? 'var(--text-disabled)' : (todayPnl >= 0 ? 'var(--up)' : 'var(--down)');
+      var closeSub = '';
+      if (missingPnlBasis) { closeSub = _missingPnlBasisText(true); }
+      else if (missingBaseline > 0) { closeSub = '基线缺失 ' + missingBaseline + ' 只'; }
+      else if (missingRealized > 0) { closeSub = '今日收益基线缺失 ' + missingRealized + ' 只'; }
+      else { closeSub = (todayPnlPct >= 0 ? '+' : '') + todayPnlPct.toFixed(2) + '% 收盘'; }
+      document.getElementById('pnl_pnl_sub').textContent = closeSub;
       posEl.textContent = posPct.toFixed(0) + '%';
       posEl.style.color = posPct > 80 ? 'var(--danger)' : posPct > 50 ? 'var(--warn)' : 'var(--accent)';
     } else {
-      pnlEl.textContent = !hasLivePnl && missingQuotes ? '—' : (todayPnl >= 0 ? '+' : '') + todayPnl.toLocaleString();
-      pnlEl.style.color = !hasLivePnl && missingQuotes ? 'var(--text-disabled)' : (todayPnl >= 0 ? 'var(--up)' : 'var(--down)');
-      document.getElementById('pnl_pnl_sub').textContent = !hasLivePnl && missingQuotes ? '行情缺失 ' + missingQuotes + ' 只' : (todayPnlPct >= 0 ? '+' : '') + todayPnlPct.toFixed(2) + '% 今日';
+      pnlEl.textContent = missingPnlBasis ? '—' : (todayPnl >= 0 ? '+' : '') + todayPnl.toLocaleString();
+      pnlEl.style.color = missingPnlBasis ? 'var(--text-disabled)' : (todayPnl >= 0 ? 'var(--up)' : 'var(--down)');
+      var subLabel = '';
+      if (missingPnlBasis) { subLabel = _missingPnlBasisText(false); }
+      else if (missingBaseline > 0) { subLabel = '基线缺失 ' + missingBaseline + ' 只'; }
+      else if (missingRealized > 0) { subLabel = '今日收益基线缺失 ' + missingRealized + ' 只'; }
+      else { subLabel = (todayPnlPct >= 0 ? '+' : '') + todayPnlPct.toFixed(2) + '% 今日'; }
+      document.getElementById('pnl_pnl_sub').textContent = subLabel;
 
       posEl.textContent = posPct.toFixed(0) + '%';
       posEl.style.color = posPct > 80 ? 'var(--danger)' : posPct > 50 ? 'var(--warn)' : 'var(--accent)';

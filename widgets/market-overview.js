@@ -60,13 +60,12 @@ class MarketOverviewWidget extends YiMuWidget {
       : (m['涨跌比'] || '—');
     var amp = li['上证指数振幅'] || '—';
     var iw = d.iwencai || {};
-    var hot = d.hot_list || {};
     var ztRaw = iw['涨停家数'];
-    var zt = (hot.total != null && hot.total > 0) ? hot.total : (ztRaw != null && ztRaw > 0 ? ztRaw : null);
+    var zt = (ztRaw != null && ztRaw > 0) ? ztRaw : null;
     var dt = iw['跌停家数'];
 
     html += '<div style="display:flex;gap:6px">';
-    html += '<div class="kpi-card" style="flex:1;padding:6px 8px"><div class="kpi-label">成交额</div><div class="kpi-value" style="font-size:14px">'+(li['成交额']||'—')+'</div>'+(amtCompareText?'<div class="kpi-verdict ' + amtDir + '">' + amtCompareText + (amtDiff?' · '+amtDiff:'') + '</div>':'')+'</div>';
+    html += '<div class="kpi-card" style="flex:1;padding:6px 8px"><div class="kpi-label">成交额</div><div class="kpi-value" style="font-size:14px">'+(li['成交额']||'—')+'</div>'+(amtCompareText?'<div class="kpi-verdict ' + amtDir + '">' + amtCompareText + '</div>':'')+'</div>';
     html += '<div class="kpi-card" style="flex:1;padding:6px 8px"><div class="kpi-label">涨跌比</div><div class="kpi-value" style="font-size:14px">'+udHtml+'</div></div>';
     html += '<div class="kpi-card" style="flex:1;padding:6px 8px"><div class="kpi-label">振幅</div><div class="kpi-value" style="font-size:14px;color:var(--warn)">'+amp+'</div></div>';
     html += '<div class="kpi-card" style="flex:1;padding:6px 8px"><div class="kpi-label">涨跌停</div><div class="kpi-value" style="font-size:14px"><span class="up">'+(zt!=null?zt:'—')+'</span>/<span class="down">'+(dt!=null?dt:'—')+'</span></div></div>';
@@ -160,9 +159,7 @@ class MarketOverviewWidget extends YiMuWidget {
       {name:'深证', chg:yb['深证昨涨幅']||'—', amt:yb['深证昨成交额']||'—', up:yb['深证昨上涨'], dn:yb['深证昨下跌']},
       {name:'创业', chg:yb['创业昨涨幅']||'—', amt:yb['创业昨成交额']||'—', up:yb['创业昨上涨'], dn:yb['创业昨下跌']}
     ];
-    var hasYest = yestIndexes.some(function(yi) { return yi.chg !== '—' || yi.amt !== '—'; });
-    if (hasYest) {
-      var yestBody = '';
+    var yestBody = '';
       yestIndexes.forEach(function(yi) {
         var ydir = yi.chg.charAt(0) === '+' ? 'up' : yi.chg.charAt(0) === '-' ? 'down' : '';
         yestBody += '<span style="display:inline-flex;align-items:center;gap:4px;padding:2px 8px;background:var(--bg-base);border-radius:4px;font-size:11px">' +
@@ -180,7 +177,6 @@ class MarketOverviewWidget extends YiMuWidget {
         '<span style="font-size:8px;transition:transform .2s;transform:rotate(90deg)" id="w04_baseline_arrow">▶</span> 昨日收盘基线</div>' +
         '<div id="w04_baseline_body" style="display:flex;margin-top:4px;gap:6px;flex-wrap:wrap">' + yestBody + '</div>' +
         '</div>';
-    }
 
     // === LLM 研判卡槽 ===
     var llmHtml = '<span style="color:var(--text-disabled)">🤖 待研判</span>';

@@ -197,6 +197,29 @@ try {
         self.assertIn("实时收益", result.get("periodSub", ""),
             f"正常应显示'实时收益': {result}")
 
+    def test_missing_day_start_price_shows_baseline_missing_not_zero(self):
+        """_day_start_price=null 且无 SSOT 今日盈亏 → 今日盈亏不显示 0"""
+        result = self._run_kpi_test({
+            "liveQ": {"000001": {"最新价": 10, "涨幅": "1.0%"}},
+            "positions": [{"状态": "持有", "代码": "000001", "数量": "100股", "_day_start_price": None, "today_pnl": None}],
+            "pnlLive": {"valuation_complete": True}
+        })
+        self.assertTrue(result.get("ok"), f"不应崩溃: {result}")
+        self.assertEqual(result.get("pnl"), "—", f"缺基线时今日盈亏 value 不应伪装为 0: {result}")
+        self.assertIn("基线缺失", result.get("pnlSub", ""), f"缺基线时 sub 应明确说明: {result}")
+        self.assertNotEqual(result.get("asset"), "—", f"缺分项基线不应影响总资产展示: {result}")
+
+    def test_closed_missing_realized_shows_today_baseline_missing(self):
+        """清仓 realized_today_pnl=null 且无 SSOT 今日盈亏 → 显示今日收益基线缺失"""
+        result = self._run_kpi_test({
+            "positions": [{"状态": "已清仓", "代码": "000001", "数量": "0股", "realized_today_pnl": None, "today_pnl": None}],
+            "pnlLive": {"valuation_complete": True}
+        })
+        self.assertTrue(result.get("ok"), f"不应崩溃: {result}")
+        self.assertEqual(result.get("pnl"), "—", f"清仓收益基线缺失时不应显示 0: {result}")
+        self.assertIn("今日收益基线缺失", result.get("pnlSub", ""), f"清仓缺 realized 应明确说明: {result}")
+        self.assertNotEqual(result.get("asset"), "—", f"缺清仓分项基线不应影响总资产展示: {result}")
+
     def test_close_snapshot_shows_values_with_label(self):
         """R3: quote_status=close_snapshot + valuation_complete=true → asset≠'—', 标注收盘"""
         result = self._run_kpi_test(
