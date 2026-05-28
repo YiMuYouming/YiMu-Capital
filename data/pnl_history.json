@@ -3,14 +3,14 @@
     "version": "1.0",
     "currency": "CNY",
     "total_deposit": 200000,
-    "last_twr_nav": 1.04893,
+    "last_twr_nav": 1.033765,
     "updated": "2026-05-15T16:02:21.650483",
     "day_start_asset": 210477,
     "day_start_date": "2026-05-26",
-    "last_total_asset": 209786.0,
-    "last_updated": "2026-05-26T15:06:50",
-    "last_mv": 141927.0,
-    "closed_date": "2026-05-26"
+    "last_total_asset": 206753.0,
+    "last_updated": "2026-05-27T15:05:00",
+    "last_mv": 106566.0,
+    "closed_date": "2026-05-27"
   },
   "intraday_histories": {},
   "daily": [
@@ -258,12 +258,21 @@
     },
     {
       "date": "2026-05-26",
-      "nav": 1.114,
-      "pnl_pct": 11.4,
-      "total_asset": 111400.0,
-      "mv": 17000,
-      "pos_pct": 15.26,
+      "nav": 1.04893,
+      "pnl_pct": -0.33,
+      "total_asset": 209786.0,
+      "mv": 141927.0,
+      "pos_pct": 67.65,
       "max_dd": null
+    },
+    {
+      "date": "2026-05-27",
+      "nav": 1.033765,
+      "pnl_pct": -1.4458,
+      "total_asset": 206753.0,
+      "mv": 106566.0,
+      "pos_pct": 51.54,
+      "max_dd": 2.3059
     }
   ]
 }

@@ -146,6 +146,7 @@ def reduce_account_state(anchor, trades, quotes, now=None, fund_events=None):
     bought_cost = {}   # code -> remaining bought cost basis
 
     # 1. 重放交易流水（含逐股日内收益）
+    ledger_errors = []
     for trade in sorted(trades or [], key=event_order_trade):
         if trade_id_cutoff is not None and trade.get("id") is not None:
             if int(trade["id"]) <= int(trade_id_cutoff):
@@ -156,12 +157,24 @@ def reduce_account_state(anchor, trades, quotes, now=None, fund_events=None):
         qty = int(_number(trade.get("qty")))
         if not code or qty <= 0:
             continue
-        cash += trade_cash_effect(trade)
         position = by_code.get(code)
         action = str(trade.get("action", ""))
         if "卖出" in action:
+            old_qty = int(position.get("数量", 0)) if position else 0
+            # Oversell guard: qty > available → fail-closed, skip cash and position
+            if qty > old_qty:
+                ledger_errors.append({
+                    "type": "oversell",
+                    "trade_id": trade.get("id"),
+                    "code": code,
+                    "name": trade.get("name", ""),
+                    "trade_time": trade.get("trade_time", ""),
+                    "sell_qty": qty,
+                    "available_qty": old_qty,
+                })
+                continue
             if position:
-                old_qty = int(position.get("数量", 0))
+                cash += trade_cash_effect(trade)
                 remaining_sell = min(qty, old_qty)
                 new_qty = max(0, old_qty - remaining_sell)
                 position["数量"] = new_qty
@@ -210,6 +223,7 @@ def reduce_account_state(anchor, trades, quotes, now=None, fund_events=None):
                         "close_trade_id": trade.get("id"),
                     })
         elif "买入" in action or "追涨" in action:
+            cash += trade_cash_effect(trade)
             trade_price = _number(trade.get("price"))
             if not position:
                 position = {
@@ -323,9 +337,13 @@ def reduce_account_state(anchor, trades, quotes, now=None, fund_events=None):
         "pnl_pct": pnl_pct,
         "pos_pct": pos_pct,
         "total_deposit": _number(anchor.get("total_deposit")),
-        "valuation_complete": valuation_complete,
+        "valuation_complete": False if ledger_errors else valuation_complete,
         "quote_status": quote_status,
         "closed_positions": closed_list,
+        "ledger_ok": not ledger_errors,
+        "ledger_errors": ledger_errors,
+        "anchor_blocked": bool(ledger_errors),
+        "block_reason": "ledger_error: oversell detected" if ledger_errors else None,
     }
 
 

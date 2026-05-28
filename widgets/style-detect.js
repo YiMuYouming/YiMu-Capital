@@ -2,17 +2,34 @@
 'use strict';
 
 class StyleDetectWidget extends YiMuWidget {
+  _formatWanYi(value) {
+    var n = Number(value);
+    if (!isFinite(n) || n <= 0) return '';
+    if (n >= 10000) {
+      return (n / 10000).toFixed(2).replace(/\.?0+$/, '') + '万亿';
+    }
+    return Math.round(n) + '亿';
+  }
+
+  _styleTone(mode) {
+    if (mode.indexOf('连板') >= 0 && mode.indexOf('趋势') < 0) return 'lb';
+    if (mode.indexOf('趋势') >= 0 && mode.indexOf('连板') < 0) return 'tr';
+    return 'mixed';
+  }
+
   render(data) {
     var body = this.getBody();
     if (!body) return;
     var ST = (data && data.style) || {};
+    var meta = (data && data.meta) || {};
 
     var score = ST['总分'] || 0;
     var mode = ST['风格'] || '—';
     var conf = ST['置信度'] || 0;
-    var modeCls = mode.indexOf('连板') >= 0 ? 'up'
-      : mode.indexOf('趋势') >= 0 ? 'down'
-      : 'info';
+    var tone = this._styleTone(mode);
+    var toneColor = tone === 'lb' ? 'var(--up-deep)' : (tone === 'tr' ? 'var(--info)' : 'var(--accent-purple)');
+    var toneBg = tone === 'lb' ? 'var(--up-bg)' : (tone === 'tr' ? 'var(--info-bg)' : 'var(--accent-purple-bg)');
+    var toneBorder = tone === 'lb' ? 'rgba(220,38,38,0.16)' : (tone === 'tr' ? 'rgba(37,99,235,0.16)' : 'rgba(124,58,237,0.16)');
     var lbPct = ST['连板占比'] || 0;
     var trPct = ST['趋势占比'] || 0;
     var lbSignal = ST['连板信号强度'] || 0;
@@ -25,26 +42,40 @@ class StyleDetectWidget extends YiMuWidget {
     var jjl2 = ST['二进三晋级率'];
     var jjl3 = ST['三进四晋级率'];
     var warnings = ST['预警'] || [];
+    var marketVolume = this._formatWanYi(ST['_iwencai_全市场成交额']);
+    var updated = meta.updated ? String(meta.updated).slice(11, 16) : '';
 
     var html = '';
 
-    // === 第一行：分数 + 风格标签 + 置信度 ===
-    html += '<div style="display:flex;align-items:baseline;gap:var(--sp-sm);margin-bottom:var(--sp-xs)">' +
-      '<span style="font-family:var(--font-mono);font-size:36px;font-weight:700;color:var(--' + modeCls + ');line-height:1">' + score + '</span>' +
-      '<span class="tag ' + modeCls + '" style="font-size:var(--fs-body);padding:2px 8px;font-weight:600">' + mode + '</span>' +
-      '<span style="font-size:var(--fs-label);color:var(--text-disabled)">置信' + conf + '%</span>' +
-      (daysInRegime ? '<span style="font-size:var(--fs-label);color:var(--text-disabled)">· 持续' + daysInRegime + '天</span>' : '') +
+    // === 顶部：每日基线 + 分数 + 风格标签 ===
+    html += '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:var(--sp-sm);margin-bottom:var(--sp-xs)">' +
+      '<div style="min-width:0">' +
+        '<div style="font-size:var(--fs-label);color:var(--text-disabled);margin-bottom:2px">每日基线' + (updated ? ' · ' + updated : '') + '</div>' +
+        '<div style="display:flex;align-items:baseline;gap:var(--sp-sm);min-width:0">' +
+          '<span style="font-family:var(--font-mono);font-size:34px;font-weight:700;color:' + toneColor + ';line-height:1">' + score + '</span>' +
+          '<span class="style-chip" style="font-size:var(--fs-body);padding:2px 8px;border-radius:var(--radius-sm);font-weight:700;color:' + toneColor + ';background:' + toneBg + ';border:1px solid ' + toneBorder + ';white-space:nowrap">' + mode + '</span>' +
+        '</div>' +
+      '</div>' +
+      '<div style="text-align:right;flex:0 0 auto;font-size:var(--fs-label);color:var(--text-disabled);line-height:1.6">' +
+        '<div>置信 <b style="font-family:var(--font-mono);color:var(--text-secondary)">' + conf + '%</b></div>' +
+        (daysInRegime ? '<div>持续 <b style="font-family:var(--font-mono);color:var(--text-secondary)">' + daysInRegime + '</b> 天</div>' : '') +
+      '</div>' +
       '</div>';
 
     // === 分配比例条（trading-core 插值表）===
     html += '<div style="display:flex;height:6px;border-radius:3px;overflow:hidden;margin-bottom:var(--sp-xs)">' +
       '<div style="width:' + lbPct + '%;background:var(--up);min-width:' + (lbPct > 0 ? '2px' : '0') + '"></div>' +
-      '<div style="width:' + trPct + '%;background:var(--down);min-width:' + (trPct > 0 ? '2px' : '0') + '"></div>' +
+      '<div style="width:' + trPct + '%;background:var(--info);min-width:' + (trPct > 0 ? '2px' : '0') + '"></div>' +
       '</div>' +
-      '<div style="display:flex;justify-content:space-between;font-size:var(--fs-body);color:var(--text-secondary);margin-bottom:var(--sp-sm)">' +
-      '<span>资金：连板 <b class="up" style="font-family:var(--font-mono)">' + lbPct + '%</b></span>' +
-      '<span>趋势 <b class="down" style="font-family:var(--font-mono)">' + trPct + '%</b></span>' +
-      (cap ? '<span style="font-size:var(--fs-label);color:var(--text-disabled)">仓位上限' + cap + '%</span>' : '') +
+      '<div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:var(--sp-xs);font-size:var(--fs-body);color:var(--text-secondary);margin-bottom:var(--sp-sm)">' +
+      '<span>连板 <b class="up" style="font-family:var(--font-mono)">' + lbPct + '%</b></span>' +
+      '<span>趋势 <b class="info" style="font-family:var(--font-mono)">' + trPct + '%</b></span>' +
+      '<span style="text-align:right">基线仓位 <b style="font-family:var(--font-mono);color:var(--text-primary)">' + cap + '%</b></span>' +
+      '</div>';
+
+    html += '<div style="display:flex;justify-content:space-between;gap:var(--sp-sm);font-size:var(--fs-label);color:var(--text-disabled);margin-bottom:var(--sp-xs)">' +
+      '<span>成交额 ' + (marketVolume || '—') + '</span>' +
+      '<span>信号强度：连板 ' + lbSignal + ' / 趋势 ' + trSignal + '</span>' +
       '</div>';
 
     // === 四维度进度条（V0.3: 25/35/25/15 = 100）===

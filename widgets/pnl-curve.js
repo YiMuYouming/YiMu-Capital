@@ -1,5 +1,5 @@
 // widgets/pnl-curve.js — W22 账户收益曲线
-// Canvas 折线图: 账户TWR收益 vs 基准指数 + 仓位 + 自动回撤高亮
+// Canvas 折线图: 账户TWR收益 vs 指数参考 + 仓位 + 自动回撤高亮
 'use strict';
 
 // 注入一次 CSS
@@ -175,8 +175,8 @@ class PnLCurveWidget extends YiMuWidget {
       '<div class="pnl-kpi" id="pnl_kpi1_' + this.id + '">' +
         '<div class="pnl-kpi-card"><div class="pnl-kpi-lbl">当前资产</div><div class="pnl-kpi-val" id="pnl_asset">—</div><div class="pnl-kpi-sub" id="pnl_asset_sub">—</div></div>' +
         '<div class="pnl-kpi-card"><div class="pnl-kpi-lbl">TWR累计</div><div class="pnl-kpi-val" id="pnl_twr">—</div><div class="pnl-kpi-sub" id="pnl_twr_sub">—</div></div>' +
-        '<div class="pnl-kpi-card"><div class="pnl-kpi-lbl">基准累计</div><div class="pnl-kpi-val" id="pnl_bm_twr">—</div><div class="pnl-kpi-sub" id="pnl_bm_twr_sub">—</div></div>' +
-        '<div class="pnl-kpi-card"><div class="pnl-kpi-lbl">累计超额 α</div><div class="pnl-kpi-val" id="pnl_alpha">—</div><div class="pnl-kpi-sub" id="pnl_alpha_sub">—</div></div>' +
+        '<div class="pnl-kpi-card"><div class="pnl-kpi-lbl">指数参考</div><div class="pnl-kpi-val" id="pnl_bm_twr">—</div><div class="pnl-kpi-sub" id="pnl_bm_twr_sub">—</div></div>' +
+        '<div class="pnl-kpi-card"><div class="pnl-kpi-lbl">相对指数</div><div class="pnl-kpi-val" id="pnl_alpha">—</div><div class="pnl-kpi-sub" id="pnl_alpha_sub">—</div></div>' +
         '<div class="pnl-kpi-card"><div class="pnl-kpi-lbl">历史最大回撤</div><div class="pnl-kpi-val" id="pnl_maxdd">—</div><div class="pnl-kpi-sub" id="pnl_maxdd_sub">—</div></div>' +
       '</div>' +
       // KPI row 2: 今日（实时变）
@@ -184,7 +184,7 @@ class PnLCurveWidget extends YiMuWidget {
         '<div class="pnl-kpi-card pnl-kpi-dyn"><div class="pnl-kpi-lbl">今日盈亏</div><div class="pnl-kpi-val" id="pnl_pnl">—</div><div class="pnl-kpi-sub" id="pnl_pnl_sub">—</div></div>' +
         '<div class="pnl-kpi-card pnl-kpi-dyn"><div class="pnl-kpi-lbl">今日仓位</div><div class="pnl-kpi-val" id="pnl_pos">—</div><div class="pnl-kpi-sub" id="pnl_pos_sub">—</div></div>' +
         '<div class="pnl-kpi-card pnl-kpi-dyn"><div class="pnl-kpi-lbl" id="pnl_period_label">今日TWR</div><div class="pnl-kpi-val" id="pnl_period_val">—</div><div class="pnl-kpi-sub" id="pnl_period_sub">—</div></div>' +
-        '<div class="pnl-kpi-card pnl-kpi-dyn"><div class="pnl-kpi-lbl">今日超额 α</div><div class="pnl-kpi-val" id="pnl_today_alpha">—</div><div class="pnl-kpi-sub" id="pnl_today_alpha_sub">—</div></div>' +
+        '<div class="pnl-kpi-card pnl-kpi-dyn"><div class="pnl-kpi-lbl">今日相对指数</div><div class="pnl-kpi-val" id="pnl_today_alpha">—</div><div class="pnl-kpi-sub" id="pnl_today_alpha_sub">—</div></div>' +
         '<div class="pnl-kpi-card pnl-kpi-dyn"><div class="pnl-kpi-lbl" id="pnl_dd_label">今日回撤</div><div class="pnl-kpi-val" id="pnl_dd_val">—</div><div class="pnl-kpi-sub" id="pnl_dd_sub">—</div></div>' +
       '</div>' +
       // Controls
@@ -209,7 +209,7 @@ class PnLCurveWidget extends YiMuWidget {
       // Legend
       '<div class="pnl-legend">' +
         '<div class="pnl-leg-item"><div class="pnl-leg-line" style="background:#DC2626"></div><span>账户收益(TWR)</span></div>' +
-        '<div class="pnl-leg-item"><div class="pnl-leg-line" style="background:#2563EB"></div><span id="pnl_idx_label_' + this.id + '">上证指数</span></div>' +
+        '<div class="pnl-leg-item"><div class="pnl-leg-line" style="background:#2563EB"></div><span id="pnl_idx_label_' + this.id + '">上证指数参考</span></div>' +
         '<div class="pnl-leg-item" style="margin-left:auto;font-size:10px;color:var(--text-disabled)" id="pnl_ts_' + this.id + '">—</div>' +
       '</div>' +
       // Drawer trigger
@@ -217,7 +217,7 @@ class PnLCurveWidget extends YiMuWidget {
       // Drawer
       '<div class="pnl-drawer" id="pnl_drawer_' + this.id + '">' +
         '<table class="pnl-table"><thead><tr>' +
-          '<th class="pnl-td-period">周期</th><th class="pnl-td-num">账户收益</th><th class="pnl-td-num">基准收益</th><th class="pnl-td-num">超额α</th><th class="pnl-td-num">最大回撤</th>' +
+          '<th class="pnl-td-period">周期</th><th class="pnl-td-num">账户收益</th><th class="pnl-td-num">指数参考</th><th class="pnl-td-num">相对指数</th><th class="pnl-td-num">最大回撤</th>' +
         '</tr></thead><tbody id="pnl_tbody_' + this.id + '"></tbody></table>' +
         '<div class="pnl-summary" id="pnl_summary_' + this.id + '"></div>' +
       '</div>' +
@@ -374,6 +374,18 @@ class PnLCurveWidget extends YiMuWidget {
     document.getElementById('pnl_pos_sub').textContent = (s.positions||[]).filter(function(p){return (p['状态']||'').indexOf('清')<0&&(p['状态']||'').indexOf('删除')<0}).length + ' 只持仓';
 
     // Period KPI — 标签联动
+    // Phase 5: 估值不可信时所有动态 KPI 同步置不可用
+    if (isQuoteUnavailable) {
+      var dynIds = ['pnl_period_val', 'pnl_dd_val', 'pnl_today_alpha', 'pnl_twr', 'pnl_alpha'];
+      dynIds.forEach(function(id) {
+        var el = document.getElementById(id);
+        if (el) { el.textContent = '—'; el.style.color = 'var(--text-disabled)'; }
+      });
+      ['pnl_period_sub', 'pnl_dd_sub', 'pnl_today_alpha_sub', 'pnl_twr_sub', 'pnl_alpha_sub'].forEach(function(id) {
+        var el = document.getElementById(id);
+        if (el) el.textContent = '估值不可信';
+      });
+    }
     var isFallback = chartData && chartData.is_fallback;
     var fbDate = isFallback ? (chartData.data_date || '?') : '';
     var periodLabel = { today:'今日', week:'近一周', month:'近一月', quarter:'近三月', year:'近一年' };
@@ -385,14 +397,14 @@ class PnLCurveWidget extends YiMuWidget {
     if (pnlLabelEl) pnlLabelEl.textContent = perStr + ' TWR';
     var ddLabelEl = document.getElementById('pnl_dd_label');
     if (ddLabelEl) ddLabelEl.textContent = perStr + ' 回撤';
-    // 超额 α 标签联动
+    // 相对指数标签联动
     var alphaEl = document.getElementById('pnl_today_alpha');
     if (alphaEl) {
       var alphaLbl = alphaEl.parentElement.querySelector('.pnl-kpi-lbl');
-      if (alphaLbl) alphaLbl.textContent = perStr + ' 超额 α';
+      if (alphaLbl) alphaLbl.textContent = perStr + ' 相对指数';
     }
 
-    // 今日：用实时持仓浮动盈亏 + 日内的回撤/超额
+    // 今日：用实时持仓浮动盈亏 + 日内的回撤/相对指数
     if (s.period === 'today') {
       if (isQuoteUnavailable) {
         document.getElementById('pnl_period_val').textContent = '—';
@@ -425,10 +437,11 @@ class PnLCurveWidget extends YiMuWidget {
         }
         if (chartData.is_fallback) {
           var alphaSubEl = document.getElementById('pnl_today_alpha_sub');
-          if (alphaSubEl) alphaSubEl.textContent = fallbackLabel + ' TWR−基准';
+          if (alphaSubEl) alphaSubEl.textContent = fallbackLabel + ' TWR−指数参考';
         }
       }
     } else {
+      if (isQuoteUnavailable) return;
       var cache = this._allDailyData;
       if (cache && cache.dates && cache.dates.length) {
       var now = new Date();
@@ -450,7 +463,7 @@ class PnLCurveWidget extends YiMuWidget {
       }
       document.getElementById('pnl_period_val').textContent = ((cP-1)*100 >= 0 ? '+' : '') + ((cP-1)*100).toFixed(2) + '%';
       document.getElementById('pnl_period_val').style.color = (cP-1)*100 >= 0 ? 'var(--up)' : 'var(--down)';
-      document.getElementById('pnl_period_sub').textContent = '超额 ' + (((cP-1)*100-(cB-1)*100) >= 0 ? '+' : '') + ((cP-1)*100-(cB-1)*100).toFixed(2) + '%';
+      document.getElementById('pnl_period_sub').textContent = '相对指数 ' + (((cP-1)*100-(cB-1)*100) >= 0 ? '+' : '') + ((cP-1)*100-(cB-1)*100).toFixed(2) + '%';
       document.getElementById('pnl_dd_val').textContent = md.toFixed(2) + '%';
     } else if (chartData && chartData.portfolio && chartData.portfolio.length) {
       var cp = chartData.portfolio, cb = chartData.benchmark;
@@ -458,12 +471,12 @@ class PnLCurveWidget extends YiMuWidget {
       var lastP = cp[cp.length-1];
       document.getElementById('pnl_period_val').textContent = (lastP >= 0 ? '+' : '') + lastP.toFixed(2) + '%';
       document.getElementById('pnl_period_val').style.color = lastP >= 0 ? 'var(--up)' : 'var(--down)';
-      document.getElementById('pnl_period_sub').textContent = '超额 ' + (lastP-(cb[cb.length-1]) >= 0 ? '+' : '') + (lastP-cb[cb.length-1]).toFixed(2) + '%';
+      document.getElementById('pnl_period_sub').textContent = '相对指数 ' + (lastP-(cb[cb.length-1]) >= 0 ? '+' : '') + (lastP-cb[cb.length-1]).toFixed(2) + '%';
       document.getElementById('pnl_dd_val').textContent = (ddI ? ddI.dd : 0).toFixed(2) + '%';
     }
     document.getElementById('pnl_dd_val').style.color = 'var(--down)';
 
-    // 今日超额 α
+    // 今日相对指数
     var todayAlphaEl = document.getElementById('pnl_today_alpha');
     if (todayAlphaEl && chartData && chartData.portfolio && chartData.benchmark) {
       var lastValid = chartData.portfolio.length - 1;
@@ -477,7 +490,7 @@ class PnLCurveWidget extends YiMuWidget {
       }
     }
     var taSub = document.getElementById('pnl_today_alpha_sub');
-    if (taSub) taSub.textContent = 'TWR−基准';
+    if (taSub) taSub.textContent = 'TWR−指数参考';
 
     // Row 1 标签联动
     var idxName2 = {sh:'上证', sz:'深证', cy:'创业'}[s.index] || '上证';
@@ -603,7 +616,7 @@ class PnLCurveWidget extends YiMuWidget {
     var s = this._state;
     var totalAsset = s.totalAsset != null ? s.totalAsset : null;
 
-    // 从 _allDailyData 实时算 TWR + 基准 + 回撤（和抽屉同源）
+    // 从 _allDailyData 实时算 TWR + 指数参考 + 回撤（和抽屉同源）
     var cumReturn = 0, bmTWR = 0, histMaxDD = 0;
     if (this._allDailyData && this._allDailyData.portfolio && this._allDailyData.portfolio.length) {
       var ad = this._allDailyData;
@@ -639,7 +652,7 @@ class PnLCurveWidget extends YiMuWidget {
     var aEl = document.getElementById('pnl_alpha');
     if (aEl) { aEl.textContent = (alpha >= 0 ? '+' : '') + alpha.toFixed(2) + '%'; aEl.style.color = alpha >= 0 ? 'var(--up)' : 'var(--down)'; }
     var aSub = document.getElementById('pnl_alpha_sub');
-    if (aSub) aSub.textContent = 'TWR−基准';
+    if (aSub) aSub.textContent = 'TWR−指数参考';
 
     var ddEl = document.getElementById('pnl_maxdd');
     if (ddEl) { ddEl.textContent = histMaxDD.toFixed(2) + '%'; ddEl.style.color = 'var(--down)'; }
@@ -913,7 +926,7 @@ class PnLCurveWidget extends YiMuWidget {
         this.classList.add('active');
         self._state.index = this.dataset.idx;
         var label = document.getElementById('pnl_idx_label_' + self.id);
-        if (label) label.textContent = this.textContent + '指数';
+        if (label) label.textContent = this.textContent + '指数参考';
         // 重新拉 all 数据更新抽屉
         self._allDataReady = false;
         self._allDataLoading = false;

@@ -173,6 +173,118 @@ class W07W14W19MissingRuleStateTest(unittest.TestCase):
         self.assertNotIn("无双冰 (rule_state)", html)
 
 
+class RuleCodeDisplayTest(unittest.TestCase):
+    """W03/W14 不应把机器规则码直接暴露给交易界面"""
+
+    def test_w03_translates_rule_codes(self):
+        result = _render_widget("position-calc.js", "W03", _day_stop_fixture())
+        html = result.get("html", "")
+        self.assertNotIn("DAY_STOP", html, f"W03 不应裸露机器码: {html[:300]}")
+        self.assertIn("单日熔断", html, f"W03 应显示中文规则说明: {html[:300]}")
+
+    def test_w14_translates_rule_codes(self):
+        result = _render_widget("risk-panel.js", "W14", _day_stop_fixture())
+        html = result.get("html", "")
+        self.assertNotIn("DAY_STOP", html, f"W14 不应裸露机器码: {html[:300]}")
+        self.assertIn("单日熔断", html, f"W14 应显示中文规则说明: {html[:300]}")
+
+    def test_w14_groups_system_and_trade_risk(self):
+        fixture = _day_stop_fixture()
+        fixture["rule_state"]["blocks"] = [
+            {"code": "DATA_UNTRUSTED", "scope": "all", "message": "账户估值或行情数据不可信", "evidence": {}},
+            {"code": "LOSS_STREAK", "scope": "all", "message": "连亏触发强制空仓", "evidence": {"loss_streak": 2}},
+            {"code": "W2_ICE_RISK", "scope": "w2", "message": "W2 冰点风险过高", "evidence": {}},
+        ]
+        fixture["rule_state"]["caps"] = {
+            "base_total_pct": 20, "total_pct": 0,
+            "lianban_side_cap_pct": 0, "trend_side_cap_pct": 20,
+            "first_entry_pct": 0,
+        }
+        result = _render_widget("risk-panel.js", "W14", fixture)
+        html = result.get("html", "")
+        self.assertIn("账户风控", html, f"W14 应展示账户风控分组: {html[:500]}")
+        self.assertIn("系统状态", html, f"W14 应把数据健康单独分组: {html[:500]}")
+        self.assertIn("交易条件", html, f"W14 应把 W1/W2 条件单独分组: {html[:500]}")
+        self.assertIn("收盘/行情状态", html, f"W14 数据不可信应避免吓人的红字主文案: {html[:500]}")
+
+    def test_w03_shows_baseline_and_execution_sources(self):
+        fixture = _day_stop_fixture()
+        fixture["style"] = {"总仓位上限": 40, "连板占比": 45, "趋势占比": 55}
+        result = _render_widget("position-calc.js", "W03", fixture)
+        html = result.get("html", "")
+        self.assertIn("执行上限", html, f"W03 应区分实时执行口径: {html[:500]}")
+        self.assertIn("风格基线", html, f"W03 应展示 W02 风格基线: {html[:500]}")
+        self.assertIn("全局门禁", html, f"W03 阻断应分组展示: {html[:500]}")
+
+
+class W01TimelineRenderTest(unittest.TestCase):
+    """W01 时间线应在低高度组件内渲染核心状态"""
+
+    def test_w01_renders_visible_status_and_segments(self):
+        result = _render_widget(
+            "timeline.js", "W01", {"meta": {"weekday": "周三"}},
+            extra_js="global.setInterval = function(){ return 0; };"
+        )
+        html = result.get("html", "")
+        self.assertTrue(
+            ("盘前准备" in html) or ("已闭市" in html) or ("窗口" in html) or ("休市" in html),
+            f"W01 应显示当前状态: {html[:300]}",
+        )
+        self.assertIn("全天进度", html, f"W01 应显示进度: {html[:300]}")
+        self.assertIn("time-line", html, f"W01 应使用稳定布局 class: {html[:300]}")
+
+
+class W02StyleDisplayTest(unittest.TestCase):
+    """W02 应清楚展示每日风格基线，避免误认为实时开仓门禁"""
+
+    def test_w02_labels_daily_baseline_and_market_volume(self):
+        result = _render_widget("style-detect.js", "W02", {
+            "meta": {"date": "2026-05-27", "updated": "2026-05-27T21:18:31+08:00"},
+            "style": {
+                "总分": 45,
+                "风格": "混合（偏趋势）",
+                "置信度": 53,
+                "连板占比": 42,
+                "趋势占比": 58,
+                "总仓位上限": 40,
+                "_iwencai_全市场成交额": 32400,
+                "dim1_量能": 17,
+                "dim2_连板生态": 9,
+                "dim3_趋势": 12,
+                "dim4_情绪广度": 7,
+                "一进二晋级率": 14.71,
+                "二进三晋级率": 37.5,
+                "三进四晋级率": 0.0,
+                "连板信号描述": "连板偏弱（谨慎开仓）",
+                "趋势信号描述": "趋势正常",
+            },
+        })
+        html = result.get("html", "")
+        self.assertIn("每日基线", html, f"W02 应标明这是每日基线: {html[:400]}")
+        self.assertIn("基线仓位", html, f"W02 仓位口径应避免误认为实时可开仓: {html[:400]}")
+        self.assertIn("3.24万亿", html, f"W02 应展示可读成交额: {html[:400]}")
+        self.assertNotIn("class=\"tag down\"", html, f"W02 不应用涨跌色表达趋势风格: {html[:400]}")
+
+    def test_w02_weak_dimension_uses_renderable_progress_class(self):
+        result = _render_widget("style-detect.js", "W02", {
+            "style": {
+                "总分": 42,
+                "风格": "混合（均衡）",
+                "连板占比": 45,
+                "趋势占比": 55,
+                "dim1_量能": 17,
+                "dim2_连板生态": 9,
+                "dim3_趋势": 9,
+                "dim4_情绪广度": 7,
+            },
+        })
+        html = result.get("html", "")
+        self.assertIn("progress-fill danger", html, f"W02 弱项应输出 danger 进度条: {html[:400]}")
+
+        css = (ROOT / "css" / "theme.css").read_text(encoding="utf-8")
+        self.assertIn(".progress-fill.danger", css)
+
+
 class StoreMergeRuleStateTest(unittest.TestCase):
     """store.js 真实 DataStore 流程可取得 rule_state"""
 
@@ -223,6 +335,78 @@ console.log(JSON.stringify({
         resp = json.loads(result.stdout.strip().split("\n")[-1])
         self.assertTrue(resp.get("ok"), f"merged 应含 rule_state: {resp}")
         self.assertEqual(resp.get("version"), "g1a-v1")
+
+
+if __name__ == "__main__":
+    unittest.main()
+
+
+
+class W1TradeEntryGateTest(unittest.TestCase):
+    """v3 Phase 4: W1 录入入口按 trade_entry_allowed 关闭"""
+
+    def test_w1_closed_when_trade_entry_disallowed(self):
+        """trade_entry_allowed=false → W1 显示关闭状态"""
+        fixture = _day_stop_fixture()
+        fixture['trade_entry_allowed'] = False
+        fixture['trade_entry_reason'] = '锚点被阻断'
+        result = _render_widget("w1-check.js", "W08", fixture)
+        html = result.get("html", "")
+        self.assertIn("关闭", html, f"trade_entry_allowed=false W1 应显示关闭: {html[:200]}")
+
+    def test_w1_shows_candidates_when_trade_entry_allowed(self):
+        """trade_entry_allowed=true 且 rule_state 正常 → W1 显示候选"""
+        fixture = {
+            "rule_state": {
+                "version": "g1a-v1", "tradable": True,
+                "caps": {"base_total_pct": 40, "total_pct": 20},
+                "windows": {"w1": {"in_session": True, "buy_allowed": True},
+                            "w2": {"in_session": True, "buy_allowed": True}},
+                "blocks": [], "warnings": [],
+            },
+            "sentiment": {"情绪值": 65},
+            "live_index": {}, "live_quotes": {},
+            "lianban_pool": [], "trend_pool": [],
+            "trade_entry_allowed": True,
+        }
+        result = _render_widget("w1-check.js", "W08", fixture)
+        html = result.get("html", "")
+        self.assertNotIn("关闭", html, f"trade_entry_allowed=true W1 不应说关闭: {html[:200]}")
+
+
+class W2TradeEntryGateTest(unittest.TestCase):
+    """v3 Phase 4: W2 录入入口按 trade_entry_allowed 关闭"""
+
+    def test_w2_closed_when_trade_entry_disallowed(self):
+        """trade_entry_allowed=false → W2 显示关闭状态"""
+        fixture = _day_stop_fixture()
+        fixture['trade_entry_allowed'] = False
+        fixture['trade_entry_reason'] = '锚点被阻断'
+        result = _render_widget("w2-check.js", "W09", fixture)
+        html = result.get("html", "")
+        self.assertIn("关闭", html, f"trade_entry_allowed=false W2 应显示关闭: {html[:200]}")
+
+    def test_w2_shows_candidates_when_trade_entry_allowed(self):
+        """trade_entry_allowed=true 且 rule_state 正常 → W2 显示候选"""
+        fixture = {
+            "rule_state": {
+                "version": "g1a-v1", "tradable": True,
+                "caps": {"base_total_pct": 40, "total_pct": 20},
+                "windows": {"w1": {"in_session": True, "buy_allowed": True},
+                            "w2": {"in_session": True, "buy_allowed": True}},
+                "blocks": [], "warnings": [],
+            },
+            "sentiment": {"情绪值": 65},
+            "live_index": {}, "live_quotes": {},
+            "lianban_pool": [{"标的": "测试连板", "代码": "000001", "板块": "科技",
+                               "角色": "情绪标", "涨幅": "+3"}],
+            "trend_pool": [{"标的": "测试趋势", "代码": "000002", "板块": "科技",
+                             "角色": "持仓", "涨幅": "-2"}],
+            "trade_entry_allowed": True,
+        }
+        result = _render_widget("w2-check.js", "W09", fixture)
+        html = result.get("html", "")
+        self.assertNotIn("关闭", html, f"trade_entry_allowed=true W2 不应说关闭: {html[:200]}")
 
 
 if __name__ == "__main__":

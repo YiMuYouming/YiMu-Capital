@@ -103,11 +103,107 @@ class RuleStateBridgeContractTest(unittest.TestCase):
             '"sectors":[],"risk":{},"pnl":{},"style":{"总分":0,"连板占比":0,"趋势占比":0}}'
         )
         state = bridge._build_rule_state(now=datetime(2026, 5, 27, 9, 40))
-        # 全零 style → base_total_cap(0)=20，不是 40
-        self.assertEqual(state["caps"]["base_total_pct"], 20,
-                         "总分=0 应映射为 base_total_pct=20，不是 40")
+        # Vault 三层后，基础仓位由连板/趋势侧上限取 max，不再由总分直接映射。
+        self.assertEqual(state["caps"]["base_total_pct"], 60)
         self.assertEqual(state["caps"]["lianban_pct"], 0)
         self.assertEqual(state["caps"]["trend_pct"], 0)
+
+    def test_vault_three_layer_caps_release_ice_lianban_to_trend(self):
+        """Vault 三层：冰点连板侧关闭，趋势侧弱趋势 20%，连板资金释放给趋势"""
+        self.tmp_dashboard.write_text(
+            '{"meta":{"date":"2026-05-27"},"market":{},"sentiment":{},'
+            '"lianban_pool":[],"trend_pool":[],"positions":[],"decision":{},'
+            '"sectors":[],"risk":{"连亏天数":0},"pnl":{},'
+            '"style":{"总分":42,"连板占比":12,"趋势占比":88,"dim3_趋势":9}}'
+        )
+        bridge.CACHE["iwencai"] = {
+            "情绪值": 17.1, "昨日涨停收益": 1.03,
+            "晋级率": 0.1739, "炸板率": 0.20,
+            "_updated": "2026-05-27T09:40:00+08:00",
+        }
+        bridge.CACHE["live_quotes"] = {"_updated": "2026-05-27T09:40:00+08:00"}
+
+        state = bridge._build_rule_state(now=datetime(2026, 5, 27, 9, 40))
+
+        self.assertEqual(state["caps"]["base_total_pct"], 20)
+        self.assertEqual(state["caps"]["total_pct"], 20)
+        self.assertEqual(state["caps"]["lianban_pct"], 0)
+        self.assertEqual(state["caps"]["trend_pct"], 100)
+
+    def test_vault_loss_streak_overrides_base_cap_to_zero(self):
+        """Vault 第一层：连亏 >=2 天最终总仓位归零"""
+        self.tmp_dashboard.write_text(
+            '{"meta":{"date":"2026-05-27"},"market":{},"sentiment":{},'
+            '"lianban_pool":[],"trend_pool":[],"positions":[],"decision":{},'
+            '"sectors":[],"risk":{"连亏天数":2},"pnl":{},'
+            '"style":{"总分":42,"连板占比":12,"趋势占比":88,"dim3_趋势":9}}'
+        )
+        bridge.CACHE["iwencai"] = {
+            "情绪值": 17.1, "昨日涨停收益": 1.03,
+            "晋级率": 0.1739, "炸板率": 0.20,
+            "_updated": "2026-05-27T09:40:00+08:00",
+        }
+        bridge.CACHE["live_quotes"] = {"_updated": "2026-05-27T09:40:00+08:00"}
+
+        state = bridge._build_rule_state(now=datetime(2026, 5, 27, 9, 40))
+
+        self.assertEqual(state["caps"]["base_total_pct"], 20)
+        self.assertEqual(state["caps"]["total_pct"], 0)
+        self.assertIn("LOSS_STREAK", [b["code"] for b in state["blocks"]])
+
+    def test_rule_inputs_fall_back_to_baseline_sentiment_fields(self):
+        """iwencai 缓存短暂缺字段时，用 baseline 情绪字段补齐规则输入"""
+        self.tmp_dashboard.write_text(
+            '{"meta":{"date":"2026-05-27"},"market":{"炸板率":86.36},"sentiment":{'
+            '"情绪值":17.1,"昨日涨停收益":1.03,"晋级率":17.39},'
+            '"lianban_pool":[],"trend_pool":[],"positions":[],"decision":{},'
+            '"sectors":[],"risk":{"连亏天数":0},"pnl":{},'
+            '"style":{"总分":42,"连板占比":12,"趋势占比":88,"dim3_趋势":9}}'
+        )
+        bridge.CACHE["iwencai"] = {"情绪值": 17.1, "_updated": "2026-05-27T09:40:00+08:00"}
+        bridge.CACHE["live_quotes"] = {"_updated": "2026-05-27T09:40:00+08:00"}
+
+        state = bridge._build_rule_state(now=datetime(2026, 5, 27, 9, 40))
+
+        stale = [b for b in state["blocks"] if b["code"] == "SENTIMENT_STALE"]
+        self.assertEqual(stale, [])
+
+    def test_weekly_and_monthly_drawdown_are_global_stops(self):
+        """Vault 第一层：周回撤>6%、月回撤>10% 都是全局停止"""
+        self.tmp_dashboard.write_text(
+            '{"meta":{"date":"2026-05-27"},"market":{"炸板率":20},"sentiment":{'
+            '"情绪值":65,"昨日涨停收益":3.0,"晋级率":25},'
+            '"lianban_pool":[],"trend_pool":[],"positions":[],"decision":{},'
+            '"sectors":[],"risk":{"连亏天数":0,"周累计回撤":-6.1,"月累计回撤":-10.1},'
+            '"pnl":{},"style":{"总分":60,"连板占比":60,"趋势占比":40,"dim3_趋势":12}}'
+        )
+        bridge.CACHE["iwencai"] = {"_updated": "2026-05-27T09:40:00+08:00"}
+        bridge.CACHE["live_quotes"] = {"_updated": "2026-05-27T09:40:00+08:00"}
+
+        state = bridge._build_rule_state(now=datetime(2026, 5, 27, 9, 40))
+        codes = [b["code"] for b in state["blocks"]]
+
+        self.assertIn("WEEK_STOP", codes)
+        self.assertIn("MONTH_STOP", codes)
+        self.assertEqual(state["caps"]["total_pct"], 0)
+
+    def test_ice_does_not_close_w2_when_lianban_risk_is_low(self):
+        """Vault 冰点可 W2 双轨试错，连板风险<0.5 时不因冰点本身关闭 W2"""
+        self.tmp_dashboard.write_text(
+            '{"meta":{"date":"2026-05-27"},"market":{"炸板率":20},"sentiment":{'
+            '"情绪值":17.1,"昨日涨停收益":3.0,"晋级率":17.39,"连板风险值":"0.3低"},'
+            '"lianban_pool":[],"trend_pool":[],"positions":[],"decision":{},'
+            '"sectors":[],"risk":{"连亏天数":0},"pnl":{},'
+            '"style":{"总分":42,"连板占比":12,"趋势占比":88,"dim3_趋势":9}}'
+        )
+        bridge.CACHE["iwencai"] = {"情绪值": 17.1, "_updated": "2026-05-27T09:40:00+08:00"}
+        bridge.CACHE["live_quotes"] = {"_updated": "2026-05-27T09:40:00+08:00"}
+
+        state = bridge._build_rule_state(now=datetime(2026, 5, 27, 14, 30))
+        codes = [b["code"] for b in state["blocks"]]
+
+        self.assertNotIn("W2_ICE", codes)
+        self.assertNotIn("W2_ICE_RISK", codes)
 
     def test_full_snapshot_contains_rule_state(self):
         """_build_full_snapshot() 输出含 rule_state"""

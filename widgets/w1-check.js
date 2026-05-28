@@ -89,6 +89,15 @@ class W1CheckWidget extends YiMuWidget {
     var rsBlocks = (RS && RS.blocks) || [];
     var rsMissing = !RS;
 
+    // Phase 4: 健康门禁 — trade_entry_allowed=false 时整版关闭
+    if (data && data.trade_entry_allowed === false) {
+      var reason = data.trade_entry_reason || '系统健康检查未通过';
+      body.innerHTML = '<div style="text-align:center;padding:20px;color:var(--danger);font-weight:600">交易入口已关闭</div>'
+        + '<div style="font-size:12px;color:var(--text-secondary);text-align:center">' + reason + '</div>';
+      this.updateTimestamp();
+      return;
+    }
+
     if (rsMissing) {
       body.innerHTML = '<div style="text-align:center;padding:20px;color:var(--danger);font-weight:600">规则状态不可用</div>'
         +'<div style="font-size:12px;color:var(--text-disabled);text-align:center">后端 rule_state 未生成</div>';

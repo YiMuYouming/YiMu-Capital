@@ -286,6 +286,31 @@ DataStore.fetchAll().then(function() {
 
 class DataStoreRefreshTest(unittest.TestCase):
 
+    def test_dead_quote_freshness_not_reported_as_live_connection(self):
+        """行情接口可达但 _freshness=dead 时，连接状态不能显示为 live"""
+        script = BASE_MOCKS + r"""
+global._mockFetchResponses['/api/live/quotes'] = {
+  live_index: {}, live_quotes: {}, iwencai: {},
+  _freshness: { level: 'dead', type: 'live_quote', age_seconds: 18000 }
+};
+global._mockFetchResponses['auction_snapshot.json'] = {
+  fetched: bjToday + 'T09:28:00+08:00', '指数竞价': [],
+  '涨跌家数': {}, '高标竞价': [], '自选池竞价': [], '信号灯': {}
+};
+global._mockFetchResponses['sentiment_auto.json'] = {};
+global._mockFetchResponses['sentiment_auto.json'][bjToday] = [{ node: '10:00', '情绪值': 65 }];
+
+DataStore.fetchAll().then(function() {
+  console.log(JSON.stringify({
+    status: DataStore.getConnectionStatus(),
+    freshness: (DataStore.merged || {})._freshness || null
+  }));
+}).catch(function(e) { console.log(JSON.stringify({ _error: String(e).slice(0,200) })); });
+"""
+        result = _run_node(script, files=["store.js"])
+        self.assertEqual(result.get("freshness", {}).get("level"), "dead", f"result={result}")
+        self.assertNotEqual(result.get("status"), "live", f"过期行情不应显示实时: {result}")
+
     def test_refresh_tick_preserves_domains(self):
         script = BASE_MOCKS + r"""
 global._mockFetchResponses['auction_snapshot.json'] = {

@@ -1,4 +1,4 @@
-# 弈沐资本数据看板 v2.5
+# 弈沐资本数据看板 v3.0
 
 > 弈沐资本盘中交易决策指挥台。23 组件 + AI 盯盘 + 实时数据管线。
 > 启动：`python3 scripts/bridge.py 8088` → Chrome `http://localhost:8088`
@@ -114,7 +114,7 @@ live-dashboard/
 | 成交额对比无显示 | `collect_yesterday_compare` 数据被 collect_index 覆盖了？检查 quotes.py 是否用 update |
 | LLM研判不触发 | `~/.Codex/settings.json` 有 ANTHROPIC_BASE_URL 和 ANTHROPIC_AUTH_TOKEN 吗？ |
 | 清仓跟踪现价空 | 清仓标的代码在 PyTDX 采集列表吗？bridge 重启会重新加载代码列表 |
-| W15显示“基准不可用” | 核查隔夜标的是否缺 `_meta.day_start_prices`；仅用受控补录脚本修复已核验昨收 |
+| W15显示“基准不可用” | 核查隔夜标的是否缺 `_meta.day_start_prices`；仅用受控补录脚本修复已核验开盘价/日初价 |
 
 ## 开发原则
 
@@ -135,21 +135,21 @@ live-dashboard/
 
 ### 第一步：找任务文档
 
-2026-05-25 发起的升级改造主体已落地，但 `YM-W15-01` 成交写入安全门禁仍待最终关闭。当前有效基线与任务位置：
+2026-05-25 发起的升级改造主体和 2026-05-27 v3.0 升级主线已落地。当前有效基线与任务位置：
 
 ```
-docs/audit/2026-05-27-升级改造完成验收与运维基线.md      ← 当前状态与阻断记录
-docs/audit/2026-05-27-给洋米-W15-W22-专项审查任务清单.md  ← 活跃任务（先执行 YM-W15-01）
-docs/_archive/2026-05-25-dashboard-upgrade/               ← 已完成的计划/派单/交付，仅供追溯
+docs/audit/2026-05-27-v3-completion-and-ops-baseline.md   ← 当前 v3.0 完成状态与运维基线
+docs/_archive/2026-05-27-v3-upgrade/                      ← v3.0 Review/派单/返工过程，仅供追溯
+docs/_archive/2026-05-25-dashboard-upgrade/                ← 旧升级计划/派单/交付，仅供追溯
 docs/audit/YYYY-MM-DD-给{米名}-{任务名}.md                ← 后续新任务指令
 ```
 
 命名规律：
 - `给洋米` = 给洋米的执行指令（直接复制发给洋米）
 - `给黑米` = 给黑米的执行指令（直接复制发给黑米）
-- `升级改造完成验收与运维基线` = 当前架构、验收边界与未关闭阻断（欧米先读）
+- `v3-completion-and-ops-baseline` = 当前架构、验收边界与运维基线（欧米先读）
 
-后续开工先读当前基线；当前仅继续 `YM-W15-01`，不得从归档 Gate 文件自行续做。
+后续开工先读当前基线；不得从归档 Gate/v3 派单文件自行续做。
 
 ### 第二步：读任务的结构
 

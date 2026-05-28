@@ -35,6 +35,7 @@ DATA_FILE = ROOT / "data/dashboard_data.json"
 LLM_INSIGHTS_FILE = ROOT / "data/llm_insights.json"
 
 _llm_rate_lock = Lock()
+_llm_conv_lock = Lock()
 
 
 def _load_cache():
@@ -554,35 +555,36 @@ def _process_llm_result(raw_text, snapshot, today_str, node_ts, mode, userMsg=No
         "text": text_part, "signals": verified_signals,
         "verified_count": verified_count, "warning_count": warning_count,
     }
-    # 单次写入：user → assistant 顺序
-    insights = {}
-    if LLM_INSIGHTS_FILE.exists():
-        try:
-            with open(LLM_INSIGHTS_FILE) as f:
-                insights = json.load(f)
-        except Exception:
-            pass
-    if today_str not in insights:
-        insights[today_str] = {"meta": {}, "conversation": []}
-    meta = insights[today_str].setdefault("meta", {})
-    if "started_at" not in meta:
-        meta["started_at"] = node_ts
-    meta["last_assistant_ts"] = node_ts
-    if mode == "auto":
-        meta["auto_trigger_count"] = meta.get("auto_trigger_count", 0) + 1
-    else:
-        meta["manual_question_count"] = meta.get("manual_question_count", 0) + 1
-    if userMsg and isinstance(userMsg, dict) and userMsg.get("text"):
+    # 单次写入（持锁防并发丢失）：user → assistant 顺序
+    with _llm_conv_lock:
+        insights = {}
+        if LLM_INSIGHTS_FILE.exists():
+            try:
+                with open(LLM_INSIGHTS_FILE) as f:
+                    insights = json.load(f)
+            except Exception:
+                pass
+        if today_str not in insights:
+            insights[today_str] = {"meta": {}, "conversation": []}
+        meta = insights[today_str].setdefault("meta", {})
+        if "started_at" not in meta:
+            meta["started_at"] = node_ts
+        meta["last_assistant_ts"] = node_ts
+        if mode == "auto":
+            meta["auto_trigger_count"] = meta.get("auto_trigger_count", 0) + 1
+        else:
+            meta["manual_question_count"] = meta.get("manual_question_count", 0) + 1
+        if userMsg and isinstance(userMsg, dict) and userMsg.get("text"):
+            insights[today_str]["conversation"].append({
+                "role": "user", "ts": userMsg.get("ts", node_ts),
+                "text": userMsg.get("text", ""), "auto": False,
+            })
         insights[today_str]["conversation"].append({
-            "role": "user", "ts": userMsg.get("ts", node_ts),
-            "text": userMsg.get("text", ""), "auto": False,
+            "role": "assistant", "ts": node_ts, "text": text_part,
+            "signals": verified_signals, "auto": mode == "auto",
         })
-    insights[today_str]["conversation"].append({
-        "role": "assistant", "ts": node_ts, "text": text_part,
-        "signals": verified_signals, "auto": mode == "auto",
-    })
-    LLM_INSIGHTS_FILE.parent.mkdir(parents=True, exist_ok=True)
-    atomic_write_json(LLM_INSIGHTS_FILE, insights)
+        LLM_INSIGHTS_FILE.parent.mkdir(parents=True, exist_ok=True)
+        atomic_write_json(LLM_INSIGHTS_FILE, insights)
     return insight, verified_signals, verified_count, warning_count
 
 
@@ -709,6 +711,8 @@ def _build_rule_inputs(now=None, account_state=None):
     dash = _load_dashboard_data()
     risk = dash.get("risk", {})
     loss_streak = int(risk.get("连亏天数", 0) or 0)
+    weekly_drawdown = risk.get("周累计回撤")
+    monthly_drawdown = risk.get("月累计回撤")
 
     # ── style ──
     style_raw = dash.get("style", {})
@@ -718,12 +722,20 @@ def _build_rule_inputs(now=None, account_state=None):
     lianban_pct = float(_lianban_raw) if _lianban_raw is not None else 50
     _trend_raw = style_raw.get("趋势占比")
     trend_pct = float(_trend_raw) if _trend_raw is not None else 50
+    _trend_score_raw = style_raw.get("dim3_趋势")
+    trend_score = float(_trend_score_raw) if _trend_score_raw is not None else None
 
     # ── sentiment ──
     iwencai = CACHE.get("iwencai", {})
+    base_sent = dash.get("sentiment", {})
+    base_market = dash.get("market", {})
     # 晋级率 / 炸板率 在 CACHE 中可能是小数 (0.198)，转换为百分数
     _promotion_raw = iwencai.get("晋级率")
+    if _promotion_raw is None:
+        _promotion_raw = base_sent.get("晋级率")
     _broken_raw = iwencai.get("炸板率")
+    if _broken_raw is None:
+        _broken_raw = base_market.get("炸板率")
     if _promotion_raw is not None and _promotion_raw <= 1:
         promotion_pct = float(_promotion_raw) * 100
     else:
@@ -734,7 +746,18 @@ def _build_rule_inputs(now=None, account_state=None):
         broken_board_pct = float(_broken_raw) if _broken_raw is not None else None
 
     limit_up_profit_raw = iwencai.get("昨日涨停收益")
+    if limit_up_profit_raw is None:
+        limit_up_profit_raw = base_sent.get("昨日涨停收益")
     limit_up_profit_pct = float(limit_up_profit_raw) if limit_up_profit_raw is not None else None
+    lianban_risk_raw = iwencai.get("连板风险值")
+    if lianban_risk_raw is None:
+        lianban_risk_raw = base_sent.get("连板风险值")
+    lianban_risk = None
+    if lianban_risk_raw is not None:
+        import re as _re
+        m = _re.search(r"[+-]?\d+(?:\.\d+)?", str(lianban_risk_raw))
+        if m:
+            lianban_risk = float(m.group(0))
 
     # 情绪值优先级：breadth 计算 > iwencai > baseline
     breadth = CACHE.get("breadth", {})
@@ -747,7 +770,6 @@ def _build_rule_inputs(now=None, account_state=None):
         if em_raw is not None:
             emotion_pct = float(em_raw)
         else:
-            base_sent = dash.get("sentiment", {})
             em_base = base_sent.get("情绪值")
             emotion_pct = float(em_base) if em_base is not None else None
 
@@ -788,11 +810,16 @@ def _build_rule_inputs(now=None, account_state=None):
             "pnl_pct": pnl_pct,
             "valuation_complete": valuation_complete,
         },
-        "risk": {"loss_streak": loss_streak},
+        "risk": {
+            "loss_streak": loss_streak,
+            "weekly_drawdown_pct": weekly_drawdown,
+            "monthly_drawdown_pct": monthly_drawdown,
+        },
         "style": {
             "score": score,
             "lianban_pct": lianban_pct,
             "trend_pct": trend_pct,
+            "trend_score": trend_score,
         },
         "sentiment": {
             "emotion_pct": emotion_pct,
@@ -800,6 +827,7 @@ def _build_rule_inputs(now=None, account_state=None):
             "limit_up_profit_pct": limit_up_profit_pct,
             "broken_board_pct": broken_board_pct,
             "promotion_pct": promotion_pct,
+            "lianban_risk": lianban_risk,
         },
         "freshness": {
             "quotes": quotes_fresh,
@@ -857,6 +885,68 @@ def _build_rule_state(now=None, account_state=None):
 
 
 # ===== 快照构建（供 LLM 和调试端点使用） =====
+
+def _build_trade_context():
+    """构建今日在线成交的可信上下文。
+
+    返回 dict：
+    {rule_state, market_snapshot, context_captured_at, context_status, context_unavailable_reason}
+    context_status: 'trusted' | 'unavailable'
+    """
+    result = {
+        'rule_state': None,
+        'market_snapshot': None,
+        'context_captured_at': None,
+        'context_status': 'unavailable',
+        'context_unavailable_reason': None,
+    }
+
+    live_quotes = CACHE.get('live_quotes', {})
+    updated = (live_quotes or {}).get('_updated')
+    if not updated:
+        result['context_unavailable_reason'] = '行情数据不可用'
+        return result
+    try:
+        qt = datetime.fromisoformat(updated.replace('Z', '+00:00'))
+        age = (datetime.now().astimezone() - qt).total_seconds()
+        if age > 600:
+            result['context_unavailable_reason'] = '行情数据不可用'
+            return result
+    except (ValueError, TypeError):
+        result['context_unavailable_reason'] = '行情数据不可用'
+        return result
+
+    # 构建规则状态和市场快照
+    rule = _build_rule_state()
+    iwencai = CACHE.get('iwencai', {}) or {}
+    live_index = CACHE.get('live_index', {})
+    mkt = {
+        'iwencai': {'情绪值': iwencai.get('情绪值', '—')},
+        'live_index': {
+            '上证指数涨幅': live_index.get('上证指数涨幅', '—'),
+            '深证指数涨幅': live_index.get('深证指数涨幅', '—'),
+        },
+    }
+
+    # 检查 rule_state 中是否存在不可信阻断块
+    blocks = (rule or {}).get('blocks', [])
+    untrusted_codes = {'DATA_UNTRUSTED', 'SENTIMENT_STALE', 'QUOTE_STALE'}
+    untrusted = [b for b in blocks if b.get('code') in untrusted_codes]
+    if untrusted:
+        codes = ','.join(b.get('code', '?') for b in untrusted)
+        result['context_unavailable_reason'] = f'行情数据不可信 ({codes})'
+        return result
+
+    # 全部检查通过 → trusted
+    captured = datetime.now().strftime('%Y-%m-%dT%H:%M:%S')
+    result.update({
+        'rule_state': rule,
+        'market_snapshot': mkt,
+        'context_captured_at': captured,
+        'context_status': 'trusted',
+    })
+    return result
+
 
 def _load_dashboard_data():
     """读取 dashboard_data.json，带缓存避免重复读盘"""
@@ -943,9 +1033,17 @@ def _build_full_snapshot():
             '最新价': q.get('最新价', '—'),
         })
 
-    # ── 5. 持仓（基线 + 实时现价/浮盈） ──────────────────────
+    # ── 5. 持仓（SSOT + 实时现价/浮盈） ─────────────────────
+    try:
+        pnl_live = _current_pnl_summary()
+    except Exception:
+        pnl_live = {}
+    ssot_positions = pnl_live.get('positions', []) if pnl_live else []
     positions = []
-    for p in (dd.get('positions') or []):
+    for p in ssot_positions:
+        status = str(p.get('状态', ''))
+        if '清' in status or '删' in status:
+            continue
         code = str(p.get('代码', ''))
         q = live_quotes.get(code, {})
         cost = p.get('成本', 0)
@@ -955,16 +1053,32 @@ def _build_full_snapshot():
             qty = int(''.join(filter(str.isdigit, qty_str)))
         except Exception:
             qty = 0
-        pnl_pct = ((price - cost) / cost * 100) if cost and price else 0
-        positions.append({
+        vc = pnl_live.get('valuation_complete', True) if pnl_live else True
+        ab = pnl_live.get('anchor_blocked', False) if pnl_live else False
+        data_trusted = bool(vc and not ab)
+        risk_note = None
+        if ab:
+            risk_note = '锚点被阻断 — 数据不可信'
+        elif not vc:
+            risk_note = '估值不可信 — 行情缺失'
+        if not data_trusted:
+            price = None
+            pnl_pct = 0
+        else:
+            pnl_pct = ((price - cost) / cost * 100) if cost and price else 0
+        entry = {
             '标的': p.get('标的', '—'),
             '代码': code,
             '成本': cost,
             '现价': price,
             '数量': qty,
-            '浮盈%': round(pnl_pct, 2),
+            '浮盈%': round(pnl_pct, 2) if price else None,
             '状态': p.get('状态', '—'),
-        })
+            'data_trusted': data_trusted,
+        }
+        if risk_note:
+            entry['risk_note'] = risk_note
+        positions.append(entry)
 
     # ── 6. 板块（基线 sectors + hot_list 涨停梯队） ─────────
     sectors = []
@@ -1003,6 +1117,15 @@ def _build_full_snapshot():
 
     # 复用已获取的 pnl_live 避免重复 SSOT 查询
     rule_state = _build_rule_state(account_state=pnl_live)
+    # 顶层可信标记
+    vc = pnl_live.get('valuation_complete', True) if pnl_live else True
+    ab = pnl_live.get('anchor_blocked', False) if pnl_live else False
+    data_trusted = bool(vc and not ab)
+    snapshot_risk_notes = None
+    if ab:
+        snapshot_risk_notes = '锚点被阻断 — 数据不可信'
+    elif not vc:
+        snapshot_risk_notes = '估值不可信 — 行情缺失'
     return {
         '指数': index_snap,
         '情绪': sentiment_snap,
@@ -1013,6 +1136,8 @@ def _build_full_snapshot():
         '涨停梯队TOP5': hot_rank,
         '风控': risk_snap,
         'rule_state': rule_state,
+        'data_trusted': data_trusted,
+        'risk_notes': snapshot_risk_notes,
     }
 
 
@@ -1068,6 +1193,63 @@ def _quotes_coverage():
             missing_pos.append(code)
 
     return covered, len(all_codes), missing_pos
+
+
+def _build_account_audit():
+    """只读 account basis audit：暴露今日锚点、隔夜持仓、当日清仓、day_start_prices 覆盖率。
+
+    返回 dict 供 /api/account/audit 使用。
+    """
+    from scripts.db import query_account_baseline, query_trades
+    today = datetime.now().strftime('%Y-%m-%d')
+    result = {
+        'anchor_date': None,
+        'anchor_source': None,
+        'anchor_effective_at': None,
+        'overnight_positions_count': 0,
+        'overnight_codes': [],
+        'day_start_prices_coverage': None,
+        'day_start_prices_missing_codes': [],
+        'closed_positions_today_count': 0,
+        'closed_positions_today': [],
+    }
+
+    anchor = query_account_baseline(today)
+    if anchor:
+        result['anchor_date'] = anchor.get('date', today)
+        result['anchor_source'] = anchor.get('source', 'unknown')
+        result['anchor_effective_at'] = anchor.get('effective_at')
+
+        positions = anchor.get('positions') or []
+        result['overnight_positions_count'] = len(positions)
+        result['overnight_codes'] = [p.get('代码', '') for p in positions]
+
+        meta = anchor.get('_meta') or {}
+        prices = meta.get('day_start_prices') or {}
+        if prices:
+            covered = sum(1 for p in positions if p.get('代码') in prices)
+            missing = [p.get('代码', '') for p in positions if p.get('代码') not in prices]
+            result['day_start_prices_coverage'] = f'{covered}/{len(positions)}'
+            result['day_start_prices_missing_codes'] = missing
+        else:
+            result['day_start_prices_coverage'] = '0/%d' % len(positions) if positions else None
+            result['day_start_prices_missing_codes'] = [p.get('代码', '') for p in positions]
+
+    # 当日清仓（纯只读：若锚点存在则用 reduce 回放流水，不创建/修复锚点）
+    if anchor:
+        from scripts.account_ssot import reduce_account_state
+        trades = query_trades(date_from=today, date_to=today, limit=10000)
+        if trades:
+            state = reduce_account_state(anchor, trades, CACHE.get('live_quotes', {}))
+            closed = state.get('closed_positions', [])
+            result['closed_positions_today_count'] = len(closed)
+            result['closed_positions_today'] = [
+                {'code': c.get('code', ''), 'name': c.get('name', ''),
+                 'sell_price': c.get('sell_price'), 'closed_date': c.get('closed_date', '')}
+                for c in closed
+            ]
+
+    return result
 
 
 def _build_health():
@@ -1206,6 +1388,44 @@ def _build_health():
     else:
         result["status"] = "healthy"
 
+    # Phase 4: 健康分层 — critical_ok / trade_entry_allowed / degraded_reasons
+    critical_issues = []
+    degraded_list = []
+
+    # account 层 critical
+    acct = result.get("account", {})
+    acct_status = acct.get("status", "")
+    if acct_status == "error":
+        critical_issues.append(f"account: {acct.get('detail', 'error')}")
+    elif acct_status == "incomplete":
+        critical_issues.append(f"account: {acct.get('detail', acct_status)}")
+    elif acct_status in ("stale", "delayed"):
+        degraded_list.append(f"account: {acct.get('detail', acct_status)}")
+
+    # pnl critical
+    pnl_s = result.get("pnl", {}).get("status", "")
+    if pnl_s == "error":
+        critical_issues.append(f"pnl: {result['pnl'].get('detail', 'error')}")
+
+    # quotes critical (dead/zero coverage = no trading)
+    q = result.get("quotes", {})
+    if q.get("status") in ("dead", "missing"):
+        critical_issues.append(f"quotes: {q.get('detail', q.get('status', 'unavailable'))}")
+    elif q.get("status") in ("stale", "delayed"):
+        degraded_list.append(f"quotes: {q.get('detail', q.get('status', 'degraded'))}")
+
+    # iwencai/baseline degraded (not critical)
+    iw = result.get("iwencai", {}).get("status", "")
+    if iw in ("stale", "delayed"):
+        degraded_list.append(f"iwencai: {iw}")
+    bf_s = result.get("baseline", {}).get("status", "")
+    if bf_s in ("stale", "delayed"):
+        degraded_list.append(f"baseline: {bf_s}")
+
+    result["critical_ok"] = len(critical_issues) == 0
+    result["trade_entry_allowed"] = len(critical_issues) == 0
+    result["degraded_reasons"] = degraded_list if degraded_list else None
+
     return result
 
 
@@ -1330,6 +1550,24 @@ class BridgeHandler(SimpleHTTPRequestHandler):
             finally:
                 self._db_close()
             return
+        elif parsed.path == '/api/account/audit':
+            _ensure_db()
+            try:
+                result = _build_account_audit()
+                body = json.dumps(result, ensure_ascii=False).encode()
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/json')
+                self.end_headers()
+                self.wfile.write(body)
+            except Exception as e:
+                self.send_response(500)
+                self.send_header('Content-Type', 'application/json')
+                self.end_headers()
+                self.wfile.write(json.dumps({'ok': False, 'error': str(e)[:200]}).encode())
+            finally:
+                self._db_close()
+            return
+
         elif parsed.path == '/api/account/correct':
             self.send_response(405)
             self.send_header('Content-Type', 'application/json')
@@ -1400,6 +1638,21 @@ class BridgeHandler(SimpleHTTPRequestHandler):
                     '创业15min': CACHE.get('创业15min', []),
                     'rule_state': _build_rule_state(),
                 }
+                # Phase 4: 健康门禁状态（供 W1/W2 按 trade_entry_allowed 开关入口）
+                # 直接复用 /api/health 的 critical 分层，避免两套逻辑不一致
+                try:
+                    h = _build_health()
+                    result['trade_entry_allowed'] = h.get('trade_entry_allowed', False)
+                    result['trade_entry_reason'] = None
+                    if not result['trade_entry_allowed']:
+                        reasons = h.get('degraded_reasons') or []
+                        if reasons:
+                            result['trade_entry_reason'] = '; '.join(reasons)
+                        else:
+                            result['trade_entry_reason'] = '系统健康检查未通过'
+                except Exception:
+                    result['trade_entry_allowed'] = False
+                    result['trade_entry_reason'] = '健康检查失败'
                 result = _add_freshness(result, 'live_quote', CACHE.get('live_quotes', {}).get('_updated'))
                 body = json.dumps(result, ensure_ascii=False).encode()
                 self.send_response(200)
@@ -1654,13 +1907,18 @@ class BridgeHandler(SimpleHTTPRequestHandler):
                     try:
                         from scripts.db import insert_trade_with_context
                         today = now.strftime('%Y-%m-%d')
+                        # 构建服务端可信成交上下文
+                        ctx = _build_trade_context()
                         inserted, trade_id, status = insert_trade_with_context({
                             'trade_date': today, 'trade_time': trade_time,
                             'action': action, 'code': entry.get('代码', ''),
                             'name': entry.get('标的', ''), 'price': entry.get('价格'),
                             'qty': entry.get('数量'), 'window': entry.get('窗口'),
                             'reason': entry.get('原因'), 'event_id': evt_id,
-                        }, rule_state=None, market_snapshot=None)
+                        }, rule_state=ctx['rule_state'], market_snapshot=ctx['market_snapshot'],
+                           context_captured_at=ctx['context_captured_at'],
+                           context_status=ctx['context_status'],
+                           context_unavailable_reason=ctx['context_unavailable_reason'])
                     except ValueError as e:
                         # 原子卖出门禁 → 409
                         status_code = 409 if 'exceeds available' in str(e) else 400

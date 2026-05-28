@@ -392,6 +392,138 @@ class ManualSyncUnverifiedTest(unittest.TestCase):
         self.assertIsNone(reviews[0].get('rule_state'))
 
 
+class SyncTrustedContextTests(unittest.TestCase):
+    """v3 Phase 2: /api/sync 当日在线成交绑定服务端可信上下文"""
+
+    def setUp(self):
+        _setup_temp_db(self)
+
+    def tearDown(self):
+        _teardown_temp_db(self)
+
+    def test_insert_with_context_captured_at(self):
+        """insert_trade_with_context 支持 context_status 和 context_captured_at 参数并写入 DB"""
+        today = datetime.now().strftime('%Y-%m-%d')
+        rs = {'version': 'g1a-v1', 'tradable': True, 'windows': {'w1': {}, 'w2': {}}, 'blocks': [], 'warnings': []}
+        mkt = {'iwencai': {'情绪值': 65}, 'live_index': {'上证指数涨幅': '-0.22'}}
+        captured = f"{today}T10:00:05"
+        ok, tid, status = db.insert_trade_with_context({
+            'trade_date': today, 'trade_time': '10:00',
+            'action': '买入', 'code': '000001', 'name': '测试', 'price': 10, 'qty': 100,
+        }, rule_state=rs, market_snapshot=mkt, context_captured_at=captured,
+           context_status='trusted')
+        self.assertTrue(ok, "insert_trade_with_context 应返回 True")
+        reviews = db.query_trade_reviews(today)
+        self.assertEqual(len(reviews), 1)
+        self.assertEqual(reviews[0].get('context_captured_at'), captured)
+        self.assertEqual(reviews[0].get('context_status'), 'trusted')
+        self.assertIsNone(reviews[0].get('context_unavailable_reason'))
+
+    def test_unavailable_context_stores_status_and_reason(self):
+        """不可用上下文存储 context_status='unavailable' + 原因"""
+        today = datetime.now().strftime('%Y-%m-%d')
+        db.insert_trade_with_context({
+            'trade_date': today, 'trade_time': '14:00',
+            'action': '买入', 'code': '000001', 'name': '测试', 'price': 12, 'qty': 100,
+        }, rule_state=None, market_snapshot=None, context_status='unavailable',
+           context_unavailable_reason='行情数据不可用')
+        reviews = db.query_trade_reviews(today)
+        self.assertEqual(len(reviews), 1)
+        self.assertIsNone(reviews[0].get('rule_state'))
+        self.assertIsNone(reviews[0].get('context_captured_at'))
+        self.assertEqual(reviews[0].get('context_status'), 'unavailable')
+        self.assertEqual(reviews[0].get('context_unavailable_reason'), '行情数据不可用')
+
+    def test_historical_sync_no_context_captured(self):
+        """历史补录成交不得标记 trusted → context_captured_at = None"""
+        db.insert_trade({
+            'trade_date': '2020-01-15', 'trade_time': '10:00',
+            'action': '买入', 'code': '000001', 'name': '测试', 'price': 10, 'qty': 100,
+        })
+        reviews = db.query_trade_reviews('2020-01-15')
+        self.assertEqual(len(reviews), 1)
+        self.assertIsNone(reviews[0].get('rule_state'))
+        self.assertIsNone(reviews[0].get('context_captured_at'))
+        self.assertIsNone(reviews[0].get('context_status'))
+
+    def test_client_forged_context_not_trusted(self):
+        """客户端夹带 rule_state/market_snapshot → 服务端拒绝"""
+        today = datetime.now().strftime('%Y-%m-%d')
+        db.insert_trade_with_context({
+            'trade_date': today, 'trade_time': '10:00',
+            'action': '买入', 'code': '000001', 'name': '测试', 'price': 10, 'qty': 100,
+            # These would be client-forged — server should ignore
+            'rule_state': {'version': 'fake'},
+            'market_snapshot': {'fake': 'data'},
+        }, rule_state=None, market_snapshot=None)
+        reviews = db.query_trade_reviews(today)
+        self.assertEqual(len(reviews), 1)
+        # Context from client data dict should NOT be stored
+        self.assertIsNone(reviews[0].get('rule_state'), "客户端伪造的 rule_state 应被忽略")
+        self.assertIsNone(reviews[0].get('market_snapshot'), "客户端伪造的 market_snapshot 应被忽略")
+        self.assertIsNone(reviews[0].get('context_captured_at'), "客户端伪造时 context_captured_at 应为 None")
+
+
+class BuildTradeContextTests(unittest.TestCase):
+    """/api/sync 上下文构建函数 _build_trade_context 完整测试"""
+
+    def setUp(self):
+        self._orig_cache = dict(bridge.CACHE)
+        bridge.CACHE.clear()
+        self._orig_build_rule = bridge._build_rule_state
+
+    def tearDown(self):
+        bridge.CACHE.clear()
+        bridge.CACHE.update(self._orig_cache)
+        bridge._build_rule_state = self._orig_build_rule
+
+    def test_no_quotes_returns_unavailable(self):
+        """无 live_quotes → 返回 unavailable"""
+        result = bridge._build_trade_context()
+        self.assertEqual(result['context_status'], 'unavailable')
+        self.assertIsNotNone(result['context_unavailable_reason'])
+
+    def test_old_quotes_returns_unavailable(self):
+        """旧行情（>600s）→ 返回 unavailable"""
+        import time
+        old = time.strftime('%Y-%m-%dT%H:%M:%S', time.gmtime(time.time() - 1200))
+        bridge.CACHE['live_quotes'] = {'_updated': old}
+        result = bridge._build_trade_context()
+        self.assertEqual(result['context_status'], 'unavailable')
+
+    def test_block_untrusted_returns_unavailable(self):
+        """rule_state 含 DATA_UNTRUSTED → 返回 unavailable 带 codes"""
+        fresh = datetime.now().strftime('%Y-%m-%dT%H:%M:%SZ')
+        bridge.CACHE['live_quotes'] = {'_updated': fresh}
+        bridge.CACHE['iwencai'] = {'情绪值': 65}
+        bridge.CACHE['live_index'] = {'上证指数涨幅': '-0.22'}
+        bridge._build_rule_state = lambda: {
+            'version': 'g1a-v1', 'tradable': False, 'blocks': [
+                {'code': 'DATA_UNTRUSTED', 'scope': 'all'},
+            ], 'warnings': [], 'windows': {'w1': {}, 'w2': {}},
+        }
+        result = bridge._build_trade_context()
+        self.assertEqual(result['context_status'], 'unavailable')
+        self.assertIn('DATA_UNTRUSTED', result.get('context_unavailable_reason', ''))
+
+    def test_healthy_returns_trusted(self):
+        """行情新鲜 + 无阻断块 → 返回 trusted 含全部字段"""
+        fresh = datetime.now().strftime('%Y-%m-%dT%H:%M:%SZ')
+        bridge.CACHE['live_quotes'] = {'_updated': fresh}
+        bridge.CACHE['iwencai'] = {'情绪值': 65}
+        bridge.CACHE['live_index'] = {'上证指数涨幅': '-0.22'}
+        bridge._build_rule_state = lambda: {
+            'version': 'g1a-v1', 'tradable': True, 'blocks': [],
+            'warnings': [], 'windows': {'w1': {}, 'w2': {}},
+        }
+        result = bridge._build_trade_context()
+        self.assertEqual(result['context_status'], 'trusted')
+        self.assertIsNotNone(result['rule_state'])
+        self.assertIsNotNone(result['market_snapshot'])
+        self.assertIsNotNone(result['context_captured_at'])
+        self.assertIsNone(result['context_unavailable_reason'])
+
+
 class ReviewAPIWriteTest(unittest.TestCase):
 
     def setUp(self):

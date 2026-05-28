@@ -1,6 +1,50 @@
 // widgets/position-calc.js — W03 三层仓位计 (v3.0 rule_state 驱动)
 'use strict';
 
+function _w03RuleText(code) {
+  var map = {
+    DATA_UNTRUSTED: '数据不可信',
+    SENTIMENT_STALE: '情绪数据过期',
+    DAY_STOP: '单日熔断',
+    LOSS_STREAK: '连亏空仓',
+    WEEK_STOP: '周回撤停止',
+    MONTH_STOP: '月回撤停止',
+    DOUBLE_ICE: '连续双冰',
+    CLIMAX_STOP: '极端高潮',
+    CLIMAX_REDUCE: '高潮降仓',
+    FRIDAY_W1: '周五关闭W1',
+    FRIDAY_TREND_CAP: '周五趋势上限',
+    W1_EMOTION: 'W1情绪不足',
+    W1_LIMIT_UP_PROFIT: 'W1涨停收益不足',
+    W1_BROKEN_BOARD: 'W1炸板率过高',
+    W1_PROMOTION: 'W1晋级率不足',
+    W2_ICE: 'W2冰点关闭',
+    W2_ICE_RISK: 'W2冰点风险过高',
+    W2_BROKEN_BOARD: 'W2炸板率过高',
+    LIANBAN_SIDE_CLOSED: '连板侧关闭'
+  };
+  return map[code] || code || '规则阻断';
+}
+
+function _w03Money(n) {
+  n = Number(n) || 0;
+  return Math.round(n).toLocaleString();
+}
+
+function _w03BlockChips(blocks, scope) {
+  var items = (blocks || []).filter(function(b){ return b.scope === scope; });
+  if (!items.length) return '';
+  return items.map(function(b) {
+    return '<span class="w03-chip w03-chip-' + (scope === 'all' ? 'risk' : 'warn') + '">' + _w03RuleText(b.code) + '</span>';
+  }).join('');
+}
+
+function _w03WindowChips(codes) {
+  return (codes || []).map(function(code) {
+    return '<span class="w03-chip w03-chip-muted">' + _w03RuleText(code) + '</span>';
+  }).join('');
+}
+
 class PositionCalcWidget extends YiMuWidget {
   render(data) {
     var body = this.getBody();
@@ -19,12 +63,14 @@ class PositionCalcWidget extends YiMuWidget {
     var baseCap = rsCaps.base_total_pct != null ? rsCaps.base_total_pct : (ST['总仓位上限'] || 0);
     var lbPct = rsCaps.lianban_pct != null ? rsCaps.lianban_pct : (ST['连板占比'] || 0);
     var trPct = rsCaps.trend_pct != null ? rsCaps.trend_pct : (ST['趋势占比'] || 0);
+    var baseLbPct = ST['连板占比'] || lbPct || 0;
+    var baseTrPct = ST['趋势占比'] || trPct || 0;
     var firstEntryPct = rsCaps.first_entry_pct != null ? rsCaps.first_entry_pct : 10;
 
     // 全局阻断：tradable=false 或 scope=all 的 blocks
     var globallyBlocked = RS ? !RS.tradable : false;
     var allScopeCodes = rsBlocks.filter(function(b){ return b.scope === 'all'; })
-                               .map(function(b){ return b.code; });
+                               .map(function(b){ return _w03RuleText(b.code); });
     var blockReasons = rsBlocks.map(function(b){ return b.message; });
 
     // 缺失 rule_state 时显示不可用
@@ -75,25 +121,37 @@ class PositionCalcWidget extends YiMuWidget {
       return;
     }
 
+    html += '<div class="w03-stack">';
+
     // ===== Layer 1: 总仓位上限 =====
-    var l1Val = globallyBlocked ? 0 : totalCap;
-    var l1Color = globallyBlocked ? 'danger' : 'info';
-    html += '<div class="layer-row' + (globallyBlocked?' layer-blocked':'') + '">' +
-      '<span class="layer-label">第一层</span>' +
-      '<span class="layer-value ' + l1Color + '">' + l1Val + '%</span>' +
-      '<span class="layer-reason">上限' + totalCap + '%' +
-        ' | 基础' + baseCap + '%' +
-        (globallyBlocked ? ' — ' + allScopeCodes.join('、') + '→空仓' : '') +
-        (rsBlocks.length && !globallyBlocked ? ' — ' + blockReasons.join('；') : '') +
-      '</span></div>';
+    html += '<section class="w03-layer' + (globallyBlocked ? ' w03-layer-blocked' : '') + '">' +
+      '<div class="w03-layer-head">' +
+        '<span class="w03-layer-index">第一层</span>' +
+        '<span class="w03-layer-title">总仓位门禁</span>' +
+      '</div>' +
+      '<div class="w03-layer-main">' +
+        '<div><div class="w03-kpi ' + (globallyBlocked ? 'danger' : 'info') + '">' + totalCap + '%</div><div class="w03-caption">执行上限</div></div>' +
+        '<div class="w03-metrics">' +
+          '<span>基础 <b>' + baseCap + '%</b></span>' +
+          '<span>首笔 <b>' + firstEntryPct + '%</b></span>' +
+        '</div>' +
+      '</div>' +
+      (globallyBlocked ? '<div class="w03-note">全局阻断后执行上限归零</div>' : '<div class="w03-note">按实时规则引擎输出执行仓位</div>') +
+      '</section>';
 
     // ===== Layer 2: 风格分配 =====
-    html += '<div class="layer-row' + (globallyBlocked?' layer-blocked':'') + '">' +
-      '<span class="layer-label">第二层</span>' +
-      '<span class="layer-value up">' + (globallyBlocked?'0':lbPct) + '%</span>' +
-      '<span class="layer-value down" style="margin-left:var(--sp-sm)">' + (globallyBlocked?'0':trPct) + '%</span>' +
-      '<span class="layer-reason">连板 | 趋势' +
-        ' | 首笔上限' + firstEntryPct + '%</span></div>';
+    html += '<section class="w03-layer' + (globallyBlocked ? ' w03-layer-blocked' : '') + '">' +
+      '<div class="w03-layer-head">' +
+        '<span class="w03-layer-index">第二层</span>' +
+        '<span class="w03-layer-title">风格分配</span>' +
+      '</div>' +
+      '<div class="w03-split-row">' +
+        '<div class="w03-split-item"><span>连板执行</span><b class="up">' + lbPct + '%</b></div>' +
+        '<div class="w03-split-item"><span>趋势执行</span><b class="info">' + trPct + '%</b></div>' +
+      '</div>' +
+      '<div class="w03-track"><i style="width:' + Math.max(0, Math.min(100, baseLbPct)) + '%;background:var(--up)"></i><i style="width:' + Math.max(0, Math.min(100, baseTrPct)) + '%;background:var(--info)"></i></div>' +
+      '<div class="w03-note">风格基线：连板 ' + baseLbPct + '% / 趋势 ' + baseTrPct + '%</div>' +
+      '</section>';
 
     // ===== Layer 3: W1/W2 窗口 =====
     var w1 = rsWindows.w1 || {};
@@ -102,14 +160,17 @@ class PositionCalcWidget extends YiMuWidget {
     var w2Open = w2.buy_allowed;
     var w1Label = w1.buy_allowed ? '追涨/回踩' : ('关闭' + (w1.in_session ? '' : '（非W1）'));
     var w2Label = w2.buy_allowed ? '低吸/回踩' : ('关闭' + (w2.in_session ? '' : '（非W2）'));
-    html += '<div class="layer-row' + (globallyBlocked?' layer-blocked':'') + '">' +
-      '<span class="layer-label">第三层</span>' +
-      '<span class="layer-value ' + (w1Open?'up':'text-disabled') + '" style="font-size:var(--fs-body)">W1 ' + w1Label + '</span>' +
-      '<span class="layer-value ' + (w2Open?'down':'text-disabled') + '" style="font-size:var(--fs-body);margin-left:var(--sp-sm)">W2 ' + w2Label + '</span>' +
-      '<span class="layer-reason">W1:' + (w1.in_session?'盘中':'休') + ' W2:' + (w2.in_session?'盘中':'休') +
-        (w1.blocks && w1.blocks.length ? ' W1阻断:' + w1.blocks.join(',') : '') +
-        (w2.blocks && w2.blocks.length ? ' W2阻断:' + w2.blocks.join(',') : '') +
-      '</span></div>';
+    html += '<section class="w03-layer' + (globallyBlocked ? ' w03-layer-blocked' : '') + '">' +
+      '<div class="w03-layer-head">' +
+        '<span class="w03-layer-index">第三层</span>' +
+        '<span class="w03-layer-title">交易窗口</span>' +
+      '</div>' +
+      '<div class="w03-window-grid">' +
+        '<div class="w03-window"><span>W1</span><b class="' + (w1Open ? 'up' : 'text-disabled') + '">' + w1Label + '</b><em>' + (w1.in_session ? '盘中' : '休') + '</em></div>' +
+        '<div class="w03-window"><span>W2</span><b class="' + (w2Open ? 'info' : 'text-disabled') + '">' + w2Label + '</b><em>' + (w2.in_session ? '盘中' : '休') + '</em></div>' +
+      '</div>' +
+      '</section>';
+    html += '</div>';
 
     // ===== 金额计算 =====
     var newCap = Math.max(0, maxPosition - currentPosVal);
@@ -117,32 +178,34 @@ class PositionCalcWidget extends YiMuWidget {
     var trMoney = globallyBlocked ? 0 : Math.round(newCap * trPct / 100);
     var sumMoney = lbMoney + trMoney;
 
-    html += '<div style="margin-top:var(--sp-sm);padding:var(--sp-sm);background:var(--bg-base);border-radius:var(--radius-sm)">' +
-      '<div style="font-size:var(--fs-label);color:var(--text-disabled);margin-bottom:var(--sp-xs)">'+
-        '总仓位上限'+totalCap+'% = '+maxPosition.toLocaleString()+' | 已持仓'+currentPosVal.toLocaleString()+' | 可新开'+newCap.toLocaleString()+'</div>'+
-      '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:2px">' +
-        '<div><span style="font-size:var(--fs-body);color:var(--text-secondary)">连板可新开</span>' +
-        '<div style="font-size:var(--fs-label);color:var(--text-disabled)">可新开'+newCap.toLocaleString()+'×'+lbPct+'%</div></div>' +
-        '<span style="font-family:var(--font-mono);font-size:var(--fs-body);font-weight:600;color:var(--up)">'+(lbMoney>0?lbMoney.toLocaleString():'0')+'</span>' +
+    html += '<div class="w03-money">' +
+      '<div class="w03-money-head">' +
+        '<span>金额测算</span>' +
+        '<b class="' + (globallyBlocked ? 'danger' : 'info') + '">' + _w03Money(sumMoney) + '</b>' +
       '</div>' +
-      '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">' +
-        '<div><span style="font-size:var(--fs-body);color:var(--text-secondary)">趋势可新开</span>' +
-        '<div style="font-size:var(--fs-label);color:var(--text-disabled)">可新开'+newCap.toLocaleString()+'×'+trPct+'%</div></div>' +
-        '<span style="font-family:var(--font-mono);font-size:var(--fs-body);font-weight:600;color:var(--down)">'+(trMoney>0?trMoney.toLocaleString():'0')+'</span>' +
-      '</div>' +
-      '<div style="border-top:1px solid var(--border-light);padding-top:4px;display:flex;justify-content:space-between;align-items:center">' +
-        '<span style="font-size:var(--fs-body);font-weight:600">可新开合计</span>' +
-        '<span style="font-family:var(--font-mono);font-size:var(--fs-subtitle);font-weight:700;color:'+(globallyBlocked?'var(--danger)':'var(--info)')+'">'+sumMoney.toLocaleString()+'</span>' +
+      '<div class="w03-money-meta">上限 ' + totalCap + '% = ' + _w03Money(maxPosition) + ' / 已持仓 ' + _w03Money(currentPosVal) + ' / 可新开 ' + _w03Money(newCap) + '</div>' +
+      '<div class="w03-money-grid">' +
+        '<div><span>连板可新开</span><b class="up">' + _w03Money(lbMoney) + '</b><em>' + _w03Money(newCap) + ' × ' + lbPct + '%</em></div>' +
+        '<div><span>趋势可新开</span><b class="info">' + _w03Money(trMoney) + '</b><em>' + _w03Money(newCap) + ' × ' + trPct + '%</em></div>' +
       '</div></div>';
 
     // 阻断详情
     if (rsBlocks.length) {
-      html += '<div style="margin-top:var(--sp-xs);font-size:var(--fs-body)">';
-      rsBlocks.forEach(function(b){ html += '<div style="color:var(--'+(b.scope==='all'?'danger':'warn')+');padding:2px 0"><b>'+b.code+'</b>: '+b.message+'</div>'; });
+      html += '<div class="w03-blocks">';
+      var allChips = _w03BlockChips(rsBlocks, 'all');
+      var lianbanChips = _w03BlockChips(rsBlocks, 'lianban');
+      var w1Chips = _w03WindowChips(w1.blocks);
+      var w2Chips = _w03WindowChips(w2.blocks);
+      if (allChips) html += '<div class="w03-block-row"><span>全局门禁</span><div>' + allChips + '</div></div>';
+      if (lianbanChips) html += '<div class="w03-block-row"><span>连板侧</span><div>' + lianbanChips + '</div></div>';
+      if (w1Chips) html += '<div class="w03-block-row"><span>W1 条件</span><div>' + w1Chips + '</div></div>';
+      if (w2Chips) html += '<div class="w03-block-row"><span>W2 条件</span><div>' + w2Chips + '</div></div>';
       html += '</div>';
     }
     if (rsWarnings.length) {
-      rsWarnings.forEach(function(w){ html += '<div style="color:var(--warn);font-size:var(--fs-body)">⚠ '+w.message+'</div>'; });
+      html += '<div class="w03-blocks">';
+      rsWarnings.forEach(function(w){ html += '<div class="w03-block-row"><span>提示</span><div><span class="w03-chip w03-chip-warn">'+w.message+'</span></div></div>'; });
+      html += '</div>';
     }
 
     body.innerHTML = html;

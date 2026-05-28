@@ -235,6 +235,90 @@ class TradeValidationTests(unittest.TestCase):
         self.assertEqual(len(db._exec("SELECT * FROM trade_records")), 0,
                          "所有非法提交均不得插入数据库")
 
+    def test_entry_forged_context_ignored(self):
+        """客户端夹带 rule_state/market_snapshot → handler 忽略，不存储为 trusted"""
+        entry = self._valid_entry()
+        entry['rule_state'] = {'version': 'forged'}
+        entry['market_snapshot'] = {'forged': 'data'}
+        status, body = self._post(entry)
+        self.assertEqual(status, 200, f"夹带上下文的合法 entry 仍应插入: {body}")
+        rows = db._exec("SELECT rule_state_json, market_snapshot_json FROM trade_records")
+        self.assertIsNone(rows[0]['rule_state_json'], "handler 不得存储客户端夹带的 rule_state")
+        self.assertIsNone(rows[0]['market_snapshot_json'], "handler 不得存储客户端夹带的 market_snapshot")
+
+
+class SyncContextHandlerTest(unittest.TestCase):
+    """v3 Phase 2: /api/sync 服务端绑定成交上下文"""
+
+    def setUp(self):
+        _setup(self)
+        bridge.CACHE['live_quotes'] = {}
+        # Mock _build_trade_context to return known contexts
+        self._orig_build_ctx = bridge._build_trade_context
+
+    def tearDown(self):
+        bridge._build_trade_context = self._orig_build_ctx
+        _teardown(self)
+
+    def _post(self, entry):
+        h = _handler('/api/sync', {'entry': entry})
+        h.do_POST()
+        return h._resp_status, json.loads(h._resp_body) if h._resp_body else {}
+
+    def test_trusted_context_stored_by_handler(self):
+        """当日健康在线成交 → 服务端绑定 rule_state + context_status=trusted"""
+        bridge._build_trade_context = lambda: {
+            'rule_state': {'version': 'g1a-v1', 'tradable': True, 'blocks': [], 'warnings': [],
+                           'windows': {'w1': {}, 'w2': {}}},
+            'market_snapshot': {'iwencai': {'情绪值': 65}, 'live_index': {'上证指数涨幅': '-0.22'}},
+            'context_captured_at': '2026-05-27T10:00:05',
+            'context_status': 'trusted',
+            'context_unavailable_reason': None,
+        }
+        entry = {'时间': '10:00', '动作': '买入', '代码': '000001', '标的': 'TEST',
+                 '价格': 10, '数量': 100, 'event_id': 'evt-trust'}
+        status, body = self._post(entry)
+        self.assertEqual(status, 200, f"应插入成功: {body}")
+        rows = db._exec("SELECT rule_state_json, context_status, context_captured_at FROM trade_records")
+        self.assertIsNotNone(rows[0]['rule_state_json'], "应有 rule_state")
+        self.assertEqual(rows[0]['context_status'], 'trusted')
+        self.assertIsNotNone(rows[0]['context_captured_at'])
+
+    def test_unavailable_context_stored_by_handler(self):
+        """行情不可用 → 上下文 context_status=unavailable 带原因"""
+        bridge._build_trade_context = lambda: {
+            'rule_state': None,
+            'market_snapshot': None,
+            'context_captured_at': None,
+            'context_status': 'unavailable',
+            'context_unavailable_reason': '行情数据不可用',
+        }
+        entry = {'时间': '10:00', '动作': '买入', '代码': '000001', '标的': 'TEST',
+                 '价格': 10, '数量': 100, 'event_id': 'evt-unavail'}
+        status, body = self._post(entry)
+        self.assertEqual(status, 200, f"unavailable 也应插入成功: {body}")
+        rows = db._exec("SELECT rule_state_json, context_status, context_unavailable_reason FROM trade_records")
+        self.assertIsNone(rows[0]['rule_state_json'], "不可用时应无 rule_state")
+        self.assertEqual(rows[0]['context_status'], 'unavailable')
+        self.assertIsNotNone(rows[0]['context_unavailable_reason'])
+
+    def test_client_forged_context_not_in_db(self):
+        """客户端夹带 rule_state/market_snapshot → handler 不写入 DB"""
+        bridge._build_trade_context = lambda: {
+            'rule_state': None, 'market_snapshot': None,
+            'context_captured_at': None, 'context_status': 'unavailable',
+            'context_unavailable_reason': '行情数据不可用',
+        }
+        entry = {'时间': '10:00', '动作': '买入', '代码': '000001', '标的': 'TEST',
+                 '价格': 10, '数量': 100, 'event_id': 'evt-forged',
+                 'rule_state': {'version': 'forged'},
+                 'market_snapshot': {'fake': 'data'}}
+        status, body = self._post(entry)
+        self.assertEqual(status, 200, f"合法 entry 仍应插入: {body}")
+        rows = db._exec("SELECT rule_state_json, market_snapshot_json FROM trade_records")
+        self.assertIsNone(rows[0]['rule_state_json'], "handler 不得写入客户端夹带的 rule_state")
+        self.assertIsNone(rows[0]['market_snapshot_json'], "handler 不得写入客户端夹带的 market_snapshot")
+
 
 class ConcurrentSellGuardTests(unittest.TestCase):
     """YM-W15-01: 并发卖出原子门禁"""

@@ -1,5 +1,6 @@
 """test_pnl_curve_api.py — W22 API 零值/时区/回退 回归"""
 import json, os, tempfile, threading, unittest
+from datetime import datetime
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -81,6 +82,31 @@ class PnlQueryZeroValueTests(unittest.TestCase):
         if last_data_idx is not None and last_data_idx + 1 < len(labels):
             self.assertIsNone(result["portfolio"][last_data_idx + 1],
                 "最后一个数据点之后应为 null")
+
+    def test_query_pnl_all_uses_nav_derived_returns(self):
+        """累计曲线原始日收益应从 nav 推导，不能被旧 pnl_pct 脏值带偏"""
+        db._exec_write(
+            "INSERT INTO daily_summary (date,nav,pnl_pct,sh_pct,sz_pct,cy_pct,pos_pct,deposit) VALUES (?,?,?,?,?,?,?,?)",
+            ("2026-03-30", 1.0, 10.0, 0.0, 0.0, 0.0, 0.0, 200000))
+        db._exec_write(
+            "INSERT INTO daily_summary (date,nav,pnl_pct,sh_pct,sz_pct,cy_pct,pos_pct,deposit) VALUES (?,?,?,?,?,?,?,?)",
+            ("2026-03-31", 1.05, -99.0, 0.0, 0.0, 0.0, 0.0, 200000))
+        result = db.query_pnl("all", "sh")
+        self.assertEqual(result["portfolio"][0], 0.0, result)
+        self.assertAlmostEqual(result["portfolio"][1], 5.0, places=4)
+
+    def test_query_pnl_all_overlays_today_benchmark_from_intraday(self):
+        """日结 daily_summary 若今天指数为 0，应以最后一条日内快照补齐"""
+        today = datetime.now().strftime("%Y-%m-%d")
+        db._exec_write(
+            "INSERT INTO daily_summary (date,nav,pnl_pct,sh_pct,sz_pct,cy_pct,pos_pct,deposit) VALUES (?,?,?,?,?,?,?,?)",
+            (today, 1.02, 2.0, 0.0, 0.0, 0.0, 30.0, 200000))
+        db._exec_write(
+            "INSERT INTO intraday_snapshots (ts,date,total_asset,mv,pnl_pct,nav,sh_pct,sz_pct,cy_pct,pos_pct) VALUES (?,?,?,?,?,?,?,?,?,?)",
+            (f"{today}T14:55:00", today, 204000, 60000, 2.0, 1.02, -1.25, -0.8, -0.3, 30.0))
+        result = db.query_pnl("all", "sh")
+        self.assertEqual(result["dates"][-1], today)
+        self.assertEqual(result["benchmark"][-1], -1.25)
 
 
 class PnlQueryZeroValueFileBasedTests(unittest.TestCase):

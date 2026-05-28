@@ -593,3 +593,187 @@ class JsonSchemaTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class Phase3SSOTPositionTest(unittest.TestCase):
+    """v3 Phase 3: _build_full_snapshot 必须使用账户 SSOT positions"""
+
+    def setUp(self):
+        _setup_isolated_bridge(self)
+        today = datetime.now().strftime("%Y-%m-%d")
+        # 删除默认空锚点，用 SSOT 锚点 + 持仓覆盖
+        db._exec("DELETE FROM account_baselines WHERE date = ?", (today,))
+        # 用 SSOT 锚点 + 持仓覆盖 dashboard baseline
+        db.insert_account_baseline({
+            "date": today, "effective_at": f"{today}T09:30:00",
+            "trade_id_cutoff": 0, "cash": 80000, "day_start_asset": 100000,
+            "total_deposit": 100000,
+            "positions": [{"标的": "SSOT股", "代码": "000001", "数量": 500, "成本": 20, "现价": 21, "状态": "持有"}],
+            "source": "previous_close",
+        })
+        # 更新 dashboard baseline: 假装有旧持仓（不应被 LLM snapshot 使用）
+        bridge.DATA_FILE.write_text(json.dumps({
+            "meta": {"date": today}, "positions": [
+                {"标的": "BASELINE_OLD", "代码": "999999", "数量": 100, "成本": 10, "现价": 15, "状态": "持有"},
+            ],
+            "lianban_pool": [], "trend_pool": [], "sectors": [], "risk": {}, "pnl": {},
+            "style": {"总分": 85, "连板占比": 54, "趋势占比": 46},
+        }))
+
+    def tearDown(self):
+        _teardown_isolated_bridge(self)
+
+    def test_snapshot_uses_ssot_positions_not_baseline(self):
+        """LLM snapshot 持仓来自 SSOT（000001），不使用 dashboard baseline（999999）"""
+        snap = bridge._build_full_snapshot()
+        positions = snap.get("持仓", [])
+        codes = [p.get("代码") for p in positions]
+        self.assertIn("000001", codes, f"SSOT position 000001 应在 snapshot 中: {codes}")
+        self.assertNotIn("999999", codes, f"dashboard baseline 旧持仓不得出现: {codes}")
+
+    def test_snapshot_position_has_ssot_fields(self):
+        """SSOT position 字段齐全：标的/代码/现价/数量/浮盈%"""
+        snap = bridge._build_full_snapshot()
+        for p in snap.get("持仓", []):
+            if p.get("代码") == "000001":
+                self.assertEqual(p.get("标的"), "SSOT股")
+                self.assertEqual(p.get("数量"), 500)
+                break
+
+    def test_cleared_position_excluded(self):
+        """已清仓/删除标的不出现在 snapshot 持仓中"""
+        today = datetime.now().strftime("%Y-%m-%d")
+        db.insert_account_baseline({
+            "date": "2026-05-20", "effective_at": "2026-05-20T09:30:00",
+            "trade_id_cutoff": 0, "cash": 100000, "day_start_asset": 100000,
+            "total_deposit": 100000,
+            "positions": [
+                {"标的": "已清", "代码": "000002", "数量": 0, "成本": 10, "现价": 12, "状态": "清仓"},
+                {"标的": "已删", "代码": "000003", "数量": 0, "成本": 10, "现价": 12, "状态": "删除"},
+            ],
+            "source": "previous_close",
+        })
+        snap = bridge._build_full_snapshot()
+        codes = [p.get("代码") for p in snap.get("持仓", [])]
+        self.assertNotIn("000002", codes, "清仓标的不得出现")
+        self.assertNotIn("000003", codes, "删除标的不得出现")
+
+
+class Phase3ValuationUntrustedTest(unittest.TestCase):
+    """valuation_complete=false/anchor_blocked → 价格/盈亏不可用 + risk_notes"""
+
+    def setUp(self):
+        _setup_isolated_bridge(self)
+        today = datetime.now().strftime("%Y-%m-%d")
+        db._exec("DELETE FROM account_baselines WHERE date = ?", (today,))
+        db.insert_account_baseline({
+            "date": today, "effective_at": f"{today}T09:30:00",
+            "trade_id_cutoff": 0, "cash": 80000, "day_start_asset": 100000,
+            "total_deposit": 100000,
+            "positions": [{"标的": "TEST", "代码": "000001", "数量": 500, "成本": 20, "现价": 21, "状态": "持有"}],
+            "source": "previous_close",
+        })
+        bridge.DATA_FILE.write_text(json.dumps({
+            "meta": {"date": today}, "positions": [],
+            "lianban_pool": [], "trend_pool": [], "sectors": [], "risk": {}, "pnl": {},
+            "style": {"总分": 85, "连板占比": 54, "趋势占比": 46},
+        }))
+
+    def tearDown(self):
+        _teardown_isolated_bridge(self)
+
+    def test_valuation_incomplete_has_unavailable_fields(self):
+        """valuation_complete=false 时现价/浮盈%为 None，含 risk_note"""
+        snap = bridge._build_full_snapshot()
+        # 顶层 data_trusted=false + risk_notes
+        self.assertFalse(snap.get("data_trusted", True), "valuation_complete=false 时顶层 data_trusted 应为 False")
+        self.assertIsNotNone(snap.get("risk_notes"), "应有顶层 risk_notes")
+        for p in snap.get("持仓", []):
+            if p.get("代码") == "000001":
+                self.assertFalse(p.get("data_trusted", True), f"持仓 data_trusted 应为 False: {p}")
+                self.assertIsNone(p.get("现价"), f"valuation_complete=false 现价应为 None: {p}")
+                self.assertIsNone(p.get("浮盈%"), f"valuation_complete=false 浮盈%应为 None: {p}")
+                self.assertIn("risk_note", p, f"应有 risk_note: {p}")
+                self.assertIsNotNone(p.get("数量"), "数量作为持仓事实应保留")
+                break
+
+    def test_anchor_blocked_has_unavailable_fields(self):
+        """anchor_blocked 时现价/浮盈%为 None，含 risk_note"""
+        bridge.CACHE["live_quotes"] = {}
+        snap = bridge._build_full_snapshot()
+        self.assertFalse(snap.get("data_trusted", True), "anchor_blocked 时顶层 data_trusted 应为 False")
+        for p in snap.get("持仓", []):
+            if p.get("代码") == "000001":
+                self.assertFalse(p.get("data_trusted", True), f"持仓 data_trusted 应为 False: {p}")
+                self.assertIsNone(p.get("现价"), f"现价应为 None: {p}")
+                self.assertIsNone(p.get("浮盈%"), f"浮盈%应为 None: {p}")
+                self.assertIn("risk_note", p, f"应有 risk_note: {p}")
+                break
+
+
+class Phase3ConcurrentConversationTest(unittest.TestCase):
+    """LLM conversation 并发写入不丢消息"""
+
+    def setUp(self):
+        _setup_isolated_bridge(self)
+
+    def tearDown(self):
+        _teardown_isolated_bridge(self)
+
+    def test_concurrent_writes_dont_lose_messages(self):
+        """模拟并发写入，验证两条消息都保留"""
+        import threading
+        results = []
+        snap = _tradable_snapshot()
+
+        def write_auto(label, text):
+            raw = '{"text":"' + text + '","signals":[]}'
+            bridge._process_llm_result(raw, snap, "2026-05-27", "10:00", "auto")
+            results.append(label)
+
+        t1 = threading.Thread(target=write_auto, args=("A", "msg_a"))
+        t2 = threading.Thread(target=write_auto, args=("B", "msg_b"))
+        t1.start(); t2.start()
+        t1.join(); t2.join()
+
+        # 验证两条消息都在 conversation 中
+        data = json.loads(bridge.LLM_INSIGHTS_FILE.read_text())
+        texts = [m.get("text", "") for m in data["2026-05-27"]["conversation"]]
+        self.assertIn("msg_a", texts, f"缺少 msg_a: {texts}")
+        self.assertIn("msg_b", texts, f"缺少 msg_b: {texts}")
+        self.assertEqual(len(texts), 2, f"应有2条消息: {texts}")
+
+
+class Phase3BuyValidationPreservedTest(unittest.TestCase):
+    """BUY hard validation 不回退"""
+
+    def setUp(self):
+        _setup_isolated_bridge(self)
+
+    def tearDown(self):
+        _teardown_isolated_bridge(self)
+
+    def test_day_stop_buy_still_warning(self):
+        """DAY_STOP 时 BUY 仍被 hard validation 阻断"""
+        from scripts.rule_engine import evaluate_rule_state
+        rs = evaluate_rule_state(
+            {"account": {"pnl_pct": -4.0, "valuation_complete": True},
+             "risk": {"loss_streak": 0},
+             "style": {"score": 85, "lianban_pct": 54, "trend_pct": 46},
+             "sentiment": {"emotion_pct": 65, "previous_emotion_pct": 45,
+                            "limit_up_profit_pct": 3.0, "broken_board_pct": 20,
+                            "promotion_pct": 22},
+             "freshness": {"quotes": "live", "sentiment": "live"}},
+            __import__("datetime").datetime(2026, 5, 27, 14, 10))
+        snap = {"指数": {}, "情绪": {}, "连板池": [], "趋势池": [
+            {"标的": "T", "代码": "000001", "涨幅": "-2", "量比": "0.5",
+             "MA10_60m": "100", "MA10_60m_dir": "向上", "最新价": "100"}],
+            "持仓": [], "板块": [], "风控": {}, "涨停梯队TOP5": [], "rule_state": rs}
+        signals = [{"type": "BUY", "target": "T", "code": "000001",
+                     "window": "W2", "direction": "多", "confidence": "高"}]
+        verified = bridge._verify_signals(signals, snap)
+        self.assertEqual(verified[0]["status"], "⚠️")
+
+
+if __name__ == "__main__":
+    unittest.main()

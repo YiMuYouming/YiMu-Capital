@@ -300,7 +300,8 @@ class PositionsWidget extends YiMuWidget {
       '<div style="display:flex;gap:var(--sp-sm);margin-top:var(--sp-md)">' +
         '<button id="f_save" style="flex:1;background:var(--info);color:var(--text-inverse);border:none;padding:var(--sp-sm);border-radius:var(--radius-sm);cursor:pointer;font-size:var(--fs-body)">确认</button>' +
         '<button id="f_cancel" style="flex:1;background:var(--bg-base);color:var(--text-primary);border:1px solid var(--border);padding:var(--sp-sm);border-radius:var(--radius-sm);cursor:pointer;font-size:var(--fs-body)">取消</button>' +
-      '</div></div>';
+      '</div>' +
+      '<div id="f_error" style="display:none;color:var(--danger);font-size:var(--fs-small);margin-top:var(--sp-xs)"></div></div>';
     document.body.appendChild(o);
 
     var buyBtn2 = o.querySelector('#f_buy'), sellBtn2 = o.querySelector('#f_sell');
@@ -348,15 +349,33 @@ class PositionsWidget extends YiMuWidget {
       var saveBtn = o.querySelector('#f_save');
       var g = function(id) { return (o.querySelector('#' + id) || {}).value || ''; };
       var buy = buyBtn2.style.opacity !== '0.4';
-      var price = parseFloat(g('f_price')) || 0, qty = parseInt(g('f_qty')) || 0;
       var stock = g('f_stock'), code = g('f_code'), reason = g('f_reason');
       var act = buy ? (g('f_win') === 'W1' ? 'W1追涨' : 'W2买入') : '卖出';
+
+      // 前端校验：在发请求前阻断非法输入
+      var validation = _validateTradeEntry({
+        time: g('f_time'), action: act, stock: stock, code: code,
+        price: g('f_price'), qty: g('f_qty'), window: g('f_win'), reason: reason
+      }, buy);
+      var errBox = o.querySelector('#f_error');
+      if (!validation.ok) {
+        if (errBox) {
+          errBox.textContent = validation.error;
+          errBox.style.display = '';
+        }
+        return;
+      }
+      if (errBox) {
+        errBox.textContent = '';
+        errBox.style.display = 'none';
+      }
 
       // event_id：首次生成，重试复用
       if (!self._pendingEvtId) {
         self._pendingEvtId = 'w15-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
       }
-      var entry = { '时间': g('f_time'), '动作': act, '标的': stock, '代码': code, '价格': price, '数量': qty, '窗口': buy ? g('f_win') : '—', '原因': reason, 'event_id': self._pendingEvtId };
+      var entry = validation.entry;
+      entry['event_id'] = self._pendingEvtId;
 
       // 锁定按钮
       self._pending = true;
@@ -378,6 +397,49 @@ class PositionsWidget extends YiMuWidget {
     };
     o.addEventListener('click', function(e) { if (e.target === o) { self._pendingEvtId = null; o.remove(); } });
   }
+}
+
+function _validateTradeEntry(raw, buy) {
+  var time = String(raw.time || '').trim();
+  var stock = String(raw.stock || '').trim();
+  var code = String(raw.code || '').trim();
+  var priceRaw = String(raw.price || '').trim();
+  var qtyRaw = String(raw.qty || '').trim();
+  var action = String(raw.action || '').trim();
+  var windowName = buy ? String(raw.window || '').trim() : '—';
+  var reason = String(raw.reason || '').trim();
+
+  if (!/^([01]\d|2[0-3]):[0-5]\d(:[0-5]\d)?$/.test(time)) {
+    return { ok: false, error: '时间格式非法，请输入 HH:MM' };
+  }
+  if (!stock) return { ok: false, error: '标的名称不能为空' };
+  if (!code) return { ok: false, error: '代码不能为空' };
+
+  var price = Number(priceRaw);
+  if (!Number.isFinite(price) || price <= 0) {
+    return { ok: false, error: '价格必须为有限正数' };
+  }
+  if (!/^[1-9]\d*$/.test(qtyRaw)) {
+    return { ok: false, error: '数量必须为正整数' };
+  }
+  var qty = Number(qtyRaw);
+  if (!Number.isSafeInteger(qty) || qty <= 0) {
+    return { ok: false, error: '数量必须为正整数' };
+  }
+
+  return {
+    ok: true,
+    entry: {
+      '时间': time,
+      '动作': action,
+      '标的': stock,
+      '代码': code,
+      '价格': price,
+      '数量': qty,
+      '窗口': windowName,
+      '原因': reason
+    }
+  };
 }
 
 function _nowTime() {

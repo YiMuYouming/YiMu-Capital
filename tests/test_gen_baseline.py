@@ -1,15 +1,22 @@
 """test_gen_baseline.py — gen_dashboard_data.py 解析逻辑测试"""
-import sys, json, unittest
+import sys, json, tempfile, unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 try:
-    from gen_dashboard_data import parse_frontmatter, parse_appendix, parse_appendix_a
+    import gen_dashboard_data as _gen
+    parse_frontmatter = _gen.parse_frontmatter
+    parse_appendix = _gen.parse_appendix
+    parse_appendix_a = _gen.parse_appendix_a
+    _build_pools_payload = getattr(_gen, "_build_pools_payload", None)
+    _select_machine_pool = getattr(_gen, "_select_machine_pool", None)
     _HAS_GEN = True
 except ImportError:
     parse_frontmatter = None
     parse_appendix = None
     parse_appendix_a = None
+    _build_pools_payload = None
+    _select_machine_pool = None
     _HAS_GEN = False
 
 FIXTURE = Path(__file__).resolve().parent / "fixtures" / "sample_review_note.md"
@@ -87,3 +94,52 @@ class TestGenBaseline(unittest.TestCase):
         self.assertEqual(lianban[0].get("板块"), "机器人")
         self.assertGreaterEqual(len(trend), 1)
         self.assertEqual(trend[0].get("板块"), "半导体")
+
+    def test_machine_pools_prefer_data_appendix_stock_rows(self):
+        self.assertIsNotNone(_build_pools_payload)
+        pools = _build_pools_payload(str(FIXTURE))
+        self.assertEqual(pools["lianban_pool"][0].get("标的"), "雷赛智能")
+        self.assertEqual(pools["lianban_pool"][0].get("代码"), "002979")
+        self.assertEqual(pools["trend_pool"][0].get("标的"), "北方华创")
+        self.assertEqual(pools["trend_pool"][0].get("代码"), "002371")
+        self.assertNotIn("观察标的", pools["trend_pool"][0])
+
+    def test_explicit_empty_lianban_pool_does_not_fallback(self):
+        self.assertIsNotNone(_select_machine_pool)
+        note = """---
+date: 2026-05-27
+---
+# 复盘
+
+## 附录A：次日盘前速查
+
+### 趋势板块→操作映射
+| 板块 | 观察标的（只盯） | 操作标的 | 触发条件 |
+|------|---------------|---------|---------|
+| 半导体 | 紫光 | 三安 | 回踩 |
+
+### 操作指南
+**不碰**：连板追涨
+
+## 数据附录（机器解析用）
+
+### 连板自选池
+| 标的 | 代码 | 板块 | 窗口 | 角色 | 操作 | 涨幅 | 收盘价 | MA5 | 量比 | 换手 | 备注 |
+|------|------|------|------|------|------|------|--------|-----|------|------|------|
+|  |  |  | W1/W2 |  |  |  |  |  |  |  |  |
+
+### 趋势自选池
+| 标的 | 代码 | 板块 | 窗口 | 角色 | 操作 | 涨幅 | 收盘价 | MA5 | MA20 | 量比 | 换手 | 备注 |
+|------|------|------|------|------|------|------|--------|-----|------|------|------|------|
+| 三安光电 | 600703 | 半导体 | W2 | 主趋势股 | W2回踩买入 | +4.79% | 16.61 | — | — | — | 8.71% | 中军 |
+"""
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "note.md"
+            path.write_text(note)
+            appendix = parse_appendix(str(path))
+            appendix_a = parse_appendix_a(str(path))
+            lb = _select_machine_pool(str(path), appendix, appendix_a, "lianban_pool")
+            tr = _select_machine_pool(str(path), appendix, appendix_a, "trend_pool")
+        self.assertEqual(lb, [])
+        self.assertEqual(tr[0].get("标的"), "三安光电")
+        self.assertEqual(tr[0].get("代码"), "600703")

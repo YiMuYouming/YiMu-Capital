@@ -221,7 +221,8 @@ inst._reviews = [
    window:'W1',reason:'W1信号',outcome:'',review_note:'',
    rule_state:{version:'g1a-v1',tradable:true,blocks:[],warnings:[],
      windows:{w1:{in_session:true,buy_allowed:true},w2:{}}},
-   market_snapshot:{iwencai:{'情绪值':65},live_index:{}}}
+   market_snapshot:{iwencai:{'情绪值':65},live_index:{}},
+   context_status:'trusted'}
 ];
 inst.render({});
 var html = _body.innerHTML || '';
@@ -244,7 +245,8 @@ inst._reviews = [
    window:'W1',reason:'',outcome:'',review_note:'',
    rule_state:{version:'g1a-v1',tradable:true,blocks:[{code:'FRIDAY_W1',scope:'W1'}],warnings:[],
      windows:{w1:{in_session:true,buy_allowed:false},w2:{}}},
-   market_snapshot:{iwencai:{},live_index:{}}}
+   market_snapshot:{iwencai:{},live_index:{}},
+   context_status:'trusted'}
 ];
 inst.render({});
 var html = _body.innerHTML || '';
@@ -265,7 +267,8 @@ inst._reviews = [
    window:'W1',reason:'',outcome:'',review_note:'',
    rule_state:{version:'g1a-v1',tradable:false,blocks:[{code:'DAY_STOP',scope:'all'}],warnings:[],
      windows:{w1:{buy_allowed:false},w2:{}}},
-   market_snapshot:{iwencai:{'情绪值':45},live_index:{}}}
+   market_snapshot:{iwencai:{'情绪值':45},live_index:{}},
+   context_status:'trusted'}
 ];
 inst.render({});
 var html = _body.innerHTML || '';
@@ -314,11 +317,14 @@ inst._reviews = [
 ];
 inst.render({});
 var html = _body.innerHTML || '';
-console.log(JSON.stringify({hasUnverified: html.indexOf('未验证')>=0, hasVerified: html.indexOf('已验证')>=0, hasTable: html.indexOf('<table')>=0}));
+// 检查表格内的状态列（过滤栏之外），不含 filter 按钮文本
+var tableStart = html.indexOf('<table');
+var tableHtml = tableStart >= 0 ? html.substring(tableStart) : '';
+console.log(JSON.stringify({hasUnverified: html.indexOf('未验证')>=0, hasFilterUnverified: html.indexOf('id=\"w23_filter_unverified\"')>=0, hasVerifiedInTable: tableHtml.indexOf('已验证')>=0, hasTable: tableHtml.indexOf('<table')>=0}));
 """
         result = _run_node(script, files=["widgets/trade-review.js"])
-        self.assertTrue(result.get("hasUnverified"), f"应未验证: {result}")
-        self.assertFalse(result.get("hasVerified"), f"不应已验证: {result}")
+        self.assertTrue(result.get("hasFilterUnverified"), f"过滤栏应含未验证按钮: {result}")
+        self.assertFalse(result.get("hasVerifiedInTable"), f"表格内不应含已验证: {result}")
         self.assertTrue(result.get("hasTable"), "应有表格")
 
     def test_empty_data(self):
@@ -911,6 +917,306 @@ console.log(JSON.stringify({
         self.assertTrue(result.get("hasWarn"), f"valuation_complete=false应显示估值不可信: {result}")
         self.assertTrue(result.get("hasQuoteUnavail"), f"价格列应显示行情不可用: {result}")
         self.assertTrue(result.get("hasCostShown"), f"成本应仍显示: {result}")
+
+
+class W15FormValidationTests(unittest.TestCase):
+    """v3 Phase 1: W15 must reject invalid form input before /api/sync."""
+
+    def test_decimal_qty_rejected_before_payload_build(self):
+        script = r"""
+var r = _validateTradeEntry({
+  time:'10:00', action:'W1追涨', stock:'测试', code:'000001',
+  price:'10.50', qty:'1.5', window:'W1', reason:''
+}, true);
+console.log(JSON.stringify({
+  ok:r.ok,
+  hasQtyError: String(r.error || '').indexOf('数量') >= 0,
+  hasEntry: !!r.entry
+}));
+"""
+        result = _run_node(script, files=["widgets/positions.js"])
+        self.assertFalse(result.get("ok"), f"小数数量必须阻断: {result}")
+        self.assertTrue(result.get("hasQtyError"), f"错误文案应指向数量: {result}")
+        self.assertFalse(result.get("hasEntry"), f"非法输入不得产生成交 entry: {result}")
+
+    def test_valid_entry_is_normalized_without_parseint_truncation(self):
+        script = r"""
+var r = _validateTradeEntry({
+  time:'10:00', action:'W1追涨', stock:'测试', code:'000001',
+  price:'10.50', qty:'100', window:'W1', reason:'test'
+}, true);
+console.log(JSON.stringify({
+  ok:r.ok,
+  price:r.entry && r.entry['价格'],
+  qty:r.entry && r.entry['数量'],
+  qtyType:typeof (r.entry && r.entry['数量'])
+}));
+"""
+        result = _run_node(script, files=["widgets/positions.js"])
+        self.assertTrue(result.get("ok"), f"合法输入应通过: {result}")
+        self.assertEqual(result.get("price"), 10.5)
+        self.assertEqual(result.get("qty"), 100)
+        self.assertEqual(result.get("qtyType"), "number")
+
+    def test_invalid_required_fields_rejected(self):
+        script = r"""
+var cases = [
+  {time:'10:00', action:'W1追涨', stock:'', code:'000001', price:'10', qty:'100', window:'W1', reason:''},
+  {time:'10:00', action:'W1追涨', stock:'测试', code:'', price:'10', qty:'100', window:'W1', reason:''},
+  {time:'10:00', action:'W1追涨', stock:'测试', code:'000001', price:'Infinity', qty:'100', window:'W1', reason:''},
+  {time:'00:01:99', action:'W1追涨', stock:'测试', code:'000001', price:'10', qty:'100', window:'W1', reason:''}
+];
+var rejected = cases.map(function(c) { return _validateTradeEntry(c, true).ok === false; });
+console.log(JSON.stringify({allRejected: rejected.every(Boolean), rejected: rejected}));
+"""
+        result = _run_node(script, files=["widgets/positions.js"])
+        self.assertTrue(result.get("allRejected"), f"空字段/非法价格/非法时间都应阻断: {result}")
+
+
+class W23ContextStatusTests(unittest.TestCase):
+    """v3 Phase 2: W23 展示成交上下文可信状态"""
+
+    def test_trusted_context_shows_verified_and_capture_time(self):
+        """rule_state + market_snapshot + context_captured_at → '已验证' + 采集时间"""
+        script = r"""
+var _body = document.createElement('div');
+var inst = new TradeReviewWidget({id:'W23'});
+inst.getBody = function(){return _body;};
+inst.updateTimestamp = function(){};
+inst._reviews = [
+  {trade_time:'10:00',action:'W1追涨',name:'测试',code:'000001',price:10,qty:100,
+   window:'W1',reason:'',outcome:'浮盈+2%',review_note:'',
+   rule_state:{version:'g1a-v1',tradable:true,blocks:[],warnings:[],
+     windows:{w1:{in_session:true,buy_allowed:true},w2:{}}},
+   market_snapshot:{iwencai:{'情绪值':65},live_index:{'上证指数涨幅':'-0.22'}},
+   context_captured_at:'2026-05-27T10:00:05',
+   context_status:'trusted'}
+];
+inst.render({});
+var html = _body.innerHTML || '';
+console.log(JSON.stringify({
+  hasCaptureTime: html.indexOf('10:00:05')>=0, hasFilterBar: html.indexOf('w23_filter_all')>=0,
+  // Scope check to table area (after filter bar)
+  hasUnavailableInTable: (function() { var t = html.indexOf('<table'); return t >= 0 && html.substring(t).indexOf('不可用') >= 0; })()
+}));
+"""
+        result = _run_node(script, files=["widgets/trade-review.js"])
+        self.assertTrue(result.get("hasFilterBar"), f"应有过滤栏: {result}")
+        self.assertTrue(result.get("hasCaptureTime"), f"应显示采集时间: {result}")
+        self.assertFalse(result.get("hasUnavailableInTable"), f"表格内不应显示不可用(trusted): {result}")
+
+    def test_null_context_shows_unavailable_with_reason(self):
+        """无 rule_state + market_snapshot → '不可用', 含原因"""
+        script = r"""
+var _body = document.createElement('div');
+var inst = new TradeReviewWidget({id:'W23'});
+inst.getBody = function(){return _body;};
+inst.updateTimestamp = function(){};
+inst._reviews = [
+  {trade_time:'14:00',action:'买入',name:'测试',code:'000001',price:10,qty:100,
+   window:'W2',reason:'',outcome:'',review_note:'',
+   context_status:'unavailable', context_unavailable_reason:'行情数据不可用'}
+];
+inst.render({});
+var html = _body.innerHTML || '';
+console.log(JSON.stringify({
+  hasUnavailable: html.indexOf('不可用')>=0,
+  hasReason: html.indexOf('行情数据不可用')>=0, hasFilter: html.indexOf('w23_filter')>=0
+}));
+"""
+        result = _run_node(script, files=["widgets/trade-review.js"])
+        self.assertTrue(result.get("hasFilter"), f"应有过滤栏: {result}")
+        self.assertTrue(result.get("hasUnavailable"), f"无上下文应显示不可用: {result}")
+        self.assertTrue(result.get("hasReason"), f"应显示不可用原因: {result}")
+
+    def test_historical_trade_shows_historical_reason(self):
+        """历史成交（非今天）无上下文 → 显示'历史补录'原因"""
+        script = r"""
+var _body = document.createElement('div');
+var inst = new TradeReviewWidget({id:'W23'});
+inst.getBody = function(){return _body;};
+inst.updateTimestamp = function(){};
+inst._reviews = [
+  {trade_time:'10:00',action:'买入',name:'历史',code:'000001',price:10,qty:100,
+   window:'',reason:'',outcome:'',review_note:'',
+   context_status:'unavailable', context_unavailable_reason:'历史补录'}
+];
+inst.render({});
+var html = _body.innerHTML || '';
+console.log(JSON.stringify({
+  hasHistorical: html.indexOf('历史')>=0,
+  hasUnavailable: html.indexOf('不可用')>=0
+}));
+"""
+        result = _run_node(script, files=["widgets/trade-review.js"])
+        self.assertTrue(result.get("hasUnavailable"), f"历史成交应显示不可用: {result}")
+        self.assertTrue(result.get("hasHistorical"), f"历史成交应显示原因: {result}")
+
+
+if __name__ == "__main__":
+    unittest.main()
+
+
+class W15AllErrorsInlineTest(unittest.TestCase):
+    """v3 Phase 5: W15 所有本地校验失败均显示 #f_error"""
+
+    def test_empty_code_shows_inline_error(self):
+        script = r"""
+var r = _validateTradeEntry({
+  time:'10:00', action:'W1追涨', stock:'测试', code:'',
+  price:'10', qty:'100', window:'W1', reason:''
+}, true);
+console.log(JSON.stringify({ ok: r.ok, error: r.error }));
+"""
+        result = _run_node(script, files=["widgets/positions.js"])
+        self.assertFalse(result.get("ok"), f"空代码应阻断: {result}")
+        self.assertIn("代码", result.get("error", ""))
+
+    def test_empty_name_shows_inline_error(self):
+        script = r"""
+var r = _validateTradeEntry({
+  time:'10:00', action:'W1追涨', stock:'', code:'000001',
+  price:'10', qty:'100', window:'W1', reason:''
+}, true);
+console.log(JSON.stringify({ ok: r.ok, error: r.error }));
+"""
+        result = _run_node(script, files=["widgets/positions.js"])
+        self.assertFalse(result.get("ok"), f"空名称应阻断: {result}")
+
+    def test_invalid_time_shows_inline_error(self):
+        for bad_time in ['25:00', '99:99', '12:60']:
+            script = r"""
+var r = _validateTradeEntry({
+  time:'TIME', action:'W1追涨', stock:'测试', code:'000001',
+  price:'10', qty:'100', window:'W1', reason:''
+}, true);
+console.log(JSON.stringify({ ok: r.ok, error: r.error }));
+""".replace('TIME', bad_time)
+            result = _run_node(script, files=["widgets/positions.js"])
+            self.assertFalse(result.get("ok"), f"非法时间 {bad_time} 应阻断: {result}")
+
+    def test_validation_failure_does_not_set_pending(self):
+        """校验失败不设置 pending 和 event_id（在 _validateTradeEntry 层验证）"""
+        script = r"""
+var r = _validateTradeEntry({
+  time:'10:00', action:'W1追涨', stock:'测试', code:'000001',
+  price:'0', qty:'100', window:'W1', reason:''
+}, true);
+console.log(JSON.stringify({ ok: r.ok, hasEntry: !!r.entry }));
+"""
+        result = _run_node(script, files=["widgets/positions.js"])
+        self.assertFalse(result.get("ok"), f"非法价格应阻断: {result}")
+        self.assertFalse(result.get("hasEntry"), f"非法输入不应构造 entry: {result}")
+
+
+class W23FilterTest(unittest.TestCase):
+    """v3 Phase 5: W23 context 状态筛选"""
+
+    def test_filter_all_shows_all_reviews(self):
+        script = r"""
+var _body = document.createElement('div');
+var inst = new TradeReviewWidget({id:'W23'});
+inst.getBody = function(){return _body;};
+inst.updateTimestamp = function(){};
+inst._reviews = [
+  {trade_time:'10:00',action:'W1追涨',name:'T1',code:'000001',price:10,qty:100,
+   window:'W1',reason:'',outcome:'',review_note:'',
+   rule_state:{version:'g1a-v1',tradable:true,blocks:[],warnings:[],windows:{w1:{},w2:{}}},
+   market_snapshot:{iwencai:{},live_index:{}},context_status:'trusted'},
+  {trade_time:'11:00',action:'买入',name:'T2',code:'000002',price:10,qty:50,
+   window:'W2',reason:'',outcome:'',review_note:'',
+   context_status:'unavailable',context_unavailable_reason:'行情数据不可用'}
+];
+inst._filter = 'all';
+inst._renderTable(_body, inst._reviews, '2026-05-27');
+var html = _body.innerHTML || '';
+console.log(JSON.stringify({hasT1: html.indexOf('T1')>=0, hasT2: html.indexOf('T2')>=0, rows: (html.match(/<tr/g)||[]).length}));
+"""
+        result = _run_node(script, files=["widgets/trade-review.js"])
+        self.assertTrue(result.get("hasT1"), f"全部筛选应含 T1: {result}")
+        self.assertTrue(result.get("hasT2"), f"全部筛选应含 T2: {result}")
+
+    def test_filter_trusted_only_shows_verified(self):
+        script = r"""
+var _body = document.createElement('div');
+var inst = new TradeReviewWidget({id:'W23'});
+inst.getBody = function(){return _body;};
+inst.updateTimestamp = function(){};
+inst._reviews = [
+  {trade_time:'10:00',action:'W1追涨',name:'T1',code:'000001',price:10,qty:100,
+   window:'W1',reason:'',outcome:'',review_note:'',
+   rule_state:{version:'g1a-v1',tradable:true,blocks:[],warnings:[],windows:{w1:{},w2:{}}},
+   market_snapshot:{iwencai:{},live_index:{}},context_status:'trusted'},
+  {trade_time:'11:00',action:'买入',name:'T2',code:'000002',price:10,qty:50,
+   window:'W2',reason:'',outcome:'',review_note:'',
+   context_status:'unavailable',context_unavailable_reason:'行情数据不可用'},
+  {trade_time:'12:00',action:'买入',name:'T3',code:'000003',price:10,qty:50,
+   window:'W2',reason:'',outcome:'',review_note:'',
+   context_status:'unverified'}
+];
+inst._filter = 'trusted';
+inst._renderTable(_body, inst._reviews, '2026-05-27');
+var html = _body.innerHTML || '';
+console.log(JSON.stringify({hasT1: html.indexOf('T1')>=0, hasT2: html.indexOf('T2')>=0, hasT3: html.indexOf('T3')>=0}));
+"""
+        result = _run_node(script, files=["widgets/trade-review.js"])
+        self.assertTrue(result.get("hasT1"), f"已验证筛选应含 T1: {result}")
+        self.assertFalse(result.get("hasT2"), f"已验证不应含 unavailable: {result}")
+        self.assertFalse(result.get("hasT3"), f"已验证不应含 unverified: {result}")
+
+    def test_filter_unavailable_excludes_unverified(self):
+        script = r"""
+var _body = document.createElement('div');
+var inst = new TradeReviewWidget({id:'W23'});
+inst.getBody = function(){return _body;};
+inst.updateTimestamp = function(){};
+inst._reviews = [
+  {trade_time:'11:00',action:'买入',name:'T2',code:'000002',price:10,qty:50,
+   window:'W2',reason:'',outcome:'',review_note:'',
+   context_status:'unavailable',context_unavailable_reason:'行情数据不可用'},
+  {trade_time:'12:00',action:'买入',name:'T3',code:'000003',price:10,qty:50,
+   window:'W2',reason:'',outcome:'',review_note:'',
+   context_status:'unverified'}
+];
+inst._filter = 'unavailable';
+inst._renderTable(_body, inst._reviews, '2026-05-27');
+var html = _body.innerHTML || '';
+console.log(JSON.stringify({hasT2: html.indexOf('T2')>=0, hasT3: html.indexOf('T3')>=0}));
+"""
+        result = _run_node(script, files=["widgets/trade-review.js"])
+        self.assertTrue(result.get("hasT2"), f"不可用筛选应含 T2: {result}")
+        self.assertFalse(result.get("hasT3"), f"不可用筛选不应含 unverified: {result}")
+
+    def test_filter_unverified_shows_unverified_in_status(self):
+        script = r"""
+var _body = document.createElement('div');
+var inst = new TradeReviewWidget({id:'W23'});
+inst.getBody = function(){return _body;};
+inst.updateTimestamp = function(){};
+inst._reviews = [
+  {trade_time:'11:00',action:'买入',name:'T2',code:'000002',price:10,qty:50,
+   window:'W2',reason:'',outcome:'',review_note:'',
+   context_status:'unavailable',context_unavailable_reason:'行情数据不可用'},
+  {trade_time:'12:00',action:'买入',name:'T3',code:'000003',price:10,qty:50,
+   window:'W2',reason:'',outcome:'',review_note:'',
+   context_status:'unverified'}
+];
+inst._filter = 'unverified';
+inst._renderTable(_body, inst._reviews, '2026-05-27');
+var html = _body.innerHTML || '';
+// Check status column: T3 row should show '未验证' not '不可用' or '历史补录'
+var t2Idx = html.indexOf('T2');
+var t3Idx = html.indexOf('T3');
+var afterT3 = t3Idx >= 0 ? html.substring(t3Idx, t3Idx + 3000) : '';
+console.log(JSON.stringify({hasT2: html.indexOf('T2')>=0, hasT3: html.indexOf('T3')>=0,
+  afterT3HasUnverified: afterT3.indexOf('未验证')>=0,
+  afterT3NoUnavailable: afterT3.indexOf('不可用')<0}));
+"""
+        result = _run_node(script, files=["widgets/trade-review.js"])
+        self.assertFalse(result.get("hasT2"), f"未验证筛选不应含 unavailable: {result}")
+        self.assertTrue(result.get("hasT3"), f"未验证筛选应含 unverified: {result}")
+        self.assertTrue(result.get("afterT3HasUnverified"), f"unverified 行状态应显示 '未验证': {result}")
+        self.assertTrue(result.get("afterT3NoUnavailable"), f"unverified 行状态不应显示 '不可用': {result}")
 
 
 if __name__ == "__main__":

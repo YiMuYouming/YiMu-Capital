@@ -24,6 +24,7 @@ ROOT = Path(__file__).resolve().parent.parent
 DATA_DIR = ROOT / "data"
 
 EXIT_CODE = 0
+TARGET_PORT = 8088
 
 
 def _err(msg):
@@ -155,7 +156,7 @@ def _check_sqlite():
 
 # ── 4. 端口占用 ──────────────────────────────────────────────────────────────
 def _check_port():
-    port = 8088
+    port = TARGET_PORT
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     sock.settimeout(1)
     try:
@@ -256,15 +257,49 @@ def _check_collector_paths():
 
 
 def main():
+    import argparse
+    parser = argparse.ArgumentParser(description="live-dashboard 运行环境检查")
+    parser.add_argument("--preflight", action="store_true", help="启动前完整检查（含端口冲突检测）")
+    parser.add_argument("--health", action="store_true", help="只读健康检查（端口占用视为正常，服务在跑即可）")
+    parser.add_argument("--port", type=int, default=8088, help="检查的目标端口（默认 8088）")
+    args = parser.parse_args()
+    global TARGET_PORT
+    TARGET_PORT = args.port
+
+    # 默认 preflight
+    mode = "preflight"
+    if args.health:
+        mode = "health"
+
+    label = "启动前检查" if mode == "preflight" else "运行中健康检查"
     print("=" * 60)
-    print("弈沐资本数据看板 — 运行环境检查")
+    print(f"弈沐资本数据看板 — {label} ({mode})")
     print("=" * 60)
+
+    if mode == "health":
+        global _check_port
+        def _check_port_health():
+            port = TARGET_PORT
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(1)
+            try:
+                result = sock.connect_ex(("127.0.0.1", port))
+                sock.close()
+                if result == 0:
+                    _ok(f"端口 {port} 已占用（服务运行中 ✓）")
+                else:
+                    _err(f"端口 {port} 空闲（服务未启动）")
+            except Exception as e:
+                _err(f"端口 {port} 检查异常: {e}")
+        _check_port_fn = _check_port_health
+    else:
+        _check_port_fn = _check_port
 
     checks = [
         ("Python 包", _check_packages),
         ("数据文件", _check_data_files),
         ("SQLite 数据库", _check_sqlite),
-        ("端口 8088", _check_port),
+        ("端口 8088", _check_port_fn),
         ("LLM API 配置", _check_llm_config),
         ("采集器路径", _check_collector_paths),
     ]

@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 from unittest.mock import patch
 
 import scripts.bridge as bridge
+import scripts.style_detect as style_detect
 from scripts.db import query_pnl, query_pnl_summary
 from scripts.collectors import quotes
 
@@ -67,6 +68,74 @@ class BridgeGuardTests(unittest.TestCase):
             text=True,
         )
         self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_style_dim1_uses_review_market_volume_when_iwencai_empty(self):
+        with patch.object(style_detect, "q", return_value={"fields": [], "datas": []}):
+            result = style_detect.score_dim1({"市场量能": 3.24})
+
+        self.assertEqual(result["details"]["全市场成交额"], "32400亿")
+        self.assertEqual(result["details"]["成交额评分"], "8/8")
+        self.assertEqual(result["score"], 17)
+
+    def test_style_review_score_validation_overrides_algorithm_scores(self):
+        s1 = {"score": 17, "details": {}, "max": 25}
+        s2 = {"score": 9, "details": {}, "max": 35}
+        s3 = {"score": 12, "details": {}, "max": 25}
+        s4 = {"score": 7, "details": {}, "max": 15}
+
+        style_detect.apply_review_score_validation({
+            "风格分数验证": "42分(维度一17+维度二9+维度三9+维度四7)"
+        }, s1, s2, s3, s4)
+
+        self.assertEqual([s1["score"], s2["score"], s3["score"], s4["score"]], [17, 9, 9, 7])
+        self.assertEqual(s3["details"]["复盘校验"], "12→9")
+
+    def test_style_allocation_uses_vault_interpolation_table(self):
+        self.assertEqual(
+            style_detect.compute_allocation(42),
+            {"连板资金占比": 12, "趋势资金占比": 88},
+        )
+
+    def test_style_dim2_parses_risk_value_with_text_suffix(self):
+        with patch.object(style_detect, "q", return_value={"fields": [], "datas": []}):
+            result = style_detect.score_dim2({
+                "最高板": 3,
+                "昨日涨停收益": 1.03,
+                "昨日炸板收益": -2.73,
+                "连板风险值": "0.5高",
+                "整体晋级率": 17.39,
+            })
+
+        self.assertEqual(result["details"]["连板风险值"], "0.5")
+
+    def test_style_regime_days_deduplicates_same_date(self):
+        state = {
+            "current_regime": "混合（偏趋势）",
+            "days_in_regime": 11,
+            "history": [
+                {"date": "2026-05-18", "style": "混合（偏连板）", "total": 48},
+                {"date": "2026-05-19", "style": "混合（均衡）", "total": 54},
+                {"date": "2026-05-19", "style": "混合（均衡）", "total": 55},
+                {"date": "2026-05-26", "style": "混合（均衡）", "total": 59},
+                {"date": "2026-05-27", "style": "混合（偏趋势）", "total": 43},
+                {"date": "2026-05-27", "style": "混合（偏趋势）", "total": 45},
+            ],
+        }
+        saved = {}
+        dims = (
+            {"score": 17, "max": 25},
+            {"score": 9, "max": 35},
+            {"score": 9, "max": 25},
+            {"score": 7, "max": 15},
+        )
+
+        with patch.object(style_detect, "_load_regime_state", return_value=state), \
+             patch.object(style_detect, "_save_regime_state", side_effect=lambda s: saved.update(s)):
+            result = style_detect.determine_style(*dims, date_str="2026-05-27")
+
+        dates = [item["date"] for item in saved["history"]]
+        self.assertEqual(dates.count("2026-05-27"), 1)
+        self.assertEqual(result["days_in_regime"], 4)
 
     def test_intraday_pnl_summary_exposes_snapshot_timestamp(self):
         result = query_pnl_summary()

@@ -1,6 +1,6 @@
-# 弈沐资本数据看板 v2.5
+# 弈沐资本数据看板 v3.0
 
-> 弈沐资本盘中交易决策指挥台。22 组件 + AI 盯盘 + 实时数据管线。
+> 弈沐资本盘中交易决策指挥台。23 组件 + AI 盯盘 + 实时数据管线。
 > 启动：`python3 scripts/bridge.py 8088` → Chrome `http://localhost:8088`
 
 ## 核心数据管线
@@ -26,9 +26,9 @@ live-dashboard/
 ├── index.html              # GridStack v12 画板 + W20浮动聊天框
 ├── store.js                # DataStore 三层合并(基线+实时+手工)
 ├── widget-base.js          # YiMuWidget 基类(生命周期+错误隔离)
-├── widget-registry.js      # 22组件注册表
+├── widget-registry.js      # 23组件注册表 (widgets/ dir 共24文件)
 ├── LLM_RULES.md            # AI研判用交易规则(蒸馏~70行)
-├── widgets/ (22 files)     # W01-W22 独立组件
+├── widgets/ (24 files)     # W01-W23 独立组件
 │   ├── timeline.js         # W01 时段
 │   ├── style-detect.js     # W02 风格
 │   ├── position-calc.js    # W03 仓位
@@ -51,6 +51,7 @@ live-dashboard/
 │   ├── llm-monitor.js      # W20 AI摘要
 │   ├── zt-echelon.js       # W21 梯队
 │   ├── pnl-curve.js        # W22 收益曲线
+│   ├── trade-review.js     # W23 逐笔复盘
 │   └── llm-chat.js         # W20浮动聊天框(extends YiMuWidget)
 ├── scripts/
 │   ├── bridge.py            # HTTP桥接+APScheduler(20+job)
@@ -88,6 +89,9 @@ live-dashboard/
 | `/api/pnl?range=today&index=sh` | GET | PnL曲线 | 5min |
 | `/api/pnl/summary` | GET | PnL摘要(SSOT资产+图表元信息) | 实时 |
 | `/api/sync` | POST | W15持仓同步(仅事件，拒绝pnl覆盖) | 随录 |
+| `/api/health` | GET | 健康门禁分层(critical_ok/trade_entry_allowed/degraded_reasons) | 60s |
+| `/api/account/audit` | GET | 只读账户基准审计(锚点/持仓/日初价覆盖率/清仓) | — |
+| `/api/trades/review` | GET/POST | W23 逐笔复盘(查询+事后归因备注) | — |
 | `/api/refresh` | POST | 触发gen | — |
 
 ## 股票数据处理
@@ -110,6 +114,7 @@ live-dashboard/
 | 成交额对比无显示 | `collect_yesterday_compare` 数据被 collect_index 覆盖了？检查 quotes.py 是否用 update |
 | LLM 研判不触发 | `~/.claude/settings.json` 有 ANTHROPIC_BASE_URL 和 ANTHROPIC_AUTH_TOKEN 吗？ |
 | 清仓跟踪现价空 | 清仓标的代码在 PyTDX 采集列表吗？bridge 重启会重新加载代码列表 |
+| W15显示“基准不可用” | 核查隔夜标的是否缺 `_meta.day_start_prices`；仅用受控补录脚本修复已核验开盘价/日初价 |
 | 账户资产数据异常 | 检查 `GET /api/account/state` 返回值；`pnl_pct` 来源为锚点+流水+行情，缺行情会降级 |
 | 前端 sync 返回 409 | 前端仍在提交 `pnl` 字段，W16 已不允许直接写入资产 |
 | 锚点 recovery 日结后未切换 | 检查 `generate_closing_anchor` 日结日志；15:05 收盘 job 是否正常执行 |

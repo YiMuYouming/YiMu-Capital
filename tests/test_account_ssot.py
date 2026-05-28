@@ -165,6 +165,61 @@ class AccountReducerTests(unittest.TestCase):
         )
         self.assertEqual(state["positions"], [])
 
+    def test_oversell_trade_fail_closed_without_cash_inflation(self):
+        """历史账本超卖：不能先加现金，必须标记 ledger_error / anchor_blocked。"""
+        anchor = {
+            "date": "2026-05-27", "effective_at": "2026-05-27T09:30:00",
+            "cash": 100000, "day_start_asset": 101000,
+            "total_deposit": 100000, "source": "previous_close",
+            "positions": [{"标的": "TEST", "代码": "000001", "数量": 100, "成本": 10, "状态": "持有"}],
+            "_meta": {"day_start_prices": {"000001": 10}},
+        }
+        trades = [{
+            "id": 1, "trade_date": "2026-05-27", "trade_time": "10:00",
+            "action": "卖出", "code": "000001", "name": "TEST",
+            "price": 20, "qty": 150,
+        }]
+        quotes = {"000001": {"最新价": 21}, "_updated": "2026-05-27T10:30:00"}
+
+        state = reduce_account_state(anchor, trades, quotes, now="2026-05-27T10:30:00")
+
+        self.assertEqual(state["cash"], 100000, "非法超卖不得增加现金")
+        self.assertFalse(state.get("ledger_ok"), f"应标记账本不可信: {state}")
+        self.assertTrue(state.get("anchor_blocked"), f"应复用现有阻断语义: {state}")
+        self.assertFalse(state.get("valuation_complete"), f"账本错误时估值不得可信: {state}")
+        self.assertIn("ledger", state.get("block_reason", ""))
+        self.assertEqual(state.get("ledger_errors", [])[0]["code"], "000001")
+        self.assertEqual(state.get("ledger_errors", [])[0]["available_qty"], 100)
+        self.assertEqual(state.get("ledger_errors", [])[0]["sell_qty"], 150)
+
+    def test_oversell_nonexistent_position_fail_closed(self):
+        """空持仓卖出：position 不存在时 qty > 0 也走 oversell，不增现金。"""
+        anchor = {
+            "date": "2026-05-27", "effective_at": "2026-05-27T09:30:00",
+            "cash": 100000, "day_start_asset": 100000,
+            "total_deposit": 100000, "source": "previous_close",
+            "positions": [],
+        }
+        trades = [{
+            "id": 1, "trade_date": "2026-05-27", "trade_time": "10:00",
+            "action": "卖出", "code": "999999", "name": "NONEXIST",
+            "price": 20, "qty": 100,
+        }]
+        quotes = {"999999": {"最新价": 21}, "_updated": "2026-05-27T10:30:00"}
+
+        state = reduce_account_state(anchor, trades, quotes, now="2026-05-27T10:30:00")
+
+        self.assertEqual(state["cash"], 100000, "空持仓卖出不得增加现金")
+        self.assertFalse(state.get("ledger_ok"), f"应标记账本不可信: {state}")
+        self.assertTrue(state.get("anchor_blocked"), f"应复用现有阻断语义: {state}")
+        self.assertFalse(state.get("valuation_complete"), f"账本错误时估值不得可信: {state}")
+        self.assertIn("ledger", state.get("block_reason", ""))
+        self.assertEqual(state.get("ledger_errors", [])[0]["code"], "999999")
+        self.assertEqual(state.get("ledger_errors", [])[0]["available_qty"], 0)
+        self.assertEqual(state.get("ledger_errors", [])[0]["sell_qty"], 100)
+        self.assertEqual(len(state.get("positions", [])), 0, "空仓不应产生持仓")
+        self.assertEqual(state.get("mv"), 0, "空仓市值应为0")
+
 
 class SyncBoundaryTests(unittest.TestCase):
     def test_client_cannot_overwrite_account_asset_fields(self):

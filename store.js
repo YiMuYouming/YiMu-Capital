@@ -82,7 +82,7 @@ const DataStore = (function() {
           if (live) liveData = live;
           merge();
           notifyAll();
-          connectionStatus = 'live';
+          connectionStatus = _connectionStatusFromLive(live);
           notifyConnListeners();
         } catch (ex) {}
       };
@@ -382,6 +382,12 @@ const DataStore = (function() {
   var _refreshCount = 0;
   var _slowDataCounter = 0;
 
+  function _connectionStatusFromLive(live) {
+    var level = live && live._freshness && live._freshness.level;
+    if (level === 'delayed' || level === 'stale' || level === 'dead') return level;
+    return 'live';
+  }
+
   function _maybeReloadSlowData() {
     _slowDataCounter++;
     if (_slowDataCounter < 60) return;
@@ -419,7 +425,7 @@ const DataStore = (function() {
           if (reloadBase && base) baseData = base;
           return adapter.fetchLive();
         }).then(function(live) {
-          if (live) { liveData = live; connectionStatus = 'live'; }
+          if (live) { liveData = live; connectionStatus = _connectionStatusFromLive(live); }
           return _fetchPnlSummary().then(function(pnlLive) {
             if (pnlLive) _pnlLive = pnlLive;
           });
@@ -465,7 +471,7 @@ const DataStore = (function() {
       }
       return adapter.fetchLive();
     }).then(function(live) {
-      if (live) { liveData = live; connectionStatus = 'live'; }
+      if (live) { liveData = live; connectionStatus = _connectionStatusFromLive(live); }
       return _fetchPnlSummary().then(function(pnlLive) {
         if (pnlLive) _pnlLive = pnlLive;
       });

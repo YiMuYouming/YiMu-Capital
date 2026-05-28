@@ -17,7 +17,8 @@ class TimelineWidget extends YiMuWidget {
     ];
 
     // 调试模式：URL 加 ?time=HH:MM
-    var debugMatch = location.search.match(/[?&]time=(\d{1,2}):(\d{2})/);
+    var search = (typeof location !== 'undefined' && location.search) ? location.search : '';
+    var debugMatch = search.match(/[?&]time=(\d{1,2}):(\d{2})/);
     var now = new Date();
     var nowH, nowM;
     if (debugMatch) {
@@ -65,10 +66,10 @@ class TimelineWidget extends YiMuWidget {
     var html = '';
 
     // 左侧：状态区
-    html += '<div style="display:flex;align-items:center;height:100%;gap:var(--sp-lg)">';
+    html += '<div class="time-line" style="display:flex;align-items:center;min-height:56px;gap:var(--sp-md);overflow:hidden">';
 
     // 状态文字 + 倒计时
-    html += '<div style="min-width:150px">';
+    html += '<div style="flex:0 0 130px;min-width:0">';
     if (isWeekend) {
       html += '<div style="font-size:var(--fs-subtitle);font-weight:700;color:var(--text-disabled)">休市</div>';
       html += '<div style="font-size:var(--fs-body);color:var(--text-disabled)">周末</div>';
@@ -82,7 +83,7 @@ class TimelineWidget extends YiMuWidget {
     } else if (current) {
       var remaining = current.end - nowHM;
       var rmStr = remaining >= 60 ? Math.floor(remaining/60) + '时' + (remaining%60) + '分' : remaining + '分钟';
-      html += '<div style="font-size:20px;font-weight:700;color:' + current.color + ';line-height:1.2">' + current.label + '</div>';
+      html += '<div style="font-size:var(--fs-subtitle);font-weight:700;color:' + current.color + ';line-height:1.2">' + current.label + '</div>';
       html += '<div style="font-size:var(--fs-body);margin-top:2px">' +
         '<span style="color:var(--text-secondary)">剩余 </span>' +
         '<span style="font-weight:700;color:var(--text-primary);font-family:var(--font-mono);font-variant-numeric:tabular-nums">' + rmStr + '</span>' +
@@ -93,7 +94,7 @@ class TimelineWidget extends YiMuWidget {
     html += '</div>';
 
     // 右侧：进度条 + 百分比
-    html += '<div style="flex:1;min-width:240px">';
+    html += '<div style="flex:1;min-width:0">';
 
     // 色条
     html += '<div style="display:flex;height:8px;border-radius:4px;overflow:hidden;gap:1px;margin-bottom:6px">';
@@ -133,7 +134,10 @@ class TimelineWidget extends YiMuWidget {
     if (!this._hasTimer) {
       this._hasTimer = true;
       var self = this;
-      var tid = setInterval(function() { if (!isDragging) self._renderBody(); }, 30000);
+      var tid = setInterval(function() {
+        if (typeof isDragging === 'undefined' || !isDragging) self._renderBody();
+      }, 30000);
+      if (!this._timers) this._timers = [];
       this._timers.push(tid);
     }
   }

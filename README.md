@@ -1,4 +1,4 @@
-# 弈沐资本数据看板 v2.5
+# 弈沐资本数据看板 v3.0
 
 ## 打开方式
 
@@ -39,7 +39,8 @@ cd ~/Documents/YM_Capital/YM-data-pipeline && pip install -e .
 ### 运行环境检查
 
 ```bash
-python3 scripts/check_runtime.py
+python3 scripts/check_runtime.py --health      # 运行中健康检查
+python3 scripts/check_runtime.py --preflight   # 启动前检查
 ```
 
 ## 启动
@@ -51,7 +52,6 @@ live-dashboard/
 ├── widget-base.js          # 组件基类
 ├── widget-registry.js      # 23 组件注册表
 ├── widgets/                # W01-W23 + W20 浮动聊天框
-├── presets/                # 4 套布局预设
 ├── css/theme.css           # 全局主题
 ├── data/                   # 数据文件
 │   ├── dashboard_data.json     # Layer 1 基线（scripts/ 产出）
@@ -73,7 +73,7 @@ account_baselines + trade_records + live quote → /api/account/state       (账
 pnl.db                                         → /api/pnl/* + /api/trades/review
 ```
 
-当前验收和数据保护规则见 [`docs/audit/2026-05-27-升级改造完成验收与运维基线.md`](docs/audit/2026-05-27-升级改造完成验收与运维基线.md)。
+当前验收和数据保护规则见 [`docs/audit/2026-05-27-v3-completion-and-ops-baseline.md`](docs/audit/2026-05-27-v3-completion-and-ops-baseline.md)。
 
 ## 快捷键
 
@@ -81,7 +81,6 @@ pnl.db                                         → /api/pnl/* + /api/trades/revi
 |----|------|
 | R | 全局刷新 |
 | P | 跳转报数面板 |
-| 1/2/3/4 | 切换预设布局 |
 | Ctrl+S | 保存布局 |
 | Ctrl+Z | 撤销删除 |
 | A | 打开组件面板 |

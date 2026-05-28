@@ -1,6 +1,46 @@
 // widgets/risk-panel.js — W14 账户风控 v3.0 (实时持仓联动)
 'use strict';
 
+function _w14RuleText(code) {
+  var map = {
+    DATA_UNTRUSTED: '数据不可信',
+    SENTIMENT_STALE: '情绪数据过期',
+    DAY_STOP: '单日熔断',
+    LOSS_STREAK: '连亏空仓',
+    DOUBLE_ICE: '连续双冰',
+    CLIMAX_STOP: '极端高潮',
+    CLIMAX_REDUCE: '高潮降仓',
+    FRIDAY_W1: '周五关闭W1',
+    FRIDAY_TREND_CAP: '周五趋势上限',
+    W1_EMOTION: 'W1情绪不足',
+    W1_LIMIT_UP_PROFIT: 'W1涨停收益不足',
+    W1_BROKEN_BOARD: 'W1炸板率过高',
+    W1_PROMOTION: 'W1晋级率不足',
+    W2_ICE: 'W2冰点关闭',
+    W2_ICE_RISK: 'W2冰点风险过高',
+    W2_BROKEN_BOARD: 'W2炸板率过高',
+    LIANBAN_SIDE_CLOSED: '连板侧关闭',
+    WEEK_STOP: '周回撤停止',
+    MONTH_STOP: '月回撤停止'
+  };
+  return map[code] || code || '规则阻断';
+}
+
+function _w14BlockKind(block) {
+  var code = block && block.code;
+  if (code === 'DATA_UNTRUSTED' || code === 'SENTIMENT_STALE') return 'system';
+  if (block && (block.scope === 'w1' || block.scope === 'w2' || block.scope === 'lianban')) return 'trade';
+  return 'account';
+}
+
+function _w14Chip(block) {
+  var kind = _w14BlockKind(block);
+  var label = _w14RuleText(block && block.code);
+  if (block && block.code === 'DATA_UNTRUSTED') label = '收盘/行情状态';
+  if (block && block.code === 'SENTIMENT_STALE') label = '情绪快照状态';
+  return '<span class="w14-chip w14-chip-' + kind + '">' + label + '</span>';
+}
+
 class RiskPanelWidget extends YiMuWidget {
   render(data) {
     var body = this.getBody();
@@ -84,17 +124,28 @@ class RiskPanelWidget extends YiMuWidget {
       var rsWarnings = RS.warnings || [];
       var rsCaps = RS.caps || {};
       if (rsBlocks.length || rsWarnings.length) {
-        html += '<div style="margin-bottom:var(--sp-sm);padding:var(--sp-xs) var(--sp-sm);background:rgba(220,38,38,0.06);border-radius:var(--radius-md);border-left:3px solid'+(RS.tradable?'var(--warn)':'var(--danger)')+'">';
-        html += '<div style="font-size:var(--fs-label);font-weight:700;color:'+(RS.tradable?'var(--warn)':'var(--danger)')+';margin-bottom:2px">'+(RS.tradable?'⚠ 规则约束':'✕ 规则阻断')+'</div>';
-        rsBlocks.forEach(function(b){
-          html += '<div style="font-size:var(--fs-body);color:var(--'+(b.scope==='all'?'danger':'warn')+');padding:1px 0">'+b.code+': '+b.message+'</div>';
-        });
-        rsWarnings.forEach(function(w){
-          html += '<div style="font-size:var(--fs-body);color:var(--warn)">⚠ '+w.message+'</div>';
-        });
+        var groups = {account: [], system: [], trade: []};
+        rsBlocks.forEach(function(b){ groups[_w14BlockKind(b)].push(b); });
+        html += '<div class="w14-gate">';
+        html += '<div class="w14-gate-head"><span>' + (RS.tradable ? '规则约束' : '禁止开仓') + '</span><b>执行仓位 ' + (rsCaps.total_pct != null ? rsCaps.total_pct + '%' : '—') + '</b></div>';
+        if (groups.account.length) {
+          html += '<div class="w14-gate-row"><span>账户风控</span><div>' + groups.account.map(_w14Chip).join('') + '</div></div>';
+        }
+        if (groups.system.length) {
+          html += '<div class="w14-gate-row"><span>系统状态</span><div>' + groups.system.map(_w14Chip).join('') + '</div></div>';
+        }
+        if (groups.trade.length) {
+          html += '<div class="w14-gate-row"><span>交易条件</span><div>' + groups.trade.map(_w14Chip).join('') + '</div></div>';
+        }
+        if (rsWarnings.length) {
+          html += '<div class="w14-gate-row"><span>提示</span><div>' + rsWarnings.map(function(w){ return '<span class="w14-chip w14-chip-trade">'+w.message+'</span>'; }).join('') + '</div></div>';
+        }
         html += '</div>';
       }
-      html += '<div style="font-size:var(--fs-body);color:var(--text-disabled);margin-bottom:var(--sp-sm)">总仓位 '+(rsCaps.total_pct!=null?rsCaps.total_pct+'%':'—')+' | 首笔 '+(rsCaps.first_entry_pct!=null?rsCaps.first_entry_pct+'%':'—')+' | '+(RS.tradable?'可交易':'禁止开仓')+'</div>';
+      html += '<div class="w14-cap-line">基线 '+(rsCaps.base_total_pct!=null?rsCaps.base_total_pct+'%':'—')+
+        ' | 连板侧 '+(rsCaps.lianban_side_cap_pct!=null?rsCaps.lianban_side_cap_pct+'%':'—')+
+        ' | 趋势侧 '+(rsCaps.trend_side_cap_pct!=null?rsCaps.trend_side_cap_pct+'%':'—')+
+        ' | 首笔 '+(rsCaps.first_entry_pct!=null?rsCaps.first_entry_pct+'%':'—')+'</div>';
     }
 
     // === 持仓累计浮盈（大字）===
@@ -129,6 +180,10 @@ class RiskPanelWidget extends YiMuWidget {
       var lossStreakBlock = rsBlocks.filter(function(b){ return b.code === 'LOSS_STREAK'; });
       var dayHit = dayStopBlock.length > 0;
       var streakHit = lossStreakBlock.length > 0;
+      var lossDaysDisplay = loseDays;
+      if (streakHit && lossStreakBlock[0].evidence && lossStreakBlock[0].evidence.loss_streak != null) {
+        lossDaysDisplay = lossStreakBlock[0].evidence.loss_streak;
+      }
 
       html += '<div style="display:flex;justify-content:space-between;padding:2px 0;font-size:var(--fs-body)">'+
         '<span style="color:var(--text-secondary)">单日熔断</span>'+
@@ -137,23 +192,25 @@ class RiskPanelWidget extends YiMuWidget {
 
       html += '<div style="display:flex;justify-content:space-between;padding:2px 0;font-size:var(--fs-body)">'+
         '<span style="color:var(--text-secondary)">连亏天数</span>'+
-        '<span style="font-family:var(--font-mono)">'+loseDays+'天</span>'+
+        '<span style="font-family:var(--font-mono)">'+lossDaysDisplay+'天</span>'+
         '<span style="color:'+(streakHit?'var(--danger)':'var(--info)')+'">'+(streakHit?'⚠ 空仓':'✓ 正常')+'</span></div>';
     }
 
     // 周回撤（rule_state 不覆盖，保留 baseline 字段 + 数据引用）
-    var wCls = weekDD > weekWarnLine ? 'danger' : weekDD > 3 ? 'warn' : 'info';
+    var weekAbs = Math.abs(weekDD);
+    var wCls = weekAbs >= weekWarnLine ? 'danger' : weekAbs > 3 ? 'warn' : 'info';
     html += '<div style="display:flex;justify-content:space-between;padding:2px 0;font-size:var(--fs-body)">'+
       '<span style="color:var(--text-secondary)">周回撤</span>'+
       '<span style="font-family:var(--font-mono)">'+pct(weekDD)+' / '+weekWarnLine+'%</span>'+
-      '<span class="'+wCls+'" style="font-weight:600">'+(weekDD>weekWarnLine?'⚠ 触发':'—')+'</span></div>';
+      '<span class="'+wCls+'" style="font-weight:600">'+(weekAbs>=weekWarnLine?'⚠ 触发':'—')+'</span></div>';
 
     // 月回撤
-    var mCls = monthDD > monthWarnLine ? 'danger' : monthDD > 5 ? 'warn' : 'info';
+    var monthAbs = Math.abs(monthDD);
+    var mCls = monthAbs >= monthWarnLine ? 'danger' : monthAbs > 5 ? 'warn' : 'info';
     html += '<div style="display:flex;justify-content:space-between;padding:2px 0;font-size:var(--fs-body)">'+
       '<span style="color:var(--text-secondary)">月回撤</span>'+
       '<span style="font-family:var(--font-mono)">'+pct(monthDD)+' / '+monthWarnLine+'%</span>'+
-      '<span class="'+mCls+'" style="font-weight:600">'+(monthDD>monthWarnLine?'⚠ 触发':'—')+'</span></div>';
+      '<span class="'+mCls+'" style="font-weight:600">'+(monthAbs>=monthWarnLine?'⚠ 触发':'—')+'</span></div>';
 
     // ===== 止损提醒（只读，优先 SSOT 止损字段，规则兜底明确标记）=====
     var slAlerts = [];

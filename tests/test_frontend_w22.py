@@ -105,6 +105,13 @@ def _run_node(script, files=None):
 class W22UpdateKpiBehaviorTests(unittest.TestCase):
     """_updateKPI 行为测试：不可信 & 回退 实际调用验证"""
 
+    def test_w22_labels_index_as_reference_not_strict_benchmark(self):
+        src = (ROOT / "widgets" / "pnl-curve.js").read_text()
+        self.assertIn("指数参考", src)
+        self.assertIn("相对指数", src)
+        self.assertNotIn("累计超额 α", src)
+        self.assertNotIn("TWR−基准", src)
+
     def _run_kpi_test(self, state_overrides, chartData_overrides=None):
         script = r"""
 var inst = new PnLCurveWidget({id:'W22'});
@@ -280,6 +287,45 @@ class W22CodeStructureTests(unittest.TestCase):
     def test_absmax_zero_guard(self):
         src = (ROOT / "widgets" / "pnl-curve.js").read_text()
         self.assertIn("absMax === 0", src, "应有全零保护")
+
+
+
+class W22Phase5CodeCheckTests(unittest.TestCase):
+    """Phase 5: W22 _updateKPI 在估值不可信时标记所有动态 KPI"""
+
+    def test_isquoteunavailable_block_exists_and_covers_dyn_kpis(self):
+        """_updateKPI 使用 isQuoteUnavailable 来标记 period/dd/alpha/twr 不可用"""
+        src = (ROOT / "widgets" / "pnl-curve.js").read_text()
+        self.assertIn("isQuoteUnavailable", src, "W22 应有 isQuoteUnavailable 检查")
+        # 验证动态 KPI 被标记不可用
+        self.assertIn("pnl_period_val", src)
+        self.assertIn("pnl_dd_val", src)
+        self.assertIn("估值不可信", src)
+
+
+if __name__ == "__main__":
+    unittest.main()
+
+
+if __name__ == "__main__":
+    unittest.main()
+
+
+class W22Phase5CodeCheckTests(unittest.TestCase):
+    """Phase 5: W22 _updateKPI 在估值不可信时标记所有动态 KPI"""
+
+    def test_isquoteunavailable_block_exists_and_covers_dyn_kpis(self):
+        """_updateKPI 使用 isQuoteUnavailable 来标记 period/dd/alpha/twr 不可用"""
+        src = (ROOT / "widgets" / "pnl-curve.js").read_text()
+        self.assertIn("isQuoteUnavailable", src, "W22 应有 isQuoteUnavailable 检查")
+        # 验证动态 KPI 被标记不可用
+        self.assertIn("pnl_period_val", src)
+        self.assertIn("pnl_dd_val", src)
+        self.assertIn("估值不可信", src)
+
+
+if __name__ == "__main__":
+    unittest.main()
 
 
 if __name__ == "__main__":

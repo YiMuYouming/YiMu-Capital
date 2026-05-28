@@ -315,6 +315,74 @@ def _parse_appendix_a_table(body, col_map):
     return rows
 
 
+def _data_appendix_has_section(filepath, title):
+    """Return True when the machine data appendix explicitly contains a section."""
+    try:
+        with open(filepath) as f:
+            content = f.read()
+    except Exception:
+        return False
+    m = re.search(r'##\s*数据附录.*?\n(.*)', content, re.DOTALL)
+    if not m:
+        return False
+    return re.search(r'\n###\s*' + re.escape(title) + r'\s*(?:\n|$)', m.group(1)) is not None
+
+
+def _pool_has_stock_rows(pool):
+    """W12/W13 need stock rows with codes; appendix A sector mappings are not enough."""
+    return any(str(s.get("代码", "")).strip() for s in (pool or []))
+
+
+def _select_machine_pool(review_path, appendix, appendix_a, key):
+    """Select W12/W13 machine pool rows.
+
+    Data appendix stock tables are the SSOT for W12/W13.  If a same-day table is
+    present but empty, that is an explicit empty pool and must not fall back to
+    yesterday's stale candidates.
+    """
+    title = "连板自选池" if key == "lianban_pool" else "趋势自选池"
+    if _data_appendix_has_section(review_path, title):
+        return appendix.get(key, []) or []
+
+    data_rows = appendix.get(key, []) or []
+    if _pool_has_stock_rows(data_rows):
+        return data_rows
+
+    appendix_a_rows = (appendix_a or {}).get(key, []) or []
+    if _pool_has_stock_rows(appendix_a_rows):
+        return appendix_a_rows
+
+    return _fallback_appendix(review_path, key)
+
+
+def _build_pools_payload(review_path):
+    """Build data/pools.json from machine-readable stock pools."""
+    appendix = parse_appendix(review_path)
+    appendix_a = parse_appendix_a(review_path)
+    excluded = (appendix_a or {}).get("excluded", [])
+
+    lianban_pool = _select_machine_pool(review_path, appendix, appendix_a, "lianban_pool")
+    trend_pool = _select_machine_pool(review_path, appendix, appendix_a, "trend_pool")
+
+    if not lianban_pool and not trend_pool:
+        has_explicit_pool = (
+            _data_appendix_has_section(review_path, "连板自选池") or
+            _data_appendix_has_section(review_path, "趋势自选池")
+        )
+        if not has_explicit_pool:
+            fallback = _fallback_pools(review_path)
+            if fallback:
+                return fallback
+
+    return {
+        "lianban_pool": _filter_excluded(lianban_pool, excluded),
+        "trend_pool": _filter_excluded(trend_pool, excluded),
+        "anchor_stocks": (appendix_a or {}).get("anchor_stocks", []) or appendix.get("锚定股状态", []),
+        "sectors": (appendix_a or {}).get("sectors", []) or appendix.get("sectors", []),
+        "excluded": excluded,
+    }
+
+
 def _parse_table(body, col_map):
     """解析 Markdown 表格，返回 list[dict]"""
     lines = body.strip().split('\n')
@@ -624,16 +692,42 @@ def get_style_data(review_path=None):
         print(f"[warn] style_detect.py failed: {e}")
     return {}
 
-# 风格总分 → 总仓位上限映射 (score_threshold, cap)
-_TOTAL_CAP_BRACKETS = [(80, 60), (60, 50), (40, 40)]
-
 def _compute_total_cap(sd):
-    """根据总分计算总仓位上限"""
-    total = sd.get("total", 50) or 50
-    for threshold, cap in _TOTAL_CAP_BRACKETS:
-        if total >= threshold:
-            return cap
-    return 20
+    """按 Vault 三层规则估算每日基线总仓位上限。
+
+    第一层正常仓位 = max(连板侧上限, 趋势侧上限)，不是风格总分直接映射。
+    """
+    emotion = _extract_iwencai_val(sd, "dim4", "情绪值")
+    try:
+        emotion = float(emotion) if emotion is not None else None
+    except (TypeError, ValueError):
+        emotion = None
+    if emotion is None:
+        lianban_cap = 0
+    elif emotion < 20:
+        lianban_cap = 0
+    elif emotion < 40:
+        lianban_cap = 40
+    elif emotion < 80:
+        lianban_cap = 60
+    else:
+        lianban_cap = 0
+
+    dim3 = sd.get("dim3") or {}
+    trend_score = dim3.get("score")
+    try:
+        trend_score = float(trend_score) if trend_score is not None else None
+    except (TypeError, ValueError):
+        trend_score = None
+    if trend_score is None:
+        trend_cap = 20
+    elif trend_score >= 18:
+        trend_cap = 60
+    elif trend_score >= 10:
+        trend_cap = 40
+    else:
+        trend_cap = 20
+    return max(lianban_cap, trend_cap)
 
 def compute_style_execution(fm, style):
     """规则引擎：根据 trading-core.md 计算 style.实际执行
@@ -839,10 +933,9 @@ def build_dashboard_data(review_path):
             style_review_path = fallback_path
     style = get_style_data(style_review_path)
     appendix = parse_appendix(review_path)
-    # 自选池优先从附录A解析（与 pools.json 同源），数据附录为回退
+    # W12/W13 自选池使用「数据附录」个股表；附录A是盘前速查映射，不作为表格数据源。
     appendix_a = parse_appendix_a(review_path)
-    lianban_pool_a = appendix_a.get("lianban_pool", []) if appendix_a else []
-    trend_pool_a = appendix_a.get("trend_pool", []) if appendix_a else []
+    pools_payload = _build_pools_payload(review_path)
     anchor_a = appendix_a.get("anchor_stocks", []) if appendix_a else []
     sectors_a = appendix_a.get("sectors", []) if appendix_a else []
     # 合并 frontmatter：今天有值用今天，空字段回退昨天
@@ -934,8 +1027,8 @@ def build_dashboard_data(review_path):
             "周回撤触发": fm.get("周回撤触发", False),
         },
         "positions": appendix.get("positions", []) or _fallback_appendix(review_path, "positions"),
-        "lianban_pool": _filter_excluded(lianban_pool_a or appendix.get("lianban_pool", []) or _fallback_appendix(review_path, "lianban_pool")),
-        "trend_pool": _filter_excluded(trend_pool_a or appendix.get("trend_pool", []) or _fallback_appendix(review_path, "trend_pool")),
+        "lianban_pool": pools_payload.get("lianban_pool", []),
+        "trend_pool": pools_payload.get("trend_pool", []),
         "sectors": sectors_a or appendix.get("sectors", []) or _fallback_appendix(review_path, "sectors"),
         "上证15min": [],
         "live_index": {},
@@ -1027,8 +1120,11 @@ def _compute_risk_from_pnl(data):
         pass
 
 
-def _filter_excluded(pool):
+def _filter_excluded(pool, excluded=None):
     """从 pools.json 读取 excluded 列表，过滤池中不应出现的标的"""
+    if excluded:
+        excluded_set = set(excluded)
+        return [s for s in pool if s.get("标的", "") not in excluded_set]
     try:
         if POOLS_FILE.exists():
             with open(POOLS_FILE) as f:
@@ -1187,18 +1283,13 @@ def watch_mode(review_path, interval=10):
             OUTPUT_FILE.parent.mkdir(parents=True, exist_ok=True)
             atomic_write_json(OUTPUT_FILE, data)
             print(f"  → {len(json.dumps(data, ensure_ascii=False))} bytes written")
-            # 同步输出 pools.json（今天空则回退昨天）
-            pools = parse_appendix_a(review_path)
-            used_fallback = False
-            if not pools or not (pools.get("lianban_pool") or pools.get("trend_pool")):
-                fallback = _fallback_pools(review_path)
-                if fallback:
-                    pools = fallback
-                    used_fallback = True
+            # 同步输出 pools.json（机器个股池；今天未填写时才回退昨天）
+            pools = _build_pools_payload(review_path)
+            used_fallback = bool(pools.get("source", "").find("fallback") >= 0)
             if pools:
                 pools["version"] = 1
                 pools["updated"] = datetime.now().strftime("%Y-%m-%dT%H:%M:%S+08:00")
-                pools["source"] = f"复盘笔记 附录A ({'fallback' if used_fallback else os.path.basename(review_path)})"
+                pools["source"] = f"复盘笔记 {'fallback' if used_fallback else '数据附录'} ({os.path.basename(review_path)})"
                 atomic_write_json(POOLS_FILE, pools)
         except Exception as e:
             print(f"  [ERROR] {e}")
@@ -1227,18 +1318,13 @@ def main():
     atomic_write_json(OUTPUT_FILE, data)
     print(f"[done] Written {len(json.dumps(data, ensure_ascii=False))} bytes → {OUTPUT_FILE}")
 
-    # 输出 pools.json（附录A SSOT，今天空则回退昨天）
-    pools = parse_appendix_a(review_path)
-    used_fallback = False
-    if not pools or not (pools.get("lianban_pool") or pools.get("trend_pool")):
-        fallback = _fallback_pools(review_path)
-        if fallback:
-            pools = fallback
-            used_fallback = True
+    # 输出 pools.json（机器个股池；今天未填写时才回退昨天）
+    pools = _build_pools_payload(review_path)
+    used_fallback = bool(pools.get("source", "").find("fallback") >= 0)
     if pools:
         pools["version"] = 1
         pools["updated"] = datetime.now().strftime("%Y-%m-%dT%H:%M:%S+08:00")
-        pools["source"] = f"复盘笔记 {'fallback' if used_fallback else '附录A'} ({os.path.basename(review_path)})"
+        pools["source"] = f"复盘笔记 {'fallback' if used_fallback else '数据附录'} ({os.path.basename(review_path)})"
         atomic_write_json(POOLS_FILE, pools)
         print(f"[done] Written pools → {POOLS_FILE}")
 

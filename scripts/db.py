@@ -183,6 +183,9 @@ def init_db():
         ('outcome', "TEXT DEFAULT ''"),
         ('review_note', "TEXT DEFAULT ''"),
         ('event_id', 'TEXT'),
+        ('context_captured_at', 'TEXT'),
+        ('context_status', 'TEXT'),
+        ('context_unavailable_reason', 'TEXT'),
     ]:
         if col not in trade_cols:
             conn.execute(f"ALTER TABLE trade_records ADD COLUMN {col} {col_type}")
@@ -369,11 +372,22 @@ def query_pnl(range='today', index='sh'):
             """, (from_date,))
         rows_list = [dict(r) for r in rows]
 
+        # Daily rollup may be written before market fields are finalized.  For
+        # today, prefer the latest intraday snapshot for index/position fields.
+        today_rows = _exec(
+            f"SELECT pnl_pct, {idx_field} AS bm_pct, pos_pct, nav FROM intraday_snapshots WHERE date = ? ORDER BY ts DESC LIMIT 1",
+            (today,))
+        if today_rows:
+            tr = dict(today_rows[0])
+            for r in rows_list:
+                if r['date'] == today:
+                    r['bm_pct'] = tr['bm_pct'] or 0.0
+                    r['pos_pct'] = tr['pos_pct'] or r.get('pos_pct') or 0.0
+                    r['nav'] = tr['nav'] or r.get('nav') or 1.0
+                    break
+
         # 追加今天的日内数据（如果今天还没收盘，daily_summary 里没有）
         if range != 'all' and not any(r['date'] == today for r in rows_list):
-            today_rows = _exec(
-                f"SELECT pnl_pct, {idx_field} AS bm_pct, pos_pct, nav FROM intraday_snapshots WHERE date = ? ORDER BY ts DESC LIMIT 1",
-                (today,))
             if today_rows:
                 tr = dict(today_rows[0])
                 rows_list.append({
@@ -389,10 +403,23 @@ def query_pnl(range='today', index='sh'):
             rows_list = rows_list[-limit:]
 
         labels = [r['date'][-5:] for r in rows_list]
-        pnl_raw = [r['pnl_pct'] for r in rows_list]
         bm_raw = [r['bm_pct'] for r in rows_list]
         pos_vals = [r['pos_pct'] for r in rows_list]
         nav_vals = [r['nav'] for r in rows_list]
+
+        def nav_returns(rows_for_nav):
+            vals = []
+            prev_nav = None
+            for r in rows_for_nav:
+                nav = float(r.get('nav') or 1.0)
+                if prev_nav is None or prev_nav <= 0:
+                    vals.append(0.0)
+                else:
+                    vals.append(round((nav / prev_nav - 1) * 100, 4))
+                prev_nav = nav
+            return vals
+
+        pnl_raw = nav_returns(rows_list)
 
         # 'all' 给抽屉用 → 原始日收益（抽屉自己算 TWR）
         if range == 'all':
@@ -491,7 +518,7 @@ def insert_trade(data):
     return inserted
 
 
-def insert_trade_with_context(data, rule_state=None, market_snapshot=None):
+def insert_trade_with_context(data, rule_state=None, market_snapshot=None, context_captured_at=None, context_status=None, context_unavailable_reason=None):
     """插入成交并绑定后端可信上下文。event_id 有唯一约束，并发冲突由 DB 处理。
 
     卖出动作在 BEGIN IMMEDIATE 事务内原子校验可用数量，防止并发超卖。
@@ -546,8 +573,9 @@ def insert_trade_with_context(data, rule_state=None, market_snapshot=None):
             cur.execute("""INSERT INTO trade_records
             (trade_date, trade_time, action, code, name, price, qty, window, reason,
              realized_pnl, fee, reversal_of_id, is_reversal,
-             rule_state_json, market_snapshot_json, event_id)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+             rule_state_json, market_snapshot_json, event_id, context_captured_at,
+             context_status, context_unavailable_reason)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (data.get('trade_date', datetime.now().strftime('%Y-%m-%d')),
              data.get('trade_time'), data['action'], data['code'], data['name'],
              data.get('price'), data.get('qty'), data.get('window'),
@@ -555,22 +583,26 @@ def insert_trade_with_context(data, rule_state=None, market_snapshot=None):
              data.get('reversal_of_id'), int(data.get('is_reversal', 0)),
              json.dumps(rule_state, ensure_ascii=False) if rule_state else None,
              json.dumps(market_snapshot, ensure_ascii=False) if market_snapshot else None,
-             str(evt_id)))
+             str(evt_id), context_captured_at,
+             context_status, context_unavailable_reason))
             conn.commit()
             return True, cur.lastrowid, 'inserted'
         else:
             cur.execute("""INSERT OR IGNORE INTO trade_records
             (trade_date, trade_time, action, code, name, price, qty, window, reason,
              realized_pnl, fee, reversal_of_id, is_reversal,
-             rule_state_json, market_snapshot_json)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+             rule_state_json, market_snapshot_json, context_captured_at,
+             context_status, context_unavailable_reason)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (data.get('trade_date', datetime.now().strftime('%Y-%m-%d')),
              data.get('trade_time'), data['action'], data['code'], data['name'],
              data.get('price'), data.get('qty'), data.get('window'),
              data.get('reason'), data.get('realized_pnl'), data.get('fee', 0),
              data.get('reversal_of_id'), int(data.get('is_reversal', 0)),
              json.dumps(rule_state, ensure_ascii=False) if rule_state else None,
-             json.dumps(market_snapshot, ensure_ascii=False) if market_snapshot else None))
+             json.dumps(market_snapshot, ensure_ascii=False) if market_snapshot else None,
+             context_captured_at,
+             context_status, context_unavailable_reason))
             conn.commit()
             inserted = cur.rowcount > 0
             return inserted, (cur.lastrowid if inserted else None), ('inserted' if inserted else 'duplicate')
@@ -617,7 +649,8 @@ def query_trade_reviews(date_str):
     """按日期读取逐笔复盘上下文（只读）。"""
     rows = _exec("""SELECT id, created_at, trade_date, trade_time, action, code, name,
         price, qty, window, reason, realized_pnl, fee, reversal_of_id, is_reversal,
-        rule_state_json, market_snapshot_json, outcome, review_note
+        rule_state_json, market_snapshot_json, outcome, review_note,
+        context_captured_at, context_status, context_unavailable_reason
         FROM trade_records WHERE trade_date = ? ORDER BY id""", (date_str,))
     results = []
     for r in rows:

@@ -172,47 +172,33 @@ def parse_tiered_jjl(filepath):
 
 
 def compute_allocation(total_score, lianban_conf=None):
-    """根据连板/趋势信号强度分配资金
-
-    lianban_conf 来自 determine_style()，已归一化为 0-100 连板相对概率。
-    用信号强度驱动分配，总分作为极端确认度调节：
-    - 总分≥80（纯连板）→ 连板不低于70%
-    - 总分<40（极弱）→ 连板不高于30%
-    - 中间地带 → 直接用 lianban_conf 做分配比例
-    """
-    if lianban_conf is not None:
-        lb = lianban_conf
-        if total_score >= 80:
-            lb = max(lb, 70)
-        elif total_score < 40:
-            lb = min(lb, 30)
-        return {'连板资金占比': lb, '趋势资金占比': 100 - lb}
-
-    # 兜底：无 signal 时用原始插值表
-    if total_score >= 80:
-        return {'连板资金占比': 100, '趋势资金占比': 0}
-    elif total_score >= 75:
-        t = (total_score - 75) / 5
-        lb = round(80 + t * 20)
-        return {'连板资金占比': lb, '趋势资金占比': 100 - lb}
-    elif total_score >= 60:
-        t = (total_score - 60) / 15
-        lb = round(60 + t * 20)
-        return {'连板资金占比': lb, '趋势资金占比': 100 - lb}
-    elif total_score >= 50:
-        t = (total_score - 50) / 10
-        lb = round(50 + t * 10)
-        return {'连板资金占比': lb, '趋势资金占比': 100 - lb}
-    elif total_score >= 45:
-        t = (total_score - 45) / 5
-        lb = round(30 + t * 20)
-        return {'连板资金占比': lb, '趋势资金占比': 100 - lb}
-    elif total_score >= 40:
-        t = (total_score - 40) / 5
-        lb = round(t * 30)
-        return {'连板资金占比': lb, '趋势资金占比': 100 - lb}
+    """按 Vault `references/量能风格切换.md` 插值表分配连板/趋势资金。"""
+    score = _number(total_score) if "_number" in globals() else None
+    if score is None:
+        try:
+            score = float(total_score)
+        except (TypeError, ValueError):
+            score = 50
+    anchors = [
+        (40, 0),
+        (45, 30),
+        (50, 50),
+        (60, 60),
+        (75, 80),
+        (80, 100),
+    ]
+    if score <= anchors[0][0]:
+        lb = anchors[0][1]
+    elif score >= anchors[-1][0]:
+        lb = anchors[-1][1]
     else:
-        return {'连板资金占比': 0, '趋势资金占比': 100}
+        lb = 50
+        for (s0, lb0), (s1, lb1) in zip(anchors, anchors[1:]):
+            if s0 <= score <= s1:
+                t = (score - s0) / (s1 - s0)
+                lb = round(lb0 + t * (lb1 - lb0))
+                break
+    return {'连板资金占比': lb, '趋势资金占比': 100 - lb}
 
 
 def _clean_val(s):
@@ -242,10 +228,77 @@ def _parse_num(s):
     """安全解析数值字符串 → float"""
     if s is None:
         return None
+    cleaned = _clean_val(s)
+    m = re.search(r'[+-]?\d+(?:\.\d+)?', str(cleaned))
+    if m:
+        return float(m.group(0))
     try:
-        return float(_clean_val(s))
+        return float(cleaned)
     except ValueError:
         return None
+
+
+def _parse_market_volume_yi(value):
+    """解析复盘笔记市场量能为亿元。
+
+    复盘笔记常写 3.24 表示 3.24万亿；若写 32400 或 3.24万亿也兼容。
+    """
+    if value is None:
+        return None
+    raw = str(value).strip()
+    num = _parse_num(raw.replace('万亿', '').replace('亿', ''))
+    if num is None:
+        return None
+    if '万亿' in raw or num < 100:
+        return num * 10000
+    return num
+
+
+def _parse_style_score_validation(review=None):
+    """解析 frontmatter 的风格分数验证。
+
+    支持格式：
+    42分(维度一17+维度二9+维度三9+维度四7)
+    """
+    raw = (review or {}).get("风格分数验证")
+    if not raw:
+        return None
+    text = str(raw)
+    total_m = re.search(r'(\d+(?:\.\d+)?)\s*分', text)
+    dim_map = {"一": "dim1", "二": "dim2", "三": "dim3", "四": "dim4"}
+    parsed = {}
+    if total_m:
+        parsed["total"] = int(float(total_m.group(1)))
+    for cn, key in dim_map.items():
+        m = re.search(r'维度%s\s*(\d+(?:\.\d+)?)' % cn, text)
+        if m:
+            parsed[key] = int(float(m.group(1)))
+    return parsed if parsed else None
+
+
+def apply_review_score_validation(review, s1, s2, s3, s4):
+    """用复盘笔记的人工校验分覆盖算法维度分。
+
+    W02 是每日风格基线，复盘笔记 frontmatter 是盘后人工确认口径；
+    style_detect 的实时/默认查询只做缺字段时的辅助计算。
+    """
+    parsed = _parse_style_score_validation(review)
+    if not parsed:
+        return None
+    targets = [
+        ("dim1", s1),
+        ("dim2", s2),
+        ("dim3", s3),
+        ("dim4", s4),
+    ]
+    for key, score_obj in targets:
+        if key not in parsed:
+            continue
+        old = score_obj.get("score")
+        new = parsed[key]
+        score_obj["score"] = new
+        score_obj.setdefault("details", {})["复盘校验"] = f"{old}→{new}" if old != new else f"{new}"
+    return parsed
 
 
 # ========== 维度一：量能环境（25分）==========
@@ -270,6 +323,12 @@ def score_dim1(review=None):
 
     latest_vol = volumes[-1] if volumes else 0
     avg_5 = sum(volumes) / len(volumes) if volumes else 0
+
+    review_vol = _parse_market_volume_yi(review.get("市场量能")) if review else None
+    if latest_vol <= 0 and review_vol:
+        latest_vol = review_vol
+        volumes = [review_vol]
+
     vol_ratio = latest_vol / avg_5 if avg_5 > 0 else 1.0
 
     r["details"]["全市场成交额"] = f"{latest_vol:.0f}亿"
@@ -712,6 +771,33 @@ def _save_regime_state(state):
         json.dump(state, f, ensure_ascii=False, indent=2)
 
 
+def _regime_base(style):
+    return (style or "").split("（")[0]
+
+
+def _dedup_history_by_date(history):
+    """同一日期只保留最后一次记录，避免重复 gen 放大持续天数。"""
+    by_date = {}
+    for item in history or []:
+        date = item.get("date")
+        if not date:
+            continue
+        by_date[date] = item
+    return [by_date[d] for d in sorted(by_date)]
+
+
+def _count_regime_days(history, style):
+    base = _regime_base(style)
+    if not base:
+        return 0
+    count = 0
+    for item in reversed(_dedup_history_by_date(history)):
+        if _regime_base(item.get("style")) != base:
+            break
+        count += 1
+    return count
+
+
 def determine_style(s1, s2, s3, s4, date_str=None):
     """概率化风格判定 + 状态持续性
 
@@ -787,8 +873,8 @@ def determine_style(s1, s2, s3, s4, date_str=None):
     prev_days = state.get("days_in_regime", 0)
 
     # 判断是否翻转
-    regime_base = style.split("（")[0]  # "连板行情" or "趋势行情" or "混合"
-    prev_base = (prev_regime or "").split("（")[0] if prev_regime else ""
+    regime_base = _regime_base(style)  # "连板行情" or "趋势行情" or "混合"
+    prev_base = _regime_base(prev_regime) if prev_regime else ""
 
     flipped = False
     if prev_base and regime_base != prev_base:
@@ -805,31 +891,27 @@ def determine_style(s1, s2, s3, s4, date_str=None):
             confidence = max(40, confidence - 20)
             flipped = False
 
-    # 更新状态
-    if flipped or not prev_regime:
-        new_days = 1
-    elif regime_base == prev_base:
-        new_days = prev_days + 1
-    else:
-        new_days = prev_days  # 不应该到这里
-
-    new_state = {
-        "current_regime": style,
-        "days_in_regime": new_days,
-        "last_update": date_str or datetime.now().strftime("%Y-%m-%d"),
-    }
+    today = date_str or datetime.now().strftime("%Y-%m-%d")
     # 保留最近30天历史
     history = state.get("history", [])
     history.append({
-        "date": date_str or datetime.now().strftime("%Y-%m-%d"),
+        "date": today,
         "style": style,
         "total": total,
         "lianban_conf": lianban_conf,
         "trend_conf": trend_conf,
         "confidence": confidence,
     })
+    history = _dedup_history_by_date(history)
     if len(history) > 30:
         history = history[-30:]
+
+    new_days = _count_regime_days(history, style) or 1
+    new_state = {
+        "current_regime": style,
+        "days_in_regime": new_days,
+        "last_update": today,
+    }
     new_state["history"] = history
     _save_regime_state(new_state)
 
@@ -889,6 +971,7 @@ def main():
     s2 = score_dim2(review)
     s3 = score_dim3(review)
     s4 = score_dim4(review)
+    apply_review_score_validation(review, s1, s2, s3, s4)
 
     dims = [
         ("维度一 · 量能环境", s1),

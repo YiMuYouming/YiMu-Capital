@@ -130,6 +130,22 @@ class DOCTYPETest(unittest.TestCase):
         r = subprocess.run(["node","--check","/tmp/_prod_idx.js"], capture_output=True, text=True)
         self.assertEqual(r.returncode, 0, f"syntax error: {r.stderr[:200]}")
 
+    def test_compact_button_uses_clear_core_copy(self):
+        src = (ROOT / "index.html").read_text()
+        self.assertIn('id="compactBtn"', src)
+        self.assertIn('只看核心', src)
+        self.assertIn('显示全部', src)
+        self.assertNotIn('title="精简模式"', src)
+
+    def test_topbar_uses_transparent_mark_logo(self):
+        src = (ROOT / "index.html").read_text()
+        logo = ROOT / "assets" / "logo-yi.png"
+        self.assertTrue(logo.exists(), "顶栏应使用无黑底的弈 PNG 标识")
+        self.assertIn('href="assets/logo-yi.png"', src)
+        self.assertIn('src="assets/logo-yi.png"', src)
+        self.assertIn('alt="弈"', src)
+        self.assertNotIn('src="assets/logo.png"', src)
+
 
 class HealthDegradeTest(unittest.TestCase):
 
@@ -157,6 +173,11 @@ console.log(JSON.stringify({hasBtn:_body.innerHTML.indexOf('录入')>=0}));
         self.assertIn(".catch(function", _PROD_SCRIPT, "缺 fetch reject 路径")
         self.assertIn("if (!h)", _PROD_SCRIPT, "缺空响应路径")
         self.assertIn("DataStore.notifyAll", _PROD_SCRIPT, "缺 notifyAll")
+
+    def test_close_snapshot_has_topbar_connection_mapping(self):
+        """健康接口 quotes.status=close_snapshot 时顶栏应显示收盘快照"""
+        self.assertIn("close_snapshot", _PROD_SCRIPT, "缺收盘快照连接状态映射")
+        self.assertIn("收盘快照", _PROD_SCRIPT, "顶栏应显示收盘快照文案")
 
     def test_health_degrade_sets_critical_confirmed(self):
         """所有降级路径统一清除 confirmed + 设置 critical"""
