@@ -122,7 +122,8 @@ class PositionsWidget extends YiMuWidget {
         '</div>';
     }
 
-    html += '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:var(--sp-xs) var(--sp-sm);margin-bottom:var(--sp-md);padding:var(--sp-sm);background:var(--bg-base);border-radius:var(--radius-md);font-size:var(--fs-body)">' +
+    html += '<div id="w15_sync_status" style="display:none;font-size:var(--fs-small);margin-bottom:var(--sp-xs);padding:2px 6px;border-radius:3px;background:var(--bg-base)"></div>' +
+      '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:var(--sp-xs) var(--sp-sm);margin-bottom:var(--sp-md);padding:var(--sp-sm);background:var(--bg-base);border-radius:var(--radius-md);font-size:var(--fs-body)">' +
       '<div style="text-align:center"><div class="kpi-label">总资产</div><div style="font-family:var(--font-mono);font-size:var(--fs-subtitle);font-weight:700">' + taDisplay + '</div></div>' +
       '<div style="text-align:center"><div class="kpi-label">持仓市值</div><div style="font-family:var(--font-mono);font-size:var(--fs-subtitle);font-weight:700">' + mvDisplay + '</div></div>' +
       '<div style="text-align:center"><div class="kpi-label">今日盈亏</div><div style="font-family:var(--font-mono);font-size:var(--fs-subtitle);font-weight:700;color:var(--' + tc + ')">' + pnlCardHtml + '</div></div>' +
@@ -387,11 +388,17 @@ class PositionsWidget extends YiMuWidget {
         self._pending = false;
         self._pendingEvtId = null;
         o.remove();
-      }, function onError() {
+      }, function onError(errMsg) {
         self._pending = false;
         saveBtn.disabled = false;
         saveBtn.textContent = '确认';
         saveBtn.style.opacity = '';
+        // 把后端错误写到 f_error 并显示
+        var errBox = o.querySelector('#f_error');
+        if (errBox && errMsg) {
+          errBox.textContent = errMsg;
+          errBox.style.display = '';
+        }
         // 保留表单 + event_id 供重试
       });
     };
@@ -453,20 +460,43 @@ function _bridgeSync(entry, onSuccess, onError) {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ entry: entry })
-  }).then(function(r) { return r.ok ? r.json() : r.json().then(function(e) { throw e; }); })
-    .then(function(resp) {
-      if (!resp || !resp.ok) {
-        if (typeof showToast === 'function') showToast('成交写入失败: ' + ((resp && resp.error) || '未知错误'));
-        if (onError) onError();
-      } else {
-        if (typeof showToast === 'function') showToast('成交已记录' + (resp.trade_id ? ' #' + resp.trade_id : ''));
-        if (onSuccess) onSuccess();
-      }
-    })
-    .catch(function() {
-      if (typeof showToast === 'function') showToast('网络错误，成交未保存');
-      if (onError) onError();
+  }).then(function(r) {
+    return r.ok ? r.json() : r.json().then(function(e) {
+      e._httpStatus = r.status; throw e;
     });
+  }).then(function(resp) {
+    if (!resp || !resp.ok) {
+      var errMsg = '成交写入失败: ' + ((resp && resp.error) || '未知错误');
+      if (typeof showToast === 'function') showToast(errMsg);
+      _setSyncStatus('error', errMsg);
+      if (onError) onError(errMsg);
+    } else {
+      var okMsg = '已写入云端 · 成交 #' + (resp.trade_id || '?');
+      if (typeof showToast === 'function') showToast(okMsg);
+      _setSyncStatus('ok', okMsg);
+      if (onSuccess) onSuccess(resp);
+    }
+  }).catch(function(e) {
+    var isReadonly = e && e.error === 'readonly_dev_preview';
+    var errMsg;
+    if (isReadonly) {
+      errMsg = '本地预览只读，请用 8088 实盘录入';
+    } else if (e && e.message) {
+      errMsg = '写入失败: ' + e.message;
+    } else {
+      errMsg = '网络错误，成交未保存';
+    }
+    if (typeof showToast === 'function') showToast(errMsg);
+    _setSyncStatus('error', errMsg);
+    if (onError) onError(errMsg);
+  });
+}
+function _setSyncStatus(type, msg) {
+  var el = document.getElementById('w15_sync_status');
+  if (!el) return;
+  el.textContent = msg;
+  el.style.display = '';
+  el.style.color = type === 'ok' ? 'var(--info)' : 'var(--danger)';
 }
 
 WidgetRegistry.register('W15', PositionsWidget);

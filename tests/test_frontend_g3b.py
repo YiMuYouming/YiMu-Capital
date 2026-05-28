@@ -831,7 +831,7 @@ class W15PendingRetryTests(unittest.TestCase):
         self.assertIn("function _bridgeSync(entry, onSuccess, onError)", src,
                       "_bridgeSync 应接受回调参数")
         self.assertIn("onSuccess()", src, "成功时调用 onSuccess")
-        self.assertIn("onError()", src, "失败时调用 onError")
+        self.assertIn("onError(errMsg)", src, "失败时调用 onError")
 
     def test_form_not_closed_on_network_error(self):
         """网络错误后不调用 o.remove()，由 onError 回调重置按钮"""
@@ -1052,11 +1052,6 @@ console.log(JSON.stringify({
         self.assertTrue(result.get("hasUnavailable"), f"历史成交应显示不可用: {result}")
         self.assertTrue(result.get("hasHistorical"), f"历史成交应显示原因: {result}")
 
-
-if __name__ == "__main__":
-    unittest.main()
-
-
 class W15AllErrorsInlineTest(unittest.TestCase):
     """v3 Phase 5: W15 所有本地校验失败均显示 #f_error"""
 
@@ -1217,6 +1212,93 @@ console.log(JSON.stringify({hasT2: html.indexOf('T2')>=0, hasT3: html.indexOf('T
         self.assertTrue(result.get("hasT3"), f"未验证筛选应含 unverified: {result}")
         self.assertTrue(result.get("afterT3HasUnverified"), f"unverified 行状态应显示 '未验证': {result}")
         self.assertTrue(result.get("afterT3NoUnavailable"), f"unverified 行状态不应显示 '不可用': {result}")
+
+
+class RuntimeModeLabelTest(unittest.TestCase):
+    """V3.1 G4: 运行模式标识 + W15 成交确认"""
+
+    def test_html_contains_mode_label_element(self):
+        """index.html 包含 runtimeModeLabel"""
+        idx = ROOT / "index.html"
+        html = idx.read_text(encoding="utf-8")
+        self.assertIn("runtimeModeLabel", html, "应有 runtimeModeLabel")
+        self.assertIn("_detectRuntimeMode", html, "应有 _detectRuntimeMode")
+
+    def test_detect_8088_is_prod(self):
+        script = r"""
+function _detectRuntimeMode() {
+  if (location.protocol === 'file:') return {key:'file',label:'本地文件',readonly:true};
+  if (location.port === '18088') return {key:'preview',label:'本地预览 · 只读',readonly:true};
+  if (location.port === '8088') return {key:'prod',label:'云端生产',readonly:false};
+  return {key:'local',label:'本地服务',readonly:false};
+}
+var location={protocol:'http:', port:'8088'};
+console.log(JSON.stringify(_detectRuntimeMode()));
+"""
+        result = _run_node(script)
+        self.assertEqual(result.get("key"), "prod", "8088 应为 prod")
+        self.assertEqual(result.get("label"), "云端生产")
+        self.assertFalse(result.get("readonly"), "8088 不应只读")
+
+    def test_detect_18088_is_preview_ro(self):
+        script = r"""
+function _detectRuntimeMode() {
+  if (location.protocol === 'file:') return {key:'file',label:'本地文件',readonly:true};
+  if (location.port === '18088') return {key:'preview',label:'本地预览 · 只读',readonly:true};
+  if (location.port === '8088') return {key:'prod',label:'云端生产',readonly:false};
+  return {key:'local',label:'本地服务',readonly:false};
+}
+var location={protocol:'http:', port:'18088'};
+console.log(JSON.stringify(_detectRuntimeMode()));
+"""
+        result = _run_node(script)
+        self.assertEqual(result.get("key"), "preview", "18088 应为 preview")
+        self.assertIn("只读", result.get("label", ""), "18088 应显式只读")
+        self.assertTrue(result.get("readonly"), "18088 应只读")
+
+    def test_detect_file_is_file(self):
+        script = r"""
+function _detectRuntimeMode() {
+  if (location.protocol === 'file:') return {key:'file',label:'本地文件',readonly:true};
+  if (location.port === '18088') return {key:'preview',label:'本地预览 · 只读',readonly:true};
+  if (location.port === '8088') return {key:'prod',label:'云端生产',readonly:false};
+  return {key:'local',label:'本地服务',readonly:false};
+}
+var location={protocol:'file:', port:''};
+console.log(JSON.stringify(_detectRuntimeMode()));
+"""
+        result = _run_node(script)
+        self.assertEqual(result.get("key"), "file", "file: 协议应 file")
+
+    def test_positions_js_has_w15_sync_status(self):
+        """W15 渲染包含 w15_sync_status"""
+        src = (ROOT / "widgets/positions.js").read_text(encoding="utf-8")
+        self.assertIn("w15_sync_status", src, "positions.js 应渲染 w15_sync_status")
+        self.assertIn("_bridgeSync", src, "应有 _bridgeSync")
+        self.assertIn("readonly_dev_preview", src, "_bridgeSync 应处理 readonly_dev_preview")
+
+    def test_bridgeSync_has_onError_errMsg_and_f_error(self):
+        """_bridgeSync 源码包含 onError(errMsg), #f_error, readonly_dev_preview, message, 8088"""
+        src = (ROOT / "widgets/positions.js").read_text(encoding="utf-8")
+        self.assertIn("onError(errMsg)", src, "错误应传 errMsg 给 onError")
+        self.assertIn("#f_error", src, "应写入 #f_error")
+        self.assertIn("readonly_dev_preview", src)
+        self.assertIn(".message", src, "应读取后端 message 字段")
+        self.assertIn("8088", src, "应提示 8088 实盘录入")
+
+    def test_f_error_writing_pattern_in_source(self):
+        """源码验证 onError 写入 #f_error 的模式正确"""
+        src = (ROOT / "widgets/positions.js").read_text(encoding="utf-8")
+        # onError 回调中应包含 querySelector('#f_error') + textContent 赋值 + style.display
+        self.assertIn("querySelector('#f_error')", src, "应通过 querySelector 找 f_error")
+        self.assertIn("errMsg", src, "应使用 errMsg 变量")
+        self.assertIn("errBox.textContent", src, "应设置 textContent")
+        self.assertIn("errBox.style.display", src, "应设置 display")
+
+    def test_runtime_mode_label_style_in_css(self):
+        """theme.css 包含 .runtime-mode 样式"""
+        css = (ROOT / "css/theme.css").read_text(encoding="utf-8")
+        self.assertIn(".runtime-mode", css, "theme.css 应有 .runtime-mode 选择器")
 
 
 if __name__ == "__main__":

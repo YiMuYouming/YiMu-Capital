@@ -98,6 +98,7 @@ body.ready{opacity:1}
 <header class="topbar" id="topbar" style="display:none">
   <img src="assets/logo-yi.png" alt="弈" class="topbar-logo">
   <span class="topbar-brand">弈沐资本 · 数据看板 v3.0</span>
+  <span class="runtime-mode" id="runtimeModeLabel"></span>
   <span class="conn-dot polling" id="connDot"></span>
   <span class="conn-text" id="connText">轮询</span>
   <span class="topbar-health" id="topbarHealth" title="系统健康状态"><span class="health-dot" id="healthDot"></span><span id="healthLabel">—</span></span><span class="topbar-metric" id="topbarEmotion" title="当前情绪值">情绪 —</span><span class="topbar-metric" id="topbarPnl" title="今日盈亏">盈亏 —</span><span class="topbar-metric" id="topbarPosPct" title="仓位占比">仓位 —</span><span class="topbar-metric" id="topbarCash" title="可用资金">可用 —</span><span style="flex:0.5"></span><button id="compactBtn" class="btn-xs btn-outline topbar-btn" title="隐藏非核心组件">只看核心</button><button id="addWidgetBtn" class="btn-info" title="添加组件" style="padding:var(--sp-xs) var(--sp-md);font-size:var(--fs-body);height:28px;line-height:1">+ 添加组件</button>
@@ -198,6 +199,7 @@ function initGrid() {
   document.getElementById('loading').style.display = 'none';
   document.getElementById('topbar').style.display = '';
   document.body.classList.add('ready');
+  _updateRuntimeModeLabel();
 }
 
 // === Widget 实例管理 ===
@@ -372,6 +374,23 @@ document.getElementById('llmPanelBtn').addEventListener('click', function() {
   else _showLLMPanel();  // fallback
 });
 document.getElementById('pnlCurveBtn').addEventListener('click', function() { _addWidgetToGrid('W22'); });
+
+// === 运行模式检测 ===
+function _detectRuntimeMode() {
+  if (location.protocol === 'file:') return { key: 'file', label: '本地文件', readonly: true };
+  if (location.port === '18088') return { key: 'preview', label: '本地预览 · 只读', readonly: true };
+  if (location.port === '8088') return { key: 'prod', label: '云端生产', readonly: false };
+  return { key: 'local', label: '本地服务', readonly: false };
+}
+function _updateRuntimeModeLabel() {
+  var el = document.getElementById('runtimeModeLabel');
+  if (!el) return;
+  var mode = _detectRuntimeMode();
+  var colors = { prod: '#16a34a', preview: '#ea580c', file: '#64748b', local: '#6366f1' };
+  el.textContent = mode.label;
+  el.style.color = colors[mode.key] || '#64748b';
+  el.title = mode.readonly ? '只读模式，不录真实交易' : '生产模式，所有操作写入云端';
+}
 
 // === W20 AI盯盘浮窗（红点+Toast）===
 var _llmLoading = false;
