@@ -1,4 +1,4 @@
-// widgets/positions.js — W15 持仓+记流水+清仓 v4.0 (SSOT-only rendering)
+// widgets/positions.js — W15 持仓+手工补录+清仓 v4.0 (SSOT-only rendering)
 'use strict';
 
 function _esc(s) {
@@ -71,20 +71,23 @@ class PositionsWidget extends YiMuWidget {
     var naData = '<span style="color:var(--text-disabled)">— / 数据不可用</span>';
     var naQuote = '<span style="color:var(--text-disabled)">— / 行情不可用</span>';
     var naPostClose = '<span style="color:var(--text-disabled)">— / 收盘价 · 非实时</span>';
+    var naWaitToday = '<span style="color:var(--text-disabled)">— / 等待今日行情</span>';
     var naDash = '<span style="color:var(--text-disabled)">—</span>';
-    // 收盘快照：显示数值（即使 valuation_complete=false），标注非实时
+    var snapshotTag = ' <span style="font-size:var(--fs-label);color:var(--text-disabled)">非实时</span>';
+    var closeTag = ' <span style="font-size:var(--fs-label);color:var(--text-disabled)">收盘</span>';
+    // 行情缺失时仍保留账户快照；只有今日盈亏等待实时行情确认。
     var isUnavailable = isValuationIncomplete && !isPostClose;
-    var taDisplay = isUnavailable ? naQuote : (isPostClose ? (_fmtAmount(ta) + ' <span style="font-size:var(--fs-label);color:var(--text-disabled)">收盘</span>') : (taNull ? naData : _fmtAmount(ta)));
-    var mvDisplay = isUnavailable ? naQuote : (isPostClose ? (_fmtAmount(mv) + ' <span style="font-size:var(--fs-label);color:var(--text-disabled)">收盘</span>') : (mvNull ? naData : _fmtAmount(mv)));
-    var cashDisplay = isUnavailable ? naQuote : (cashNull ? naData : _fmtAmount(cash));
-    var posPctDisplay = isUnavailable ? naDash : (posPctNull ? naDash : posPct + '%');
-    var posPctColor = (isUnavailable || posPctNull) ? '' : (posPct > 80 ? 'var(--danger)' : posPct > 50 ? 'var(--warn)' : 'var(--info)');
+    var taDisplay = isUnavailable ? (taNull ? naQuote : _fmtAmount(ta) + snapshotTag) : (isPostClose ? (_fmtAmount(ta) + closeTag) : (taNull ? naData : _fmtAmount(ta)));
+    var mvDisplay = isUnavailable ? (mvNull ? naQuote : _fmtAmount(mv) + snapshotTag) : (isPostClose ? (_fmtAmount(mv) + closeTag) : (mvNull ? naData : _fmtAmount(mv)));
+    var cashDisplay = cashNull ? naData : _fmtAmount(cash);
+    var posPctDisplay = posPctNull ? naDash : posPct + '%';
+    var posPctColor = posPctNull ? '' : (posPct > 80 ? 'var(--danger)' : posPct > 50 ? 'var(--warn)' : 'var(--info)');
 
     var pnlCardHtml;
     if (isUnavailable) {
-      pnlCardHtml = naQuote;
+      pnlCardHtml = naWaitToday;
     } else if (isPostClose) {
-      pnlCardHtml = _fmtPnL(tp) + ' <span style="font-size:var(--fs-body);font-weight:400">(' + (pp >= 0 ? '+' : '') + pp.toFixed(2) + '%)</span> <span style="font-size:var(--fs-label);color:var(--text-disabled)">收盘</span>';
+      pnlCardHtml = _fmtPnL(tp) + ' <span style="font-size:var(--fs-body);font-weight:400">(' + (pp >= 0 ? '+' : '') + pp.toFixed(2) + '%)</span>' + closeTag;
     } else if (tpNull && ppNull) {
       pnlCardHtml = '<span style="color:var(--text-disabled)">— / 基准不可用</span>';
     } else {
@@ -100,7 +103,7 @@ class PositionsWidget extends YiMuWidget {
         (pnlLive.block_reason ? ' <span style="font-weight:400;opacity:0.8">(' + _esc(pnlLive.block_reason) + ')</span>' : '') +
         '</div>';
     } else if (isValuationIncomplete) {
-      var bannerText = isPostClose ? '收盘行情 — 非实时估值' : '行情缺失 — 估值不可信';
+      var bannerText = isPostClose ? '收盘行情 — 非实时估值' : '行情缺失 — 估值不可信（行情不可用，显示非实时快照）';
       var bannerBg = isPostClose ? 'var(--bg-card)' : 'var(--warn-bg, #fffbeb)';
       var bannerBorder = isPostClose ? 'var(--border)' : 'var(--warn)';
       var bannerColor = isPostClose ? 'var(--text-secondary)' : 'var(--warn)';
@@ -147,13 +150,13 @@ class PositionsWidget extends YiMuWidget {
         // 估值不可信时，价格相关字段标记不可用
         var mvCell, priceCell, todayCell, totalCell;
         if (isUnavailable) {
-          mvCell = naQuote;
-          priceCell = naQuote;
-          todayCell = naQuote;
-          totalCell = naQuote;
+          mvCell = p['市值'] == null ? naQuote : _fmtAmount(p['市值']) + snapshotTag;
+          priceCell = p['现价'] == null ? naQuote : _fmtPrice(p['现价']) + snapshotTag;
+          todayCell = naWaitToday;
+          totalCell = totPnL == null ? naQuote : _fmtPnL(totPnL) + ' <span style="font-size:var(--fs-label)">' + _fmtPct(totPct) + '</span>' + snapshotTag;
         } else if (isPostClose) {
-          mvCell = _fmtAmount(p['市值']) + ' <span style="font-size:var(--fs-label);color:var(--text-disabled)">收盘</span>';
-          priceCell = _fmtPrice(p['现价']) + ' <span style="font-size:var(--fs-label);color:var(--text-disabled)">收盘</span>';
+          mvCell = _fmtAmount(p['市值']) + closeTag;
+          priceCell = _fmtPrice(p['现价']) + closeTag;
           if (tPnL != null) {
             todayCell = _fmtPnL(tPnL) + ' <span style="font-size:var(--fs-label)">' + _fmtPct(tPct) + '</span>';
           } else {
@@ -199,7 +202,7 @@ class PositionsWidget extends YiMuWidget {
     // ===== 今日记录 (SSOT trade_records) =====
     html += '<div style="display:flex;align-items:center;gap:var(--sp-sm);margin-top:var(--sp-md);margin-bottom:var(--sp-xs)">' +
       '<span style="font-size:var(--fs-body);font-weight:600">今日记录</span>' +
-      '<button id="w15_add" style="background:var(--info);color:var(--text-inverse);border:none;padding:2px 10px;border-radius:var(--radius-sm);cursor:pointer;font-size:var(--fs-body);font-family:var(--font-sans)">记流水</button></div>';
+      '<button id="w15_add" style="background:var(--info);color:var(--text-inverse);border:none;padding:2px 10px;border-radius:var(--radius-sm);cursor:pointer;font-size:var(--fs-body);font-family:var(--font-sans)">手工补录成交</button></div>';
 
     var trades = Array.isArray(pnlLive.trades) ? pnlLive.trades : [];
     if (trades.length) {
@@ -223,17 +226,12 @@ class PositionsWidget extends YiMuWidget {
       html += '<div style="padding:var(--sp-sm);text-align:center;color:var(--text-disabled);font-size:var(--fs-body)">今日无操作</div>';
     }
 
-    // ===== 清仓跟踪 (SSOT closed_positions only, 7日内) =====
+    // ===== 清仓跟踪 (SSOT closed_positions only, 7个交易日) =====
     var closed = Array.isArray(pnlLive.closed_positions) ? pnlLive.closed_positions : [];
     if (closed.length) {
-      var now = new Date();
-      var tracked = closed.filter(function(c) {
-        var d = c.closed_date;
-        if (!d) return true;
-        try { return (now - new Date(d)) / 86400000 <= 7; } catch (e) { return true; }
-      });
+      var tracked = closed;
       if (tracked.length) {
-        html += '<div style="margin-top:var(--sp-md)"><span style="font-size:var(--fs-body);font-weight:600">清仓跟踪（7日内）</span></div>';
+        html += '<div style="margin-top:var(--sp-md)"><span style="font-size:var(--fs-body);font-weight:600">清仓跟踪（7个交易日）</span></div>';
         html += '<table class="data-table"><thead><tr><th>标的</th><th>卖出价</th><th>已实现盈亏</th><th>现价</th><th>卖出后涨跌</th><th>原因</th></tr></thead><tbody>';
         tracked.forEach(function(c) {
           var sp = parseFloat(c.sell_price) || 0;
@@ -283,7 +281,8 @@ class PositionsWidget extends YiMuWidget {
     }).join('');
 
     o.innerHTML = '<div style="background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-lg);padding:var(--sp-lg);width:90%;max-width:400px">' +
-      '<div style="font-size:var(--fs-subtitle);font-weight:700;margin-bottom:var(--sp-md)">记流水</div>' +
+      '<div style="font-size:var(--fs-subtitle);font-weight:700;margin-bottom:var(--sp-xs)">手工补录成交</div>' +
+      '<div style="font-size:var(--fs-small);color:var(--warn);margin-bottom:var(--sp-md)">优先用交易票据确认成交；这里只用于补录真实已成交流水。</div>' +
       '<div style="display:flex;gap:var(--sp-sm);margin-bottom:var(--sp-md)">' +
         '<button id="f_buy" style="flex:1;padding:var(--sp-sm);border:none;border-radius:var(--radius-sm);cursor:pointer;font-size:var(--fs-body);font-weight:600;background:var(--up-bg);color:var(--up)">买入</button>' +
         '<button id="f_sell" style="flex:1;padding:var(--sp-sm);border:none;border-radius:var(--radius-sm);cursor:pointer;font-size:var(--fs-body);font-weight:600;background:var(--down-bg);color:var(--down);opacity:0.4">卖出</button>' +
@@ -377,6 +376,9 @@ class PositionsWidget extends YiMuWidget {
       }
       var entry = validation.entry;
       entry['event_id'] = self._pendingEvtId;
+      entry['input_source'] = 'manual_backfill';
+      entry['confirmed_by'] = 'yimu';
+      entry['audit_note'] = reason || '手工补录成交';
 
       // 锁定按钮
       self._pending = true;

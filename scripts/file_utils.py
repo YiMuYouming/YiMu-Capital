@@ -7,7 +7,19 @@
 
 import json, os
 from pathlib import Path
-from filelock import FileLock
+try:
+    from filelock import FileLock
+except ImportError:
+    class FileLock:
+        def __init__(self, path, timeout=5):
+            self.path = path
+            self.timeout = timeout
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
 
 
 def atomic_write_json(filepath: Path, data: dict, timeout: int = 5) -> None:

@@ -6,20 +6,39 @@ W15 记流水时自动 POST 到 /api/sync，实时写入 JSON
 LLM Hook: POST /api/llm → Anthropic API → 研判文本
 """
 
-import atexit, json, os, sys, time
+import atexit, hashlib, json, os, sys, time
 from http.server import HTTPServer, SimpleHTTPRequestHandler
 from socketserver import ThreadingMixIn
 
 class ThreadingHTTPServer(ThreadingMixIn, HTTPServer):
     daemon_threads = True
 from pathlib import Path
-from datetime import datetime, time as _time
+from datetime import datetime, time as _time, timedelta
 from urllib.parse import parse_qs, urlparse
 from threading import Lock, Thread
 
-from apscheduler.schedulers.background import BackgroundScheduler
+try:
+    from apscheduler.schedulers.background import BackgroundScheduler
+except ImportError:
+    class BackgroundScheduler:
+        """Minimal fallback so DB/API code remains importable without APScheduler."""
+        def __init__(self, *args, **kwargs):
+            self._jobs = []
+
+        def add_job(self, func, trigger=None, **kwargs):
+            self._jobs.append({"func": func, "trigger": trigger, **kwargs})
+
+        def start(self):
+            return None
+
+        def get_jobs(self):
+            return list(self._jobs)
+
+        def shutdown(self, wait=False):
+            self._jobs = []
 
 ROOT = Path(__file__).resolve().parent.parent
+AI_RULE_SYSTEM_ROOT = ROOT.parent / "ai-rule-system"
 
 try:
     from scripts.file_utils import atomic_write_json
@@ -33,6 +52,11 @@ CACHE = {}
 CACHE_FILE = ROOT / "data" / "cache_dump.json"
 DATA_FILE = ROOT / "data/dashboard_data.json"
 LLM_INSIGHTS_FILE = ROOT / "data/llm_insights.json"
+_PERSIST_KEYS = [
+    "live_index", "live_quotes", "breadth", "live_sectors", "iwencai",
+    "northbound", "hot_list", "sector_inflow",
+    "上证15min", "深证15min", "创业15min", "kline_15m_date",
+]
 
 _llm_rate_lock = Lock()
 _llm_conv_lock = Lock()
@@ -710,12 +734,15 @@ def _build_rule_inputs(now=None, account_state=None):
     # ── risk ──
     dash = _load_dashboard_data()
     risk = dash.get("risk", {})
-    loss_streak = int(risk.get("连亏天数", 0) or 0)
+    style_raw = dash.get("style", {})
+    funds_raw = dash.get("funds", {}) or dash.get("资金", {}) or {}
+    time_window = dash.get("time_window", {})
+    legacy_loss_streak = int(risk.get("连亏天数", 0) or 0)
+    losing_account_days = 0 if pnl_pct is not None and pnl_pct > 0 else legacy_loss_streak
     weekly_drawdown = risk.get("周累计回撤")
     monthly_drawdown = risk.get("月累计回撤")
 
     # ── style ──
-    style_raw = dash.get("style", {})
     _score_raw = style_raw.get("总分")
     score = int(_score_raw) if _score_raw is not None else 50
     _lianban_raw = style_raw.get("连板占比")
@@ -724,6 +751,34 @@ def _build_rule_inputs(now=None, account_state=None):
     trend_pct = float(_trend_raw) if _trend_raw is not None else 50
     _trend_score_raw = style_raw.get("dim3_趋势")
     trend_score = float(_trend_score_raw) if _trend_score_raw is not None else None
+
+    def _first_present(*values):
+        for value in values:
+            if value not in (None, "", "—"):
+                return value
+        return None
+
+    style_score_raw = _first_present(
+        style_raw.get("style_score_raw"),
+        style_raw.get("原始分"),
+        style_raw.get("脚本原始分"),
+    )
+    style_score_adjusted = _first_present(
+        style_raw.get("style_score_adjusted"),
+        style_raw.get("修正分"),
+    )
+    adjustment_reason = _first_present(
+        style_raw.get("adjustment_reason"),
+        style_raw.get("修正原因"),
+    )
+    style_approver = _first_present(
+        style_raw.get("approver"),
+        style_raw.get("审批人"),
+    )
+    style_script_version = _first_present(
+        style_raw.get("script_version"),
+        style_raw.get("脚本版本"),
+    )
 
     # ── sentiment ──
     iwencai = CACHE.get("iwencai", {})
@@ -805,21 +860,41 @@ def _build_rule_inputs(now=None, account_state=None):
     quotes_fresh = _compute_freshness("live_quote", CACHE.get("live_quotes", {}), now=now)
     sentiment_fresh = _compute_freshness("iwencai", iwencai, now=now)
 
+    plan_source = style_raw.get("_source")
+    plan_overrides_loss_streak = (
+        plan_source in ("premarket_plan", "appendix_a_plan")
+        and (style_raw.get("总仓位上限") or 0) > 0
+    )
+
     return {
         "account": {
             "pnl_pct": pnl_pct,
+            "account_day_return_pct": pnl_pct,
             "valuation_complete": valuation_complete,
         },
         "risk": {
-            "loss_streak": loss_streak,
+            "losing_account_days": losing_account_days,
+            "loss_streak_hard_stop": not plan_overrides_loss_streak,
             "weekly_drawdown_pct": weekly_drawdown,
             "monthly_drawdown_pct": monthly_drawdown,
         },
         "style": {
             "score": score,
+            "style_score_raw": style_score_raw,
+            "style_score_adjusted": style_score_adjusted,
+            "adjustment_reason": adjustment_reason,
+            "approver": style_approver,
+            "script_version": style_script_version,
             "lianban_pct": lianban_pct,
             "trend_pct": trend_pct,
             "trend_score": trend_score,
+        },
+        "funds": {
+            "main_inflow": _first_present(funds_raw.get("main_inflow"), funds_raw.get("主力净流入")),
+            "dde_big_order_net": _first_present(funds_raw.get("dde_big_order_net"), funds_raw.get("DDE大单净额")),
+            "volume_ratio": _first_present(funds_raw.get("volume_ratio"), funds_raw.get("量比")),
+            "source": _first_present(funds_raw.get("source"), funds_raw.get("来源")),
+            "query": _first_present(funds_raw.get("query"), funds_raw.get("查询语句")),
         },
         "sentiment": {
             "emotion_pct": emotion_pct,
@@ -832,6 +907,10 @@ def _build_rule_inputs(now=None, account_state=None):
         "freshness": {
             "quotes": quotes_fresh,
             "sentiment": sentiment_fresh,
+        },
+        "time_window": {
+            "w1_status": time_window.get("W1状态"),
+            "w2_status": time_window.get("W2状态"),
         },
     }
 
@@ -866,6 +945,29 @@ def _compute_freshness(data_type, cache_entry, now=None):
             ref_utc = now.replace(tzinfo=CST).astimezone(_tz.utc)
 
         age = max(0, (ref_utc - fetched_utc).total_seconds())
+
+        if data_type == "live_quote":
+            fetched_cst = fetched.astimezone(CST)
+            ref_cst = ref_utc.astimezone(CST)
+            ref_hhmm = ref_cst.hour * 60 + ref_cst.minute
+            PRE_MARKET = 9 * 60 + 15
+            MARKET_CLOSE = 15 * 60
+            if ref_hhmm < PRE_MARKET:
+                same_day_premarket = (
+                    fetched_cst.date() == ref_cst.date()
+                    and age <= 2 * 3600
+                )
+                previous_close = (
+                    fetched_cst.date() < ref_cst.date()
+                    and fetched_cst.hour * 60 + fetched_cst.minute >= MARKET_CLOSE
+                    and age <= 4 * 86400
+                )
+                if same_day_premarket or previous_close:
+                    if age < live_s:
+                        return "live"
+                    if age < delayed_s:
+                        return "delayed"
+                    return "stale"
     except Exception:
         return "dead"
     if age < live_s:
@@ -882,6 +984,29 @@ def _build_rule_state(now=None, account_state=None):
     from scripts.rule_engine import evaluate_rule_state as _eval
     inputs = _build_rule_inputs(now=now, account_state=account_state)
     return _eval(inputs, now=now)
+
+
+def _execution_card_metadata():
+    card_path = AI_RULE_SYSTEM_ROOT / "daily-runtime" / "today_execution_card.json"
+    if not card_path.exists():
+        return {}
+    try:
+        card = json.loads(card_path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    snapshot = card.get("rule_snapshot") or card.get("rule_state") or card
+    snapshot_hash = "sha256:" + hashlib.sha256(_canonical_json(snapshot).encode("utf-8")).hexdigest()
+    trade_date = str(card.get("next_trade_date") or datetime.now().strftime("%Y-%m-%d")).replace("-", "")
+    generated = str(card.get("generated_at") or "")
+    try:
+        generated_id = datetime.fromisoformat(generated.replace("Z", "+00:00")).strftime("%Y%m%dT%H%M%S%z")
+    except Exception:
+        generated_id = datetime.fromtimestamp(card_path.stat().st_mtime).strftime("%Y%m%dT%H%M%S")
+    return {
+        "rule_snapshot_hash": snapshot_hash,
+        "today_execution_card_id": f"EXEC-{trade_date}-{generated_id}",
+        "rule_pack_version": str((card.get("source_rule_pack") or {}).get("mtime") or ""),
+    }
 
 
 # ===== 快照构建（供 LLM 和调试端点使用） =====
@@ -937,6 +1062,8 @@ def _build_trade_context():
         result['context_unavailable_reason'] = f'行情数据不可信 ({codes})'
         return result
 
+    card_meta = _execution_card_metadata()
+
     # 全部检查通过 → trusted
     captured = datetime.now().strftime('%Y-%m-%dT%H:%M:%S')
     result.update({
@@ -944,8 +1071,313 @@ def _build_trade_context():
         'market_snapshot': mkt,
         'context_captured_at': captured,
         'context_status': 'trusted',
+        'rule_pack_version': (rule or {}).get('version') or card_meta.get('rule_pack_version'),
+        'rule_snapshot_hash': card_meta.get('rule_snapshot_hash'),
+        'today_execution_card_id': card_meta.get('today_execution_card_id'),
     })
     return result
+
+
+def _send_json(handler, status, payload):
+    handler.send_response(status)
+    handler.send_header('Content-Type', 'application/json')
+    handler.end_headers()
+    handler.wfile.write(json.dumps(payload, ensure_ascii=False).encode())
+
+
+def _blocking_codes_for_ticket(rule_state, action_type, window):
+    blocks = []
+    for block in (rule_state or {}).get("blocks") or []:
+        scope = str(block.get("scope") or "")
+        code = block.get("code")
+        if not code:
+            continue
+        if scope == "all":
+            blocks.append(code)
+        elif action_type in ("buy", "add") and window and scope.lower() == str(window).lower():
+            blocks.append(code)
+    if action_type in ("buy", "add") and window:
+        wkey = str(window).lower()
+        win = ((rule_state or {}).get("windows") or {}).get(wkey) or {}
+        for code in win.get("blocks") or []:
+            if code not in blocks:
+                blocks.append(code)
+    return blocks
+
+
+def _prepare_trade_ticket(payload):
+    from scripts.db import create_trade_ticket, query_trade_ticket, get_sellable_qty
+
+    allowed = {"buy", "sell", "add", "reduce", "do_t", "clear", "observe"}
+    action_type = str((payload or {}).get("action_type") or "").strip()
+    if action_type == "t":
+        raise ValueError("action_type=t is not accepted; use do_t")
+    if action_type not in allowed:
+        raise ValueError(f"invalid action_type: {action_type}")
+    code = str((payload or {}).get("code") or "").strip()
+    name = str((payload or {}).get("name") or "").strip()
+    if not code:
+        raise ValueError("code is required")
+
+    ctx = _build_trade_context()
+    rule_state = ctx.get("rule_state") or {}
+    market_snapshot = ctx.get("market_snapshot") or {}
+    account_state = load_current_account_state(CACHE.get("live_quotes", {}))
+    trade_date = str(account_state.get("date") or datetime.now().strftime("%Y-%m-%d"))
+    account_snapshot = ctx.get("account_snapshot") or {
+        "account_day_return_pct": account_state.get("account_day_return_pct", account_state.get("pnl_pct")),
+        "lot_reconciliation_ok": account_state.get("lot_reconciliation_ok"),
+    }
+
+    window = str((payload or {}).get("window") or "").strip()
+    blocking_rule_ids = _blocking_codes_for_ticket(rule_state, action_type, window)
+    missing_data = []
+    leg_type = "sell_reduce" if action_type == "reduce" else action_type
+    sellable_qty = None
+    qty = (payload or {}).get("qty")
+    try:
+        qty = int(qty) if qty is not None else None
+    except (TypeError, ValueError):
+        raise ValueError("qty must be an integer when provided")
+
+    if action_type in ("sell", "reduce", "do_t", "clear"):
+        positions = account_state.get("positions") or []
+        pos = next((p for p in positions if str(p.get("代码") or "") == code), None)
+        if pos and pos.get("sellable_qty") is not None:
+            sellable_qty = int(pos.get("sellable_qty") or 0)
+        else:
+            sellable_qty = get_sellable_qty(code, trade_date)
+        if account_state.get("lot_reconciliation_ok") is False:
+            blocking_rule_ids.append("lot_reconciliation")
+        if qty is not None and qty > sellable_qty:
+            blocking_rule_ids.append("sellable_qty")
+            missing_data.append({
+                "field": "sellable_qty",
+                "message": f"requested qty {qty} exceeds sellable_qty {sellable_qty}",
+            })
+
+    if ctx.get("context_status") != "trusted":
+        blocking_rule_ids.append("context_status")
+    audit_degraded = False
+    trade_time = str((payload or {}).get("trade_time") or "").strip()
+    if trade_time and _snapshot_captured_after_trade(trade_date, trade_time, ctx.get("context_captured_at")):
+        blocking_rule_ids.append("snapshot_captured_after_trade")
+        audit_degraded = True
+    rule_snapshot_hash = ctx.get("rule_snapshot_hash")
+    today_execution_card_id = ctx.get("today_execution_card_id")
+    if not rule_snapshot_hash or not today_execution_card_id:
+        blocking_rule_ids.append("rule_snapshot_hash")
+
+    blocking_rule_ids = list(dict.fromkeys(blocking_rule_ids))
+    human_override_reason = str((payload or {}).get("human_override_reason") or "").strip()
+    hard_blocks = [code for code in blocking_rule_ids if code != "snapshot_captured_after_trade"]
+    non_overridable_blocks = {"context_status", "rule_snapshot_hash", "sellable_qty", "lot_reconciliation"}
+    override_to_audit = (
+        audit_degraded
+        and human_override_reason
+        and hard_blocks
+        and not any(code in non_overridable_blocks for code in hard_blocks)
+    )
+    status = (
+        "blocked" if hard_blocks and not override_to_audit
+        else ("audit_degraded" if audit_degraded or override_to_audit else ("draft" if action_type == "observe" else "executable"))
+    )
+
+    ticket_id = create_trade_ticket({
+        "trade_date": trade_date,
+        "code": code,
+        "name": name,
+        "action_type": action_type,
+        "status": status,
+        "window": window,
+        "intent_text": (payload or {}).get("intent_text"),
+        "rule_state_json": rule_state,
+        "market_snapshot_json": market_snapshot,
+        "account_snapshot_json": account_snapshot,
+        "max_qty": qty,
+        "stop_line": (payload or {}).get("stop_line"),
+        "expected_r": (payload or {}).get("expected_r"),
+        "missing_data_json": missing_data,
+        "blocking_rule_ids_json": blocking_rule_ids,
+        "triggered_rule_ids_json": (payload or {}).get("triggered_rule_ids") or [],
+        "account_day_return_pct": account_snapshot.get("account_day_return_pct"),
+        "sellable_quantity": sellable_qty,
+        "rule_pack_version": ctx.get("rule_pack_version"),
+        "rule_snapshot_hash": rule_snapshot_hash,
+        "today_execution_card_id": today_execution_card_id,
+        "human_override_reason": human_override_reason,
+    })
+    ticket = query_trade_ticket(ticket_id)
+    ticket["leg_type"] = leg_type
+    return ticket
+
+
+def _snapshot_captured_after_trade(trade_date, trade_time, context_captured_at, grace_minutes=5):
+    if not trade_date or not trade_time or not context_captured_at:
+        return False
+    try:
+        trade_dt = datetime.fromisoformat(f"{trade_date}T{trade_time}:00" if len(trade_time) == 5 else f"{trade_date}T{trade_time}")
+        captured = datetime.fromisoformat(str(context_captured_at).replace("Z", "+00:00"))
+        if captured.tzinfo is not None:
+            captured = captured.replace(tzinfo=None)
+        if trade_dt.tzinfo is not None:
+            trade_dt = trade_dt.replace(tzinfo=None)
+    except Exception:
+        return False
+    return (captured - trade_dt).total_seconds() > grace_minutes * 60
+
+
+def _canonical_json(data):
+    return json.dumps(data, ensure_ascii=False, sort_keys=True, separators=(',', ':'))
+
+
+def _parse_fill_input(input_text, ticket):
+    import re
+    text = str(input_text or "")
+    action = "卖出" if "卖" in text else "买入" if "买" in text else ""
+    if not action:
+        raise ValueError("input_text must include 已买 or 已卖")
+    qty_match = re.search(r"(\d+)\s*股", text)
+    nums = re.findall(r"\d+(?:\.\d+)?", text)
+    if not qty_match or not nums:
+        raise ValueError("input_text must include qty and price")
+    qty = int(qty_match.group(1))
+    price_candidates = [float(n) for n in nums if int(float(n)) != qty or "." in n]
+    price = price_candidates[-1] if price_candidates else float(nums[-1])
+    action_type = str(ticket.get("action_type") or "")
+    if action == "卖出":
+        leg_type = "sell_t_old_lot" if action_type in ("do_t", "reduce", "sell") else "sell"
+    else:
+        leg_type = "buy_add" if action_type in ("add", "buy") else "buy"
+    return {
+        "时间": datetime.now().strftime("%H:%M:%S"),
+        "动作": action,
+        "代码": ticket.get("code"),
+        "标的": ticket.get("name"),
+        "价格": price,
+        "数量": qty,
+        "ticket_id": ticket.get("ticket_id"),
+        "leg_type": leg_type,
+        "input_source": "spoken_confirmed",
+        "input_text": text,
+    }
+
+
+def _ticket_can_accept_fills(ticket):
+    return str((ticket or {}).get("status") or "") in {"executable", "confirmed", "partially_filled", "audit_degraded"}
+
+
+def _create_fill_preview(payload):
+    import hashlib
+    import secrets
+    import uuid
+    from scripts.db import query_trade_ticket, get_conn
+
+    ticket_id = str((payload or {}).get("ticket_id") or "")
+    input_text = str((payload or {}).get("input_text") or "")
+    ticket = query_trade_ticket(ticket_id)
+    if not ticket:
+        raise ValueError(f"ticket not found: {ticket_id}")
+    if not _ticket_can_accept_fills(ticket):
+        raise ValueError(f"ticket {ticket_id} cannot accept fills in status {ticket.get('status')}")
+    parsed = _parse_fill_input(input_text, ticket)
+    confirmation_id = f"CONFIRM-{datetime.now().strftime('%Y%m%d')}-{uuid.uuid4().hex[:10]}"
+    preview_token = secrets.token_urlsafe(24)
+    preview_hash = "sha256:" + hashlib.sha256(
+        (ticket_id + input_text + _canonical_json(parsed) + preview_token).encode("utf-8")
+    ).hexdigest()
+    now = datetime.now()
+    expires_at = (now + timedelta(minutes=10)).strftime("%Y-%m-%dT%H:%M:%S")
+    conn = get_conn()
+    conn.execute("""
+        INSERT INTO pending_fill_confirmations
+        (confirmation_id, created_at, expires_at, ticket_id, input_text,
+         parsed_entry_json, preview_token, preview_hash, status)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """, (confirmation_id, now.strftime("%Y-%m-%dT%H:%M:%S"), expires_at,
+          ticket_id, input_text, json.dumps(parsed, ensure_ascii=False),
+          preview_token, preview_hash, "pending"))
+    conn.commit()
+    return {
+        "parsed": {
+            "action": parsed["动作"],
+            "code": parsed["代码"],
+            "name": parsed["标的"],
+            "price": parsed["价格"],
+            "qty": parsed["数量"],
+            "leg_type": parsed["leg_type"],
+        },
+        "requires_confirmation": True,
+        "confirmation_id": confirmation_id,
+        "preview_token": preview_token,
+        "preview_hash": preview_hash,
+    }
+
+
+def _confirm_fill(payload, headers):
+    from scripts.db import get_conn, close_conn, record_confirmed_fill
+
+    allowed_actors = {"yimu", "agent:oumi", "agent:yangmi", "manual_backfill", "correction"}
+    confirmed_by = str((payload or {}).get("confirmed_by") or "")
+    if confirmed_by not in allowed_actors:
+        return 403, {"ok": False, "error": f"unknown confirmed_by: {confirmed_by}"}
+    if confirmed_by.startswith("agent:"):
+        actor_header = headers.get("X-YM-Confirm-Actor")
+        if actor_header != confirmed_by:
+            return 403, {"ok": False, "error": "X-YM-Confirm-Actor mismatch"}
+
+    confirmation_id = str((payload or {}).get("confirmation_id") or "")
+    preview_token = str((payload or {}).get("preview_token") or "")
+    preview_hash = str((payload or {}).get("preview_hash") or "")
+    conn = get_conn()
+    row = conn.execute(
+        "SELECT * FROM pending_fill_confirmations WHERE confirmation_id = ?",
+        (confirmation_id,),
+    ).fetchone()
+    if not row:
+        return 404, {"ok": False, "error": "confirmation not found"}
+    pending = dict(row)
+    if pending.get("status") != "pending":
+        return 409, {"ok": False, "error": f"confirmation status is {pending.get('status')}"}
+    if str(pending.get("preview_token") or "") != preview_token:
+        return 409, {"ok": False, "error": "preview_token mismatch"}
+    if str(pending.get("preview_hash") or "") != preview_hash:
+        return 409, {"ok": False, "error": "preview_hash mismatch"}
+    if str(pending.get("expires_at") or "") < datetime.now().strftime("%Y-%m-%dT%H:%M:%S"):
+        return 409, {"ok": False, "error": "confirmation expired"}
+    ticket_row = conn.execute(
+        "SELECT * FROM trade_tickets WHERE ticket_id = ?",
+        (pending["ticket_id"],),
+    ).fetchone()
+    ticket = dict(ticket_row) if ticket_row else None
+    if not ticket or not _ticket_can_accept_fills(ticket):
+        return 409, {"ok": False, "error": "ticket cannot accept fills"}
+    parsed = json.loads(pending.get("parsed_entry_json") or "{}")
+    parsed["confirmed_by"] = confirmed_by
+    parsed["audit_note"] = f"confirmed via {confirmation_id}"
+    parsed["event_id"] = confirmation_id
+    ctx = _build_trade_context()
+    close_conn()
+    try:
+        result = record_confirmed_fill(
+            parsed,
+            rule_state=ctx.get("rule_state"),
+            market_snapshot=ctx.get("market_snapshot"),
+            confirmation={
+                "context_captured_at": ctx.get("context_captured_at"),
+                "context_status": ctx.get("context_status"),
+                "context_unavailable_reason": ctx.get("context_unavailable_reason"),
+            },
+        )
+    except ValueError as e:
+        return 409, {"ok": False, "error": str(e)}
+    conn = get_conn()
+    conn.execute(
+        "UPDATE pending_fill_confirmations SET status = 'confirmed', confirmed_at = ?, confirmed_by = ? WHERE confirmation_id = ?",
+        (datetime.now().strftime("%Y-%m-%dT%H:%M:%S"), confirmed_by, confirmation_id),
+    )
+    conn.commit()
+    return 200, {"ok": True, **result}
 
 
 def _load_dashboard_data():
@@ -1049,6 +1481,18 @@ def _live_index_with_baseline():
     return li
 
 
+def _kline_15m_payload(key, now=None):
+    """Return W11 15min rows only when they are marked as today's data."""
+    rows = CACHE.get(key, [])
+    if not rows:
+        return []
+    ref = now or datetime.now()
+    today = ref.strftime("%Y-%m-%d")
+    if CACHE.get("kline_15m_date") != today:
+        return []
+    return rows
+
+
 def _build_live_quotes_payload(rule_state=None):
     """Build the live payload shared by polling and SSE endpoints."""
     return {
@@ -1060,9 +1504,9 @@ def _build_live_quotes_payload(rule_state=None):
         'sector_inflow': CACHE.get('sector_inflow', {}),
         'northbound': CACHE.get('northbound', {}),
         'iwencai': CACHE.get('iwencai', {}),
-        '上证15min': CACHE.get('上证15min', []),
-        '深证15min': CACHE.get('深证15min', []),
-        '创业15min': CACHE.get('创业15min', []),
+        '上证15min': _kline_15m_payload('上证15min'),
+        '深证15min': _kline_15m_payload('深证15min'),
+        '创业15min': _kline_15m_payload('创业15min'),
         'rule_state': rule_state if rule_state is not None else _build_rule_state(),
     }
 
@@ -1640,6 +2084,22 @@ class BridgeHandler(SimpleHTTPRequestHandler):
             finally:
                 self._db_close()
             return
+        elif parsed.path == '/api/trade/tickets':
+            _ensure_db()
+            try:
+                from scripts.db import query_trade_tickets
+                params = parse_qs(parsed.query)
+                date = (params.get('date') or [None])[0]
+                tickets = query_trade_tickets(
+                    date_from=date,
+                    date_to=date,
+                    code=(params.get('code') or [None])[0],
+                    status=(params.get('status') or [None])[0],
+                )
+                _send_json(self, 200, {'ok': True, 'tickets': tickets})
+            finally:
+                self._db_close()
+            return
         elif parsed.path == '/api/health':
             _ensure_db()
             try:
@@ -1889,6 +2349,65 @@ class BridgeHandler(SimpleHTTPRequestHandler):
         super().end_headers()
 
     def do_POST(self):
+        parsed = urlparse(self.path)
+        if parsed.path == '/api/trade/tickets/prepare':
+            length = int(self.headers.get('Content-Length', 0))
+            body = self.rfile.read(length)
+            try:
+                payload = json.loads(body or b'{}')
+            except Exception as e:
+                _send_json(self, 400, {'ok': False, 'error': str(e)})
+                return
+            _ensure_db()
+            try:
+                ticket = _prepare_trade_ticket(payload)
+                _send_json(self, 200, {'ok': True, 'ticket': ticket})
+            except ValueError as e:
+                _send_json(self, 400, {'ok': False, 'error': str(e)})
+            except Exception as e:
+                _send_json(self, 500, {'ok': False, 'error': str(e)})
+            finally:
+                self._db_close()
+            return
+
+        if parsed.path == '/api/trade/fills/preview':
+            length = int(self.headers.get('Content-Length', 0))
+            body = self.rfile.read(length)
+            try:
+                payload = json.loads(body or b'{}')
+            except Exception as e:
+                _send_json(self, 400, {'ok': False, 'error': str(e)})
+                return
+            _ensure_db()
+            try:
+                result = _create_fill_preview(payload)
+                _send_json(self, 200, {'ok': True, **result})
+            except ValueError as e:
+                _send_json(self, 400, {'ok': False, 'error': str(e)})
+            except Exception as e:
+                _send_json(self, 500, {'ok': False, 'error': str(e)})
+            finally:
+                self._db_close()
+            return
+
+        if parsed.path == '/api/trade/fills/confirm':
+            length = int(self.headers.get('Content-Length', 0))
+            body = self.rfile.read(length)
+            try:
+                payload = json.loads(body or b'{}')
+            except Exception as e:
+                _send_json(self, 400, {'ok': False, 'error': str(e)})
+                return
+            _ensure_db()
+            try:
+                status, result = _confirm_fill(payload, self.headers)
+                _send_json(self, status, result)
+            except Exception as e:
+                _send_json(self, 500, {'ok': False, 'error': str(e)})
+            finally:
+                self._db_close()
+            return
+
         if self.path == '/api/sync':
             length = int(self.headers.get('Content-Length', 0))
             body = self.rfile.read(length)
@@ -2031,61 +2550,86 @@ class BridgeHandler(SimpleHTTPRequestHandler):
                         }).encode())
                         return
 
-                    # Sell quantity validation — done BEFORE insert, but note:
-                    # the atomic gate in insert_trade_with_context also checks this
-                    if '卖' in action:
-                        acct = load_current_account_state(CACHE.get('live_quotes', {}))
-                        positions = acct.get('positions') or []
-                        code = str(entry.get('代码', ''))
-                        sell_qty = int(entry.get('数量', 0) or 0)
-                        pos = next((p for p in positions if str(p.get('代码','')) == code), None)
-                        avail = int(pos.get('数量', 0) or 0) if pos else 0
-                        if sell_qty > avail:
+                    input_source = str(entry.get('input_source', '') or '')
+                    ticket_id = str(entry.get('ticket_id', '') or '')
+                    if not ticket_id:
+                        if input_source not in ('manual_backfill', 'correction'):
                             self.send_response(409)
                             self.send_header('Content-Type', 'application/json')
                             self.end_headers()
                             self.wfile.write(json.dumps({
-                                'ok': False, 'error': f'sell qty {sell_qty} exceeds available {avail} for {code}'
+                                'ok': False,
+                                'error': 'ticket_id required; /api/sync is recovery-only without ticket',
+                            }).encode())
+                            return
+                        missing = [
+                            key for key in ('confirmed_by', 'audit_note')
+                            if not str(entry.get(key, '') or '').strip()
+                        ]
+                        if not str(entry.get('原因', '') or '').strip():
+                            missing.append('reason')
+                        if missing:
+                            self.send_response(400)
+                            self.send_header('Content-Type', 'application/json')
+                            self.end_headers()
+                            self.wfile.write(json.dumps({
+                                'ok': False,
+                                'error': f"manual_backfill missing required fields: {missing}",
                             }).encode())
                             return
 
-                    # Event idempotency
-                    evt_id = str(entry.get('event_id', '') or '')
-
                     _ensure_db()
                     try:
-                        from scripts.db import insert_trade_with_context
+                        from scripts.db import create_trade_ticket, record_confirmed_fill
                         today = now.strftime('%Y-%m-%d')
-                        # 构建服务端可信成交上下文
                         ctx = _build_trade_context()
-                        inserted, trade_id, status = insert_trade_with_context({
-                            'trade_date': today, 'trade_time': trade_time,
-                            'action': action, 'code': entry.get('代码', ''),
-                            'name': entry.get('标的', ''), 'price': entry.get('价格'),
-                            'qty': entry.get('数量'), 'window': entry.get('窗口'),
-                            'reason': entry.get('原因'), 'event_id': evt_id,
-                        }, rule_state=ctx['rule_state'], market_snapshot=ctx['market_snapshot'],
-                           context_captured_at=ctx['context_captured_at'],
-                           context_status=ctx['context_status'],
-                           context_unavailable_reason=ctx['context_unavailable_reason'])
+                        if not ticket_id:
+                            action_type = 'sell' if '卖' in action else 'buy'
+                            ticket_id = create_trade_ticket({
+                                'trade_date': today,
+                                'code': entry.get('代码', ''),
+                                'name': entry.get('标的', ''),
+                                'action_type': action_type,
+                                'status': 'confirmed',
+                                'intent_text': entry.get('原因', ''),
+                                'human_override_reason': entry.get('原因', ''),
+                                'review_note': entry.get('audit_note', ''),
+                                'rule_state_json': ctx.get('rule_state'),
+                                'market_snapshot_json': ctx.get('market_snapshot'),
+                                'rule_pack_version': ctx.get('rule_pack_version'),
+                                'rule_snapshot_hash': ctx.get('rule_snapshot_hash'),
+                                'today_execution_card_id': ctx.get('today_execution_card_id'),
+                            })
+                            entry['ticket_id'] = ticket_id
+                            entry.setdefault('trade_group_id', f'BACKFILL-{today}-{entry.get("代码", "")}')
+                            entry.setdefault('leg_type', 'manual_backfill')
+                        result = record_confirmed_fill(
+                            entry,
+                            rule_state=ctx.get('rule_state'),
+                            market_snapshot=ctx.get('market_snapshot'),
+                            confirmation={
+                                'context_captured_at': ctx.get('context_captured_at'),
+                                'context_status': ctx.get('context_status'),
+                                'context_unavailable_reason': ctx.get('context_unavailable_reason'),
+                            },
+                        )
+                        trade_id = result['trade_id']
+                        status = result['status']
+                        ticket_id = result['ticket_id']
                     except ValueError as e:
-                        # 原子卖出门禁 → 409
-                        status_code = 409 if 'exceeds available' in str(e) else 400
+                        msg = str(e)
+                        status_code = 409 if ('exceeds sellable' in msg or 'ticket_id required' in msg) else 400
                         self.send_response(status_code)
                         self.send_header('Content-Type', 'application/json')
                         self.end_headers()
-                        self.wfile.write(json.dumps({'ok': False, 'error': str(e)}).encode())
-                        if status_code == 409:
-                            print(f"  [bridge] Atomic sell gate: {e}")
-                        else:
-                            print(f"  [bridge] SQLite trade insert error: {e}")
+                        self.wfile.write(json.dumps({'ok': False, 'error': msg}).encode())
                         return
                     except Exception as e:
-                        self.send_response(400)
+                        self.send_response(500)
                         self.send_header('Content-Type', 'application/json')
                         self.end_headers()
                         self.wfile.write(json.dumps({'ok': False, 'error': str(e)}).encode())
-                        print(f"  [bridge] SQLite trade insert error: {e}")
+                        print(f"  [bridge] Ticket-aware sync error: {e}")
                         return
 
                     if positions_updated:
@@ -2095,9 +2639,9 @@ class BridgeHandler(SimpleHTTPRequestHandler):
                     self.send_header('Content-Type', 'application/json')
                     self.end_headers()
                     self.wfile.write(json.dumps({
-                        'ok': True, 'status': status, 'trade_id': trade_id,
+                        'ok': True, 'status': status, 'trade_id': trade_id, 'ticket_id': ticket_id,
                     }).encode())
-                    print(f"  [bridge] Synced {status} trade_id={trade_id} → {DATA_FILE}")
+                    print(f"  [bridge] Synced {status} trade_id={trade_id} ticket_id={ticket_id} → {DATA_FILE}")
                 elif tlist:
                     self.send_response(409)
                     self.send_header('Content-Type', 'application/json')
@@ -2662,9 +3206,15 @@ if __name__ == '__main__':
     # 冷启动：强制执行一次初始采集填充缓存（不受 is_trading_time 限制）
     # 云端数据源可能慢或限流，不能阻塞 HTTP ready。
     start_cold_bootstrap([
-        quotes.collect_index, quotes.collect_quotes, quotes.collect_sectors,
-        iwencai_poll.poll_iwencai_sentiment, quotes.collect_yesterday_compare,
-        quotes.collect_kline_15m, quotes.log_pnl_snapshot, quotes.collect_hot_list,
+        market_data.poll_sector_inflow,
+        iwencai_poll.poll_iwencai_sentiment,
+        quotes.collect_quotes,
+        quotes.collect_yesterday_compare,
+        quotes.collect_hot_list,
+        quotes.collect_index,
+        quotes.collect_sectors,
+        quotes.collect_kline_15m,
+        quotes.log_pnl_snapshot,
     ])
 
     print(f'[bridge] 看板桥接服务启动 → http://localhost:{port}')

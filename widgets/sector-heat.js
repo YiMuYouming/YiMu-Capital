@@ -1,217 +1,244 @@
-// widgets/sector-heat.js — W10 板块热力 v3.3 (三行结构·角色分层)
+// widgets/sector-heat.js — W10 板块热力 v4.0 (复盘SSOT + 盘中校验)
 'use strict';
+
+function _w10CleanText(value) {
+  return String(value == null ? '' : value)
+    .replace(/[\u{1F300}-\u{1FAFF}\u2600-\u27BF]/gu, '')
+    .replace(/[★☆⭐✅❌⚠️🔥🆕🚨🔴🟡🔵🟢⚫⚪🥇🥈🥉📶🔬📱🔌]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function _w10Norm(value) {
+  var s = _w10CleanText(value).replace(/[（）()【】\[\]\s]/g, '').toLowerCase();
+  var aliases = [
+    ['半导体产业链', '半导体'], ['半导体存储', '半导体'], ['半导体/存储', '半导体'],
+    ['先进封装', '半导体'], ['元件pcb', 'pcb'], ['元件/pcb', 'pcb'], ['pcb链', 'pcb'],
+    ['通信设备', '通信设备'], ['cpo光通信', '通信设备'], ['cpo/光通信', '通信设备'], ['光通信', '通信设备'],
+    ['消费电子', '消费电子'], ['电力改革', '电力'], ['电力储能', '电力'], ['电力', '电力']
+  ];
+  for (var i = 0; i < aliases.length; i++) {
+    if (s.indexOf(aliases[i][0]) >= 0) return aliases[i][1];
+  }
+  return s;
+}
+
+function _w10Num(value) {
+  if (value == null || value === '' || value === '—') return null;
+  var m = String(value).replace(/,/g, '').match(/[+-]?\d+(?:\.\d+)?/);
+  return m ? parseFloat(m[0]) : null;
+}
+
+function _w10Pct(value) {
+  var n = _w10Num(value);
+  return n == null ? '—' : (n >= 0 ? '+' : '') + n.toFixed(2) + '%';
+}
+
+function _w10Yi(value) {
+  var n = _w10Num(value);
+  return n == null ? '—' : (n >= 0 ? '+' : '') + n.toFixed(1) + '亿';
+}
+
+function _w10Class(n) {
+  n = _w10Num(n);
+  return n == null ? 'muted' : n > 0 ? 'up' : n < 0 ? 'down' : 'muted';
+}
+
+function _w10ExtractStatus(sec) {
+  var status = String(sec && sec['状态'] || '');
+  var pct = sec && (sec['涨跌幅'] != null ? sec['涨跌幅'] : sec['板块涨跌幅']);
+  var flow = sec && (sec['主力净流入'] != null ? sec['主力净流入'] : sec['净流入']);
+  var ma = sec && (sec['5日线位置'] || sec['MA5位置'] || sec['均线']);
+
+  if (pct == null) {
+    var pm = status.match(/[+-]?\d+(?:\.\d+)?%/);
+    if (pm) pct = pm[0];
+  }
+  if (flow == null) {
+    var fm = status.match(/(?:主力)?([+-]\d+(?:\.\d+)?)\s*亿/);
+    if (fm) flow = fm[1];
+  }
+  if (!ma) {
+    if (/站上|均线上升|多头/.test(status)) ma = '站上';
+    else if (/跌破|破5日|破MA5/.test(status)) ma = '跌破';
+  }
+
+  return {
+    pct: _w10Num(pct),
+    flow: _w10Num(flow),
+    ma: ma ? _w10CleanText(ma) : '',
+    note: _w10CleanText(status)
+  };
+}
 
 class SectorHeatWidget extends YiMuWidget {
   constructor(config) {
     super(config);
-    this._insights = null;
+    this._sectorInflow = null;
+    this._sectorInflowLoading = false;
   }
 
   render(data) {
-    // 异步加载 LLM 研判
-    if (!this._insights) this._loadInsights();
-    var self = this;
     var body = this.getBody();
     if (!body) return;
+
     var sectors = (data && data.sectors) || [];
     var liveQ = (data && data.live_quotes) || {};
     var lbPool = (data && data.lianban_pool) || [];
     var trPool = (data && data.trend_pool) || [];
     var liveSectors = (data && data.live_sectors) || {};
+    var inflowRaw = (data && data.sector_inflow) || this._sectorInflow || [];
+    var inflow = Array.isArray(inflowRaw) ? inflowRaw : (inflowRaw.data || []);
+    if (!inflow.length) this._loadSectorInflow();
 
     if (!sectors.length) {
-      body.innerHTML = '<div style="padding:var(--sp-lg);text-align:center;color:var(--text-disabled)">板块数据未录入</div>';
+      body.innerHTML = '<div class="w10-empty">板块状态未录入</div>';
       this.updateTimestamp();
       return;
     }
 
-    var ALIAS = {
-      'CPO':'CPO/光通信','光通信':'CPO/光通信','光纤/光通信':'CPO/光通信','CPO/光通信':'CPO/光通信',
-      '半导体':'半导体','半导体产业链':'半导体','半导体/存储':'半导体','半导体材料':'半导体',
-      '电力':'电力','电力/算电':'电力','电力改革':'电力','电力/储能':'电力',
-      '数据中心':'数据中心','数据中心供电':'数据中心',
-      'PCB':'PCB','PCB链':'PCB',
-      '机器人':'机器人','机器人🆕':'机器人',
-      '光伏':'光伏','光伏🆕':'光伏',
-      '算力租赁':'算力租赁','算力':'算力租赁',
-      '存储芯片':'存储芯片',
-    };
-    function norm(n) {
-      // 去掉emoji后缀再匹配
-      var clean = String(n||'').replace(/🆕|⬇️|🔄|✅|❌/g, '').trim();
-      return ALIAS[clean] || ALIAS[n] || n;
-    }
-    function matchLive(name) {
-      var n = norm(name);
-      if (liveSectors[n]) return liveSectors[n];
-      for (var k in liveSectors) { if (n.indexOf(k)>=0||k.indexOf(n)>=0) return liveSectors[k]; }
+    function liveBySector(name) {
+      var target = _w10Norm(name);
+      if (liveSectors[name]) return liveSectors[name];
+      for (var k in liveSectors) {
+        if (_w10Norm(k) === target) return liveSectors[k];
+      }
+      for (var i = 0; i < inflow.length; i++) {
+        if (_w10Norm(inflow[i].name) === target) return inflow[i];
+      }
+      for (var j = 0; j < inflow.length; j++) {
+        var n = _w10Norm(inflow[j].name);
+        if (target && n && (target.indexOf(n) >= 0 || n.indexOf(target) >= 0)) return inflow[j];
+      }
       return null;
     }
 
-    // 获取板块关联的所有标的，按角色分组
-    function sectorRoles(sectorName) {
-      var result = {龙头:[], 中军:[], 跟风:[], 高度板:[], 趋势:[], 锚定:[]};
-      lbPool.concat(trPool).forEach(function(s) {
-        if (norm(s['板块']||'') !== norm(sectorName)) return;
-        var role = s['角色']||'';
-        var code = s['代码']||'';
-        var q = liveQ[code]||{};
-        var chg = parseFloat(q['涨幅']||s['涨幅']||0)||0;
-        var cls = chg>0?'up':chg<0?'down':'';
-        var tag = '<span style="white-space:nowrap">'+
-          '<span style="color:var(--text-primary)">'+s['标的']+'</span> '+
-          '<span class="'+cls+'" style="font-family:var(--font-mono)">'+(chg>=0?'+':'')+chg.toFixed(1)+'%</span></span>';
-
-        if (role.indexOf('龙头')>=0) result['龙头'].push(tag);
-        else if (role.indexOf('中军')>=0) result['中军'].push(tag);
-        else if (role.indexOf('跟风')>=0) result['跟风'].push(tag);
-        else if (role.indexOf('高度板')>=0) result['高度板'].push(tag);
-        else if (role.indexOf('趋势')>=0) result['趋势'].push(tag);
-        else result['跟风'].push(tag); // 兜底
-      });
-      return result;
+    function stockChange(row) {
+      var code = row['代码'] || '';
+      var q = liveQ[code] || {};
+      var n = _w10Num(q['涨幅']);
+      if (n == null) n = _w10Num(row['涨幅']);
+      return n;
     }
 
-    // === 分组 ===
-    var groups = [
-      {key:'主线', label:'主线', icon:'🔴', color:'var(--up)', sectors:[]},
-      {key:'趋势主线', label:'趋势主线', icon:'🔵', color:'var(--info)', sectors:[]},
-      {key:'强支线', label:'强支线', icon:'🟠', color:'var(--warn)', sectors:[]},
-      {key:'观察', label:'观察/候选', icon:'⚪', color:'var(--text-secondary)', sectors:[]},
-      {key:'退潮', label:'退潮', icon:'⚫', color:'var(--text-disabled)', sectors:[]},
-    ];
+    function stockRank(row) {
+      var role = row['角色'] || '';
+      var action = row['操作'] || '';
+      if (/持仓|主趋势/.test(role + action)) return 0;
+      if (/买入|回踩|操作/.test(action)) return 1;
+      if (/候选|观察/.test(role + action)) return 2;
+      return 3;
+    }
+
+    function sectorStocks(name, limit) {
+      var target = _w10Norm(name);
+      var rows = lbPool.concat(trPool).filter(function(row) {
+        return _w10Norm(row['板块']) === target;
+      });
+      rows.sort(function(a, b) {
+        var r = stockRank(a) - stockRank(b);
+        if (r !== 0) return r;
+        return Math.abs(stockChange(b) || 0) - Math.abs(stockChange(a) || 0);
+      });
+      return limit == null ? rows : rows.slice(0, limit);
+    }
+
+    function averageStockChange(rows) {
+      var vals = rows.map(stockChange).filter(function(v) { return v != null && !isNaN(v); });
+      if (!vals.length) return null;
+      return vals.reduce(function(a, b) { return a + b; }, 0) / vals.length;
+    }
+
+    function typeTone(type) {
+      type = _w10CleanText(type);
+      if (/分歧|退潮|风险|背离/.test(type)) return 'risk';
+      if (/防守|观察|候选/.test(type)) return 'watch';
+      if (/主线|强/.test(type)) return 'main';
+      return 'neutral';
+    }
+
+    var html = '<div class="w10-board">';
+    html += '<div class="w10-header"><span>复盘板块</span><span>盘中校验</span></div>';
 
     sectors.forEach(function(sec) {
-      var type = sec['类型']||'';
-      var placed = false;
-      if (type.indexOf('退潮')>=0) { groups[4].sectors.push(sec); placed=true; }
-      else if (type.indexOf('主线')>=0 && type.indexOf('趋势')>=0) { groups[1].sectors.push(sec); placed=true; }
-      else if (type.indexOf('主线')>=0) { groups[0].sectors.push(sec); placed=true; }
-      else if (type.indexOf('支线')>=0) { groups[2].sectors.push(sec); placed=true; }
-      else { groups[3].sectors.push(sec); }
-    });
-
-    var html = '';
-
-    groups.forEach(function(g) {
-      if (!g.sectors.length) return;
-
-      html += '<div style="margin-bottom:var(--sp-sm)">'+
-        '<div style="display:flex;align-items:center;gap:6px;margin-bottom:1px;padding:2px var(--sp-sm)">'+
-          '<span style="font-size:15px">'+g.icon+'</span>'+
-          '<span style="font-weight:700;font-size:13px;color:'+g.color+'">'+g.label+'</span>'+
-          '<span style="font-size:var(--fs-label);color:var(--text-disabled)">'+g.sectors.length+'</span>'+
-        '</div>';
-
-      g.sectors.forEach(function(sec) {
-        var name = sec['板块']||'—';
-        var live = matchLive(name) || {};
-        var chgNum = parseFloat(live['涨跌幅']);
-        var chgStr = !isNaN(chgNum) ? (chgNum>=0?'+':'')+chgNum.toFixed(2)+'%' : '—';
-        var chgCls = chgNum>=0?'up':'down';
-        var leader = sec['龙头']||'';
-        var roles = sectorRoles(name);
-
-        // 卡片开始
-        html += '<div style="margin:3px 0 3px 8px;padding:4px var(--sp-sm);background:var(--bg-base);border:1px solid var(--border-light);border-radius:var(--radius-md);border-left:3px solid '+g.color+'">';
-
-        // === 行1：板块数据（TDX实时）===
-        var amtTrend = live['成交额趋势']||'';
-        var amtCls = amtTrend==='放量'?'up':amtTrend==='缩量'?'down':'';
-        var distMA5 = live['距MA5'];
-        var distStr = (distMA5 != null) ? ((distMA5>=0?'+':'')+distMA5.toFixed(1)+'%') : '';
-        var distCls = (distMA5 != null) ? (distMA5>=0?'up':'down') : '';
-        html += '<div style="font-size:13px;padding-bottom:3px">'+
-          '<span style="font-weight:700;color:var(--text-primary)">'+name+'</span>'+
-          '<span class="'+chgCls+'" style="font-family:var(--font-mono);font-weight:700;font-size:14px;margin-left:var(--sp-sm)">'+chgStr+'</span>'+
-          (distStr ? '<span class="'+distCls+'" style="font-family:var(--font-mono);font-size:11px;margin-left:4px">距MA5 '+distStr+'</span>' : '')+
-          (amtTrend ? '<span class="'+amtCls+'" style="font-size:11px;margin-left:4px">'+amtTrend+'</span>' : '')+
-          '<span style="font-size:9px;color:var(--text-disabled);margin-left:2px">⚡</span>'+
-          '</div>';
-
-        // === 行2：个股（带角色标签）===
-        var roleOrder = [
-          {key:'高度板', label:'高', color:'var(--warn)'},
-          {key:'龙头', label:'龙头', color:'var(--up)'},
-          {key:'中军', label:'中军', color:'var(--info)'},
-          {key:'趋势', label:'趋势', color:'var(--down)'},
-          {key:'跟风', label:'跟风', color:'var(--text-secondary)'},
-        ];
-        var stockRows = [];
-        roleOrder.forEach(function(r) {
-          if (roles[r.key].length) {
-            stockRows.push('<span style="font-size:9px;padding:1px 4px;border-radius:2px;background:'+r.color+'18;color:'+r.color+';margin-right:4px;white-space:nowrap">'+r.label+'</span>'+
-              roles[r.key].join(' '));
-          }
-        });
-        if (stockRows.length) {
-          html += '<div style="font-size:var(--fs-body);padding:2px 0">'+stockRows.join('  ')+'</div>';
-        } else {
-          html += '<div style="font-size:var(--fs-body);color:var(--text-disabled);padding:2px 0">自选池无此板块标的</div>';
-        }
-
-        // === 行3：LLM（从 llm_insights 读取最新研判）===
-        var llmText = '';
-        if (self._insights) {
-          // 取今天最新一条研判中匹配此板块的内容
-          var today = new Date().toISOString().slice(0,10);
-          var todayData = self._insights[today] || {};
-          var keys = Object.keys(todayData).sort().reverse();
-          for (var ki = 0; ki < keys.length; ki++) {
-            var text = todayData[keys[ki]].text || '';
-            if (text.indexOf(name) >= 0 || text.indexOf(norm(name)) >= 0) {
-              llmText = text; break;
-            }
-          }
-          // 无板块匹配→取最新一条全文
-          if (!llmText && keys.length > 0) {
-            llmText = todayData[keys[0]].text || '';
-          }
-        }
-        html += '<div style="font-size:11px;color:var(--text-secondary)">';
-        if (llmText) {
-          var short = llmText.length > 120 ? llmText.substring(0, 120) + '...' : llmText;
-          html += '<span style="border-left:2px solid var(--info);padding-left:6px">🤖 '+short+'</span>';
-        } else {
-          html += '<span style="border:1px dashed var(--border-light);padding:1px 6px;border-radius:3px;color:var(--text-disabled)">🤖 待分析</span>';
-        }
-        html += '</div>';
-
-        html += '</div>'; // 卡片结束
-      });
-
-      html += '</div>';
-    });
-
-    // === 行业净流入 TOP5 (ym-stock-data) ===
-    var inflow = (data && data.sector_inflow) || [];
-    if (inflow.length) {
-      html += '<div style="margin-top:8px;padding:6px var(--sp-sm);background:var(--bg-base);border:1px solid var(--border-light);border-radius:var(--radius-md)">';
-      html += '<span style="font-weight:700;font-size:13px;color:var(--info)">行业净流入 TOP5</span>';
-      html += '<div style="margin-top:4px;display:flex;flex-wrap:wrap;gap:6px">';
-      for (var i = 0; i < Math.min(5, inflow.length); i++) {
-        var s = inflow[i];
-        var nf = s.net_inflow_yi || 0;
-        html += '<span style="font-size:11px;padding:2px 6px;background:var(--bg-base);border:1px solid var(--border-light);border-radius:3px">';
-        html += s.name + ' ';
-        html += '<span class="' + (nf > 0 ? 'up' : 'down') + '" style="font-family:var(--font-mono)">' + (nf >= 0 ? '+' : '') + nf.toFixed(1) + '亿</span>';
-        html += '</span>';
+      var name = sec['板块'] || '—';
+      var cleanName = _w10CleanText(name) || '—';
+      var type = _w10CleanText(sec['类型'] || '未分类');
+      var tone = typeTone(type + ' ' + (sec['状态'] || ''));
+      var live = liveBySector(name) || {};
+      var statusInfo = _w10ExtractStatus(sec);
+      var pct = _w10Num(live.change_pct != null ? live.change_pct : live['涨跌幅']);
+      if (pct == null) pct = statusInfo.pct;
+      var flow = _w10Num(live.net_inflow_yi != null ? live.net_inflow_yi : live['主力净流入']);
+      if (flow == null) flow = statusInfo.flow;
+      var up = live.up_count;
+      var down = live.down_count;
+      var leader = _w10CleanText(live.leader || sec['龙头'] || '');
+      var leaderChg = _w10Num(live.leader_change_pct);
+      var ma = statusInfo.ma || _w10CleanText(live['MA5方向'] || live['5日线位置'] || '');
+      var source = live && Object.keys(live).length ? '实时' : '复盘';
+      var allStocks = sectorStocks(name);
+      var stocks = allStocks.slice(0, 3);
+      var avgStockPct = averageStockChange(allStocks);
+      if (pct == null && avgStockPct != null) {
+        pct = avgStockPct;
+        source = '池均';
       }
-      html += '</div></div>';
-    }
 
+      html += '<article class="w10-row w10-' + tone + '">';
+      html += '<div class="w10-main">';
+      html += '<div class="w10-title"><b>' + cleanName + '</b><span>' + type + '</span></div>';
+      html += '<div class="w10-meta">' +
+        '<span>涨停 ' + _w10CleanText(sec['涨停数'] || '—') + '</span>' +
+        '<span>梯队 ' + _w10CleanText(sec['梯队'] || '—') + '</span>' +
+        (ma ? '<span>MA5 ' + ma + '</span>' : '') +
+        '</div>';
+      html += '<div class="w10-note">' + (statusInfo.note || '复盘未写状态') + '</div>';
+      html += '</div>';
+
+      html += '<div class="w10-live">';
+      html += '<div class="w10-live-top">' +
+        '<span class="' + _w10Class(pct) + '">' + _w10Pct(pct) + '</span>' +
+        '<span class="' + _w10Class(flow) + '">' + _w10Yi(flow) + '</span>' +
+        '<em>' + source + '</em>' +
+        '</div>';
+      html += '<div class="w10-live-sub">' +
+        (up != null || down != null ? '<span>涨跌 ' + (up != null ? up : '—') + ':' + (down != null ? down : '—') + '</span>' : '<span>涨跌 —</span>') +
+        (leader ? '<span>领涨 ' + leader + (leaderChg != null ? ' ' + _w10Pct(leaderChg) : '') + '</span>' : '<span>龙头 ' + _w10CleanText(sec['龙头'] || '—') + '</span>') +
+        '</div>';
+      if (stocks.length) {
+        html += '<div class="w10-stocks">';
+        stocks.forEach(function(s) {
+          var chg = stockChange(s);
+          html += '<span><b>' + _w10CleanText(s['标的'] || '') + '</b><i class="' + _w10Class(chg) + '">' + _w10Pct(chg) + '</i></span>';
+        });
+        html += '</div>';
+      } else {
+        html += '<div class="w10-stocks muted">自选池暂无匹配标的</div>';
+      }
+      html += '</div>';
+      html += '</article>';
+    });
+
+    html += '</div>';
     body.innerHTML = html;
     this.updateTimestamp();
   }
 
-  _loadInsights() {
+  _loadSectorInflow() {
+    if (this._sectorInflowLoading || typeof fetch !== 'function') return;
     var self = this;
-    fetch('data/llm_insights.json?t=' + Date.now())
+    this._sectorInflowLoading = true;
+    fetch('/api/live/sectors?t=' + Date.now())
       .then(function(r) { return r.ok ? r.json() : null; })
       .then(function(data) {
-        if (data) { self._insights = data; self._renderBody(); }
+        if (data && (Array.isArray(data) || data.data)) {
+          self._sectorInflow = data;
+          self._renderBody();
+        }
       })
-      .catch(function() {});
+      .catch(function() {})
+      .finally(function() { self._sectorInflowLoading = false; });
   }
 }
 

@@ -1,11 +1,11 @@
 // widget-registry.js — 弈沐资本数据看板 v2.0 组件注册表
-// 16 组件元数据 + 动态加载 + 按类型分组
+// 24 组件元数据 + 动态加载 + 按类型分组
 'use strict';
 
 const WidgetRegistry = (function() {
   var registry = {};
 
-  // === 16 组件元数据 ===
+  // === 24 组件元数据 ===
   var widgets = [
     // 工具类
     { id:'W01', type:'timeline',      title:'时段时间线',   category:'tool',     tier:'slow',   defaultSize:{w:12,h:2},  dataPaths:[], priority:'P0' },
@@ -19,7 +19,7 @@ const WidgetRegistry = (function() {
     // 数据类
     { id:'W04', type:'market-overview',title:'市场全景',    category:'data',     tier:'tick',   defaultSize:{w:6,h:3},  dataPaths:['live_index','market.涨跌比','market.涨停家数','market.跌停家数','iwencai.昨日涨停收益','iwencai.连板收益','iwencai.炸板收益','iwencai.涨停家数','iwencai.跌停家数'], priority:'P0' },
     { id:'W05', type:'sentiment-dash',title:'情绪节点对比', category:'data',     tier:'manual', defaultSize:{w:8,h:5},  dataPaths:['sentiment_nodes','live_index','iwencai.涨停家数','iwencai.跌停家数','iwencai.昨日涨停收益','iwencai.连板收益','iwencai.炸板收益'], priority:'P0' },
-    { id:'W10', type:'sector-heat',   title:'板块热力图',   category:'data',     tier:'fast',   defaultSize:{w:8,h:6},  dataPaths:['sectors','live_sectors','lianban_pool','trend_pool','live_quotes','decision.锚定股状态'], priority:'P1' },
+    { id:'W10', type:'sector-heat',   title:'板块热力图',   category:'data',     tier:'fast',   defaultSize:{w:8,h:6},  dataPaths:['sectors','sector_inflow','live_sectors','lianban_pool','trend_pool','live_quotes','decision.锚定股状态'], priority:'P1' },
     { id:'W11', type:'volume-bars',   title:'15min量价图', category:'data',     tier:'slow',   defaultSize:{w:10,h:6}, dataPaths:['上证15min','深证15min','创业15min'], priority:'P1' },
     { id:'W12', type:'lianban-pool',  title:'连板自选池',   category:'data',     tier:'tick',   defaultSize:{w:12,h:4}, dataPaths:['lianban_pool','live_quotes'], priority:'P1' },
     { id:'W13', type:'trend-pool',    title:'趋势自选池',   category:'data',     tier:'tick',   defaultSize:{w:12,h:4}, dataPaths:['trend_pool','live_quotes'], priority:'P1' },
@@ -36,6 +36,7 @@ const WidgetRegistry = (function() {
     { id:'W21', type:'zt-echelon',  title:'涨停梯队',   category:'data',     tier:'tick',   defaultSize:{w:8,h:7}, dataPaths:['hot_list','iwencai.连板股列表'], priority:'P1' },
     { id:'W22', type:'pnl-curve',   title:'账户收益曲线', category:'data',     tier:'fast',   defaultSize:{w:12,h:10}, dataPaths:['live_quotes','pnl_live'], priority:'P1' },
     { id:'W23', type:'trade-review',title:'逐笔复盘',     category:'data',     tier:'manual', defaultSize:{w:12,h:5},  dataPaths:[], priority:'P1' },
+    { id:'W24', type:'trade-tickets',title:'交易票据',     category:'risk',     tier:'manual', defaultSize:{w:12,h:5},  dataPaths:['trade_tickets'], priority:'P0' },
   ];
 
   // 注册组件 class

@@ -2,7 +2,8 @@
 
 全隔离：temp DB，不访问 data/**，不调用真实写接口。
 """
-import json, tempfile, threading, unittest
+import io, json, tempfile, threading, unittest
+from contextlib import redirect_stdout
 from datetime import datetime
 from pathlib import Path
 from unittest import mock
@@ -62,6 +63,7 @@ class ReviewContextTest(unittest.TestCase):
 
     def setUp(self):
         _setup_temp_db(self)
+        self._trade_seq = 0
 
     def tearDown(self):
         _teardown_temp_db(self)
@@ -130,6 +132,229 @@ class ReviewContextTest(unittest.TestCase):
         self.assertEqual(r['rule_state']['version'], 'g1a-v1')
         self.assertIn('market_snapshot', r)
         self.assertEqual(r['outcome'], 'W1追涨 测试A 浮盈')
+
+
+class DailyTicketReviewTest(unittest.TestCase):
+
+    def setUp(self):
+        _setup_temp_db(self)
+        self._trade_seq = 0
+
+    def tearDown(self):
+        _teardown_temp_db(self)
+
+    def _insert_trade(self, action, code, name, qty, ticket_id, group_id, window='W2'):
+        self._trade_seq += 1
+        db.insert_trade({
+            'trade_date': '2026-06-03', 'trade_time': f'10:{self._trade_seq:02d}',
+            'action': action, 'code': code, 'name': name, 'price': 10,
+            'qty': qty, 'window': window, 'reason': 'pilot',
+        })
+        tid = db._exec("SELECT id FROM trade_records ORDER BY id DESC LIMIT 1")[0]['id']
+        db.link_trade_to_ticket(tid, ticket_id, group_id, 'fill')
+        return tid
+
+    def test_build_daily_ticket_review_summary(self):
+        from scripts.account_ssot import build_daily_ticket_review
+
+        db.create_trade_ticket({
+            'ticket_id': 'TICKET-20260603-600726-EXIT',
+            'trade_date': '2026-06-03', 'code': '600726', 'name': '华电能源',
+            'action_type': 'clear', 'status': 'closed_with_conflict',
+            'window': 'W2', 'triggered_rule_ids': ['SELL-CLEAR-001'],
+        })
+        db.create_trade_ticket({
+            'ticket_id': 'TICKET-20260603-002281-T',
+            'trade_date': '2026-06-03', 'code': '002281', 'name': '光迅科技',
+            'action_type': 'do_t', 'status': 'filled', 'window': 'W2',
+            'triggered_rule_ids': ['T-001'],
+        })
+        db.create_trade_ticket({
+            'ticket_id': 'TICKET-20260603-002475-W2-BUY',
+            'trade_date': '2026-06-03', 'code': '002475', 'name': '立讯精密',
+            'action_type': 'buy', 'status': 'filled', 'window': 'W2',
+            'triggered_rule_ids': ['WIN-W2-001'],
+        })
+        for _ in range(3):
+            self._insert_trade('卖出', '600726', '华电能源', 1000, 'TICKET-20260603-600726-EXIT', 'G-HD')
+        self._insert_trade('卖出', '002281', '光迅科技', 500, 'TICKET-20260603-002281-T', 'G-GX')
+        self._insert_trade('买入', '002281', '光迅科技', 500, 'TICKET-20260603-002281-T', 'G-GX')
+        self._insert_trade('卖出', '002281', '光迅科技', 500, 'TICKET-20260603-002281-T', 'G-GX')
+        self._insert_trade('W2买入', '002475', '立讯精密', 300, 'TICKET-20260603-002475-W2-BUY', 'G-LX')
+        db._exec_write("""
+            INSERT INTO ticket_conflict_log
+            (trade_date, ticket_id, code, conflict_type, severity, expected_json, actual_json, note)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """, ('2026-06-03', 'TICKET-20260603-600726-EXIT', '600726',
+              'T1_SELLABLE_MISMATCH', 'high',
+              json.dumps({'sellable': 7000}), json.dumps({'sell': 10000}), 'pilot'))
+
+        summary = build_daily_ticket_review('2026-06-03')
+
+        self.assertEqual(summary['ticket_count'], 3)
+        self.assertEqual(summary['fill_count'], 7)
+        self.assertEqual(len(summary['t1_conflicts']), 1)
+        self.assertEqual(len(summary['do_t_results']), 1)
+        self.assertEqual(summary['by_action_type']['buy'], 1)
+        self.assertIn('3 tickets', summary['review_markdown'])
+        self.assertIn('7 fills', summary['review_markdown'])
+        self.assertIn('1 T+1 conflict candidate', summary['review_markdown'])
+        self.assertIn('1 do-T group', summary['review_markdown'])
+        self.assertIn('1 W2 buy', summary['review_markdown'])
+        self.assertIn('rule_id_stats', summary)
+        self.assertIn('blocked_but_later_would_win_count', summary['rule_id_stats'][0])
+
+
+class BackfillTradeTicketsTest(unittest.TestCase):
+
+    def setUp(self):
+        _setup_temp_db(self)
+        self.ref = Path(self.tmp.name) / "trade_tickets_2026-06-03.md"
+        self.ref.write_text("# pilot\n", encoding="utf-8")
+        self._insert_pilot_trade(42, "09:30", "卖出", "600726", "华电能源", 3000, 8.96)
+        self._insert_pilot_trade(45, "13:46", "卖出", "600726", "华电能源", 2000, 9.57)
+        self._insert_pilot_trade(46, "14:05", "卖出", "600726", "华电能源", 5000, 9.59)
+        self._insert_pilot_trade(43, "10:14", "W1追涨", "002281", "光迅科技", 100, 225.78, "W1")
+        self._insert_pilot_trade(44, "10:15", "W1追涨", "002281", "光迅科技", 100, 226.42, "W1")
+        self._insert_pilot_trade(48, "14:56", "卖出", "002281", "光迅科技", 200, 223.80)
+        self._insert_pilot_trade(47, "14:30", "W2买入", "002475", "立讯精密", 2000, 75.31, "W2")
+
+    def tearDown(self):
+        _teardown_temp_db(self)
+
+    def _insert_pilot_trade(self, tid, time, action, code, name, qty, price, window=None):
+        db._exec_write("""
+            INSERT INTO trade_records
+            (id, trade_date, trade_time, action, code, name, price, qty, window, reason)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (tid, "2026-06-03", time, action, code, name, price, qty, window, "pilot"))
+
+    def test_backfill_dry_run_writes_nothing(self):
+        from scripts.ops import backfill_trade_tickets
+
+        out = io.StringIO()
+        with redirect_stdout(out):
+            backfill_trade_tickets.main([
+                "--date", "2026-06-03", "--dry-run", "--reference", str(self.ref)
+            ])
+
+        self.assertIn("Would create ticket TICKET-20260603-600726-EXIT from trades 42,45,46", out.getvalue())
+        self.assertEqual(db.query_trade_tickets(date_from="2026-06-03", date_to="2026-06-03"), [])
+        rows = db._exec("SELECT COUNT(*) AS n FROM trade_records WHERE ticket_id IS NOT NULL")
+        self.assertEqual(rows[0]["n"], 0)
+
+    def test_backfill_apply_links_all_pilot_trades_and_archives_reference(self):
+        from scripts.ops import backfill_trade_tickets
+
+        out = io.StringIO()
+        with redirect_stdout(out):
+            backfill_trade_tickets.main([
+                "--date", "2026-06-03", "--apply", "--reference", str(self.ref)
+            ])
+
+        tickets = db.query_trade_tickets(date_from="2026-06-03", date_to="2026-06-03", limit=10)
+        self.assertEqual(len(tickets), 3)
+        hd = db.query_trade_ticket("TICKET-20260603-600726-EXIT")
+        self.assertEqual(hd["status"], "closed_with_conflict")
+        linked = db._exec("SELECT COUNT(*) AS n FROM trade_records WHERE trade_date = ? AND ticket_id IS NOT NULL", ("2026-06-03",))
+        self.assertEqual(linked[0]["n"], 7)
+        conflicts = db._exec("SELECT * FROM ticket_conflict_log WHERE conflict_type = ?", ("T1_SELLABLE_MISMATCH",))
+        self.assertEqual(len(conflicts), 1)
+        self.assertIn("Creates 3 trade_tickets", out.getvalue())
+        archived = Path(self.tmp.name) / "reference_archive" / "trade_tickets_2026-06-03.reference_only.md"
+        self.assertTrue(archived.exists())
+        self.assertIn("reference_only: true", archived.read_text(encoding="utf-8"))
+
+
+class BackfillOrphanTradeTicketTest(unittest.TestCase):
+
+    def setUp(self):
+        _setup_temp_db(self)
+        db._exec_write("""
+            INSERT INTO trade_records
+            (id, trade_date, trade_time, action, code, name, price, qty, window,
+             reason, rule_state_json, market_snapshot_json, context_captured_at,
+             context_status)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            49, "2026-06-04", "14:10", "W2买入", "002281", "光迅科技",
+            222.38, 200, "W2", "缩量回踩，加仓",
+            json.dumps({"version": "g1a-v1"}, ensure_ascii=False),
+            json.dumps({"iwencai": {"情绪值": 24.1}}, ensure_ascii=False),
+            "2026-06-04T15:11:29", "trusted",
+        ))
+        db._exec_write("""
+            INSERT INTO position_lots
+            (lot_id, code, name, source_trade_id, buy_date, original_qty, open_qty,
+             cost_price, locked_until, lot_source, migration_source, status)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            "trade:49", "002281", "光迅科技", 49, "2026-06-04",
+            200, 200, 222.38, "2026-06-05", "same_day_trade",
+            "trade_records:49", "open",
+        ))
+
+    def tearDown(self):
+        _teardown_temp_db(self)
+
+    def test_dry_run_writes_nothing(self):
+        from scripts.ops import backfill_orphan_trade_ticket
+
+        result = backfill_orphan_trade_ticket.run(
+            49,
+            apply=False,
+            snapshot_meta={
+                "rule_snapshot_hash": "hash-1",
+                "today_execution_card_id": "EXEC-20260604",
+                "rule_pack_version": "g1a-v1",
+            },
+        )
+
+        self.assertEqual(result["status"], "dry_run")
+        self.assertIsNone(dict(db._exec("SELECT ticket_id FROM trade_records WHERE id = 49")[0])["ticket_id"])
+        self.assertEqual(db.query_trade_tickets(date_from="2026-06-04", date_to="2026-06-04"), [])
+
+    def test_cli_accepts_explicit_snapshot_metadata(self):
+        from scripts.ops import backfill_orphan_trade_ticket
+
+        out = io.StringIO()
+        with redirect_stdout(out):
+            status = backfill_orphan_trade_ticket.main([
+                "--trade-id", "49",
+                "--dry-run",
+                "--rule-snapshot-hash", "hash-1",
+                "--today-execution-card-id", "EXEC-20260604",
+                "--rule-pack-version", "g1a-v1",
+            ])
+
+        self.assertEqual(status, 0)
+        self.assertIn('"rule_snapshot_hash": "hash-1"', out.getvalue())
+        self.assertEqual(db.query_trade_tickets(date_from="2026-06-04", date_to="2026-06-04"), [])
+
+    def test_apply_creates_hashed_posthoc_ticket_and_links_trade_and_lot(self):
+        from scripts.ops import backfill_orphan_trade_ticket
+
+        result = backfill_orphan_trade_ticket.run(
+            49,
+            apply=True,
+            snapshot_meta={
+                "rule_snapshot_hash": "hash-1",
+                "today_execution_card_id": "EXEC-20260604",
+                "rule_pack_version": "g1a-v1",
+            },
+        )
+
+        self.assertEqual(result["status"], "applied")
+        trade = dict(db._exec("SELECT ticket_id, trade_group_id, leg_type FROM trade_records WHERE id = 49")[0])
+        ticket = db.query_trade_ticket(trade["ticket_id"])
+        lot = dict(db._exec("SELECT source_ticket_id FROM position_lots WHERE source_trade_id = 49")[0])
+        self.assertEqual(ticket["rule_snapshot_hash"], "hash-1")
+        self.assertEqual(ticket["today_execution_card_id"], "EXEC-20260604")
+        self.assertEqual(ticket["status"], "filled")
+        self.assertIn("posthoc", ticket["review_note"])
+        self.assertEqual(trade["trade_group_id"], "POSTHOC-20260604-002281-49")
+        self.assertEqual(trade["leg_type"], "buy_add")
+        self.assertEqual(lot["source_ticket_id"], ticket["ticket_id"])
 
 
 class AssetPnLParityTest(unittest.TestCase):

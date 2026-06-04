@@ -178,11 +178,15 @@ class RiskPanelWidget extends YiMuWidget {
       // 从 rule_state 取实时阻断结论
       var dayStopBlock = rsBlocks.filter(function(b){ return b.code === 'DAY_STOP'; });
       var lossStreakBlock = rsBlocks.filter(function(b){ return b.code === 'LOSS_STREAK'; });
+      var lossStreakWarn = rsWarnings.filter(function(w){ return w.code === 'LOSS_STREAK'; });
       var dayHit = dayStopBlock.length > 0;
       var streakHit = lossStreakBlock.length > 0;
+      var streakWarn = !streakHit && lossStreakWarn.length > 0;
       var lossDaysDisplay = loseDays;
       if (streakHit && lossStreakBlock[0].evidence && lossStreakBlock[0].evidence.loss_streak != null) {
         lossDaysDisplay = lossStreakBlock[0].evidence.loss_streak;
+      } else if (streakWarn && lossStreakWarn[0].evidence && lossStreakWarn[0].evidence.loss_streak != null) {
+        lossDaysDisplay = lossStreakWarn[0].evidence.loss_streak;
       }
 
       html += '<div style="display:flex;justify-content:space-between;padding:2px 0;font-size:var(--fs-body)">'+
@@ -193,7 +197,9 @@ class RiskPanelWidget extends YiMuWidget {
       html += '<div style="display:flex;justify-content:space-between;padding:2px 0;font-size:var(--fs-body)">'+
         '<span style="color:var(--text-secondary)">连亏天数</span>'+
         '<span style="font-family:var(--font-mono)">'+lossDaysDisplay+'天</span>'+
-        '<span style="color:'+(streakHit?'var(--danger)':'var(--info)')+'">'+(streakHit?'⚠ 空仓':'✓ 正常')+'</span></div>';
+        '<span style="color:'+(streakHit?'var(--danger)':streakWarn?'var(--warn)':'var(--info)')+'">'+
+          (streakHit?'⚠ 空仓':streakWarn?'⚠ 提示':'✓ 正常')+
+        '</span></div>';
     }
 
     // 周回撤（rule_state 不覆盖，保留 baseline 字段 + 数据引用）

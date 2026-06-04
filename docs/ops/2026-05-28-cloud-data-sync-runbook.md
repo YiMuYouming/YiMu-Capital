@@ -331,6 +331,42 @@ PY
 - `integrity_check: ok`
 - `intraday_snapshots` 和 `trade_records` 能正常查询
 
+## 交易票据迁移安全垫
+
+在执行 `migrate_position_lots.py --apply`、`backfill_trade_tickets.py --apply` 或其它会改写本地 `data/pnl.db` 的票据迁移前，必须先做本地备份。
+
+```bash
+cd /Users/yimu/Documents/YM_Capital/live-dashboard
+python3 scripts/ops/backup_pnl_db.py --dry-run
+python3 scripts/ops/backup_pnl_db.py --apply
+```
+
+备份会复制：
+
+- `data/pnl.db`
+- `data/pnl.db-wal`，如存在
+- `data/pnl.db-shm`，如存在
+
+备份目录形如：
+
+```text
+data/backups/YYYYMMDD-HHMMSS/
+```
+
+回滚只允许本地执行，且 backup 目录必须包含 `pnl.db`：
+
+```bash
+python3 scripts/ops/rollback_ticket_migration.py --backup data/backups/YYYYMMDD-HHMMSS --dry-run
+python3 scripts/ops/rollback_ticket_migration.py --backup data/backups/YYYYMMDD-HHMMSS --apply
+```
+
+生产写入规则：
+
+- 自动化测试必须使用隔离 DB 或只读 `18088/18089` proxy。
+- 自动化测试禁止 POST 到 `http://localhost:8088`。
+- 真实 `8088` 写入必须由弈沐哥明确确认，不能由测试脚本隐式触发。
+- `18088/18089` 本地预览代理会拦截 `POST`、`PUT`、`DELETE`，只能用于视觉和只读 API 验收。
+
 ## 盘中发现数据 bug 的处理流程
 
 ### 成交流水录错

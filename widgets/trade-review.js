@@ -92,6 +92,41 @@ class TradeReviewWidget extends YiMuWidget {
     return '<td style="padding:3px 6px;white-space:nowrap">' + innerHTML + '</td>';
   }
 
+  _tradeGroupKey(r, idx) {
+    return r.trade_group_id || r.ticket_id || ('single-' + idx);
+  }
+
+  _tradeId(r) {
+    return r.id || r.trade_id || r.record_id || '';
+  }
+
+  _ticketGroupLabel(rows) {
+    var text = rows.map(function(r){ return r.action || r.action_type || ''; }).join(' ');
+    var hasBuy = text.indexOf('买') >= 0 || text.indexOf('buy') >= 0 || text.indexOf('add') >= 0;
+    var hasSell = text.indexOf('卖') >= 0 || text.indexOf('sell') >= 0 || text.indexOf('clear') >= 0 || text.indexOf('reduce') >= 0;
+    if (hasBuy && hasSell) return '做T票据';
+    if (hasSell) return '清仓/卖出票据';
+    if (hasBuy) return '买入票据';
+    return '交易票据';
+  }
+
+  _renderGroupHeader(rows, key) {
+    var name = rows[0].name || rows[0].code || '未命名标的';
+    var label = this._ticketGroupLabel(rows);
+    var ticket = rows[0].ticket_id || '';
+    var tradeIds = rows.map(this._tradeId).filter(function(v){ return v !== ''; }).join(',');
+    var sub = [];
+    if (ticket) sub.push(ticket);
+    if (key && key !== ticket && key.indexOf('single-') !== 0) sub.push(key);
+    if (tradeIds) sub.push('trade ' + tradeIds);
+    return '<tr style="background:var(--bg-hover);border-top:1px solid var(--border)">' +
+      '<td colspan="12" style="padding:4px 6px;font-size:11px;color:var(--text-secondary)">' +
+        '<span style="font-weight:700;color:var(--text-primary);margin-right:6px">' + _esc(name) + '</span>' +
+        '<span style="margin-right:8px">' + _esc(label) + '</span>' +
+        '<span style="font-family:var(--font-mono)">' + _esc(sub.join(' · ')) + '</span>' +
+      '</td></tr>';
+  }
+
   _renderTable(body, reviews, date) {
     var html = '';
 
@@ -133,6 +168,7 @@ class TradeReviewWidget extends YiMuWidget {
           '<th style="padding:3px 6px;white-space:nowrap">代码</th>' +
           '<th style="padding:3px 6px;white-space:nowrap">价格</th>' +
           '<th style="padding:3px 6px;white-space:nowrap">数量</th>' +
+          '<th style="padding:3px 6px;white-space:nowrap">票据</th>' +
           '<th style="padding:3px 6px;white-space:nowrap">窗口</th>' +
           '<th style="padding:3px 6px;white-space:nowrap">原因</th>' +
           '<th style="padding:3px 6px;white-space:nowrap">收盘结果</th>' +
@@ -140,8 +176,22 @@ class TradeReviewWidget extends YiMuWidget {
           '<th style="padding:3px 6px;white-space:nowrap">归因备注</th>' +
         '</tr></thead><tbody>';
 
+      var groupRows = {};
+      var self = this;
+      filtered.forEach(function(r, ri) {
+        var gk = self._tradeGroupKey(r, ri);
+        if (!groupRows[gk]) groupRows[gk] = [];
+        groupRows[gk].push(r);
+      });
+      var lastGroupKey = null;
+
       filtered.forEach(function(r, ri) {
         var rowId = 'w23r' + ri;
+        var groupKey = self._tradeGroupKey(r, ri);
+        if (groupKey !== lastGroupKey) {
+          html += self._renderGroupHeader(groupRows[groupKey] || [r], groupKey);
+          lastGroupKey = groupKey;
+        }
         var hasTrusted = !!(r.rule_state && r.market_snapshot);
         var hasRule = !!(r.rule_state);
 
@@ -156,6 +206,7 @@ class TradeReviewWidget extends YiMuWidget {
           '<td style="padding:3px 6px;font-family:var(--font-mono)">' + _esc(r.code) + '</td>' +
           '<td style="padding:3px 6px;font-family:var(--font-mono);text-align:right">' + (r.price != null ? _esc(String(r.price)) : '—') + '</td>' +
           '<td style="padding:3px 6px;font-family:var(--font-mono);text-align:right">' + _esc(String(r.qty || '')) + '</td>' +
+          '<td style="padding:3px 6px;font-family:var(--font-mono);font-size:10px;color:var(--text-secondary);max-width:120px;overflow:hidden;text-overflow:ellipsis" title="' + _esc(r.ticket_id || '') + '">' + _esc(r.ticket_id || '—') + '</td>' +
           '<td style="padding:3px 6px;white-space:nowrap">' + _esc(r.window) + '</td>' +
           '<td style="padding:3px 6px;font-size:11px;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + _esc(r.reason) + '">' + _esc(r.reason) + '</td>' +
           '<td style="padding:3px 6px;font-size:11px;max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + _esc(r.outcome) + '">' + _esc(r.outcome) + '</td>';
@@ -209,7 +260,7 @@ class TradeReviewWidget extends YiMuWidget {
       var sellCount = filtered.filter(function(r){return(r.action||'').indexOf('卖')>=0;}).length;
       var unverifiedCount = filtered.filter(function(r){return !(r.rule_state && r.market_snapshot);}).length;
       html += '<tr style="background:var(--bg-hover);font-size:11px;color:var(--text-secondary)">' +
-        '<td colspan="11" style="padding:4px 6px">' +
+        '<td colspan="12" style="padding:4px 6px">' +
           '共 ' + filtered.length + ' 笔 | 买入 ' + buyCount + ' | 卖出 ' + sellCount + ' | 未验证 ' + unverifiedCount +
         '</td></tr>';
 

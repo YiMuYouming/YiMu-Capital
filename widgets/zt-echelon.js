@@ -128,7 +128,6 @@ class ZtEchelonWidget extends YiMuWidget {
     this._selectedConcepts = [];
     this._selectedDate = null;
     this._sortKey = null;
-    this._insights = null;
   }
 
   render(data) {
@@ -138,70 +137,38 @@ class ZtEchelonWidget extends YiMuWidget {
 
     var hotList = (data && data.hot_list) || {};
     var reasonStats = hotList.reason_stats || {};
-    // zt_stocks 优先（涨停精选），空则回退 stocks（热榜全量）
-    var rawStocks = (hotList.zt_stocks && hotList.zt_stocks.length > 0) ? hotList.zt_stocks : (hotList.stocks || []);
-    // 过滤 ST 股票
-    var ztStocks = rawStocks.filter(function(s) {
-      var name = s.name || '';
-      return !/ST/.test(name);
-    });
-
-    // 从 iwencai 连板股列表构建 code→连板数 映射（真实涨停数据，优先使用）
-    var iwencaiBoardMap = {};
-    try {
-      var iwencaiList = (data && data.iwencai && data.iwencai['连板股列表']) || [];
-      iwencaiList.forEach(function(s) {
-        if (s['代码']) iwencaiBoardMap[s['代码']] = parseInt(s['连板数']) || 1;
-      });
-    } catch(e) {}
-
-    // 合并服务端 zt_history + 客户端 localStorage 缓存
+    var today = this._today();
+    var confirmedZt = this._normalizeHotStocks(hotList.zt_stocks || [], 'ths');
+    var hotStocks = this._normalizeHotStocks(hotList.stocks || [], 'hot');
+    var iwencaiStocks = this._normalizeIwencaiStocks((data && data.iwencai && data.iwencai['连板股列表']) || []);
     var ztHistory = hotList.zt_history || {};
-    if (Object.keys(ztHistory).length === 0) {
-      ztHistory = self._loadLocalHistory();
-    } else {
-      var localHist = self._loadLocalHistory();
-      Object.keys(localHist).forEach(function(d) {
-        if (!ztHistory[d]) ztHistory[d] = localHist[d];
-      });
-    }
-    self._saveLocalHistory(ztStocks);
+    if (confirmedZt.length > 0) self._saveLocalHistory(confirmedZt);
 
     // Build date list
-    var dates = this._buildDateList(ztStocks, ztHistory);
+    var dates = this._buildDateList(confirmedZt, ztHistory, iwencaiStocks);
     if (!this._selectedDate || dates.indexOf(this._selectedDate) < 0) {
       this._selectedDate = dates[0];
     }
 
-    // Get stocks for selected date
-    var stocks = this._getStocksForDate(this._selectedDate, ztStocks, ztHistory);
-    var isToday = (this._selectedDate === new Date().toISOString().substring(0, 10));
-
-    // Compute 连板性质：iwencai 连板股列表优先，其次 ztHistory，最后回退首板
-    stocks.forEach(function(s) {
-      if (iwencaiBoardMap[s.code]) {
-        s._nature = iwencaiBoardMap[s.code] + '连板';
-      } else {
-        s._nature = self._computeNature(s.code, self._selectedDate, ztHistory);
-      }
+    var isToday = (this._selectedDate === today);
+    var displayStocks = this._getConfirmedStocksForDate(
+      this._selectedDate, confirmedZt, iwencaiStocks, ztHistory
+    );
+    displayStocks.forEach(function(s) {
+      var computed = s._boardLevel > 0 ? s._boardLevel + '板' : self._computeNature(s.code, self._selectedDate, ztHistory);
+      s._nature = computed === '首板' ? '首板' : computed;
       s._natureRank = self._natureRank(s._nature);
     });
 
-    // === Concept tag stats (normalized + merged) ===
     var conceptStats = _buildConceptStats(reasonStats);
     var conceptKeys = Object.keys(conceptStats).sort(function(a, b) {
       if (a === '其他') return 1;
       if (b === '其他') return -1;
       return conceptStats[b] - conceptStats[a];
     });
-    var top5Keys = conceptKeys.filter(function(k) { return k !== '其他'; }).slice(0, 5);
-    var top5Counts = top5Keys.map(function(k) { return conceptStats[k]; });
-    var fireThreshold = top5Counts.length >= 5 ? top5Counts[top5Counts.length - 1]
-      : (top5Counts.length > 0 ? top5Counts[top5Counts.length - 1] : 999);
 
-    // Filter by selected concepts (normalize both sides)
     if (this._selectedConcepts.length > 0) {
-      stocks = stocks.filter(function(s) {
+      displayStocks = displayStocks.filter(function(s) {
         var tags = (s.reason || '').split('+');
         var normTags = tags.map(function(t) { return _normalizeConcept(t.trim()); });
         return self._selectedConcepts.some(function(c) {
@@ -210,54 +177,44 @@ class ZtEchelonWidget extends YiMuWidget {
       });
     }
 
-    // Sort
     if (this._sortKey === 'nature') {
-      stocks.sort(function(a, b) { return b._natureRank - a._natureRank; });
+      displayStocks.sort(function(a, b) { return b._natureRank - a._natureRank; });
     } else if (this._sortKey === 'reason') {
-      stocks.sort(function(a, b) { return (a.reason || '').localeCompare(b.reason || ''); });
+      displayStocks.sort(function(a, b) { return (a.reason || '').localeCompare(b.reason || ''); });
+    } else {
+      displayStocks.sort(function(a, b) { return b._natureRank - a._natureRank; });
     }
 
-    // Stats
-    var natureCount = {};
-    stocks.forEach(function(s) {
-      var n = s._nature || '首板';
-      natureCount[n] = (natureCount[n] || 0) + 1;
-    });
-    var boardLevels = [];
-    Object.keys(natureCount).forEach(function(k) {
-      var m = k.match(/^(\d+)连板/);
-      if (m) boardLevels.push(parseInt(m[1]));
-    });
-    boardLevels.sort(function(a, b) { return b - a; });
-    var maxBoard = boardLevels[0] || 0;
-    var secondBoard = boardLevels[1] || 0;
+    var confirmedCodes = {};
+    displayStocks.forEach(function(s) { if (s.code) confirmedCodes[s.code] = true; });
+    var hotObserve = hotStocks.filter(function(s) { return !confirmedCodes[s.code]; }).slice(0, 12);
+    if (this._selectedConcepts.length > 0) {
+      hotObserve = hotObserve.filter(function(s) {
+        var tags = (s.reason || '').split('+');
+        var normTags = tags.map(function(t) { return _normalizeConcept(t.trim()); });
+        return self._selectedConcepts.some(function(c) { return normTags.indexOf(c) >= 0; });
+      });
+    }
 
-    var stats_首板 = natureCount['首板'] || 0;
-    var stats_二连 = 0, stats_三连 = 0, stats_四板 = 0;
-    Object.keys(natureCount).forEach(function(k) {
-      if (k === '首板') return;
-      var m = k.match(/^(\d+)连板/);
-      if (m) {
-        var v = parseInt(m[1]);
-        if (v >= 4) stats_四板 += natureCount[k];
-        else if (v === 3) stats_三连 += natureCount[k];
-        else if (v === 2) stats_二连 += natureCount[k];
-      }
-    });
-    var statsHtml = '<div class="zt-stats">';
-    statsHtml += '最高板: <b>' + (maxBoard > 0 ? maxBoard + '连板' : '—') + '</b>';
-    statsHtml += ' | 次高板: <b>' + (secondBoard > 0 ? secondBoard + '连板' : '—') + '</b>';
-    statsHtml += ' | 首板:' + stats_首板;
-    statsHtml += ' 二连:' + stats_二连;
-    statsHtml += ' 三连:' + stats_三连;
-    statsHtml += ' 四板+:' + stats_四板;
-    statsHtml += ' | 共' + stocks.length + '只';
-    statsHtml += '</div>';
+    var stats = this._buildStats(displayStocks);
+    var hasFullZtSource = confirmedZt.length > 0;
+    var hasIwcSource = iwencaiStocks.length > 0;
+    var sourceLabel = isToday
+      ? (hasIwcSource ? '问财连板' : (hasFullZtSource ? '同花顺涨停' : '涨停源待确认'))
+      : '历史快照';
+    var updated = this._formatUpdated(hotList._updated);
 
     // === Render ===
     var html = '';
+    html += '<div class="zt-source-row">';
+    html += '<span class="zt-source-chip primary">' + this._esc(sourceLabel) + '</span>';
+    html += '<span class="zt-source-chip">热榜实时 ' + (hotList.total || hotStocks.length || 0) + '只</span>';
+    if (updated) html += '<span class="zt-source-chip muted">更新 ' + this._esc(updated) + '</span>';
+    if (isToday && !hasFullZtSource) {
+      html += '<span class="zt-source-chip warn">首板源未确认</span>';
+    }
+    html += '</div>';
 
-    // Row 1: Date tabs
     html += '<div class="zt-date-row">';
     dates.forEach(function(d) {
       var label = d.substring(5);
@@ -266,96 +223,128 @@ class ZtEchelonWidget extends YiMuWidget {
     });
     html += '</div>';
 
-    // Row 2: Concept tags (merged)
+    html += '<div class="zt-stats">';
+    html += '<span>最高 <b>' + (stats.maxBoard > 0 ? stats.maxBoard + '板' : '—') + '</b></span>';
+    html += '<span>次高 <b>' + (stats.secondBoard > 0 ? stats.secondBoard + '板' : '—') + '</b></span>';
+    html += '<span>连板 <b>' + stats.linkedCount + '</b></span>';
+    html += '<span>首板 <b>' + stats.firstCount + '</b></span>';
+    html += '<span>确认 <b>' + displayStocks.length + '</b>只</span>';
+    html += '</div>';
+
+    if (displayStocks.length > 0) {
+      html += this._renderBoardLanes(displayStocks);
+    }
+
     if (conceptKeys.length > 0) {
       html += '<div class="zt-concept-row">';
       conceptKeys.forEach(function(c) {
         var count = conceptStats[c];
         var isOther = (c === '其他');
-        var isFire = (!isOther && count >= fireThreshold) ? ' fire' : '';
         var isSel = self._selectedConcepts.indexOf(c) >= 0 ? ' active' : '';
         var mutedCls = isOther ? ' zt-muted' : '';
-        html += '<span class="zt-concept-tag' + isFire + isSel + mutedCls + '" data-concept="' + c + '">';
-        if (!isOther && count >= fireThreshold) html += '🔥 ';
-        html += c + ' <b>' + count + '</b></span>';
+        html += '<span class="zt-concept-tag' + isSel + mutedCls + '" data-concept="' + self._esc(c) + '">';
+        html += self._esc(c) + ' <b>' + count + '</b></span>';
       });
       html += '</div>';
     }
 
-    // Stats bar (between concepts and table)
-    if (stocks.length > 0) {
-      html += statsHtml;
-    }
-
-    // No data state
-    if (stocks.length === 0) {
+    if (displayStocks.length === 0) {
       html += '<div class="zt-empty">';
-      if (isToday && ztStocks.length === 0) {
-        html += '⏳ 等待开盘（今日数据尚未更新，切换日期Tab可看历史）';
+      if (isToday) {
+        html += '今日确认涨停源暂不可用，可先看热榜观察和历史日期。';
       } else {
-        html += '当日无涨停数据';
+        html += '该日期暂无涨停历史快照。';
       }
       html += '</div>';
     } else {
-      // Table header
-      html += '<div class="zt-table-header">';
-      html += '<span class="zt-col-name">名称</span>';
-      html += '<span class="zt-col-chg">涨幅</span>';
-      html += '<span class="zt-col-hs">换手</span>';
-      html += '<span class="zt-col-amt">成交额</span>';
-      var natureCls = self._sortKey === 'nature' ? ' zt-sortable zt-sorted' : ' zt-sortable';
-      html += '<span class="zt-col-nature' + natureCls + '" data-sort="nature">性质</span>';
-      var reasonCls = self._sortKey === 'reason' ? ' zt-sortable zt-sorted' : ' zt-sortable';
-      html += '<span class="zt-col-reason' + reasonCls + '" data-sort="reason">板块</span>';
-      html += '</div>';
-
-      // Stock list
-      html += '<div class="zt-stock-list">';
-      stocks.forEach(function(s) {
-        var natureCls = '';
-        if (s._nature === '首板') natureCls = ' zt-nature-1';
-        else if (s._nature === '二连板') natureCls = ' zt-nature-2';
-        else natureCls = ' zt-nature-3';
-
-        var hs = s.huanshou != null ? s.huanshou.toFixed(1) + '%' : '—';
-        var amt = s.chengjiaoe != null ? self._fmtAmt(s.chengjiaoe) : '—';
-        var chg = s.zhangfu != null ? (s.zhangfu >= 0 ? '+' : '') + s.zhangfu.toFixed(2) + '%' : '—';
-        var chgCls = s.zhangfu > 0 ? 'up' : (s.zhangfu < 0 ? 'down' : '');
-
-        html += '<div class="zt-stock-row">';
-        html += '<span class="zt-col-name">' + s.name + '</span>';
-        html += '<span class="zt-col-chg ' + chgCls + '">' + chg + '</span>';
-        html += '<span class="zt-col-hs">' + hs + '</span>';
-        html += '<span class="zt-col-amt">' + amt + '</span>';
-        html += '<span class="zt-col-nature' + natureCls + '">' + s._nature + '</span>';
-        html += '<span class="zt-col-reason">' + (s.reason || '—') + '</span>';
-        html += '</div>';
-      });
-      html += '</div>';
+      html += this._renderStockTable('确认梯队', displayStocks, true);
     }
 
-    // LLM slot
-    html += this._renderLLMSlot();
+    if (isToday && hotObserve.length > 0) {
+      html += this._renderHotObserve(hotObserve);
+    }
 
     body.innerHTML = html;
 
-    // Bind events
     this._bindEvents(body, dates);
     this.updateTimestamp();
   }
 
   // === Internal methods ===
 
-  _buildDateList(ztStocks, ztHistory) {
-    var dates = [];
-    var today = new Date().toISOString().substring(0, 10);
+  _today() {
+    var d = new Date();
+    var m = String(d.getMonth() + 1).padStart(2, '0');
+    var day = String(d.getDate()).padStart(2, '0');
+    return d.getFullYear() + '-' + m + '-' + day;
+  }
+
+  _esc(v) {
+    return String(v == null ? '' : v)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
+  _toNum(v) {
+    if (v == null || v === '') return null;
+    var n = parseFloat(String(v).replace('%', '').replace('+', ''));
+    return isNaN(n) ? null : n;
+  }
+
+  _normalizeHotStocks(list, source) {
+    var self = this;
+    return (list || []).filter(function(s) {
+      var name = s.name || s['名称'] || '';
+      return !/ST/.test(name);
+    }).map(function(s) {
+      return {
+        code: String(s.code || s['代码'] || ''),
+        name: s.name || s['名称'] || '—',
+        zhangfu: self._toNum(s.zhangfu != null ? s.zhangfu : s['涨幅']),
+        huanshou: self._toNum(s.huanshou != null ? s.huanshou : s['换手率']),
+        chengjiaoe: self._toNum(s.chengjiaoe != null ? s.chengjiaoe : s['成交额']),
+        reason: s.reason || s['所属概念'] || s['概念'] || '',
+        _source: source,
+        _boardLevel: 0,
+      };
+    });
+  }
+
+  _normalizeIwencaiStocks(list) {
+    var self = this;
+    return (list || []).filter(function(s) {
+      var name = s['名称'] || s.name || s['股票简称'] || '';
+      return !/ST/.test(name);
+    }).map(function(s) {
+      var board = parseInt(s['连板数'] || s.board_count || s['连续涨停天数'] || 1, 10);
+      if (!board || board < 1) board = 1;
+      return {
+        code: String(s['代码'] || s.code || ''),
+        name: s['名称'] || s.name || s['股票简称'] || '—',
+        zhangfu: self._toNum(s['涨幅'] || s.zhangfu),
+        huanshou: self._toNum(s['换手率'] || s.huanshou),
+        chengjiaoe: self._toNum(s['成交额'] || s.chengjiaoe),
+        reason: s['所属概念'] || s['概念'] || s.reason || '',
+        _source: 'iwencai',
+        _boardLevel: board,
+      };
+    });
+  }
+
+  _buildDateList(ztStocks, ztHistory, iwencaiStocks) {
+    var today = this._today();
     ztStocks = ztStocks || [];
+    iwencaiStocks = iwencaiStocks || [];
     ztHistory = ztHistory || {};
 
-    // Today always first if we have today's data
-    var allDates = Object.keys(ztHistory).concat([today]);
+    var allDates = Object.keys(ztHistory);
+    if (ztStocks.length > 0 || iwencaiStocks.length > 0 || allDates.length === 0) {
+      allDates.push(today);
+    }
     allDates.sort().reverse();
-    // Deduplicate
     var seen = {};
     var result = [];
     allDates.forEach(function(d) {
@@ -364,16 +353,27 @@ class ZtEchelonWidget extends YiMuWidget {
     return result.slice(0, 5);
   }
 
-  _getStocksForDate(dateStr, ztStocks, ztHistory) {
+  _getConfirmedStocksForDate(dateStr, ztStocks, iwencaiStocks, ztHistory) {
     if (!dateStr) return [];
-    var today = new Date().toISOString().substring(0, 10);
-    if (dateStr === today) return ztStocks || [];
-    return (ztHistory && ztHistory[dateStr]) || [];
+    var today = this._today();
+    var merged = [];
+    var seen = {};
+    function add(s) {
+      if (!s || !s.code || seen[s.code]) return;
+      seen[s.code] = true;
+      merged.push(s);
+    }
+    if (dateStr === today) {
+      (iwencaiStocks || []).forEach(add);
+      (ztStocks || []).forEach(add);
+      return merged;
+    }
+    return this._normalizeHotStocks((ztHistory && ztHistory[dateStr]) || [], 'history');
   }
 
   _computeNature(code, dateStr, ztHistory) {
     ztHistory = ztHistory || {};
-    var today = new Date().toISOString().substring(0, 10);
+    var today = this._today();
     var isToday = (dateStr === today);
 
     var dates = Object.keys(ztHistory).sort().reverse();
@@ -407,19 +407,121 @@ class ZtEchelonWidget extends YiMuWidget {
     }
 
     if (consecutive >= 2) {
-      return consecutive + '连板';
+      return consecutive + '板';
     }
     return '首板';
   }
 
   _natureRank(nature) {
     if (!nature) return 0;
-    var m = nature.match(/^(\d+)连板/);
+    var m = nature.match(/^(\d+)板/);
     if (m) return parseInt(m[1]) * 100;
-    var m2 = nature.match(/^(\d+)天(\d+)板/);
-    if (m2) return parseInt(m2[1]) * 10 + parseInt(m2[2]);
     if (nature === '首板') return 1;
     return 0;
+  }
+
+  _buildStats(stocks) {
+    var boards = [];
+    var firstCount = 0;
+    stocks.forEach(function(s) {
+      var level = s._natureRank >= 100 ? Math.floor(s._natureRank / 100) : 1;
+      if (level > 1) boards.push(level);
+      else firstCount++;
+    });
+    boards.sort(function(a, b) { return b - a; });
+    return {
+      maxBoard: boards[0] || 0,
+      secondBoard: boards[1] || 0,
+      linkedCount: boards.length,
+      firstCount: firstCount,
+    };
+  }
+
+  _renderBoardLanes(stocks) {
+    var self = this;
+    var groups = {};
+    stocks.forEach(function(s) {
+      var level = s._natureRank >= 100 ? Math.floor(s._natureRank / 100) : 1;
+      var key = level > 1 ? level + '板' : '首板';
+      if (!groups[key]) groups[key] = [];
+      groups[key].push(s);
+    });
+    var keys = Object.keys(groups).sort(function(a, b) {
+      var av = a === '首板' ? 1 : parseInt(a, 10);
+      var bv = b === '首板' ? 1 : parseInt(b, 10);
+      return bv - av;
+    });
+    var html = '<div class="zt-lanes">';
+    keys.forEach(function(k) {
+      html += '<div class="zt-lane">';
+      html += '<div class="zt-lane-head"><b>' + self._esc(k) + '</b><span>' + groups[k].length + '只</span></div>';
+      html += '<div class="zt-lane-stocks">';
+      groups[k].slice(0, 8).forEach(function(s) {
+        html += '<span title="' + self._esc(s.reason || '') + '">' + self._esc(s.name) + '</span>';
+      });
+      if (groups[k].length > 8) html += '<em>+' + (groups[k].length - 8) + '</em>';
+      html += '</div></div>';
+    });
+    html += '</div>';
+    return html;
+  }
+
+  _renderStockTable(title, stocks, sortable) {
+    var self = this;
+    var natureCls = this._sortKey === 'nature' ? ' zt-sortable zt-sorted' : ' zt-sortable';
+    var reasonCls = this._sortKey === 'reason' ? ' zt-sortable zt-sorted' : ' zt-sortable';
+    var html = '<div class="zt-section-title">' + this._esc(title) + '</div>';
+    html += '<div class="zt-table-header">';
+    html += '<span class="zt-col-name">名称</span>';
+    html += '<span class="zt-col-chg">涨幅</span>';
+    html += '<span class="zt-col-hs">换手</span>';
+    html += '<span class="zt-col-amt">成交额</span>';
+    html += '<span class="zt-col-nature' + (sortable ? natureCls : '') + '" data-sort="nature">性质</span>';
+    html += '<span class="zt-col-reason' + (sortable ? reasonCls : '') + '" data-sort="reason">板块</span>';
+    html += '</div>';
+    html += '<div class="zt-stock-list">';
+    stocks.forEach(function(s) { html += self._renderStockRow(s, true); });
+    html += '</div>';
+    return html;
+  }
+
+  _renderStockRow(s, showNature) {
+    var level = s._natureRank >= 100 ? Math.floor(s._natureRank / 100) : 1;
+    var natureCls = level <= 1 ? ' zt-nature-1' : (level === 2 ? ' zt-nature-2' : ' zt-nature-3');
+    var hs = s.huanshou != null ? s.huanshou.toFixed(1) + '%' : '—';
+    var amt = s.chengjiaoe != null ? this._fmtAmt(s.chengjiaoe) : '—';
+    var chg = s.zhangfu != null ? (s.zhangfu >= 0 ? '+' : '') + s.zhangfu.toFixed(2) + '%' : '—';
+    var chgCls = s.zhangfu > 0 ? 'up' : (s.zhangfu < 0 ? 'down' : '');
+    var html = '<div class="zt-stock-row">';
+    html += '<span class="zt-col-name">' + this._esc(s.name) + '</span>';
+    html += '<span class="zt-col-chg ' + chgCls + '">' + chg + '</span>';
+    html += '<span class="zt-col-hs">' + hs + '</span>';
+    html += '<span class="zt-col-amt">' + amt + '</span>';
+    html += '<span class="zt-col-nature' + natureCls + '">' + (showNature ? this._esc(s._nature || '首板') : '观察') + '</span>';
+    html += '<span class="zt-col-reason">' + this._esc(s.reason || '—') + '</span>';
+    html += '</div>';
+    return html;
+  }
+
+  _renderHotObserve(stocks) {
+    var self = this;
+    var html = '<div class="zt-hot-observe">';
+    html += '<div class="zt-section-title">热榜观察 <span>同花顺实时热榜，未计入确认涨停</span></div>';
+    html += '<div class="zt-hot-grid">';
+    stocks.forEach(function(s) {
+      html += '<div class="zt-hot-card">';
+      html += '<b>' + self._esc(s.name) + '</b>';
+      html += '<span>' + self._esc(s.reason || '—') + '</span>';
+      html += '</div>';
+    });
+    html += '</div></div>';
+    return html;
+  }
+
+  _formatUpdated(raw) {
+    if (!raw) return '';
+    var m = String(raw).match(/T(\d{2}:\d{2})/);
+    return m ? m[1] : String(raw).slice(0, 16);
   }
 
   // === 客户端涨停历史缓存（跨日连板判定用）===
@@ -435,6 +537,7 @@ class ZtEchelonWidget extends YiMuWidget {
   }
 
   _saveLocalHistory(ztStocks) {
+    if (!ztStocks || ztStocks.length === 0) return;
     var today = new Date().toISOString().substring(0, 10);
     var hist = this._loadLocalHistory();
     // 保存今日出现的涨停股票 code
@@ -458,65 +561,6 @@ class ZtEchelonWidget extends YiMuWidget {
     if (yi >= 10000) return (yi / 10000).toFixed(2) + '万亿';
     if (yi >= 1) return yi.toFixed(1) + '亿';
     return val + '万';
-  }
-
-  _renderLLMSlot() {
-    var self = this;
-    if (!this._insights) {
-      this._loadInsights();
-      return '<div class="zt-llm">🤖 LLM研判加载中...</div>';
-    }
-
-    var today = new Date().toISOString().substring(0, 10);
-    var todayData = this._insights[today] || {};
-    var text = '';
-
-    // Search for matching keywords
-    var keywords = ['涨停梯队', '连板', '涨停', '梯队'];
-    var keys = Object.keys(todayData);
-    for (var i = 0; i < keywords.length && !text; i++) {
-      for (var j = 0; j < keys.length && !text; j++) {
-        var entry = todayData[keys[j]] || {};
-        var t = entry.text || '';
-        if (t.indexOf(keywords[i]) >= 0 || keys[j].indexOf(keywords[i]) >= 0) {
-          text = t;
-          break;
-        }
-      }
-    }
-
-    // Fallback: latest global insight
-    if (!text && keys.length > 0) {
-      text = todayData[keys[0]].text || '';
-    }
-
-    // Try other dates
-    if (!text) {
-      var allDates = Object.keys(this._insights).sort().reverse();
-      for (var d = 0; d < allDates.length && !text; d++) {
-        var dd = this._insights[allDates[d]] || {};
-        var dk = Object.keys(dd);
-        if (dk.length > 0) {
-          text = dd[dk[0]].text || '';
-        }
-      }
-    }
-
-    if (text) {
-      var short = text.length > 100 ? text.substring(0, 100) + '...' : text;
-      return '<div class="zt-llm">🤖 ' + short + '</div>';
-    }
-    return '';
-  }
-
-  _loadInsights() {
-    var self = this;
-    fetch('data/llm_insights.json?t=' + Date.now())
-      .then(function(r) { return r.ok ? r.json() : null; })
-      .then(function(data) {
-        if (data) { self._insights = data; self._renderBody(); }
-      })
-      .catch(function() {});
   }
 
   _bindEvents(body, dates) {

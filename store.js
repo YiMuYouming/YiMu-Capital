@@ -344,11 +344,14 @@ const DataStore = (function() {
       d.pnl_live = _pnlLive;
     }
 
+    d.trade_tickets = Array.isArray(_tradeTickets) ? _tradeTickets : [];
+
     setMerged(d);
     return d;
   }
 
   var _pnlLive = null;
+  var _tradeTickets = null;
 
   // === 内部持久化数据域（refresh 周期不丢失）===
   var _sentimentNodes = null;    // sentient_auto.json 快照
@@ -383,6 +386,17 @@ const DataStore = (function() {
   function _fetchPnlSummary() {
     if (typeof location !== 'undefined' && location.protocol === 'file:') return Promise.resolve(null);
     return fetch('/api/pnl/summary').then(function(r) { return r.ok ? r.json() : null; }).catch(function() { return null; });
+  }
+
+  function _fetchTradeTickets() {
+    if (typeof location !== 'undefined' && location.protocol === 'file:') return Promise.resolve(null);
+    return fetch('/api/trade/tickets')
+      .then(function(r) { return r.ok ? r.json() : null; })
+      .then(function(data) {
+        if (data && Array.isArray(data.tickets)) _tradeTickets = data.tickets;
+        return data;
+      })
+      .catch(function() { return null; });
   }
 
   // === 刷新数据（v2.0 多源实时管线）===
@@ -433,7 +447,8 @@ const DataStore = (function() {
           return adapter.fetchLive();
         }).then(function(live) {
           if (live) { liveData = live; connectionStatus = _connectionStatusFromLive(live); }
-          return _fetchPnlSummary().then(function(pnlLive) {
+          return Promise.all([_fetchPnlSummary(), _fetchTradeTickets()]).then(function(results) {
+            var pnlLive = results[0];
             if (pnlLive) _pnlLive = pnlLive;
           });
         }).then(function() {
@@ -479,7 +494,8 @@ const DataStore = (function() {
       return adapter.fetchLive();
     }).then(function(live) {
       if (live) { liveData = live; connectionStatus = _connectionStatusFromLive(live); }
-      return _fetchPnlSummary().then(function(pnlLive) {
+      return Promise.all([_fetchPnlSummary(), _fetchTradeTickets()]).then(function(results) {
+        var pnlLive = results[0];
         if (pnlLive) _pnlLive = pnlLive;
       });
     }).then(function() {

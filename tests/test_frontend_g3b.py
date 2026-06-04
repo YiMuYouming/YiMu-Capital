@@ -566,6 +566,49 @@ console.log(JSON.stringify({
         result = _run_node(script, files=["widgets/positions.js"])
         self.assertTrue(result.get("hasUnavailable"), f"应显示基准不可用: {result}")
 
+    def test_closed_tracking_trusts_backend_trading_day_window(self):
+        """后端已给出7交易日清仓列表时，前端不应用自然日二次过滤"""
+        script = r"""
+global.DataStore = {_prefill:null, merged:{}};
+var RealDate = Date;
+global.Date = class extends RealDate {
+  constructor() {
+    if (arguments.length === 0) return new RealDate('2026-06-04T10:00:00+08:00');
+    return new RealDate(...arguments);
+  }
+  static now() { return new RealDate('2026-06-04T10:00:00+08:00').getTime(); }
+  static parse(v) { return RealDate.parse(v); }
+  static UTC() { return RealDate.UTC.apply(RealDate, arguments); }
+};
+var _body = document.createElement('div');
+var inst = new PositionsWidget({id:'W15'});
+inst.getBody = function(){return _body;};
+inst.updateTimestamp = function(){};
+inst._bindEvents = function(){};
+var data = {
+  pnl_live: {
+    total_asset:200000, mv:0, cash:200000,
+    pnl_amount:0, pnl_pct:0, pos_pct:0,
+    positions: [], trades: [],
+    closed_positions: [
+      {name:'OLD7', code:'000007', sell_price:20, sell_qty:100,
+       realized_today_pnl:1000, closed_date:'2026-05-27', reason:''}
+    ]
+  },
+  live_quotes: {'000007':{最新价:21}},
+  positions: []
+};
+inst.render(data);
+var html = _body.innerHTML || '';
+console.log(JSON.stringify({
+  hasClosed: html.indexOf('OLD7')>=0,
+  hasTradingLabel: html.indexOf('7个交易日')>=0
+}));
+"""
+        result = _run_node(script, files=["widgets/positions.js"])
+        self.assertTrue(result.get("hasClosed"), f"前端不应按自然日过滤后端7交易日结果: {result}")
+        self.assertTrue(result.get("hasTradingLabel"), f"标题应说明7个交易日口径: {result}")
+
     def test_pnl_card_merged_amount_and_pct(self):
         """今日盈亏卡片合金额+百分比在同一格，例如 +500.00 (+0.25%)"""
         script = r"""
@@ -883,7 +926,7 @@ console.log(JSON.stringify({
         self.assertFalse(result.get("hasEmpty"), f"blocked不应显示空仓: {result}")
 
     def test_valuation_incomplete_shows_untrusted(self):
-        """valuation_complete=false → 显示'估值不可信'横幅，价格列'行情不可用'"""
+        """valuation_complete=false → 显示风险横幅，但保留账户快照"""
         script = r"""
 global.DataStore = {_prefill:null, merged:{}};
 var _body = document.createElement('div');
@@ -910,12 +953,22 @@ var html = _body.innerHTML || '';
 console.log(JSON.stringify({
   hasWarn: html.indexOf('估值不可信')>=0,
   hasQuoteUnavail: html.indexOf('行情不可用')>=0,
+  hasTotalAsset: html.indexOf('200,000.00')>=0,
+  hasCash: html.indexOf('100,000.00')>=0,
+  hasPositionPct: html.indexOf('50%')>=0,
+  hasSnapshotHint: html.indexOf('非实时')>=0,
+  hasWaitTodayQuote: html.indexOf('等待今日行情')>=0,
   hasCostShown: html.indexOf('100.00')>=0
 }));
 """
         result = _run_node(script, files=["widgets/positions.js"])
         self.assertTrue(result.get("hasWarn"), f"valuation_complete=false应显示估值不可信: {result}")
         self.assertTrue(result.get("hasQuoteUnavail"), f"价格列应显示行情不可用: {result}")
+        self.assertTrue(result.get("hasTotalAsset"), f"应保留总资产快照: {result}")
+        self.assertTrue(result.get("hasCash"), f"现金不是行情字段，应保留显示: {result}")
+        self.assertTrue(result.get("hasPositionPct"), f"仓位应随快照保留显示: {result}")
+        self.assertTrue(result.get("hasSnapshotHint"), f"快照数值应标注非实时: {result}")
+        self.assertTrue(result.get("hasWaitTodayQuote"), f"今日盈亏应等待今日行情: {result}")
         self.assertTrue(result.get("hasCostShown"), f"成本应仍显示: {result}")
 
 

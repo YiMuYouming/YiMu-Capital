@@ -98,6 +98,9 @@ class FreshDBSyncTest(unittest.TestCase):
                     "数量": 300,
                     "窗口": "W1",
                     "原因": "测试",
+                    "input_source": "manual_backfill",
+                    "confirmed_by": "yimu",
+                    "audit_note": "测试补录",
                 },
             }).encode()
 

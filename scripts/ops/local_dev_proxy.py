@@ -31,6 +31,14 @@ class LocalDevProxyHandler(SimpleHTTPRequestHandler):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=str(ROOT), **kwargs)
 
+    def end_headers(self):
+        self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
+        self.send_header("Pragma", "no-cache")
+        self.send_header("Expires", "0")
+        if self.path.split("?", 1)[0] in ("/", "/index.html"):
+            self.send_header("Clear-Site-Data", '"cache"')
+        super().end_headers()
+
     def do_GET(self):
         request_path = self.path.split("?", 1)[0]
         if self.path.startswith("/api/") or request_path in CLOUD_DATA_PATHS:
@@ -58,6 +66,9 @@ class LocalDevProxyHandler(SimpleHTTPRequestHandler):
                 self.end_headers()
                 self.wfile.write(body)
         except urllib.error.HTTPError as exc:
+            if self.path.split("?", 1)[0] == "/api/trade/tickets" and exc.code == 404:
+                self._write_json({"tickets": []}, status=200)
+                return
             body = exc.read()
             self.send_response(exc.code)
             self.send_header("Content-Type", exc.headers.get("Content-Type", "application/json"))
@@ -71,6 +82,13 @@ class LocalDevProxyHandler(SimpleHTTPRequestHandler):
                 "error": "cloud_proxy_unavailable",
                 "detail": str(exc),
             }, ensure_ascii=False).encode("utf-8"))
+
+    def _write_json(self, payload, status=200):
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(json.dumps(payload, ensure_ascii=False).encode("utf-8"))
 
     def _blocked_write(self):
         self.send_response(403)

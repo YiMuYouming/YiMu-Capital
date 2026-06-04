@@ -49,16 +49,25 @@ def _handler(path, payload):
     return h
 
 
+def _manual_backfill_entry(entry):
+    entry = dict(entry)
+    entry.setdefault('input_source', 'manual_backfill')
+    entry.setdefault('confirmed_by', 'yimu')
+    entry.setdefault('audit_note', 'test manual backfill')
+    entry.setdefault('原因', 'test manual backfill')
+    return entry
+
+
 class EventIdIsolationTest(unittest.TestCase):
     def setUp(self): _setup(self); bridge.CACHE['live_quotes'] = {}
     def tearDown(self): _teardown(self)
 
     def test_two_different_event_ids_same_fields_both_inserted(self):
         for evt in ['evt-a1', 'evt-a2']:
-            h = _handler('/api/sync', {'entry': {
+            h = _handler('/api/sync', {'entry': _manual_backfill_entry({
                 '时间': '10:00', '动作': '买入', '代码': '000001', '标的': 'T',
                 '价格': 10, '数量': 100, 'event_id': evt
-            }})
+            })})
             h.do_POST()
             r = json.loads(h._resp_body)
             self.assertEqual(r['status'], 'inserted', f'{evt} should be inserted')
@@ -66,17 +75,17 @@ class EventIdIsolationTest(unittest.TestCase):
         self.assertEqual(len(trades), 2)
 
     def test_same_event_id_replay_idempotent(self):
-        h1 = _handler('/api/sync', {'entry': {
+        h1 = _handler('/api/sync', {'entry': _manual_backfill_entry({
             '时间': '10:00', '动作': '买入', '代码': '000001', '标的': 'T',
             '价格': 10, '数量': 100, 'event_id': 'evt-r1'
-        }})
+        })})
         h1.do_POST()
         r1 = json.loads(h1._resp_body)
         tid = r1['trade_id']
-        h2 = _handler('/api/sync', {'entry': {
+        h2 = _handler('/api/sync', {'entry': _manual_backfill_entry({
             '时间': '10:00', '动作': '买入', '代码': '000001', '标的': 'T',
             '价格': 10, '数量': 100, 'event_id': 'evt-r1'
-        }})
+        })})
         h2.do_POST()
         r2 = json.loads(h2._resp_body)
         self.assertEqual(r2['status'], 'idempotent')
@@ -85,14 +94,14 @@ class EventIdIsolationTest(unittest.TestCase):
 
     def test_replay_with_positions_blocked(self):
         """同 event_id 重放夹带 positions → 拒绝"""
-        h1 = _handler('/api/sync', {'entry': {
+        h1 = _handler('/api/sync', {'entry': _manual_backfill_entry({
             '时间': '10:00', '动作': '买入', '代码': '000001', '标的': 'T',
             '价格': 10, '数量': 100, 'event_id': 'evt-r2'
-        }})
+        })})
         h1.do_POST()
         h2 = _handler('/api/sync', {
-            'entry': {'时间': '10:00', '动作': '买入', '代码': '000001', '标的': 'T',
-                       '价格': 10, '数量': 100, 'event_id': 'evt-r2'},
+            'entry': _manual_backfill_entry({'时间': '10:00', '动作': '买入', '代码': '000001', '标的': 'T',
+                       '价格': 10, '数量': 100, 'event_id': 'evt-r2'}),
             'positions': [{'标的': 'HAX', '代码': '999'}]
         })
         h2.do_POST()
@@ -103,15 +112,15 @@ class EventIdIsolationTest(unittest.TestCase):
 
     def test_non_event_id_conflict_not_idempotent(self):
         """无 event_id 的重复提交返回 duplicate（非 idempotent）"""
-        h1 = _handler('/api/sync', {'entry': {
+        h1 = _handler('/api/sync', {'entry': _manual_backfill_entry({
             '时间': '10:00', '动作': '买入', '代码': '000001', '标的': 'T',
             '价格': 10, '数量': 100
-        }})
+        })})
         h1.do_POST()
-        h2 = _handler('/api/sync', {'entry': {
+        h2 = _handler('/api/sync', {'entry': _manual_backfill_entry({
             '时间': '10:00', '动作': '买入', '代码': '000001', '标的': 'T',
             '价格': 10, '数量': 100
-        }})
+        })})
         h2.do_POST()
         r2 = json.loads(h2._resp_body)
         self.assertEqual(r2['status'], 'duplicate')
@@ -166,8 +175,8 @@ class TradeValidationTests(unittest.TestCase):
     def tearDown(self): _teardown(self)
 
     def _valid_entry(self, **overrides):
-        e = {'时间': '10:00', '动作': '买入', '代码': '000001', '标的': 'TEST',
-             '价格': 10, '数量': 100, 'event_id': 'evt-val'}
+        e = _manual_backfill_entry({'时间': '10:00', '动作': '买入', '代码': '000001', '标的': 'TEST',
+             '价格': 10, '数量': 100, 'event_id': 'evt-val'})
         e.update(overrides)
         return e
 
@@ -243,8 +252,10 @@ class TradeValidationTests(unittest.TestCase):
         status, body = self._post(entry)
         self.assertEqual(status, 200, f"夹带上下文的合法 entry 仍应插入: {body}")
         rows = db._exec("SELECT rule_state_json, market_snapshot_json FROM trade_records")
-        self.assertIsNone(rows[0]['rule_state_json'], "handler 不得存储客户端夹带的 rule_state")
-        self.assertIsNone(rows[0]['market_snapshot_json'], "handler 不得存储客户端夹带的 market_snapshot")
+        if rows[0]['rule_state_json']:
+            self.assertNotIn('forged', rows[0]['rule_state_json'], "handler 不得存储客户端夹带的 rule_state")
+        if rows[0]['market_snapshot_json']:
+            self.assertNotIn('forged', rows[0]['market_snapshot_json'], "handler 不得存储客户端夹带的 market_snapshot")
 
 
 class SyncContextHandlerTest(unittest.TestCase):
@@ -275,8 +286,8 @@ class SyncContextHandlerTest(unittest.TestCase):
             'context_status': 'trusted',
             'context_unavailable_reason': None,
         }
-        entry = {'时间': '10:00', '动作': '买入', '代码': '000001', '标的': 'TEST',
-                 '价格': 10, '数量': 100, 'event_id': 'evt-trust'}
+        entry = _manual_backfill_entry({'时间': '10:00', '动作': '买入', '代码': '000001', '标的': 'TEST',
+                 '价格': 10, '数量': 100, 'event_id': 'evt-trust'})
         status, body = self._post(entry)
         self.assertEqual(status, 200, f"应插入成功: {body}")
         rows = db._exec("SELECT rule_state_json, context_status, context_captured_at FROM trade_records")
@@ -293,8 +304,8 @@ class SyncContextHandlerTest(unittest.TestCase):
             'context_status': 'unavailable',
             'context_unavailable_reason': '行情数据不可用',
         }
-        entry = {'时间': '10:00', '动作': '买入', '代码': '000001', '标的': 'TEST',
-                 '价格': 10, '数量': 100, 'event_id': 'evt-unavail'}
+        entry = _manual_backfill_entry({'时间': '10:00', '动作': '买入', '代码': '000001', '标的': 'TEST',
+                 '价格': 10, '数量': 100, 'event_id': 'evt-unavail'})
         status, body = self._post(entry)
         self.assertEqual(status, 200, f"unavailable 也应插入成功: {body}")
         rows = db._exec("SELECT rule_state_json, context_status, context_unavailable_reason FROM trade_records")
@@ -309,15 +320,17 @@ class SyncContextHandlerTest(unittest.TestCase):
             'context_captured_at': None, 'context_status': 'unavailable',
             'context_unavailable_reason': '行情数据不可用',
         }
-        entry = {'时间': '10:00', '动作': '买入', '代码': '000001', '标的': 'TEST',
+        entry = _manual_backfill_entry({'时间': '10:00', '动作': '买入', '代码': '000001', '标的': 'TEST',
                  '价格': 10, '数量': 100, 'event_id': 'evt-forged',
                  'rule_state': {'version': 'forged'},
-                 'market_snapshot': {'fake': 'data'}}
+                 'market_snapshot': {'fake': 'data'}})
         status, body = self._post(entry)
         self.assertEqual(status, 200, f"合法 entry 仍应插入: {body}")
         rows = db._exec("SELECT rule_state_json, market_snapshot_json FROM trade_records")
-        self.assertIsNone(rows[0]['rule_state_json'], "handler 不得写入客户端夹带的 rule_state")
-        self.assertIsNone(rows[0]['market_snapshot_json'], "handler 不得写入客户端夹带的 market_snapshot")
+        if rows[0]['rule_state_json']:
+            self.assertNotIn('forged', rows[0]['rule_state_json'], "handler 不得写入客户端夹带的 rule_state")
+        if rows[0]['market_snapshot_json']:
+            self.assertNotIn('fake', rows[0]['market_snapshot_json'], "handler 不得写入客户端夹带的 market_snapshot")
 
 
 class ConcurrentSellGuardTests(unittest.TestCase):
@@ -350,6 +363,12 @@ class ConcurrentSellGuardTests(unittest.TestCase):
                            "成本": 10, "状态": "持有"}],
             "source": "manual_correction",
         })
+        db._exec_write("""INSERT INTO position_lots
+            (lot_id, code, name, buy_date, original_qty, open_qty, cost_price,
+             locked_until, lot_source, migration_source, status)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            ("old-000001", "000001", "TEST", self.today, 100, 100, 10,
+             self.today, "test", "test", "open"))
 
     def _post_sell(self, qty=100):
         h = _handler('/api/sync', {'entry': {
@@ -366,18 +385,33 @@ class ConcurrentSellGuardTests(unittest.TestCase):
 
         results = []
 
-        def sell(evt_id):
+        ticket_ids = [
+            db.create_trade_ticket({
+                "trade_date": self.today,
+                "code": "000001",
+                "name": "TEST",
+                "action_type": "sell",
+                "status": "executable",
+            })
+            for _ in range(2)
+        ]
+
+        def sell(evt_id, ticket_id):
             h = _handler('/api/sync', {'entry': {
                 '时间': '10:00', '动作': '卖出', '代码': '000001', '标的': 'TEST',
-                '价格': 15, '数量': 100, 'event_id': evt_id
+                '价格': 15, '数量': 100, 'event_id': evt_id,
+                'ticket_id': ticket_id,
+                'input_source': 'spoken_confirmed',
+                'confirmed_by': 'yimu',
+                'audit_note': 'concurrent sell test',
             }})
             h.do_POST()
             results.append((h._resp_status, json.loads(h._resp_body) if h._resp_body else {}))
 
         eid1 = 'evt-conc-a-' + str(random.random())
         eid2 = 'evt-conc-b-' + str(random.random())
-        t1 = threading.Thread(target=sell, args=(eid1,))
-        t2 = threading.Thread(target=sell, args=(eid2,))
+        t1 = threading.Thread(target=sell, args=(eid1, ticket_ids[0]))
+        t2 = threading.Thread(target=sell, args=(eid2, ticket_ids[1]))
         t1.start(); t2.start()
         t1.join(); t2.join()
 

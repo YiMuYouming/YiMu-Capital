@@ -31,6 +31,14 @@ function _w03Money(n) {
   return Math.round(n).toLocaleString();
 }
 
+function _w03PctRangeMoney(range, totalCapital) {
+  var m = String(range || '').match(/(\d+(?:\.\d+)?)\s*[-~]\s*(\d+(?:\.\d+)?)/);
+  if (!m) return '';
+  var low = Math.round((Number(totalCapital) || 0) * Number(m[1]) / 100);
+  var high = Math.round((Number(totalCapital) || 0) * Number(m[2]) / 100);
+  return _w03Money(low) + '-' + _w03Money(high);
+}
+
 function _w03BlockChips(blocks, scope) {
   var items = (blocks || []).filter(function(b){ return b.scope === scope; });
   if (!items.length) return '';
@@ -65,6 +73,8 @@ class PositionCalcWidget extends YiMuWidget {
     var trPct = rsCaps.trend_pct != null ? rsCaps.trend_pct : (ST['趋势占比'] || 0);
     var baseLbPct = ST['连板占比'] || lbPct || 0;
     var baseTrPct = ST['趋势占比'] || trPct || 0;
+    var planTotalCap = ST['总仓位上限'] || baseCap || totalCap || 0;
+    var planW2Cap = ST['新开趋势W2上限'] || '';
     var firstEntryPct = rsCaps.first_entry_pct != null ? rsCaps.first_entry_pct : 10;
 
     // 全局阻断：tradable=false 或 scope=all 的 blocks
@@ -109,6 +119,7 @@ class PositionCalcWidget extends YiMuWidget {
                  || (totalCapital - currentPosVal);
     var currentPosPct = totalCapital > 0 ? Math.round(currentPosVal / totalCapital * 100) : 0;
     var maxPosition = Math.round(totalCapital * (totalCap||0) / 100);
+    var planMaxPosition = Math.round(totalCapital * (planTotalCap||0) / 100);
     var availPct = Math.max(0, totalCap - currentPosPct);
 
     // ── rule_state 缺失提示 ──
@@ -133,6 +144,7 @@ class PositionCalcWidget extends YiMuWidget {
         '<div><div class="w03-kpi ' + (globallyBlocked ? 'danger' : 'info') + '">' + totalCap + '%</div><div class="w03-caption">执行上限</div></div>' +
         '<div class="w03-metrics">' +
           '<span>基础 <b>' + baseCap + '%</b></span>' +
+          (planTotalCap !== baseCap ? '<span>计划 <b>' + planTotalCap + '%</b></span>' : '') +
           '<span>首笔 <b>' + firstEntryPct + '%</b></span>' +
         '</div>' +
       '</div>' +
@@ -150,7 +162,7 @@ class PositionCalcWidget extends YiMuWidget {
         '<div class="w03-split-item"><span>趋势执行</span><b class="info">' + trPct + '%</b></div>' +
       '</div>' +
       '<div class="w03-track"><i style="width:' + Math.max(0, Math.min(100, baseLbPct)) + '%;background:var(--up)"></i><i style="width:' + Math.max(0, Math.min(100, baseTrPct)) + '%;background:var(--info)"></i></div>' +
-      '<div class="w03-note">风格基线：连板 ' + baseLbPct + '% / 趋势 ' + baseTrPct + '%</div>' +
+      '<div class="w03-note">风格基线 / 计划分配：连板 ' + baseLbPct + '% / 趋势 ' + baseTrPct + '%' + (planW2Cap ? ' / W2 ' + planW2Cap : '') + '</div>' +
       '</section>';
 
     // ===== Layer 3: W1/W2 窗口 =====
@@ -158,35 +170,45 @@ class PositionCalcWidget extends YiMuWidget {
     var w2 = rsWindows.w2 || {};
     var w1Open = w1.buy_allowed;
     var w2Open = w2.buy_allowed;
-    var w1Label = w1.buy_allowed ? '追涨/回踩' : ('关闭' + (w1.in_session ? '' : '（非W1）'));
-    var w2Label = w2.buy_allowed ? '低吸/回踩' : ('关闭' + (w2.in_session ? '' : '（非W2）'));
+    function windowLabel(w, openText, timeText) {
+      if (w.buy_allowed) return openText;
+      if (!w.in_session) return timeText;
+      return '规则限制';
+    }
+    var w1Label = windowLabel(w1, '追涨/回踩', '09:30-10:00');
+    var w2Label = windowLabel(w2, '低吸/回踩', '14:00-14:50');
     html += '<section class="w03-layer' + (globallyBlocked ? ' w03-layer-blocked' : '') + '">' +
       '<div class="w03-layer-head">' +
         '<span class="w03-layer-index">第三层</span>' +
         '<span class="w03-layer-title">交易窗口</span>' +
       '</div>' +
       '<div class="w03-window-grid">' +
-        '<div class="w03-window"><span>W1</span><b class="' + (w1Open ? 'up' : 'text-disabled') + '">' + w1Label + '</b><em>' + (w1.in_session ? '盘中' : '休') + '</em></div>' +
-        '<div class="w03-window"><span>W2</span><b class="' + (w2Open ? 'info' : 'text-disabled') + '">' + w2Label + '</b><em>' + (w2.in_session ? '盘中' : '休') + '</em></div>' +
+        '<div class="w03-window"><span>W1</span><b class="' + (w1Open ? 'up' : 'text-disabled') + '">' + w1Label + '</b><em>' + (w1.in_session ? '盘中' : '待开') + '</em></div>' +
+        '<div class="w03-window"><span>W2</span><b class="' + (w2Open ? 'info' : 'text-disabled') + '">' + w2Label + '</b><em>' + (w2.in_session ? '盘中' : '待开') + '</em></div>' +
       '</div>' +
       '</section>';
     html += '</div>';
 
     // ===== 金额计算 =====
     var newCap = Math.max(0, maxPosition - currentPosVal);
+    var planNewCap = Math.max(0, planMaxPosition - currentPosVal);
     var lbMoney = globallyBlocked ? 0 : Math.round(newCap * lbPct / 100);
     var trMoney = globallyBlocked ? 0 : Math.round(newCap * trPct / 100);
     var sumMoney = lbMoney + trMoney;
+    var planLbMoney = Math.round(planNewCap * baseLbPct / 100);
+    var planTrMoney = Math.round(planNewCap * baseTrPct / 100);
+    var w2RangeMoney = _w03PctRangeMoney(planW2Cap, totalCapital);
 
     html += '<div class="w03-money">' +
       '<div class="w03-money-head">' +
         '<span>金额测算</span>' +
         '<b class="' + (globallyBlocked ? 'danger' : 'info') + '">' + _w03Money(sumMoney) + '</b>' +
       '</div>' +
-      '<div class="w03-money-meta">上限 ' + totalCap + '% = ' + _w03Money(maxPosition) + ' / 已持仓 ' + _w03Money(currentPosVal) + ' / 可新开 ' + _w03Money(newCap) + '</div>' +
+      '<div class="w03-money-meta">执行上限 ' + totalCap + '% = ' + _w03Money(maxPosition) + ' / 已持仓 ' + _w03Money(currentPosVal) + ' / 当前可新开 ' + _w03Money(newCap) + '</div>' +
+      '<div class="w03-money-meta">计划上限 ' + planTotalCap + '% = ' + _w03Money(planMaxPosition) + ' / 计划可新开 ' + _w03Money(planNewCap) + (w2RangeMoney ? ' / W2趋势上限 ' + w2RangeMoney : '') + '</div>' +
       '<div class="w03-money-grid">' +
-        '<div><span>连板可新开</span><b class="up">' + _w03Money(lbMoney) + '</b><em>' + _w03Money(newCap) + ' × ' + lbPct + '%</em></div>' +
-        '<div><span>趋势可新开</span><b class="info">' + _w03Money(trMoney) + '</b><em>' + _w03Money(newCap) + ' × ' + trPct + '%</em></div>' +
+        '<div><span>连板计划可新开</span><b class="up">' + _w03Money(planLbMoney) + '</b><em>' + _w03Money(planNewCap) + ' × ' + baseLbPct + '%</em></div>' +
+        '<div><span>趋势计划可新开</span><b class="info">' + _w03Money(planTrMoney) + '</b><em>' + _w03Money(planNewCap) + ' × ' + baseTrPct + '%</em></div>' +
       '</div></div>';
 
     // 阻断详情

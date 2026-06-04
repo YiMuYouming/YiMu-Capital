@@ -242,24 +242,51 @@ class PnLCurveWidget extends YiMuWidget {
   _fetchChartData(callback) {
     var period = this._state.period;
     var idx = this._state.index;
+    var key = period + '_' + idx;
     var url = '/api/pnl?range=' + period + '&index=' + idx;
     if (location.protocol === 'file:') { callback(null); return; }
     var self = this;
+    if (!self._periodCache) self._periodCache = {};
+    if (!self._periodFetchedAt) self._periodFetchedAt = {};
+    if (!self._chartFetchLoading) self._chartFetchLoading = {};
+    if (!self._chartFetchCallbacks) self._chartFetchCallbacks = {};
+
+    var cached = self._periodCache[key];
+    var fetchedAt = self._periodFetchedAt[key] || 0;
+    if (cached && Date.now() - fetchedAt < 15000) {
+      callback(cached);
+      return;
+    }
+
+    if (self._chartFetchLoading[key]) {
+      self._chartFetchCallbacks[key].push(callback);
+      return;
+    }
+
+    self._chartFetchLoading[key] = true;
+    self._chartFetchCallbacks[key] = [callback];
+
+    function finish(data) {
+      self._chartFetchLoading[key] = false;
+      var callbacks = self._chartFetchCallbacks[key] || [];
+      delete self._chartFetchCallbacks[key];
+      callbacks.forEach(function(cb) { cb(data); });
+    }
+
     fetch(url).then(function(r) { return r.json(); })
       .then(function(data) {
         if (data && data.labels && data.labels.length) {
-          if (!self._periodCache) self._periodCache = {};
-          self._periodCache[period + '_' + idx] = data;
-          callback(data);
+          self._periodCache[key] = data;
+          self._periodFetchedAt[key] = Date.now();
+          finish(data);
         } else if (period === 'today') {
           // 非交易时间：保留上次今日缓存，图表停留在最后交易日
-          var cached = (self._periodCache || {})['today_' + idx];
-          callback(cached || null);
+          finish(cached || null);
         } else {
-          callback(null);
+          finish(null);
         }
       })
-      .catch(function() { callback(null); });
+      .catch(function() { finish(cached || null); });
   }
 
   _calcDD(chartData) {
@@ -304,14 +331,18 @@ class PnLCurveWidget extends YiMuWidget {
     var ta = s.totalAsset;
     var taNull = ta == null;
     var pnlLive = s.pnlLive || {};
-    var valuationBad = pnlLive.valuation_complete === false || pnlLive.anchor_blocked === true;
+    var anchorBlocked = pnlLive.anchor_blocked === true;
+    var valuationBad = pnlLive.valuation_complete === false || anchorBlocked;
     var quoteStatus = pnlLive.quote_status || '';
     var isPostClose = quoteStatus === 'close_snapshot';
     var isQuoteUnavailable = valuationBad && !isPostClose;
 
-    if (valuationBad && !isPostClose) {
+    if (anchorBlocked) {
       asset.textContent = '—';
-      document.getElementById('pnl_asset_sub').textContent = '行情缺失 — 估值不可信';
+      document.getElementById('pnl_asset_sub').textContent = '锚点阻断 — 估值不可信';
+    } else if (valuationBad && !isPostClose) {
+      asset.textContent = taNull ? '—' : ta.toLocaleString();
+      document.getElementById('pnl_asset_sub').textContent = taNull ? '行情缺失 — 估值不可信' : '行情缺失 · 非实时估值';
     } else if (isPostClose) {
       asset.textContent = taNull ? '—' : ta.toLocaleString();
       document.getElementById('pnl_asset_sub').textContent = '收盘快照 · 非实时';
@@ -404,12 +435,12 @@ class PnLCurveWidget extends YiMuWidget {
     // Period KPI — 标签联动
     // Phase 5: 估值不可信时所有动态 KPI 同步置不可用
     if (isQuoteUnavailable) {
-      var dynIds = ['pnl_period_val', 'pnl_dd_val', 'pnl_today_alpha', 'pnl_twr', 'pnl_alpha'];
+      var dynIds = ['pnl_period_val', 'pnl_dd_val', 'pnl_today_alpha'];
       dynIds.forEach(function(id) {
         var el = document.getElementById(id);
         if (el) { el.textContent = '—'; el.style.color = 'var(--text-disabled)'; }
       });
-      ['pnl_period_sub', 'pnl_dd_sub', 'pnl_today_alpha_sub', 'pnl_twr_sub', 'pnl_alpha_sub'].forEach(function(id) {
+      ['pnl_period_sub', 'pnl_dd_sub', 'pnl_today_alpha_sub'].forEach(function(id) {
         var el = document.getElementById(id);
         if (el) el.textContent = '估值不可信';
       });

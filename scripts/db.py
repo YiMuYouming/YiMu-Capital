@@ -3,9 +3,9 @@
 
 核心表：account_baselines / trade_records / intraday_snapshots / daily_summary / llm_insights
 """
-import sqlite3, json, threading
+import sqlite3, json, threading, sys
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timedelta
 
 ROOT = Path(__file__).resolve().parent.parent
 DB_PATH = ROOT / "data" / "pnl.db"
@@ -167,6 +167,116 @@ def init_db():
             source      TEXT DEFAULT 'manual'
         );
         CREATE INDEX IF NOT EXISTS idx_fund_date ON fund_events(event_date);
+
+        CREATE TABLE IF NOT EXISTS trade_tickets (
+            ticket_id                   TEXT PRIMARY KEY,
+            created_at                  TEXT DEFAULT (datetime('now','localtime')),
+            updated_at                  TEXT DEFAULT (datetime('now','localtime')),
+            trade_date                  TEXT NOT NULL,
+            code                        TEXT NOT NULL,
+            name                        TEXT,
+            action_type                 TEXT NOT NULL,
+            status                      TEXT NOT NULL DEFAULT 'draft',
+            window                      TEXT,
+            intent_text                 TEXT,
+            rule_state_json             TEXT,
+            market_snapshot_json        TEXT,
+            account_snapshot_json       TEXT,
+            max_qty                     INTEGER,
+            max_amount                  REAL,
+            stop_line                   REAL,
+            expected_r                  REAL,
+            missing_data_json           TEXT,
+            blocking_rule_ids_json      TEXT,
+            triggered_rule_ids_json     TEXT,
+            account_day_return_pct      REAL,
+            trade_return_pct            REAL,
+            realized_pnl_pct            REAL,
+            unrealized_pnl_pct          REAL,
+            losing_account_days         INTEGER,
+            losing_trades_streak        INTEGER,
+            sellable_quantity           INTEGER,
+            t1_risk_json                TEXT,
+            human_override_reason       TEXT,
+            funds_evidence_json         TEXT,
+            style_score_raw             REAL,
+            style_score_adjusted        REAL,
+            style_adjustment_reason     TEXT,
+            style_adjustment_approver   TEXT,
+            style_script_version        TEXT,
+            rule_pack_version           TEXT,
+            rule_snapshot_hash          TEXT,
+            today_execution_card_id     TEXT,
+            funds_source_freshness      TEXT,
+            funds_query_time            TEXT,
+            funds_unit                  TEXT,
+            eod_outcome_json            TEXT,
+            linked_ticket_id            TEXT,
+            close_reason                TEXT,
+            review_note                 TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_ticket_date_status ON trade_tickets(trade_date, status);
+        CREATE INDEX IF NOT EXISTS idx_ticket_code_date ON trade_tickets(code, trade_date);
+
+        CREATE TABLE IF NOT EXISTS position_lots (
+            lot_id              TEXT PRIMARY KEY,
+            created_at          TEXT DEFAULT (datetime('now','localtime')),
+            code                TEXT NOT NULL,
+            name                TEXT,
+            source_trade_id     INTEGER,
+            source_ticket_id    TEXT,
+            buy_date            TEXT NOT NULL,
+            original_qty        INTEGER NOT NULL,
+            open_qty            INTEGER NOT NULL,
+            cost_price          REAL,
+            locked_until        TEXT,
+            lot_source          TEXT,
+            migration_source    TEXT,
+            status              TEXT NOT NULL DEFAULT 'open'
+        );
+        CREATE INDEX IF NOT EXISTS idx_lot_code_status ON position_lots(code, status);
+        CREATE INDEX IF NOT EXISTS idx_lot_locked_until ON position_lots(locked_until);
+
+        CREATE TABLE IF NOT EXISTS trade_lot_allocations (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            sell_trade_id   INTEGER NOT NULL,
+            lot_id          TEXT NOT NULL,
+            qty             INTEGER NOT NULL,
+            cost_price      REAL,
+            sell_price      REAL,
+            realized_pnl    REAL
+        );
+        CREATE INDEX IF NOT EXISTS idx_alloc_sell_trade ON trade_lot_allocations(sell_trade_id);
+
+        CREATE TABLE IF NOT EXISTS pending_fill_confirmations (
+            confirmation_id     TEXT PRIMARY KEY,
+            created_at          TEXT DEFAULT (datetime('now','localtime')),
+            expires_at          TEXT,
+            ticket_id           TEXT NOT NULL,
+            input_text          TEXT,
+            parsed_entry_json   TEXT,
+            preview_token       TEXT,
+            preview_hash        TEXT,
+            status              TEXT NOT NULL DEFAULT 'pending',
+            confirmed_at        TEXT,
+            confirmed_by        TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_pending_confirm_status ON pending_fill_confirmations(status, expires_at);
+
+        CREATE TABLE IF NOT EXISTS ticket_conflict_log (
+            id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+            created_at          TEXT DEFAULT (datetime('now','localtime')),
+            trade_date          TEXT NOT NULL,
+            ticket_id           TEXT,
+            code                TEXT,
+            conflict_type       TEXT NOT NULL,
+            severity            TEXT,
+            expected_json       TEXT,
+            actual_json         TEXT,
+            resolution_status   TEXT NOT NULL DEFAULT 'open',
+            note                TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_ticket_conflict ON ticket_conflict_log(trade_date, code, conflict_type);
     """)
     columns = {row['name'] for row in conn.execute("PRAGMA table_info(account_baselines)").fetchall()}
     if 'trade_id_cutoff' not in columns:
@@ -186,6 +296,15 @@ def init_db():
         ('context_captured_at', 'TEXT'),
         ('context_status', 'TEXT'),
         ('context_unavailable_reason', 'TEXT'),
+        ('ticket_id', 'TEXT'),
+        ('trade_group_id', 'TEXT'),
+        ('leg_type', 'TEXT'),
+        ('sellable_qty_before', 'INTEGER'),
+        ('locked_until', 'TEXT'),
+        ('input_source', 'TEXT'),
+        ('input_text', 'TEXT'),
+        ('confirmed_by', 'TEXT'),
+        ('audit_note', 'TEXT'),
     ]:
         if col not in trade_cols:
             conn.execute(f"ALTER TABLE trade_records ADD COLUMN {col} {col_type}")
@@ -236,6 +355,525 @@ def query_account_baseline(date_str):
 def query_last_trade_id(date_str):
     rows = _exec("SELECT MAX(id) AS last_id FROM trade_records WHERE trade_date = ?", (date_str,))
     return int(rows[0]['last_id'] or 0) if rows else 0
+
+
+# ===== 交易票据 =====
+
+TICKET_STATUSES = {
+    "draft",
+    "blocked",
+    "executable",
+    "confirmed",
+    "partially_filled",
+    "filled",
+    "cancelled",
+    "closed",
+    "closed_with_conflict",
+    "audit_degraded",
+}
+
+TICKET_JSON_COLUMNS = {
+    "rule_state_json",
+    "market_snapshot_json",
+    "account_snapshot_json",
+    "missing_data_json",
+    "blocking_rule_ids_json",
+    "triggered_rule_ids_json",
+    "t1_risk_json",
+    "funds_evidence_json",
+    "eod_outcome_json",
+}
+
+
+def _ticket_columns(conn=None):
+    conn = conn or get_conn()
+    return {row["name"] for row in conn.execute("PRAGMA table_info(trade_tickets)").fetchall()}
+
+
+def _json_text(value):
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return value
+    return json.dumps(value, ensure_ascii=False)
+
+
+def _parse_ticket_row(row):
+    if not row:
+        return None
+    data = dict(row)
+    for col in TICKET_JSON_COLUMNS:
+        raw = data.get(col)
+        if raw:
+            try:
+                data[col.replace("_json", "")] = json.loads(raw)
+            except (json.JSONDecodeError, TypeError):
+                pass
+    return data
+
+
+def _generate_ticket_id(conn, trade_date, code):
+    date_key = str(trade_date).replace("-", "")
+    code_key = str(code)
+    prefix = f"TICKET-{date_key}-{code_key}"
+    row = conn.execute(
+        "SELECT COUNT(*) AS n FROM trade_tickets WHERE ticket_id LIKE ?",
+        (f"{prefix}%",),
+    ).fetchone()
+    seq = int(row["n"] or 0) + 1
+    return f"{prefix}-{seq:04d}"
+
+
+def create_trade_ticket(data):
+    """Create a trade ticket and return its ticket_id."""
+    conn = get_conn()
+    cols = _ticket_columns(conn)
+    payload = dict(data or {})
+    status = payload.get("status", "draft")
+    if status not in TICKET_STATUSES:
+        raise ValueError(f"invalid ticket status: {status}")
+    payload["status"] = status
+    payload.setdefault("ticket_id", _generate_ticket_id(conn, payload["trade_date"], payload["code"]))
+
+    insert_cols = []
+    values = []
+    for col, value in payload.items():
+        if col not in cols:
+            continue
+        insert_cols.append(col)
+        values.append(_json_text(value) if col in TICKET_JSON_COLUMNS else value)
+    placeholders = ", ".join(["?"] * len(insert_cols))
+    conn.execute(
+        f"INSERT INTO trade_tickets ({', '.join(insert_cols)}) VALUES ({placeholders})",
+        values,
+    )
+    conn.commit()
+    return payload["ticket_id"]
+
+
+def query_trade_ticket(ticket_id):
+    row = get_conn().execute(
+        "SELECT * FROM trade_tickets WHERE ticket_id = ?",
+        (ticket_id,),
+    ).fetchone()
+    return _parse_ticket_row(row)
+
+
+def query_trade_tickets(date_from=None, date_to=None, code=None, status=None, limit=100):
+    clauses, params = [], []
+    if date_from:
+        clauses.append("trade_date >= ?")
+        params.append(date_from)
+    if date_to:
+        clauses.append("trade_date <= ?")
+        params.append(date_to)
+    if code:
+        clauses.append("code = ?")
+        params.append(code)
+    if status:
+        clauses.append("status = ?")
+        params.append(status)
+    sql = "SELECT * FROM trade_tickets"
+    if clauses:
+        sql += " WHERE " + " AND ".join(clauses)
+    sql += " ORDER BY trade_date DESC, created_at DESC, ticket_id DESC LIMIT ?"
+    params.append(int(limit))
+    return [_parse_ticket_row(row) for row in _exec(sql, params)]
+
+
+def update_trade_ticket_status(ticket_id, status, close_reason=None, review_note=None):
+    if status not in TICKET_STATUSES:
+        raise ValueError(f"invalid ticket status: {status}")
+    conn = get_conn()
+    cur = conn.cursor()
+    cur.execute("""
+        UPDATE trade_tickets
+        SET status = ?,
+            close_reason = COALESCE(?, close_reason),
+            review_note = COALESCE(?, review_note),
+            updated_at = datetime('now','localtime')
+        WHERE ticket_id = ?
+    """, (status, close_reason, review_note, ticket_id))
+    conn.commit()
+    return cur.rowcount > 0
+
+
+def link_trade_to_ticket(trade_id, ticket_id, trade_group_id, leg_type,
+                         sellable_qty_before=None, locked_until=None):
+    conn = get_conn()
+    if not conn.execute("SELECT 1 FROM trade_tickets WHERE ticket_id = ?", (ticket_id,)).fetchone():
+        return False
+    cur = conn.cursor()
+    cur.execute("""
+        UPDATE trade_records
+        SET ticket_id = ?,
+            trade_group_id = ?,
+            leg_type = ?,
+            sellable_qty_before = ?,
+            locked_until = ?
+        WHERE id = ?
+    """, (ticket_id, trade_group_id, leg_type, sellable_qty_before, locked_until, int(trade_id)))
+    conn.commit()
+    return cur.rowcount > 0
+
+
+# ===== Position lots / T+1 =====
+
+def _number(value):
+    try:
+        return float(str(value or 0).replace("股", ""))
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _holiday_dates():
+    path = ROOT / "data" / "trading_holidays.json"
+    if not path.exists():
+        return set()
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return set()
+    if isinstance(raw, list):
+        return {str(item) for item in raw}
+    if isinstance(raw, dict):
+        values = raw.get("holidays") or raw.get("dates") or []
+        return {str(item) for item in values}
+    return set()
+
+
+def is_trading_day(date_str):
+    day = datetime.strptime(str(date_str), "%Y-%m-%d").date()
+    return day.weekday() < 5 and day.isoformat() not in _holiday_dates()
+
+
+def next_trade_date(date_str):
+    day = datetime.strptime(str(date_str), "%Y-%m-%d").date() + timedelta(days=1)
+    holidays = _holiday_dates()
+    while day.weekday() >= 5 or day.isoformat() in holidays:
+        day += timedelta(days=1)
+    return day.isoformat()
+
+
+def create_lot_from_buy_trade(trade):
+    if int(trade.get("is_reversal") or 0) == 1:
+        return None
+    action = str(trade.get("action") or "")
+    if "买" not in action and "追涨" not in action:
+        raise ValueError("create_lot_from_buy_trade requires a buy action")
+    trade_id = int(trade.get("id") or trade.get("source_trade_id") or 0)
+    if trade_id <= 0:
+        raise ValueError("buy trade id is required")
+    trade_date = str(trade.get("trade_date") or datetime.now().strftime("%Y-%m-%d"))
+    code = str(trade.get("code") or "")
+    qty = int(_number(trade.get("qty")))
+    if not code or qty <= 0:
+        raise ValueError("buy trade requires code and positive qty")
+    lot_id = f"trade:{trade_id}"
+    conn = get_conn()
+    exists = conn.execute("SELECT 1 FROM position_lots WHERE lot_id = ?", (lot_id,)).fetchone()
+    if exists:
+        return lot_id
+    conn.execute("""
+        INSERT INTO position_lots
+        (lot_id, code, name, source_trade_id, source_ticket_id, buy_date,
+         original_qty, open_qty, cost_price, locked_until, lot_source,
+         migration_source, status)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """, (lot_id, code, trade.get("name"), trade_id, trade.get("ticket_id"),
+          trade_date, qty, qty, _number(trade.get("price")),
+          next_trade_date(trade_date), "trade_record", None, "open"))
+    conn.commit()
+    return lot_id
+
+
+def query_position_lots(code=None, status=None):
+    clauses, params = [], []
+    if code:
+        clauses.append("code = ?")
+        params.append(str(code))
+    if status:
+        clauses.append("status = ?")
+        params.append(str(status))
+    sql = "SELECT * FROM position_lots"
+    if clauses:
+        sql += " WHERE " + " AND ".join(clauses)
+    sql += " ORDER BY buy_date ASC, created_at ASC, lot_id ASC"
+    return [dict(row) for row in _exec(sql, params)]
+
+
+def get_sellable_lots(code, trade_date):
+    if not is_trading_day(trade_date):
+        return []
+    return [dict(row) for row in _exec("""
+        SELECT * FROM position_lots
+        WHERE code = ? AND status = 'open' AND open_qty > 0 AND locked_until <= ?
+        ORDER BY buy_date ASC, created_at ASC, lot_id ASC
+    """, (str(code), str(trade_date)))]
+
+
+def get_sellable_qty(code, trade_date):
+    return sum(int(row.get("open_qty") or 0) for row in get_sellable_lots(code, trade_date))
+
+
+def allocate_sell_to_lots(sell_trade):
+    if int(sell_trade.get("is_reversal") or 0) == 1:
+        return []
+    action = str(sell_trade.get("action") or "")
+    if "卖" not in action:
+        raise ValueError("allocate_sell_to_lots requires a sell action")
+    sell_trade_id = int(sell_trade.get("id") or sell_trade.get("sell_trade_id") or 0)
+    if sell_trade_id <= 0:
+        raise ValueError("sell trade id is required")
+    trade_date = str(sell_trade.get("trade_date") or datetime.now().strftime("%Y-%m-%d"))
+    code = str(sell_trade.get("code") or "")
+    sell_qty = int(_number(sell_trade.get("qty")))
+    sell_price = _number(sell_trade.get("price"))
+    if not code or sell_qty <= 0:
+        raise ValueError("sell trade requires code and positive qty")
+    if not is_trading_day(trade_date):
+        raise ValueError(f"{trade_date} is not a trading day")
+
+    conn = get_conn()
+    owns_tx = not conn.in_transaction
+    allocations = []
+    try:
+        if owns_tx:
+            conn.execute("BEGIN IMMEDIATE")
+        existing = conn.execute(
+            "SELECT * FROM trade_lot_allocations WHERE sell_trade_id = ? ORDER BY id",
+            (sell_trade_id,),
+        ).fetchall()
+        if existing:
+            if owns_tx:
+                conn.commit()
+            return [dict(row) for row in existing]
+        lots = [dict(row) for row in conn.execute("""
+            SELECT * FROM position_lots
+            WHERE code = ? AND status = 'open' AND open_qty > 0 AND locked_until <= ?
+            ORDER BY buy_date ASC, created_at ASC, lot_id ASC
+        """, (code, trade_date)).fetchall()]
+        sellable = sum(int(row["open_qty"] or 0) for row in lots)
+        if sell_qty > sellable:
+            raise ValueError(f"sell qty {sell_qty} exceeds sellable lot qty {sellable} for {code}")
+
+        remaining = sell_qty
+        for lot in lots:
+            if remaining <= 0:
+                break
+            lot_qty = int(lot["open_qty"] or 0)
+            alloc_qty = min(remaining, lot_qty)
+            cost_price = _number(lot.get("cost_price"))
+            realized = round((sell_price - cost_price) * alloc_qty, 2) if cost_price else None
+            conn.execute("""
+                INSERT INTO trade_lot_allocations
+                (sell_trade_id, lot_id, qty, cost_price, sell_price, realized_pnl)
+                VALUES (?, ?, ?, ?, ?, ?)
+            """, (sell_trade_id, lot["lot_id"], alloc_qty, cost_price, sell_price, realized))
+            new_open_qty = lot_qty - alloc_qty
+            conn.execute(
+                "UPDATE position_lots SET open_qty = ?, status = ? WHERE lot_id = ?",
+                (new_open_qty, "closed" if new_open_qty == 0 else "open", lot["lot_id"]),
+            )
+            allocations.append({
+                "sell_trade_id": sell_trade_id,
+                "lot_id": lot["lot_id"],
+                "qty": alloc_qty,
+                "cost_price": cost_price,
+                "sell_price": sell_price,
+                "realized_pnl": realized,
+            })
+            remaining -= alloc_qty
+        if owns_tx:
+            conn.commit()
+        return allocations
+    except Exception:
+        if owns_tx:
+            conn.rollback()
+        raise
+
+
+def _entry_get(entry, *keys, default=None):
+    for key in keys:
+        value = entry.get(key)
+        if value not in (None, ""):
+            return value
+    return default
+
+
+def _sellable_qty_in_tx(conn, code, trade_date):
+    if not is_trading_day(trade_date):
+        return 0
+    row = conn.execute("""
+        SELECT COALESCE(SUM(open_qty), 0) AS qty
+        FROM position_lots
+        WHERE code = ? AND status = 'open' AND open_qty > 0 AND locked_until <= ?
+    """, (str(code), str(trade_date))).fetchone()
+    return int(row["qty"] or 0) if row else 0
+
+
+def record_confirmed_fill(entry, rule_state=None, market_snapshot=None, confirmation=None):
+    """Atomically record a confirmed fill and apply lot effects."""
+    conn = get_conn()
+    evt_id = str(_entry_get(entry, "event_id", default="") or "")
+    if evt_id:
+        existing = conn.execute(
+            "SELECT id, ticket_id FROM trade_records WHERE event_id = ?",
+            (evt_id,),
+        ).fetchone()
+        if existing:
+            return {
+                "trade_id": int(existing["id"]),
+                "ticket_id": existing["ticket_id"],
+                "status": "idempotent",
+            }
+
+    ticket_id = str(_entry_get(entry, "ticket_id") or "")
+    if not ticket_id:
+        raise ValueError("ticket_id is required for confirmed fill")
+    ticket = conn.execute("SELECT * FROM trade_tickets WHERE ticket_id = ?", (ticket_id,)).fetchone()
+    if not ticket:
+        raise ValueError(f"ticket not found: {ticket_id}")
+    if str(ticket["status"]) not in {"executable", "confirmed", "partially_filled", "audit_degraded"}:
+        raise ValueError(f"ticket {ticket_id} cannot accept fills in status {ticket['status']}")
+
+    action = str(_entry_get(entry, "action", "动作") or "")
+    code = str(_entry_get(entry, "code", "代码") or "")
+    name = str(_entry_get(entry, "name", "标的") or "")
+    qty = int(_number(_entry_get(entry, "qty", "数量")))
+    price = _number(_entry_get(entry, "price", "价格"))
+    trade_date = str(_entry_get(entry, "trade_date", default=ticket["trade_date"]) or ticket["trade_date"])
+    trade_time = _entry_get(entry, "trade_time", "时间")
+    if not code or qty <= 0 or price <= 0:
+        raise ValueError("confirmed fill requires code, positive qty and positive price")
+
+    is_buy = ("买" in action) or ("追涨" in action)
+    is_sell = "卖" in action
+    if not is_buy and not is_sell:
+        raise ValueError(f"unsupported fill action: {action}")
+
+    sellable_qty_before = None
+    owns_tx = not conn.in_transaction
+    try:
+        if owns_tx:
+            conn.execute("BEGIN IMMEDIATE")
+        if is_sell:
+            sellable_qty_before = _sellable_qty_in_tx(conn, code, trade_date)
+            if qty > sellable_qty_before:
+                raise ValueError(
+                    f"sell qty {qty} exceeds sellable_qty_before {sellable_qty_before} for {code}")
+
+        cur = conn.cursor()
+        cur.execute("""INSERT INTO trade_records
+            (trade_date, trade_time, action, code, name, price, qty, window, reason,
+             realized_pnl, fee, reversal_of_id, is_reversal, rule_state_json,
+             market_snapshot_json, event_id, context_captured_at, context_status,
+             context_unavailable_reason, ticket_id, trade_group_id, leg_type,
+             sellable_qty_before, locked_until, input_source, input_text,
+             confirmed_by, audit_note)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (trade_date, trade_time, action, code, name, price, qty,
+             _entry_get(entry, "window", "窗口"),
+             _entry_get(entry, "reason", "原因"),
+             _entry_get(entry, "realized_pnl"),
+             _entry_get(entry, "fee", default=0),
+             _entry_get(entry, "reversal_of_id"),
+             int(_entry_get(entry, "is_reversal", default=0) or 0),
+             json.dumps(rule_state, ensure_ascii=False) if rule_state else None,
+             json.dumps(market_snapshot, ensure_ascii=False) if market_snapshot else None,
+             evt_id or None,
+             (confirmation or {}).get("context_captured_at"),
+             (confirmation or {}).get("context_status"),
+             (confirmation or {}).get("context_unavailable_reason"),
+             ticket_id,
+             _entry_get(entry, "trade_group_id"),
+             _entry_get(entry, "leg_type"),
+             sellable_qty_before,
+             _entry_get(entry, "locked_until"),
+             _entry_get(entry, "input_source"),
+             _entry_get(entry, "input_text"),
+             _entry_get(entry, "confirmed_by"),
+             _entry_get(entry, "audit_note")))
+        trade_id = int(cur.lastrowid)
+
+        if is_buy:
+            locked_until = next_trade_date(trade_date)
+            conn.execute("""
+                INSERT INTO position_lots
+                (lot_id, code, name, source_trade_id, source_ticket_id, buy_date,
+                 original_qty, open_qty, cost_price, locked_until, lot_source,
+                 migration_source, status)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (f"trade:{trade_id}", code, name, trade_id, ticket_id, trade_date,
+                  qty, qty, price, locked_until, "trade_record", None, "open"))
+            conn.execute(
+                "UPDATE trade_records SET locked_until = ? WHERE id = ?",
+                (locked_until, trade_id),
+            )
+        elif is_sell:
+            remaining = qty
+            lots = [dict(row) for row in conn.execute("""
+                SELECT * FROM position_lots
+                WHERE code = ? AND status = 'open' AND open_qty > 0 AND locked_until <= ?
+                ORDER BY buy_date ASC, created_at ASC, lot_id ASC
+            """, (code, trade_date)).fetchall()]
+            for lot in lots:
+                if remaining <= 0:
+                    break
+                lot_qty = int(lot["open_qty"] or 0)
+                alloc_qty = min(remaining, lot_qty)
+                cost_price = _number(lot.get("cost_price"))
+                realized = round((price - cost_price) * alloc_qty, 2) if cost_price else None
+                conn.execute("""
+                    INSERT INTO trade_lot_allocations
+                    (sell_trade_id, lot_id, qty, cost_price, sell_price, realized_pnl)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                """, (trade_id, lot["lot_id"], alloc_qty, cost_price, price, realized))
+                new_open_qty = lot_qty - alloc_qty
+                conn.execute(
+                    "UPDATE position_lots SET open_qty = ?, status = ? WHERE lot_id = ?",
+                    (new_open_qty, "closed" if new_open_qty == 0 else "open", lot["lot_id"]),
+                )
+                remaining -= alloc_qty
+
+        conn.execute(
+            "UPDATE trade_tickets SET status = ?, updated_at = datetime('now','localtime') WHERE ticket_id = ?",
+            ("filled", ticket_id),
+        )
+        if owns_tx:
+            conn.commit()
+        return {
+            "trade_id": trade_id,
+            "ticket_id": ticket_id,
+            "status": "inserted",
+            "sellable_qty_before": sellable_qty_before,
+        }
+    except sqlite3.IntegrityError:
+        err = sys.exc_info()[1]
+        if conn.in_transaction:
+            conn.rollback()
+        if evt_id:
+            existing = conn.execute(
+                "SELECT id, ticket_id FROM trade_records WHERE event_id = ?",
+                (evt_id,),
+            ).fetchone()
+            if existing:
+                return {
+                    "trade_id": int(existing["id"]),
+                    "ticket_id": existing["ticket_id"],
+                    "status": "idempotent",
+                }
+        if "UNIQUE constraint failed" in str(err):
+            return {
+                "trade_id": None,
+                "ticket_id": ticket_id,
+                "status": "duplicate",
+            }
+        raise
+    except Exception:
+        if owns_tx:
+            conn.rollback()
+        raise
 
 
 # ===== PnL 操作 =====
@@ -650,7 +1288,7 @@ def query_trade_reviews(date_str):
     rows = _exec("""SELECT id, created_at, trade_date, trade_time, action, code, name,
         price, qty, window, reason, realized_pnl, fee, reversal_of_id, is_reversal,
         rule_state_json, market_snapshot_json, outcome, review_note,
-        context_captured_at, context_status, context_unavailable_reason
+        context_captured_at, context_status, context_unavailable_reason, ticket_id
         FROM trade_records WHERE trade_date = ? ORDER BY id""", (date_str,))
     results = []
     for r in rows:

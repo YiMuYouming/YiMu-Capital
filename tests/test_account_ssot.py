@@ -117,6 +117,28 @@ class AccountReducerTests(unittest.TestCase):
         self.assertFalse(state["valuation_complete"])
         self.assertEqual(state.get("quote_status"), "stale")
 
+    def test_premarket_previous_close_quote_is_close_snapshot(self):
+        """09:15前允许上一交易日收盘行情展示账户快照"""
+        state = reduce_account_state(
+            self.anchor,
+            [],
+            {"688981": {"最新价": 146}, "_updated": "2026-05-25T15:05:00"},
+            now="2026-05-26T08:45:00",
+        )
+        self.assertTrue(state["valuation_complete"])
+        self.assertEqual(state.get("quote_status"), "close_snapshot")
+
+    def test_premarket_same_day_snapshot_remains_usable_before_collector_window(self):
+        """09:15前同日盘前快照超过300s，仍可用于展示账户估值"""
+        state = reduce_account_state(
+            self.anchor,
+            [],
+            {"688981": {"最新价": 146}, "_updated": "2026-05-26T08:54:00+08:00"},
+            now="2026-05-26T09:08:00+08:00",
+        )
+        self.assertTrue(state["valuation_complete"])
+        self.assertEqual(state.get("quote_status"), "premarket_snapshot")
+
     def test_1501_with_1500_quote_is_close_snapshot(self):
         """15:01 使用 15:00 quote → close_snapshot(收盘后，非live)"""
         state = reduce_account_state(
@@ -416,6 +438,35 @@ class ClosingAnchorTests(unittest.TestCase):
         self.assertIsNotNone(today_anchor.get("_meta"))
         self.assertIn("nav", today_anchor["_meta"])
         self.assertIn("pnl_pct", today_anchor["_meta"])
+
+    def test_closing_anchor_preserves_existing_day_start_prices(self):
+        from scripts.account_ssot import generate_closing_anchor
+
+        history_path = Path(self.tmp.name) / "pnl_history.json"
+        db.insert_account_baseline({
+            "date": "2026-05-26",
+            "effective_at": "2026-05-26T09:30:00",
+            "trade_id_cutoff": 0,
+            "cash": 70000,
+            "day_start_asset": 101500,
+            "total_deposit": 100000,
+            "positions": [{"标的": "沪电", "代码": "002463", "数量": 300, "成本": 100, "现价": 105}],
+            "source": "previous_close",
+            "_meta": {"day_start_prices": {"002463": 105.0}},
+        })
+
+        result = generate_closing_anchor(
+            {"002463": {"最新价": 106.0}, "_updated": "2026-05-26T15:00:00"},
+            now="2026-05-26T15:05:00",
+            pnl_history_path=history_path,
+        )
+
+        self.assertIsNotNone(result)
+        today_anchor = db.query_account_baseline("2026-05-26")
+        meta = today_anchor.get("_meta") or {}
+        self.assertEqual(meta.get("day_start_prices"), {"002463": 105.0})
+        self.assertIn("nav", meta)
+        self.assertIn("pnl_pct", meta)
 
     def test_previous_close_anchor_is_used_by_ensure_today_anchor(self):
         from scripts.account_ssot import ensure_today_anchor, load_current_account_state
@@ -1320,23 +1371,36 @@ class SevenDayClosedPositionsTests(unittest.TestCase):
         codes = [c["code"] for c in closed]
         self.assertIn("000001", codes, f"昨日清仓应在7日内: {closed}")
 
-    def test_six_days_ago_appears_eight_days_ago_not(self):
-        """6日前可显示，8日前不可"""
-        # 8日前
-        self._make_anchor("2026-05-19",
+    def test_seventh_trading_day_appears_eighth_trading_day_not(self):
+        """第7个交易日可显示，第8个交易日不可显示"""
+        # 第8个交易日
+        self._make_anchor("2026-05-16",
             [{"标的": "OLD8", "代码": "000008", "数量": 100, "成本": 10, "状态": "持有"}])
-        self._add_sell("2026-05-19", "000008", "OLD8", 20, 100)
-        # 6日前
-        self._make_anchor("2026-05-21",
-            [{"标的": "OLD6", "代码": "000006", "数量": 100, "成本": 10, "状态": "持有"}])
-        self._add_sell("2026-05-21", "000006", "OLD6", 20, 100)
+        self._add_sell("2026-05-16", "000008", "OLD8", 20, 100)
+        # 第7个交易日
+        self._make_anchor("2026-05-19",
+            [{"标的": "OLD7", "代码": "000007", "数量": 100, "成本": 10, "状态": "持有"}])
+        self._add_sell("2026-05-19", "000007", "OLD7", 20, 100)
         self._make_anchor("2026-05-27", [], source="previous_close")
 
         from scripts.account_ssot import query_7day_closed_positions
         closed = query_7day_closed_positions("2026-05-27")
         codes = [c["code"] for c in closed]
-        self.assertIn("000006", codes, f"6日前清仓应在7日内: {closed}")
-        self.assertNotIn("000008", codes, f"8日前清仓不应在7日内: {closed}")
+        self.assertIn("000007", codes, f"第7个交易日清仓应在窗口内: {closed}")
+        self.assertNotIn("000008", codes, f"第8个交易日清仓不应在窗口内: {closed}")
+
+    def test_cross_week_uses_7_trading_days_not_7_calendar_days(self):
+        """跨周时周末不占清仓跟踪窗口：6/4 的7个交易日应包含5/27"""
+        self._make_anchor("2026-05-27",
+            [{"标的": "OLD7", "代码": "000007", "数量": 100, "成本": 10, "状态": "持有"}])
+        self._add_sell("2026-05-27", "000007", "OLD7", 20, 100)
+        for day in ["2026-05-28", "2026-05-29", "2026-06-01", "2026-06-02", "2026-06-03", "2026-06-04"]:
+            self._make_anchor(day, [], source="previous_close")
+
+        from scripts.account_ssot import query_7day_closed_positions
+        closed = query_7day_closed_positions("2026-06-04")
+        codes = [c["code"] for c in closed]
+        self.assertIn("000007", codes, f"5/27 是第7个交易日，应保留: {closed}")
 
     def test_partial_sell_not_in_closed(self):
         """部分卖出不出现在清仓跟踪"""

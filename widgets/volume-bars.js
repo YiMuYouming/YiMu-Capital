@@ -25,6 +25,9 @@ class VolumeBarsWidget extends YiMuWidget {
       {key:'深证15min', label:'深证', data:(data||{})['深证15min']||[]},
       {key:'创业15min', label:'创业', data:(data||{})['创业15min']||[]}
     ];
+    var hasTodayBars = indexes.some(function(idx) {
+      return idx.data.some(function(b) { return b && !b._cum; });
+    });
 
     var now = new Date();
     var nowMin = now.getHours()*60 + now.getMinutes();
@@ -39,6 +42,13 @@ class VolumeBarsWidget extends YiMuWidget {
 
     // tooltip
     html += '<div id="w11tip" style="display:none;position:fixed;background:rgba(0,0,0,0.85);color:#fff;padding:3px 9px;border-radius:5px;font-size:11px;white-space:nowrap;z-index:var(--z-tooltip);pointer-events:none"></div>';
+
+    if (!hasTodayBars) {
+      html += '<div style="height:156px;display:flex;align-items:center;justify-content:center;color:var(--text-disabled);font-size:12px;background:var(--bg-base);border-radius:var(--radius-sm)">等待今日15min数据</div>';
+      body.innerHTML = html;
+      this.updateTimestamp();
+      return;
+    }
 
     indexes.forEach(function(idx, rowI) {
       var bars = idx.data;

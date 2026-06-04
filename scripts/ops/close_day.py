@@ -11,13 +11,16 @@ Usage:
 import argparse
 import subprocess
 import sys
+from datetime import datetime
 from pathlib import Path
 
 try:
     from scripts.ops.common import run, sqlite_integrity
+    from scripts.account_ssot import build_daily_ticket_review
 except ModuleNotFoundError:
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
     from scripts.ops.common import run, sqlite_integrity
+    from scripts.account_ssot import build_daily_ticket_review
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 LOCAL_DATA_DIR = PROJECT_ROOT / "data"
@@ -43,6 +46,8 @@ def parse_args(argv=None):
                    help="只打印不执行（默认）")
     p.add_argument("--apply", action="store_true",
                    help="执行实际写操作")
+    p.add_argument("--date", default=datetime.now().strftime("%Y-%m-%d"),
+                   help="生成票据复盘摘要的日期，默认今天")
     p.add_argument("--remote-data-dir", default=REMOTE_DATA_DIR,
                    help=argparse.SUPPRESS)
     p.add_argument("--local-data-dir", default=str(LOCAL_DATA_DIR),
@@ -71,6 +76,8 @@ def main():
 
     local_data = Path(args.local_data_dir)
     remote_data = args.remote_data_dir
+    arg_date = getattr(args, "date", None)
+    date_str = arg_date if isinstance(arg_date, str) and arg_date else datetime.now().strftime("%Y-%m-%d")
 
     print("=" * 60)
     print(f"{'收盘自动化 [DRY-RUN]' if dry_run else '收盘自动化'}")
@@ -158,6 +165,20 @@ def main():
         else:
             print(f"  ❌ integrity_check: {msg}")
             sys.exit(1)
+
+    # 5. 生成交易票据复盘摘要
+    print()
+    print("[STEP 5] 生成交易票据复盘摘要")
+    summary = build_daily_ticket_review(date_str)
+    print(f"  Ticket review summary generated for {date_str}")
+    if dry_run:
+        print("  [DRY-RUN] 跳过 Markdown 写入")
+    else:
+        review_dir = local_data / "reviews"
+        review_dir.mkdir(parents=True, exist_ok=True)
+        out_path = review_dir / f"ticket_review_{date_str}.md"
+        out_path.write_text(summary.get("review_markdown", ""), encoding="utf-8")
+        print(f"  ✅ Markdown 已写入: {out_path}")
 
     print()
     print("=" * 60)

@@ -137,7 +137,7 @@ def main():
         for url_path in ["/api/baseline", "/api/account/state", "/api/pnl/summary"]:
             curl_cmd = ["curl", "-s", "--max-time", "5",
                         f"http://127.0.0.1:8088{url_path}"]
-            r = run(curl_cmd, dry_run=False, check=False)
+            r = run(curl_cmd, dry_run=False, check=False, capture_output=True)
             if r and r.returncode == 0 and r.stdout.strip():
                 snippet = r.stdout.strip()[:120]
                 print(f"  ✅ {url_path}: {snippet}...")

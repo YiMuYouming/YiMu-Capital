@@ -1,6 +1,7 @@
 """test_gen_baseline.py — gen_dashboard_data.py 解析逻辑测试"""
 import sys, json, tempfile, unittest
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "scripts"))
 try:
@@ -11,7 +12,10 @@ try:
     _build_pools_payload = getattr(_gen, "_build_pools_payload", None)
     _build_pools_payload_for_trading_day = getattr(_gen, "_build_pools_payload_for_trading_day", None)
     build_dashboard_data = getattr(_gen, "build_dashboard_data", None)
+    find_latest_review = getattr(_gen, "find_latest_review", None)
+    _parse_premarket_plan = getattr(_gen, "_parse_premarket_plan", None)
     _select_machine_pool = getattr(_gen, "_select_machine_pool", None)
+    _preserve_active_price = getattr(_gen, "_preserve_active_price", None)
     _HAS_GEN = True
 except ImportError:
     parse_frontmatter = None
@@ -20,7 +24,10 @@ except ImportError:
     _build_pools_payload = None
     _build_pools_payload_for_trading_day = None
     build_dashboard_data = None
+    find_latest_review = None
+    _parse_premarket_plan = None
     _select_machine_pool = None
+    _preserve_active_price = None
     _HAS_GEN = False
 
 FIXTURE = Path(__file__).resolve().parent / "fixtures" / "sample_review_note.md"
@@ -28,6 +35,33 @@ FIXTURE = Path(__file__).resolve().parent / "fixtures" / "sample_review_note.md"
 
 @unittest.skipUnless(_HAS_GEN, "gen_dashboard_data not available")
 class TestGenBaseline(unittest.TestCase):
+
+    def test_preserve_active_price_accepts_markdown_bold_quantity(self):
+        self.assertIsNotNone(_preserve_active_price)
+        old_root = _gen.ROOT_DIR
+        old_output = _gen.OUTPUT_FILE
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            data_dir = root / "data"
+            data_dir.mkdir()
+            (data_dir / "pnl_history.json").write_text(
+                json.dumps({"meta": {"last_mv": 100000}}),
+                encoding="utf-8",
+            )
+            _gen.ROOT_DIR = root
+            _gen.OUTPUT_FILE = data_dir / "dashboard_data.json"
+            new_data = {
+                "positions": [
+                    {"标的": "立讯精密", "代码": "002475", "数量": "**2000**股", "成本": 75.31, "状态": "持有"}
+                ]
+            }
+            try:
+                _preserve_active_price(new_data)
+            finally:
+                _gen.ROOT_DIR = old_root
+                _gen.OUTPUT_FILE = old_output
+
+        self.assertEqual(new_data["positions"][0]["现价"], 50.0)
 
     def test_parse_frontmatter(self):
         fm = parse_frontmatter(str(FIXTURE))
@@ -76,6 +110,27 @@ class TestGenBaseline(unittest.TestCase):
         sectors = appendix.get("sectors", [])
         self.assertGreaterEqual(len(sectors), 1)
         self.assertEqual(sectors[0].get("板块"), "机器人")
+
+    def test_parse_appendix_sector_ssot_columns(self):
+        note = """---
+date: 2026-05-29
+---
+# test
+
+## 数据附录
+
+### 板块状态
+| 板块 | 类型 | 涨停数 | 梯队 | 龙头 | 板块涨跌幅 | 主力净流入 | 5日线位置 | 状态 |
+|------|------|--------|------|------|------------|------------|-----------|------|
+| 半导体 | 趋势主线 | ~10 | 2板+首板 | 中京电子 | +2.24% | +111.0亿 | 站上 | 趋势确认 |
+"""
+        with tempfile.NamedTemporaryFile("w", suffix=".md", delete=False) as f:
+            f.write(note)
+            path = f.name
+        sectors = parse_appendix(path).get("sectors", [])
+        self.assertEqual(sectors[0].get("板块涨跌幅"), 2.24)
+        self.assertEqual(sectors[0].get("主力净流入"), "+111.0亿")
+        self.assertEqual(sectors[0].get("5日线位置"), "站上")
 
     def test_parse_appendix_operations(self):
         appendix = parse_appendix(str(FIXTURE))
@@ -213,10 +268,18 @@ date: 2026-05-27
 weekday: 周三
 上证指数: 4093.73
 上证涨幅: -1.25
+深证涨幅: -0.65
+深证成交额: 1.12
 市场量能: 3.24
 涨跌比: 1260 / 3890
 ---
 # 昨日复盘
+
+**午盘**
+- 说明：上午总成交1.78万亿，创业板+0.21%。
+
+**收盘**
+- 说明：上证-1.25%，创业板**+1.96%**领涨。全日量能3.24万亿。
 
 ## 数据附录（机器解析用）
 
@@ -237,6 +300,155 @@ weekday: 周三
 
         yb = data.get("yesterday_baseline") or {}
         self.assertEqual(yb.get("上证昨涨幅"), "-1.25%")
-        self.assertEqual(yb.get("上证昨成交额"), "3.24万亿")
+        self.assertEqual(yb.get("上证昨成交额"), "2.12万亿")
+        self.assertEqual(yb.get("深证昨涨幅"), "-0.65%")
+        self.assertEqual(yb.get("深证昨成交额"), "1.12万亿")
+        self.assertEqual(yb.get("创业昨涨幅"), "+1.96%")
+        self.assertEqual(yb.get("昨日午间成交额"), "1.78万亿")
         self.assertEqual(yb.get("上证昨上涨"), 1260)
         self.assertEqual(yb.get("上证昨下跌"), 3890)
+
+    def test_find_latest_review_accepts_premarket_plan_note(self):
+        self.assertIsNotNone(find_latest_review)
+        current_note = """---
+date: 2026-05-29
+weekday: 周五
+情绪值:
+---
+# 2026-05-29 周五 复盘笔记
+
+## 第〇部分：昨日预案（5/28 附录A）
+
+> 风格：57分 | 连板57% / 趋势43%（连板硬卡释放）
+> 总仓位上限：60%（情绪54.5%主升区）
+"""
+        previous_note = """---
+date: 2026-05-28
+weekday: 周四
+情绪值: 54.5
+---
+# 2026-05-28 周四 复盘笔记
+
+## 数据附录（机器解析用）
+
+### 趋势自选池
+| 标的 | 代码 | 板块 | 窗口 | 角色 | 操作 | 涨幅 | 收盘价 | MA5 | MA20 | 量比 | 换手 | 备注 |
+|------|------|------|------|------|------|------|--------|-----|------|------|------|------|
+| 紫光国微 | 002049 | 半导体 | — | 主趋势股 | 持有 | +1.46% | 86.30 | — | — | — | — | 持仓 |
+"""
+        with tempfile.TemporaryDirectory() as td:
+            review_root = Path(td) / "复盘笔记" / "W22_第22周"
+            review_root.mkdir(parents=True)
+            current = review_root / "2026_5_29_Friday_ReviewNote.md"
+            previous = review_root / "2026_5_28_Thursday_ReviewNote.md"
+            current.write_text(current_note)
+            previous.write_text(previous_note)
+
+            with mock.patch.object(_gen, "REVIEW_DIR", Path(td) / "复盘笔记"):
+                selected = find_latest_review()
+
+        self.assertEqual(Path(selected).name, "2026_5_29_Friday_ReviewNote.md")
+
+    def test_dashboard_style_uses_premarket_plan_when_today_fm_empty(self):
+        self.assertIsNotNone(build_dashboard_data)
+        self.assertIsNotNone(_parse_premarket_plan)
+        current_note = """---
+date: 2026-05-29
+weekday: 周五
+情绪值:
+连亏天数: 0
+---
+# 2026-05-29 周五 复盘笔记
+
+## 第〇部分：昨日预案（5/28 附录A）
+
+> 风格：57分 | 连板57% / 趋势43%（连板硬卡释放 → 实际趋势≈60%）
+> 总仓位上限：60%（情绪54.5%主升区）
+"""
+        previous_note = """---
+date: 2026-05-28
+weekday: 周四
+情绪值: 54.5
+昨日涨停收益: 0.84
+炸板率: 76.19
+整体晋级率: 19.15
+连板风险值: 0.3低
+市场量能: 2.97
+上证涨幅: +0.12
+涨跌比: 2800/2335
+---
+# 2026-05-28 周四 复盘笔记
+"""
+        with tempfile.TemporaryDirectory() as td:
+            review_root = Path(td) / "复盘笔记" / "W22_第22周"
+            review_root.mkdir(parents=True)
+            current = review_root / "2026_5_29_Friday_ReviewNote.md"
+            previous = review_root / "2026_5_28_Thursday_ReviewNote.md"
+            current.write_text(current_note)
+            previous.write_text(previous_note)
+
+            old_style = {
+                "总分": 42, "风格": "混合（均衡）", "置信度": 55,
+                "连板占比": 12, "趋势占比": 88, "总仓位上限": 20,
+                "dim1_量能": 17, "dim2_连板生态": 9,
+                "dim3_趋势": 9, "dim4_情绪广度": 7,
+            }
+            with mock.patch.object(_gen, "get_style_data", return_value=old_style):
+                data = build_dashboard_data(str(current))
+
+        style = data.get("style") or {}
+        self.assertEqual(data.get("meta", {}).get("date"), "2026-05-29")
+        self.assertEqual(style.get("总分"), 57)
+        self.assertEqual(style.get("连板占比"), 57)
+        self.assertEqual(style.get("趋势占比"), 43)
+        self.assertEqual(style.get("总仓位上限"), 60)
+
+    def test_dashboard_style_uses_appendix_a_final_plan_even_when_frontmatter_has_close_data(self):
+        """盘后最终附录A是 D+1 盘前口径，应覆盖当日收盘 frontmatter 风格推导。"""
+        self.assertIsNotNone(build_dashboard_data)
+        current_note = """---
+date: 2026-06-02
+weekday: 周二
+情绪值: 27.5
+涨停家数: 67
+炸板率: 71.43
+整体晋级率: 13.33
+风格分数验证: 趋势行情(76%置信)
+---
+# 2026-06-02 周二 复盘笔记
+
+## 第〇部分：昨日预案
+
+> 风格：49分 | 连板50% / 趋势50% | 总仓位上限60%
+
+## 附录A：次日盘前速查
+
+**状态**：终稿
+
+### 操作指南
+
+**总基调**：被动趋势日，连板全关，趋势池9只（含持仓2）。情绪27.5%低迷→W1不开新仓
+**W2**：若趋势回踩确认+板块未破位+情绪回升→弱回踩买入候选标的
+**仓位**：当前~39.8%，新开趋势W2上限~10-14%（V反检测通过时），总上限60%
+"""
+        with tempfile.TemporaryDirectory() as td:
+            review_root = Path(td) / "复盘笔记" / "W23_第23周"
+            review_root.mkdir(parents=True)
+            current = review_root / "2026_6_2_Tuesday_ReviewNote.md"
+            current.write_text(current_note)
+
+            old_style = {
+                "总分": 49, "风格": "混合（偏趋势）", "置信度": 53,
+                "连板占比": 46, "趋势占比": 54, "总仓位上限": 40,
+                "dim1_量能": 17, "dim2_连板生态": 11,
+                "dim3_趋势": 14, "dim4_情绪广度": 7,
+            }
+            with mock.patch.object(_gen, "get_style_data", return_value=old_style):
+                data = build_dashboard_data(str(current))
+
+        style = data.get("style") or {}
+        self.assertEqual(style.get("风格"), "被动趋势日")
+        self.assertEqual(style.get("连板占比"), 0)
+        self.assertEqual(style.get("趋势占比"), 100)
+        self.assertEqual(style.get("总仓位上限"), 60)
+        self.assertEqual(style.get("_source"), "appendix_a_plan")

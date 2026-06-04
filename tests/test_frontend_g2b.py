@@ -467,6 +467,18 @@ console.log(JSON.stringify({
         self.assertIn("this._on(body", src)
         self.assertIn("_hoverBound", src)
 
+    def test_w11_empty_today_data_shows_waiting_state(self):
+        script = r"""
+var _body = document.createElement('div'); _body.id = 'body_W11';
+var inst = new VolumeBarsWidget({id: 'W11'});
+inst.getBody = function() { return _body; };
+inst.updateTimestamp = function() {};
+inst.render({'上证15min': [], '深证15min': [], '创业15min': [], live_index: {}});
+console.log(JSON.stringify({html: _body.innerHTML}));
+"""
+        result = _run_node(script, files=["widgets/volume-bars.js"])
+        self.assertIn("等待今日15min数据", result.get("html", ""))
+
 
 class W12W13W16LifecycleTest(unittest.TestCase):
 

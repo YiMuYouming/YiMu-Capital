@@ -3,9 +3,9 @@
 使用 YM-data-pipeline fetch() 统一接口，不再直接调 PyTDX/easyquotation。
 bridge.py APScheduler 调度：5s/30s/300s 三档频率。
 """
-import os, sys, json, threading
+import os, sys, json, threading, urllib.parse, urllib.request
 from pathlib import Path
-from datetime import datetime, time as _time_module
+from datetime import datetime, time as _time_module, timedelta
 
 from scripts.file_utils import atomic_write_json
 
@@ -103,6 +103,7 @@ def collect_index(force=False):
             # _updated 的 live_index，导致 W04 重启后失去收盘基线。
             if isinstance(r, dict) and r:
                 li = CACHE.get("live_index", {})
+                _drop_stale_turnover_compare(li, r)
                 li.update(r)
                 li["_updated"] = datetime.now().strftime("%Y-%m-%dT%H:%M:%S+08:00")
                 CACHE["live_index"] = li
@@ -110,11 +111,46 @@ def collect_index(force=False):
         print(f"  [quotes] collect_index error: {e}", file=sys.stderr)
 
 
+def _drop_stale_turnover_compare(live_index, incoming):
+    """Remove yesterday-same-period compare fields when the current source omits them."""
+    compare_keys = []
+    for name in ("上证", "深证"):
+        compare_keys.extend([
+            f"{name}昨成交额",
+            f"{name}成交额差",
+            f"{name}成交额差百分比",
+        ])
+
+    incoming_has_compare = any(k in incoming for k in compare_keys)
+    incoming_has_amount = any(k in incoming for k in (
+        "成交额",
+        "上证指数成交额",
+        "深证指数成交额",
+    ))
+    if incoming_has_amount and not incoming_has_compare:
+        if _is_recent_turnover_compare(live_index.get("_turnover_compare_updated")):
+            return
+        for key in compare_keys:
+            live_index.pop(key, None)
+        live_index.pop("_turnover_compare_updated", None)
+
+
+def _is_recent_turnover_compare(updated, max_age_seconds=90):
+    if not updated:
+        return False
+    try:
+        ts = datetime.strptime(str(updated).replace("+08:00", ""), "%Y-%m-%dT%H:%M:%S")
+        return (datetime.now() - ts).total_seconds() <= max_age_seconds
+    except Exception:
+        return False
+
+
 def collect_yesterday_compare(force=False):
     """30s: 成交额较昨日同时段对比"""
     if not force and not is_trading_time():
         return
     if _pytdx_disabled():
+        _collect_yesterday_compare_eastmoney()
         return
     try:
         from datetime import datetime as _dt
@@ -127,6 +163,7 @@ def collect_yesterday_compare(force=False):
         # 从 PyTDX 获取昨日15分钟K线
         api = _get_tdx_api()
         if not api:
+            _collect_yesterday_compare_cached_15m(now=now)
             return
 
         result = {}
@@ -186,9 +223,243 @@ def collect_yesterday_compare(force=False):
             # 合并到 live_index
             li = CACHE.get("live_index", {})
             li.update(result)
+            li["_turnover_compare_updated"] = datetime.now().strftime("%Y-%m-%dT%H:%M:%S+08:00")
             CACHE["live_index"] = li
+        else:
+            _collect_yesterday_compare_cached_15m(now=now)
     except Exception as e:
         print(f"  [quotes] collect_yesterday_compare error: {e}", file=sys.stderr)
+
+
+def _collect_yesterday_compare_eastmoney(now=None):
+    now = now or datetime.now()
+    cutoff = _current_15m_cutoff(now)
+    if not cutoff:
+        return
+    result = {}
+    li = CACHE.get("live_index", {})
+    for name, secid in [("上证", "1.000001"), ("深证", "0.399001")]:
+        try:
+            rows = _eastmoney_15m_klines(secid, now=now)
+            yesterday_amt_yi = _eastmoney_yesterday_same_period_yi(rows, now, cutoff)
+            today_amt_yi = _amount_str_to_yi(li.get(f"{name}指数成交额"))
+            if yesterday_amt_yi > 0 and today_amt_yi > 0:
+                diff = today_amt_yi - yesterday_amt_yi
+                pct = round(diff / yesterday_amt_yi * 100, 1)
+                result[f"{name}昨成交额"] = f"{yesterday_amt_yi:.2f}亿"
+                result[f"{name}成交额差"] = f"{diff:+.2f}亿"
+                result[f"{name}成交额差百分比"] = f"{pct:+.1f}%"
+        except Exception:
+            continue
+    if result:
+        li.update(result)
+        li["_turnover_compare_updated"] = now.strftime("%Y-%m-%dT%H:%M:%S+08:00")
+        CACHE["live_index"] = li
+    else:
+        _collect_yesterday_compare_cached_15m(now=now)
+
+
+def _collect_yesterday_compare_cached_15m(now=None):
+    """Fallback: use restored previous-day 15min rows as yesterday same-period basis."""
+    now = now or datetime.now()
+    cutoff = _current_15m_cutoff(now)
+    if not cutoff:
+        return False
+    li = CACHE.get("live_index", {})
+    result = {}
+    for name, key in [("上证", "上证15min"), ("深证", "深证15min")]:
+        rows = CACHE.get(key) or []
+        yesterday_amt = 0.0
+        for row in rows:
+            if not isinstance(row, dict) or row.get("_cum"):
+                continue
+            slot = str(row.get("t") or "")
+            if slot and slot <= cutoff:
+                try:
+                    basis = row.get("yesterdayAmt")
+                    if basis in (None, "", 0):
+                        basis = row.get("amount")
+                    yesterday_amt += float(basis or 0)
+                except (TypeError, ValueError):
+                    continue
+        today_amt_yi = _amount_str_to_yi(li.get(f"{name}指数成交额"))
+        yesterday_amt_yi = yesterday_amt / 1e8
+        if yesterday_amt_yi > 0 and today_amt_yi > 0:
+            diff = today_amt_yi - yesterday_amt_yi
+            pct = round(diff / yesterday_amt_yi * 100, 1)
+            result[f"{name}昨成交额"] = f"{yesterday_amt_yi:.2f}亿"
+            result[f"{name}成交额差"] = f"{diff:+.2f}亿"
+            result[f"{name}成交额差百分比"] = f"{pct:+.1f}%"
+    if result:
+        li.update(result)
+        li["_turnover_compare_updated"] = now.strftime("%Y-%m-%dT%H:%M:%S+08:00")
+        li["_turnover_compare_source"] = "cached_previous_15m"
+        CACHE["live_index"] = li
+        return True
+    return False
+
+
+def _current_15m_cutoff(now=None):
+    now = now or datetime.now()
+    minutes = now.hour * 60 + now.minute
+    open_min = 9 * 60 + 30
+    morning_close = 11 * 60 + 30
+    afternoon_open = 13 * 60
+    close_min = 15 * 60
+
+    def fmt(total_min):
+        return f"{total_min // 60:02d}:{total_min % 60:02d}"
+
+    if minutes < open_min:
+        return None
+    if minutes <= morning_close:
+        elapsed = max(1, minutes - open_min)
+        slot_end = open_min + max(15, (elapsed // 15) * 15)
+        return fmt(min(slot_end, morning_close))
+    if minutes < afternoon_open:
+        return "11:30"
+    if minutes <= close_min:
+        elapsed = max(1, minutes - afternoon_open)
+        slot_end = afternoon_open + max(15, (elapsed // 15) * 15)
+        return fmt(min(slot_end, close_min))
+    return "15:00"
+
+
+def _eastmoney_15m_klines(secid, now=None):
+    now = now or datetime.now()
+    beg = (now - timedelta(days=7)).strftime("%Y%m%d")
+    end = now.strftime("%Y%m%d")
+    params = {
+        "secid": secid,
+        "fields1": "f1,f2,f3,f4,f5,f6",
+        "fields2": "f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61",
+        "klt": 15,
+        "fqt": 0,
+        "beg": beg,
+        "end": end,
+    }
+    url = "https://push2his.eastmoney.com/api/qt/stock/kline/get?" + urllib.parse.urlencode(params)
+    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+    payload = json.loads(urllib.request.urlopen(req, timeout=8).read().decode("utf-8"))
+    return ((payload or {}).get("data") or {}).get("klines") or []
+
+
+def _eastmoney_yesterday_same_period_yi(rows, now, cutoff):
+    today = now.strftime("%Y-%m-%d")
+    prior_dates = sorted({
+        str(row).split(",", 1)[0][:10]
+        for row in rows
+        if str(row).split(",", 1)[0][:10] < today
+    })
+    if not prior_dates:
+        return 0
+    ydate = prior_dates[-1]
+    total = 0.0
+    for row in rows:
+        parts = str(row).split(",")
+        if len(parts) < 7:
+            continue
+        dt = parts[0]
+        if not dt.startswith(ydate):
+            continue
+        time_key = dt[-5:]
+        if time_key <= cutoff:
+            try:
+                total += float(parts[6])
+            except ValueError:
+                pass
+    return total / 1e8
+
+
+def _eastmoney_kline_15m_rows(secid, now=None):
+    now = now or datetime.now()
+    today = now.strftime("%Y-%m-%d")
+    rows = _eastmoney_15m_klines(secid, now=now)
+    prior_dates = sorted({
+        str(row).split(",", 1)[0][:10]
+        for row in rows
+        if str(row).split(",", 1)[0][:10] < today
+    })
+    yesterday = prior_dates[-1] if prior_dates else None
+    yesterday_by_time = {}
+    today_rows = []
+
+    for row in rows:
+        parts = str(row).split(",")
+        if len(parts) < 9:
+            continue
+        dt = parts[0]
+        date = dt[:10]
+        slot = dt[11:16]
+        try:
+            vol = float(parts[5] or 0)
+            amount = float(parts[6] or 0)
+            chg = float(parts[8] or 0)
+        except (TypeError, ValueError):
+            continue
+        if yesterday and date == yesterday:
+            yesterday_by_time[slot] = amount
+        elif date == today:
+            today_rows.append((slot, chg, vol, amount))
+
+    result = []
+    total_amount = 0.0
+    total_yesterday = 0.0
+    for slot, chg, vol, amount in today_rows:
+        yesterday_amt = yesterday_by_time.get(slot) or 0.0
+        total_amount += amount
+        total_yesterday += yesterday_amt
+        result.append({
+            "t": slot,
+            "chg": chg,
+            "vol": vol,
+            "volRatio": round(amount / yesterday_amt, 2) if yesterday_amt > 0 else 1,
+            "amount": amount,
+            "yesterdayAmt": yesterday_amt,
+        })
+    if result:
+        result.append({
+            "t": "累计",
+            "chg": 0,
+            "vol": 0,
+            "volRatio": round(total_amount / total_yesterday, 2) if total_yesterday > 0 else 1,
+            "amount": total_amount,
+            "cumYesterdayAmt": total_yesterday,
+            "_cum": True,
+        })
+    return result
+
+
+def _collect_kline_15m_eastmoney(now=None):
+    now = now or datetime.now()
+    mapping = {
+        "上证15min": "1.000001",
+        "深证15min": "0.399001",
+        "创业15min": "0.399006",
+    }
+    updated = False
+    for key, secid in mapping.items():
+        rows = _eastmoney_kline_15m_rows(secid, now=now)
+        if rows:
+            CACHE[key] = rows
+            updated = True
+    if updated:
+        CACHE["kline_15m_date"] = now.strftime("%Y-%m-%d")
+    return updated
+
+
+def _amount_str_to_yi(value):
+    if value in (None, "", "—"):
+        return 0
+    s = str(value).replace(",", "").strip()
+    try:
+        if "万亿" in s:
+            return float(s.replace("万亿", "")) * 10000
+        if "亿" in s:
+            return float(s.replace("亿", ""))
+        return float(s) / 1e8
+    except ValueError:
+        return 0
 
 
 def _get_tdx_api():
@@ -317,8 +588,9 @@ def _save_zt_snapshot(hot_data):
         else:
             history = {}
 
-        # 从 hot_data 提取今日涨停股票
-        raw_stocks = hot_data.get("zt_stocks") or hot_data.get("stocks") or []
+        # 从 hot_data 提取今日确认涨停股票。
+        # hot_data["stocks"] 是同花顺热榜/强势股，不等同于涨停，不能写入涨停历史。
+        raw_stocks = hot_data.get("zt_stocks") or []
         today_snapshot = []
         for s in raw_stocks:
             if s.get("name", "").find("ST") >= 0:
@@ -332,6 +604,11 @@ def _save_zt_snapshot(hot_data):
                 "reason": s.get("reason", ""),
             })
 
+        def _inject_recent():
+            keys = sorted(history.keys(), reverse=True)
+            recent = {k: history[k] for k in keys[:5]}
+            CACHE.setdefault("hot_list", {})["zt_history"] = recent
+
         if today_snapshot:
             # 如果 gen 已完成收盘写入（含 _meta 标志），不覆盖
             existing_entry = history.get(today, [])
@@ -344,8 +621,8 @@ def _save_zt_snapshot(hot_data):
                 history = {k: history[k] for k in keys[:60]}
 
             atomic_write_json(zt_file, history)
-            # 注入到 hot_list CACHE（供 W21 前端读取）
-            CACHE["hot_list"]["zt_history"] = dict(list(history.items())[:5])  # 最近5天
+        # 注入到 hot_list CACHE（供 W21 前端读取）。即使今日没有确认涨停，也保留历史。
+        _inject_recent()
     except Exception as e:
         print(f"  [quotes] _save_zt_snapshot error: {e}", file=sys.stderr)
 
@@ -355,15 +632,27 @@ def collect_kline_15m(force=False):
     if not force and not is_trading_time():
         return
     if _pytdx_disabled():
+        _collect_kline_15m_eastmoney()
         return
     try:
         with _tdx_lock:
             r = _pipeline_fetch("kline_15m")
         if r and isinstance(r, dict):
             r.pop('_meta', None)
-            if '上证15min' in r: CACHE['上证15min'] = r['上证15min']
-            if '深证15min' in r: CACHE['深证15min'] = r['深证15min']
-            if '创业15min' in r: CACHE['创业15min'] = r['创业15min']
+            updated = False
+            if '上证15min' in r:
+                CACHE['上证15min'] = r['上证15min']
+                updated = True
+            if '深证15min' in r:
+                CACHE['深证15min'] = r['深证15min']
+                updated = True
+            if '创业15min' in r:
+                CACHE['创业15min'] = r['创业15min']
+                updated = True
+            if updated:
+                CACHE['kline_15m_date'] = datetime.now().strftime("%Y-%m-%d")
+        else:
+            _collect_kline_15m_eastmoney()
     except Exception as e:
         print(f"  [quotes] collect_kline_15m error: {e}", file=sys.stderr)
 

@@ -8,14 +8,14 @@
 <!-- GridStack.js v12.x CDN (版本锁定) -->
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/gridstack@12.0.0/dist/gridstack.min.css">
 <!-- 内部样式 -->
-<link rel="stylesheet" href="css/theme.css">
+<link rel="stylesheet" href="css/theme.css?v=20260604-ticket-ui">
 <!-- 兜底数据 -->
 <script src="data/embedded-data.js"></script>
 <!-- 核心模块 -->
 <script src="store.js"></script>
 <script src="widget-base.js"></script>
-<script src="widget-registry.js"></script>
-<!-- 23 Widget 组件 -->
+<script src="widget-registry.js?v=20260604-ticket"></script>
+<!-- 24 Widget 组件 -->
 <script src="widgets/timeline.js"></script>
 <script src="widgets/style-detect.js"></script>
 <script src="widgets/position-calc.js"></script>
@@ -40,6 +40,7 @@
 <script src="widgets/zt-echelon.js"></script>
 <script src="widgets/pnl-curve.js"></script>
 <script src="widgets/trade-review.js"></script>
+<script src="widgets/trade-tickets.js?v=20260604-ticket"></script>
 <style>
 /* Inline critical styles for initial load */
 body{opacity:0;transition:opacity .3s}
@@ -96,20 +97,42 @@ body.ready{opacity:1}
 
 <!-- Top Bar -->
 <header class="topbar" id="topbar" style="display:none">
-  <img src="assets/logo-yi.png" alt="弈" class="topbar-logo">
-  <span class="topbar-brand">弈沐资本 · 数据看板 v3.0</span>
-  <span class="runtime-mode" id="runtimeModeLabel"></span>
-  <span class="conn-dot polling" id="connDot"></span>
-  <span class="conn-text" id="connText">轮询</span>
-  <span class="topbar-health" id="topbarHealth" title="系统健康状态"><span class="health-dot" id="healthDot"></span><span id="healthLabel">—</span></span><span class="topbar-metric" id="topbarEmotion" title="当前情绪值">情绪 —</span><span class="topbar-metric" id="topbarPnl" title="今日盈亏">盈亏 —</span><span class="topbar-metric" id="topbarPosPct" title="仓位占比">仓位 —</span><span class="topbar-metric" id="topbarCash" title="可用资金">可用 —</span><span style="flex:0.5"></span><button id="compactBtn" class="btn-xs btn-outline topbar-btn" title="隐藏非核心组件">只看核心</button><button id="addWidgetBtn" class="btn-info" title="添加组件" style="padding:var(--sp-xs) var(--sp-md);font-size:var(--fs-body);height:28px;line-height:1">+ 添加组件</button>
-  <button id="inputPanelBtn" title="报数面板" style="background:var(--accent-purple);color:#fff;font-weight:600;border:none;padding:var(--sp-xs) var(--sp-md);border-radius:var(--radius-sm);cursor:pointer;font-size:var(--fs-body);font-family:var(--font-sans);white-space:nowrap;height:28px;line-height:1">报数</button>
-  <input id="widgetSearch" type="text" placeholder="搜索组件 (Ctrl+F)" title="输入组件名快速定位" style="width:150px;height:28px;border:1px solid var(--border);border-radius:var(--radius-sm);padding:0 var(--sp-sm);font-size:var(--fs-body);font-family:var(--font-sans);background:var(--bg-card);color:var(--text);outline:none">
-  <button id="llmPanelBtn" title="AI盯盘" style="background:var(--info);color:#fff;font-weight:600;border:none;padding:var(--sp-xs) var(--sp-md);border-radius:var(--radius-sm);cursor:pointer;font-size:var(--fs-body);font-family:var(--font-sans);white-space:nowrap;height:28px;line-height:1;position:relative">🤖 AI盯盘<span class="btn-badge" id="llmBadge" style="display:none">0</span></button>
-  <button id="pnlCurveBtn" title="收益曲线" style="background:#D97706;color:#fff;font-weight:600;border:none;padding:var(--sp-xs) var(--sp-md);border-radius:var(--radius-sm);cursor:pointer;font-size:var(--fs-body);font-family:var(--font-sans);white-space:nowrap;height:28px;line-height:1">📈 收益曲线</button>
-  <span style="flex:1"></span>
-  <button class="widget-btn" id="saveLayoutBtn" title="保存布局 (Ctrl+S)">保存</button>
-  <button class="widget-btn" id="exportLayoutBtn" title="导出布局 JSON">导出</button>
-  <button class="widget-btn" id="importLayoutBtn" title="导入布局 JSON">导入</button>
+  <div class="topbar-brand-group">
+    <img src="assets/logo-yi.png" alt="弈" class="topbar-logo">
+    <div class="topbar-brand-stack">
+      <span class="topbar-brand">弈沐资本</span>
+      <span class="topbar-subbrand">数据看板 v3.0</span>
+    </div>
+    <span class="runtime-mode" id="runtimeModeLabel"></span>
+  </div>
+  <div class="topbar-status-group">
+    <span class="topbar-conn"><span class="conn-dot polling" id="connDot"></span><span class="conn-text" id="connText">轮询</span></span>
+    <span class="topbar-health" id="topbarHealth" title="系统健康状态"><span class="health-dot" id="healthDot"></span><span id="healthLabel">—</span></span>
+    <span class="topbar-metric" id="topbarEmotion" title="当前情绪值">情绪 —</span>
+    <span class="topbar-metric" id="topbarPnl" title="今日盈亏">盈亏 —</span>
+    <span class="topbar-metric" id="topbarPosPct" title="仓位占比">仓位 —</span>
+    <span class="topbar-metric" id="topbarCash" title="可用资金">可用 —</span>
+  </div>
+  <div class="topbar-shortcuts" aria-label="常用组件快捷入口">
+    <button class="topbar-shortcut topbar-shortcut-data" data-widget="W04" title="W04 市场全景"><b>W04</b><span>全景</span></button>
+    <button class="topbar-shortcut topbar-shortcut-trade" data-widget="W24" title="W24 交易票据"><b>W24</b><span>票据</span></button>
+    <button class="topbar-shortcut topbar-shortcut-trade" data-widget="W15" title="W15 持仓操作清仓"><b>W15</b><span>持仓</span></button>
+    <button class="topbar-shortcut topbar-shortcut-data" data-widget="W12" title="W12 连板池"><b>W12</b><span>连板</span></button>
+    <button class="topbar-shortcut topbar-shortcut-data" data-widget="W13" title="W13 趋势池"><b>W13</b><span>趋势</span></button>
+    <button id="inputPanelBtn" class="topbar-shortcut topbar-shortcut-tool" title="W16 报数面板"><b>W16</b><span>报数</span></button>
+    <button id="llmPanelBtn" class="topbar-shortcut topbar-shortcut-ai" title="W20 AI盯盘"><b>W20</b><span>AI</span><span class="btn-badge" id="llmBadge" style="display:none">0</span></button>
+    <button id="pnlCurveBtn" class="topbar-shortcut topbar-shortcut-pnl" title="W22 收益曲线"><b>W22</b><span>曲线</span></button>
+    <button id="addWidgetBtn" class="topbar-shortcut topbar-shortcut-add" title="添加组件"><b>+</b><span>组件</span></button>
+    <button id="compactBtn" class="topbar-shortcut topbar-shortcut-quiet" title="隐藏非核心组件"><b>核心</b><span>视图</span></button>
+  </div>
+  <details class="topbar-layout-menu">
+    <summary title="布局操作">布局</summary>
+    <div class="topbar-layout-popover">
+      <button class="topbar-layout-btn" id="saveLayoutBtn" title="保存布局 (Ctrl+S)">保存</button>
+      <button class="topbar-layout-btn" id="exportLayoutBtn" title="导出布局 JSON">导出</button>
+      <button class="topbar-layout-btn" id="importLayoutBtn" title="导入布局 JSON">导入</button>
+    </div>
+  </details>
   <input type="file" id="importFileInput" accept=".json" style="display:none">
 </header>
 
@@ -168,6 +191,7 @@ body.ready{opacity:1}
 // === GridStack Init ===
 var grid = null;
 var activePreset = null;
+var REQUIRED_LAYOUT_WIDGETS = ['W24'];
 
 function initGrid() {
   grid = GridStack.init({
@@ -245,6 +269,12 @@ function _addWidgetToGrid(widgetId) {
   requestAnimationFrame(function() {
     var contentEl = document.getElementById('content_' + widgetId);
     if (contentEl) instance.mount(contentEl);
+  });
+}
+
+function _ensureRequiredLayoutWidgets() {
+  REQUIRED_LAYOUT_WIDGETS.forEach(function(widgetId) {
+    if (!widgetInstances[widgetId]) _addWidgetToGrid(widgetId);
   });
 }
 
@@ -374,11 +404,14 @@ document.getElementById('llmPanelBtn').addEventListener('click', function() {
   else _showLLMPanel();  // fallback
 });
 document.getElementById('pnlCurveBtn').addEventListener('click', function() { _addWidgetToGrid('W22'); });
+document.querySelectorAll('.topbar-shortcut[data-widget]').forEach(function(btn) {
+  btn.addEventListener('click', function() { _addWidgetToGrid(btn.dataset.widget); });
+});
 
 // === 运行模式检测 ===
 function _detectRuntimeMode() {
   if (location.protocol === 'file:') return { key: 'file', label: '本地文件', readonly: true };
-  if (location.port === '18088') return { key: 'preview', label: '本地预览 · 只读', readonly: true };
+  if (/^180(8[0-9]|9[0-9])$/.test(location.port || '')) return { key: 'preview', label: '本地预览 · 只读', readonly: true };
   if (location.port === '8088') return { key: 'prod', label: '云端生产', readonly: false };
   return { key: 'local', label: '本地服务', readonly: false };
 }
@@ -682,13 +715,16 @@ function _loadSavedLayout() {
             instance.mount(document.getElementById('content_' + id));
           }
         });
+        _ensureRequiredLayoutWidgets();
         return;
       }
     }
   } catch(e) {}
-  // 旧格式或不兼容 → 清除，空白画布
+  // 旧格式或不兼容 → 清除，并加载票据优先的兜底工作台
   try { localStorage.removeItem(STORAGE_KEYS.layout); } catch(e) {}
-  showToast('右键画布添加组件，拖拽摆放后 Ctrl+S 保存');
+  _addWidgetToGrid('W24');
+  _addWidgetToGrid('W15');
+  showToast('已加载默认工作台：W24 交易票据 + W15 手工补录');
 }
 function exportLayout() {
   var layout = grid.save(false);
@@ -879,7 +915,7 @@ window._healthConfirmed = false;
 
 // === Compact Mode ===
 var _compactMode = false;
-var CORE_IDS = ['W04','W07','W08','W09','W14','W15','W22'];
+var CORE_IDS = ['W04','W07','W08','W09','W14','W24','W15','W22'];
 (function() {
   var btn = document.getElementById('compactBtn');
   if (!btn) return;

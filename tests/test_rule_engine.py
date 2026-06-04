@@ -84,20 +84,20 @@ class TestRuleEngine(unittest.TestCase):
         result = compute_style_execution(fm, style)
         self.assertEqual(result["总仓位上限"], 0)
 
-    def test_total_cap_80(self):
-        self.assertEqual(_compute_total_cap({"total": 80}), 60)
+    def test_total_cap_strong_lianban_side(self):
+        self.assertEqual(_compute_total_cap({"dim4": {"details": {"情绪值": 65}}}), 60)
 
-    def test_total_cap_60(self):
-        self.assertEqual(_compute_total_cap({"total": 60}), 50)
+    def test_total_cap_medium_lianban_side(self):
+        self.assertEqual(_compute_total_cap({"dim4": {"details": {"情绪值": 25}}}), 40)
 
-    def test_total_cap_40(self):
-        self.assertEqual(_compute_total_cap({"total": 40}), 40)
+    def test_total_cap_ice_weak_trend_side(self):
+        self.assertEqual(_compute_total_cap({"dim4": {"details": {"情绪值": 10}}, "dim3": {"score": 9}}), 20)
 
-    def test_total_cap_20(self):
-        self.assertEqual(_compute_total_cap({"total": 20}), 20)
+    def test_total_cap_strong_trend_side(self):
+        self.assertEqual(_compute_total_cap({"dim4": {"details": {"情绪值": 85}}, "dim3": {"score": 18}}), 60)
 
-    def test_total_cap_below_40(self):
-        self.assertEqual(_compute_total_cap({"total": 10}), 20)
+    def test_total_cap_medium_trend_side(self):
+        self.assertEqual(_compute_total_cap({"dim4": {"details": {"情绪值": 85}}, "dim3": {"score": 10}}), 40)
 
     def test_total_cap_default(self):
-        self.assertEqual(_compute_total_cap({}), 40)
+        self.assertEqual(_compute_total_cap({}), 20)

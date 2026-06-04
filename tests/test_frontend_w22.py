@@ -152,12 +152,12 @@ try {
         return _run_node(script, files=["widgets/pnl-curve.js"])
 
     def test_valuation_incomplete_shows_unavailable(self):
-        """valuation_complete=false → 全部估值字段不可用"""
+        """valuation_complete=false → 实时估值字段不可用，总资产快照仍展示"""
         result = self._run_kpi_test(
             {"pnlLive": {"valuation_complete": False, "anchor_blocked": False}})
         self.assertTrue(result.get("ok"), f"不应崩溃: {result}")
-        self.assertEqual(result.get("asset"), "—")
-        self.assertIn("不可信", result.get("assetSub", ""))
+        self.assertNotEqual(result.get("asset"), "—")
+        self.assertIn("非实时", result.get("assetSub", ""))
         self.assertEqual(result.get("pnl"), "—")
         self.assertIn("不可信", result.get("pnlSub", ""))
         self.assertEqual(result.get("pos"), "—")
@@ -170,6 +170,27 @@ try {
             f"valuationBad 时 ddVal 应为'—': {result}")
         self.assertEqual(result.get("alpha"), "—",
             f"valuationBad 时 alpha 应为'—': {result}")
+
+    def test_valuation_incomplete_does_not_clear_historical_kpis(self):
+        """valuation_complete=false 不应清空历史累计 TWR/相对指数"""
+        script = r"""
+var inst = new PnLCurveWidget({id:'W22'});
+inst.id = 'W22';
+inst._state = {
+  period:'today', index:'sh', totalAsset:200000, totalDeposit:200000,
+  liveQ:{}, positions:[], pnlLive:{valuation_complete:false}
+};
+document.getElementById('pnl_twr').textContent = '+2.78%';
+document.getElementById('pnl_alpha').textContent = '+3.33%';
+inst._updateKPI({ type:'intraday', labels:['09:30','09:35'], portfolio:[0.5, 0.8], benchmark:[0.2, 0.3], position:[50.0, 50.0] });
+console.log(JSON.stringify({
+  twr: document.getElementById('pnl_twr').textContent,
+  alpha: document.getElementById('pnl_alpha').textContent
+}));
+"""
+        result = _run_node(script, files=["widgets/pnl-curve.js"])
+        self.assertEqual(result.get("twr"), "+2.78%", f"历史 TWR 不应被实时估值分支清空: {result}")
+        self.assertEqual(result.get("alpha"), "+3.33%", f"历史相对指数不应被实时估值分支清空: {result}")
 
     def test_fallback_shows_date_not_realtime(self):
         """is_fallback=true → 显示 data_date + 回退，无'实时收益'"""
@@ -290,6 +311,26 @@ try {
 """
         result = _run_node(script, files=["widgets/pnl-curve.js"])
         self.assertTrue(result.get("ok"), f"全零曲线 draw 不应崩溃: {result}")
+
+
+class W22ChartFetchBehaviorTests(unittest.TestCase):
+    """W22 图表请求节流，避免高频刷新导致 canvas 闪烁"""
+
+    def test_fetch_chart_data_reuses_inflight_request(self):
+        script = r"""
+global.location = { protocol:'http:' };
+var calls = 0;
+var pending = new Promise(function(resolve) { global._resolveFetch = resolve; });
+global.fetch = function(url) { calls++; return pending; };
+var inst = new PnLCurveWidget({id:'W22'});
+inst.id = 'W22';
+inst._state = { period:'today', index:'sh' };
+inst._fetchChartData(function(){});
+inst._fetchChartData(function(){});
+console.log(JSON.stringify({ calls:calls }));
+"""
+        result = _run_node(script, files=["widgets/pnl-curve.js"])
+        self.assertEqual(result.get("calls"), 1, f"同一图表请求 in-flight 时应复用: {result}")
 
 
 class W22CodeStructureTests(unittest.TestCase):

@@ -36,23 +36,9 @@ class MarketOverviewWidget extends YiMuWidget {
     html += '</div>';
 
     // === 第二行：关键指标 (4 个紧凑卡片) ===
-    var amtDiff = li['上证成交额差'] || '';
-    var amtPct = li['上证成交额差百分比'] || '';
-    var amtDir = amtDiff.charAt(0) === '+' ? 'up' : amtDiff.charAt(0) === '-' ? 'down' : '';
-    var amtEstimated = false;
-    if (!amtPct && li['成交额'] && yb['上证昨成交额']) {
-      var todayAmtYi = parseAmountYi(li['成交额']);
-      var yestFullYi = parseAmountYi(yb['上证昨成交额']);
-      var yestSameYi = yestFullYi * getTradeElapsedRatio(new Date());
-      if (todayAmtYi > 0 && yestSameYi > 0) {
-        var estimatePct = (todayAmtYi - yestSameYi) / yestSameYi * 100;
-        amtPct = (estimatePct >= 0 ? '+' : '') + estimatePct.toFixed(1) + '%';
-        amtDiff = '';
-        amtDir = estimatePct >= 0 ? 'up' : 'down';
-        amtEstimated = true;
-      }
-    }
-    var amtCompareText = amtPct ? '昨日 ' + (amtPct.charAt(0) === '-' ? amtPct : '+' + amtPct.replace('+', '')) : '';
+    var amtCompare = buildW04AmountCompare(li, yb, new Date());
+    var amtCompareText = amtCompare.text;
+    var amtDir = amtCompare.dir;
     var upCnt = li['上涨家数'];
     var dnCnt = li['下跌家数'];
     var udHtml = (upCnt != null && dnCnt != null)
@@ -61,9 +47,8 @@ class MarketOverviewWidget extends YiMuWidget {
     var amp = li['上证指数振幅'] || '—';
     var iw = d.iwencai || {};
     var sent = d.sentiment || {};
-    var ztRaw = (iw['涨停家数'] != null && iw['涨停家数'] > 0) ? iw['涨停家数'] : m['涨停家数'];
-    var zt = (ztRaw != null && ztRaw > 0) ? ztRaw : null;
-    var dt = (iw['跌停家数'] != null && iw['跌停家数'] > 0) ? iw['跌停家数'] : m['跌停家数'];
+    var zt = pickW04LiveFirst(iw, '涨停家数', m['涨停家数']);
+    var dt = pickW04LiveFirst(iw, '跌停家数', m['跌停家数']);
 
     html += '<div style="display:flex;gap:6px">';
     html += '<div class="kpi-card" style="flex:1;padding:6px 8px"><div class="kpi-label">成交额</div><div class="kpi-value" style="font-size:14px">'+(li['成交额']||'—')+'</div>'+(amtCompareText?'<div class="kpi-verdict ' + amtDir + '">' + amtCompareText + '</div>':'')+'</div>';
@@ -122,6 +107,7 @@ class MarketOverviewWidget extends YiMuWidget {
 
     // === 第三行：实时情绪（iwencai 2min 轮询）===
     var iw = d.iwencai || {};
+    var hasLiveIwencai = !!iw['_updated'];
     var upCnt2 = li['上涨家数'];
     var dnCnt2 = li['下跌家数'];
     var emotionVal = (upCnt2 != null && dnCnt2 != null && upCnt2 + dnCnt2 > 0)
@@ -129,15 +115,15 @@ class MarketOverviewWidget extends YiMuWidget {
     html += '<div style="display:flex;gap:6px">';
     var emotionDisplay = emotionVal != null ? emotionVal + '%' : (sent['情绪值'] != null ? sent['情绪值'] + '%' : '—');
     html += '<div class="kpi-card" style="flex:1;padding:6px 8px"><div class="kpi-label">情绪值</div><div class="kpi-value" style="font-size:14px">'+ emotionDisplay +'</div></div>';
-    var ztVal = iw['昨日涨停收益'] != null ? iw['昨日涨停收益'] : sent['昨日涨停收益'];
+    var ztVal = pickW04Return(iw, '昨日涨停收益', sent['昨日涨停收益'], hasLiveIwencai);
     var ztCls = (ztVal != null && !isNaN(parseFloat(ztVal)) && parseFloat(ztVal) > 0) ? 'up' : (ztVal != null && !isNaN(parseFloat(ztVal)) && parseFloat(ztVal) < 0) ? 'down' : '';
-    html += '<div class="kpi-card" style="flex:1;padding:6px 8px"><div class="kpi-label">涨停收益</div><div class="kpi-value'+(ztCls?' '+ztCls:'')+'" style="font-size:14px">'+ (ztVal != null ? (parseFloat(ztVal)>0?'+':'')+ztVal+'%' : '—') +'</div></div>';
-    var lbVal = iw['连板收益'] != null ? iw['连板收益'] : sent['连板收益'];
+    html += '<div class="kpi-card" style="flex:1;padding:6px 8px"><div class="kpi-label">昨停今日</div><div class="kpi-value'+(ztCls?' '+ztCls:'')+'" style="font-size:14px">'+ formatW04Pct(ztVal) +'</div></div>';
+    var lbVal = pickW04Return(iw, '连板收益', sent['连板收益'], hasLiveIwencai);
     var lbCls = (lbVal != null && !isNaN(parseFloat(lbVal)) && parseFloat(lbVal) > 0) ? 'up' : (lbVal != null && !isNaN(parseFloat(lbVal)) && parseFloat(lbVal) < 0) ? 'down' : '';
-    html += '<div class="kpi-card" style="flex:1;padding:6px 8px"><div class="kpi-label">连板收益</div><div class="kpi-value'+(lbCls?' '+lbCls:'')+'" style="font-size:14px">'+ (lbVal != null ? (parseFloat(lbVal)>0?'+':'')+lbVal+'%' : '—') +'</div></div>';
-    var zbVal = iw['炸板收益'] != null ? iw['炸板收益'] : sent['昨日炸板收益'];
+    html += '<div class="kpi-card" style="flex:1;padding:6px 8px"><div class="kpi-label">连板今日</div><div class="kpi-value'+(lbCls?' '+lbCls:'')+'" style="font-size:14px">'+ formatW04Pct(lbVal) +'</div></div>';
+    var zbVal = pickW04Return(iw, '炸板收益', sent['昨日炸板收益'], hasLiveIwencai);
     var zbCls = (zbVal != null && !isNaN(parseFloat(zbVal)) && parseFloat(zbVal) > 0) ? 'up' : (zbVal != null && !isNaN(parseFloat(zbVal)) && parseFloat(zbVal) < 0) ? 'down' : '';
-    html += '<div class="kpi-card" style="flex:1;padding:6px 8px"><div class="kpi-label">炸板收益</div><div class="kpi-value'+(zbCls?' '+zbCls:'')+'" style="font-size:14px">'+ (zbVal != null ? (parseFloat(zbVal)>0?'+':'')+zbVal+'%' : '—') +'</div></div>';
+    html += '<div class="kpi-card" style="flex:1;padding:6px 8px"><div class="kpi-label">炸板今日</div><div class="kpi-value'+(zbCls?' '+zbCls:'')+'" style="font-size:14px">'+ formatW04Pct(zbVal) +'</div></div>';
     html += '</div>';
 
     // === 北向资金 (60s 实时) ===
@@ -180,23 +166,10 @@ class MarketOverviewWidget extends YiMuWidget {
         '<div id="w04_baseline_body" style="display:flex;margin-top:4px;gap:6px;flex-wrap:wrap">' + yestBody + '</div>' +
         '</div>';
 
-    // === LLM 研判卡槽 ===
-    var llmHtml = '<span style="color:var(--text-disabled)">🤖 待研判</span>';
-    try {
-      var llmRaw = DataStore.manualData.getAll()['_llm_market'] || '';
-      if (llmRaw) {
-        llmHtml = '<span style="color:var(--info)">🤖 ' + (llmRaw.length > 150 ? llmRaw.substring(0, 150) + '...' : llmRaw) + '</span>';
-      }
-    } catch(e) {}
-    html += '<div style="margin-top:4px;padding:3px 8px;background:var(--bg-base);border-radius:var(--radius-sm);font-size:var(--fs-body);border:1px dashed var(--border-light)" id="w04-llm-text">' + llmHtml + '</div>';
-
     html += '</div>';
 
     body.innerHTML = html;
     this.updateTimestamp();
-
-    // 异步加载 LLM 研判
-    this._loadLLM(body);
 
     // 绑定基线折叠（DOM 随 render 重建，用 onclick 天然防重复绑定）
     var toggle = body.querySelector('#w04_baseline_toggle');
@@ -210,27 +183,6 @@ class MarketOverviewWidget extends YiMuWidget {
         if (arrow) arrow.style.transform = bBody.style.display !== 'none' ? 'rotate(90deg)' : '';
       }.bind(this);
     }
-  }
-
-  _loadLLM(body) {
-    var self = this;
-    fetch('data/llm_insights.json?t=' + Date.now())
-      .then(function(r) { return r.ok ? r.json() : null; })
-      .then(function(data) {
-        if (!data) return;
-        // 找今天的研判
-        var today = new Date().toISOString().slice(0, 10);
-        var keys = Object.keys(data).filter(function(k) { return k.indexOf(today) === 0; }).sort().reverse();
-        var text = '';
-        keys.forEach(function(k) {
-          if (data[k] && data[k].text) text = data[k].text;
-        });
-        if (text) {
-          var el = body.querySelector('#w04-llm-text');
-          if (el) el.innerHTML = '🤖 ' + (text.length > 150 ? text.substring(0, 150) + '...' : text);
-        }
-      })
-      .catch(function() {});
   }
 
   _card(title, bodyContent) {
@@ -248,6 +200,27 @@ function parseAmountYi(v) {
   return (parseFloat(s) || 0) / 100000000;
 }
 
+function hasW04Own(obj, key) {
+  return Object.prototype.hasOwnProperty.call(obj || {}, key);
+}
+
+function pickW04LiveFirst(liveObj, key, fallback) {
+  if (hasW04Own(liveObj, key)) return liveObj[key];
+  return fallback != null ? fallback : null;
+}
+
+function pickW04Return(liveObj, key, fallback, hasLiveIwencai) {
+  if (hasW04Own(liveObj, key)) return liveObj[key];
+  return hasLiveIwencai ? null : fallback;
+}
+
+function formatW04Pct(v) {
+  if (v == null || v === '' || v === '—') return '—';
+  var n = parseFloat(String(v).replace('%', '').replace('+', ''));
+  if (isNaN(n)) return String(v);
+  return (n > 0 ? '+' : '') + n + '%';
+}
+
 function getTradeElapsedRatio(now) {
   var minutes = now.getHours() * 60 + now.getMinutes();
   var open = 9 * 60 + 30;
@@ -261,6 +234,62 @@ function getTradeElapsedRatio(now) {
   else if (minutes <= close) traded = 120 + minutes - afternoonOpen;
   else traded = 240;
   return Math.max(1, Math.min(240, traded)) / 240;
+}
+
+function buildW04AmountCompare(li, yb, now) {
+  li = li || {};
+  yb = yb || {};
+  var backend = buildW04BackendAmountCompare(li);
+  if (backend.text) return backend;
+
+  var todayAmtYi = parseAmountYi(li['成交额']);
+  if (todayAmtYi <= 0) return { text: '', dir: '' };
+
+  var minutes = now.getHours() * 60 + now.getMinutes();
+  var lunchStart = 11 * 60 + 30;
+  var afternoonOpen = 13 * 60;
+  var close = 15 * 60;
+  var yestSameYi = 0;
+  var label = '昨同段';
+
+  if (minutes >= lunchStart && minutes < afternoonOpen) {
+    yestSameYi = parseAmountYi(yb['昨日午间成交额'] || yb['午盘昨成交额']);
+    label = '昨午盘';
+  } else if (minutes >= close) {
+    yestSameYi = parseAmountYi(yb['昨日全天成交额'] || yb['上证昨成交额']);
+    label = '昨收';
+  }
+
+  if (yestSameYi <= 0) return { text: '', dir: '' };
+  return formatW04AmountCompare(todayAmtYi - yestSameYi, yestSameYi, label);
+}
+
+function buildW04BackendAmountCompare(li) {
+  var totalDiff = 0;
+  var totalYest = 0;
+  var count = 0;
+  ['上证', '深证'].forEach(function(name) {
+    var diff = parseAmountYi(li[name + '成交额差']);
+    var yest = parseAmountYi(li[name + '昨成交额']);
+    if (yest > 0 && diff !== 0) {
+      totalDiff += diff;
+      totalYest += yest;
+      count += 1;
+    }
+  });
+  if (count >= 2 && totalYest > 0) {
+    return formatW04AmountCompare(totalDiff, totalYest, '昨同段');
+  }
+  return { text: '', dir: '' };
+}
+
+function formatW04AmountCompare(diffYi, baseYi, label) {
+  var pct = baseYi > 0 ? diffYi / baseYi * 100 : null;
+  var signPct = pct >= 0 ? '+' : '';
+  return {
+    text: label + ' ' + formatAmtDiff(diffYi) + (pct == null ? '' : ' ' + signPct + pct.toFixed(1) + '%'),
+    dir: diffYi >= 0 ? 'up' : 'down'
+  };
 }
 
 function formatAmtDiff(v) {

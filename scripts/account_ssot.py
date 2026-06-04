@@ -63,9 +63,10 @@ def _quote_status(quotes, now=None):
     """判断行情新鲜度：live / close_snapshot / stale / missing。
 
     规则：先看交易时段，再看 age。
+    - 盘前(<9:15)：上一交易日15:00后的行情可作为 close_snapshot 展示
     - 盘中(9:30-15:00)：age≤300s→live，否则→stale
     - 收盘后(≥15:00)：当天≥15:00的行情→close_snapshot(可用)，否则→stale
-    - 无_updated/跨日→stale/missing
+    - 其他跨日/无_updated→stale/missing
     返回 (is_usable: bool, quote_status: str)
     """
     updated = (quotes or {}).get("_updated")
@@ -82,14 +83,31 @@ def _quote_status(quotes, now=None):
         if age < 0:
             return False, "stale"  # 未来时间不可用
 
-        quote_date = quote_time.strftime("%Y-%m-%d")
-        ref_date = ref_time.strftime("%Y-%m-%d")
-        if quote_date != ref_date:
-            return False, "stale"
-
+        quote_date = quote_time.date()
+        ref_date = ref_time.date()
         quote_hhmm = quote_time.hour * 60 + quote_time.minute
         ref_hhmm = ref_time.hour * 60 + ref_time.minute
+        PRE_MARKET = 9 * 60 + 15
         MARKET_CLOSE = 15 * 60  # 15:00
+
+        if quote_date != ref_date:
+            # 盘前看盘仍需要展示昨收账户快照；交易规则继续由 rule_state
+            # 的 freshness 阻断控制，不把这类快照当作盘中实时行情。
+            if (
+                ref_hhmm < PRE_MARKET
+                and quote_date < ref_date
+                and quote_hhmm >= MARKET_CLOSE
+                and age <= 4 * 86400
+            ):
+                return True, "close_snapshot"
+            return False, "stale"
+
+        if ref_hhmm < PRE_MARKET:
+            # 09:15 前采集器尚未进入常规 5s 轮询；同日冷启动/盘前快照
+            # 可用于估值展示，但不冒充盘中 live。
+            if age <= 2 * 3600:
+                return True, "premarket_snapshot"
+            return False, "stale"
 
         if ref_hhmm < MARKET_CLOSE:
             # 盘中：严格 300s
@@ -103,6 +121,178 @@ def _quote_status(quotes, now=None):
             return False, "stale"
     except (TypeError, ValueError):
         return False, "missing"
+
+
+def _json_list(value):
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return value
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+            return parsed if isinstance(parsed, list) else []
+        except Exception:
+            return []
+    return []
+
+
+def _json_dict(value):
+    if value is None:
+        return {}
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+            return parsed if isinstance(parsed, dict) else {}
+        except Exception:
+            return {}
+    return {}
+
+
+def build_daily_ticket_review(date_str, eod_quotes=None):
+    """Build a close-day ticket review from SQLite facts.
+
+    This function reports only data derivable from persisted tickets, fills,
+    lots and conflict logs. Missing EOD prices do not produce guessed outcomes.
+    """
+    from collections import defaultdict
+    from scripts.db import init_db, query_trade_tickets, query_trades, _exec
+    init_db()
+
+    tickets = query_trade_tickets(date_from=date_str, date_to=date_str, limit=10000)
+    trades = query_trades(date_from=date_str, date_to=date_str, limit=10000)
+    fills = [dict(t) for t in trades if t.get("ticket_id")]
+    conflicts = [dict(r) for r in _exec("""
+        SELECT * FROM ticket_conflict_log
+        WHERE trade_date = ?
+        ORDER BY created_at ASC, id ASC
+    """, (date_str,))]
+    lots = [dict(r) for r in _exec("""
+        SELECT * FROM position_lots
+        WHERE buy_date <= ? AND status = 'open'
+        ORDER BY code ASC, locked_until ASC, lot_id ASC
+    """, (date_str,))]
+
+    by_action_type = defaultdict(int)
+    for ticket in tickets:
+        by_action_type[str(ticket.get("action_type") or "unknown")] += 1
+
+    blocked_statuses = {"blocked", "audit_degraded", "observe"}
+    filled_statuses = {"filled", "partially_filled", "closed", "closed_with_conflict"}
+    blocked_tickets = [t for t in tickets if str(t.get("status")) in blocked_statuses]
+    filled_tickets = [t for t in tickets if str(t.get("status")) in filled_statuses]
+    t1_conflicts = [
+        c for c in conflicts
+        if "T1" in str(c.get("conflict_type") or "").upper()
+        or "SELLABLE" in str(c.get("conflict_type") or "").upper()
+    ]
+    do_t_results = [
+        t for t in tickets
+        if str(t.get("action_type") or "").lower() in {"t", "do_t"}
+    ]
+    w2_buys = [
+        t for t in tickets
+        if str(t.get("window") or "").upper() == "W2"
+        and str(t.get("action_type") or "").lower() in {"buy", "add"}
+    ]
+
+    trades_by_ticket = defaultdict(list)
+    for trade in fills:
+        trades_by_ticket[trade.get("ticket_id")].append(trade)
+
+    blocked_ticket_eod_outcomes = []
+    eod_quotes = eod_quotes or {}
+    for ticket in blocked_tickets:
+        outcome = _json_dict(ticket.get("eod_outcome_json"))
+        code = str(ticket.get("code") or "")
+        q = eod_quotes.get(code) or eod_quotes.get(str(code).zfill(6)) or {}
+        eod_price = _number(q.get("最新价") or q.get("close") or q.get("eod_price"))
+        ticket_price = _number(ticket.get("stop_line") or ticket.get("max_amount"))
+        if not outcome and eod_price > 0:
+            outcome = {
+                "eod_price": eod_price,
+                "eod_return_from_ticket_price": None if ticket_price <= 0 else round((eod_price - ticket_price) / ticket_price * 100, 2),
+                "would_have_hit_stop": None,
+                "would_have_reached_target": None,
+                "blocked_reason": (ticket.get("blocking_rule_ids") or ticket.get("close_reason") or ""),
+            }
+        if outcome:
+            blocked_ticket_eod_outcomes.append({"ticket_id": ticket.get("ticket_id"), **outcome})
+
+    rule_stats = {}
+    for ticket in tickets:
+        rule_ids = _json_list(ticket.get("triggered_rule_ids")) or ["UNSPECIFIED"]
+        ticket_fills = trades_by_ticket.get(ticket.get("ticket_id"), [])
+        realized = sum(_number(t.get("realized_pnl")) for t in ticket_fills)
+        executed = 1 if ticket_fills or str(ticket.get("status")) in filled_statuses else 0
+        manual_override = 1 if ticket.get("human_override_reason") else 0
+        eod = _json_dict(ticket.get("eod_outcome_json"))
+        would_win = None
+        if eod:
+            would_win = 1 if eod.get("would_have_reached_target") else 0
+        for rule_id in rule_ids:
+            row = rule_stats.setdefault(rule_id, {
+                "rule_id": rule_id,
+                "window": ticket.get("window"),
+                "sentiment_bucket": None,
+                "trigger_count": 0,
+                "executed_count": 0,
+                "win_rate": None,
+                "avg_R": None,
+                "total_realized_pnl": 0.0,
+                "manual_override_count": 0,
+                "manual_override_pnl": 0.0,
+                "blocked_but_later_would_win_count": None,
+            })
+            row["trigger_count"] += 1
+            row["executed_count"] += executed
+            row["total_realized_pnl"] = round(row["total_realized_pnl"] + realized, 2)
+            row["manual_override_count"] += manual_override
+            if manual_override:
+                row["manual_override_pnl"] = round(row["manual_override_pnl"] + realized, 2)
+            if would_win is not None:
+                if row["blocked_but_later_would_win_count"] is None:
+                    row["blocked_but_later_would_win_count"] = 0
+                row["blocked_but_later_would_win_count"] += would_win
+
+    markdown = "\n".join([
+        f"# {date_str} 交易票据复盘",
+        "",
+        f"- {len(tickets)} tickets",
+        f"- {len(fills)} fills",
+        f"- {len(t1_conflicts)} T+1 conflict candidate",
+        f"- {len(do_t_results)} do-T group",
+        f"- {len(w2_buys)} W2 buy",
+    ])
+
+    return {
+        "date": date_str,
+        "ticket_count": len(tickets),
+        "fill_count": len(fills),
+        "by_action_type": dict(by_action_type),
+        "blocked_tickets": blocked_tickets,
+        "filled_tickets": filled_tickets,
+        "lot_locks": lots,
+        "t1_conflicts": t1_conflicts,
+        "do_t_results": do_t_results,
+        "rule_id_stats": list(rule_stats.values()),
+        "account_metric_errors": [],
+        "funds_conflict_events": [
+            t for t in tickets
+            if any("DATA-FUNDS" in str(rule_id) for rule_id in _json_list(t.get("blocking_rule_ids")))
+        ],
+        "ice_w1_block_events": [
+            t for t in tickets
+            if any("WIN-ICE-W1" in str(rule_id) for rule_id in _json_list(t.get("blocking_rule_ids")))
+        ],
+        "style_score_adjustments": [
+            t for t in tickets if t.get("style_score_adjusted") is not None
+        ],
+        "blocked_ticket_eod_outcomes": blocked_ticket_eod_outcomes,
+        "review_markdown": markdown,
+    }
 
 
 def reduce_account_state(anchor, trades, quotes, now=None, fund_events=None):
@@ -349,17 +539,19 @@ def reduce_account_state(anchor, trades, quotes, now=None, fund_events=None):
 
 def update_account_baseline_meta(date_str, meta, update_anchor=None):
     """追加或更新锚点的 _meta 结算信息（收盘日结用）。"""
+    from scripts.db import query_account_baseline, _exec_write
+    anchor = query_account_baseline(date_str)
+    existing = dict((anchor or {}).get("_meta") or {})
+    merged = {**existing, **(meta or {})}
     if update_anchor is None:
-        from scripts.db import insert_account_baseline, _exec_write
         _exec_write(
             "UPDATE account_baselines SET _meta_json = ? WHERE date = ?",
-            (json.dumps(meta, ensure_ascii=False), date_str)
+            (json.dumps(merged, ensure_ascii=False), date_str)
         )
     else:
-        from scripts.db import _exec_write
         _exec_write(
             "UPDATE account_baselines SET _meta_json = ? WHERE date = ?",
-            (json.dumps(meta, ensure_ascii=False), date_str)
+            (json.dumps(merged, ensure_ascii=False), date_str)
         )
 
 
@@ -784,13 +976,25 @@ def ensure_today_anchor(data, day_start_asset, now=None, get_anchor=None, insert
     return get_anchor(date_str) or anchor
 
 
+def _recent_trading_dates(date_str, count=7):
+    """Return recent trading dates, approximated by weekdays when no exchange calendar exists."""
+    from datetime import datetime as _dt, timedelta as _td
+
+    current = _dt.strptime(date_str, "%Y-%m-%d")
+    dates = []
+    while len(dates) < count:
+        if current.weekday() < 5:
+            dates.append(current.strftime("%Y-%m-%d"))
+        current -= _td(days=1)
+    return dates
+
+
 def query_7day_closed_positions(date_str, get_anchor=None, get_trades=None):
-    """查询7日内（含当日）完全卖清的持仓，仅来自 SSOT 账本回放。
+    """查询近7个交易日（含当日）完全卖清的持仓，仅来自 SSOT 账本回放。
 
     返回 list[dict]: 每项 {code, name, closed_date, sell_price, reason, ...}
     去重：同一 code 只保留最近一次清仓日期。
     """
-    from datetime import datetime as _dt, timedelta as _td
 
     if get_anchor is None:
         from scripts.db import query_account_baseline
@@ -799,11 +1003,11 @@ def query_7day_closed_positions(date_str, get_anchor=None, get_trades=None):
         from scripts.db import query_trades
         get_trades = query_trades
 
-    today = _dt.strptime(date_str, "%Y-%m-%d")
+    trading_dates = _recent_trading_dates(date_str, 7)
     all_closed = {}  # code -> closed entry
 
-    # 收集7日内所有含 is_reversal=1 的纠错交易，提取被撤销的原始交易 ID
-    start_date = (today - _td(days=6)).strftime("%Y-%m-%d")
+    # 收集7个交易日窗口内所有含 is_reversal=1 的纠错交易，提取被撤销的原始交易 ID
+    start_date = trading_dates[-1] if trading_dates else date_str
     all_trades = get_trades(date_from=start_date, date_to=date_str, limit=10000)
     reversed_trade_ids = set()
     for t in (all_trades or []):
@@ -812,9 +1016,8 @@ def query_7day_closed_positions(date_str, get_anchor=None, get_trades=None):
             if orig_id is not None:
                 reversed_trade_ids.add(int(orig_id))
 
-    # 逐日回放，收集 closed_positions
-    for offset in range(7):
-        day = (today - _td(days=offset)).strftime("%Y-%m-%d")
+    # 逐交易日回放，收集 closed_positions
+    for day in trading_dates:
         anchor = get_anchor(day)
         if not anchor:
             continue
@@ -834,6 +1037,80 @@ def query_7day_closed_positions(date_str, get_anchor=None, get_trades=None):
                 all_closed[code] = closed
 
     return sorted(all_closed.values(), key=lambda c: c.get("closed_date", ""), reverse=True)
+
+
+def _lot_reconciliation_for_positions(positions):
+    """Compare current account position quantity with open lot quantity by code."""
+    try:
+        from scripts.db import get_conn
+        conn = get_conn()
+        rows = conn.execute("""
+            SELECT code, COALESCE(SUM(open_qty), 0) AS qty
+            FROM position_lots
+            WHERE status = 'open'
+            GROUP BY code
+        """).fetchall()
+    except Exception as exc:
+        return False, [{
+            "code": None,
+            "account_qty": None,
+            "lot_qty": None,
+            "message": f"lot/account quantity mismatch: lot table unavailable ({exc})",
+        }]
+
+    lot_qty = {str(row["code"]): int(row["qty"] or 0) for row in rows}
+    account_qty = {}
+    for position in positions or []:
+        code = str(position.get("代码") or "")
+        qty = int(_number(position.get("数量")))
+        if code and qty > 0:
+            account_qty[code] = account_qty.get(code, 0) + qty
+
+    errors = []
+    for code in sorted(set(account_qty) | set(lot_qty)):
+        aq = int(account_qty.get(code, 0))
+        lq = int(lot_qty.get(code, 0))
+        if aq != lq:
+            errors.append({
+                "code": code,
+                "account_qty": aq,
+                "lot_qty": lq,
+                "message": f"lot/account quantity mismatch for {code}: account={aq}, lots={lq}",
+            })
+    return not errors, errors
+
+
+def _lot_summary_by_code(trade_date):
+    try:
+        from scripts.db import get_conn, is_trading_day
+        conn = get_conn()
+        rows = [dict(row) for row in conn.execute("""
+            SELECT *
+            FROM position_lots
+            WHERE status = 'open' AND open_qty > 0
+            ORDER BY code ASC, buy_date ASC, created_at ASC, lot_id ASC
+        """).fetchall()]
+    except Exception:
+        return {}
+
+    summaries = {}
+    trade_day_open = is_trading_day(trade_date)
+    for lot in rows:
+        code = str(lot.get("code") or "")
+        if not code:
+            continue
+        entry = summaries.setdefault(code, {"lots": [], "sellable_qty": 0, "locked_qty": 0})
+        open_qty = int(_number(lot.get("open_qty")))
+        locked_until = str(lot.get("locked_until") or "")
+        sellable = trade_day_open and locked_until <= trade_date
+        lot_copy = dict(lot)
+        lot_copy["sellable"] = sellable
+        entry["lots"].append(lot_copy)
+        if sellable:
+            entry["sellable_qty"] += open_qty
+        else:
+            entry["locked_qty"] += open_qty
+    return summaries
 
 
 def load_current_account_state(live_quotes, now=None, data_file=None, history_file=None):
@@ -891,6 +1168,20 @@ def load_current_account_state(live_quotes, now=None, data_file=None, history_fi
         if c.get("code") not in today_codes:
             state.setdefault("closed_positions", []).append(c)
     state["trades"] = sorted(trades, key=lambda trade: (_event_timestamp(trade), int(trade.get("id") or 0)))
+    lot_summary = _lot_summary_by_code(date_str)
+    for position in state.get("positions") or []:
+        code = str(position.get("代码") or "")
+        summary = lot_summary.get(code, {"lots": [], "sellable_qty": 0, "locked_qty": 0})
+        position["sellable_qty"] = int(summary["sellable_qty"])
+        position["locked_qty"] = int(summary["locked_qty"])
+        position["lots"] = summary["lots"]
+        position["lot_reconciliation_ok"] = (
+            int(_number(position.get("数量"))) == position["sellable_qty"] + position["locked_qty"]
+        )
+    lot_ok, lot_errors = _lot_reconciliation_for_positions(state.get("positions") or [])
+    state["lot_reconciliation_ok"] = lot_ok
+    state["lot_reconciliation_errors"] = lot_errors
+    state["lot_reconciliation_block_actions"] = ["sell", "do_t"] if lot_errors else []
     state["_updated"] = (live_quotes or {}).get("_updated") or effective_at
     anchor_source = anchor.get("source", "recovery")
     anchor_positions = anchor.get("positions") or []

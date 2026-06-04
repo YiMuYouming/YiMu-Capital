@@ -47,6 +47,12 @@ def find_latest_review():
             if has_appendix:
                 return str(f)
 
+            # 盘前当日笔记：frontmatter 仍为空，但第〇部分已经承载今日基线。
+            premarket = _parse_premarket_plan(str(f))
+            if premarket.get("style"):
+                print(f"[info] Using {f.name} (premarket plan)")
+                return str(f)
+
             # 附录空但正文5节点表格有数据 → 也算有效
             nodes = parse_sentiment_nodes(str(f))
             filled = [n for n in ['竞价','早盘','午盘','尾盘','收盘'] if nodes.get(n)]
@@ -187,7 +193,11 @@ def parse_appendix(filepath):
         elif '板块状态' in title:
             result['sectors'] = _parse_table(body, {
                 '板块': '板块', '类型': '类型', '涨停数': '涨停数',
-                '梯队': '梯队', '龙头': '龙头', '状态': '状态'
+                '梯队': '梯队', '龙头': '龙头',
+                '板块涨跌幅': '板块涨跌幅', '涨跌幅': '板块涨跌幅',
+                '主力净流入': '主力净流入', '净流入': '主力净流入',
+                '5日线位置': '5日线位置', 'MA5位置': '5日线位置',
+                '状态': '状态'
             })
         elif '竞价5维' in title:
             result['竞价'] = _parse_auction(body)
@@ -313,6 +323,97 @@ def _parse_appendix_a_table(body, col_map):
         if row:
             rows.append(row)
     return rows
+
+
+def _infer_style_label(lb_pct, tr_pct):
+    lb = float(lb_pct or 0)
+    tr = float(tr_pct or 0)
+    if lb >= 80 and lb - tr >= 20:
+        return "连板行情"
+    if tr >= 80 and tr - lb >= 20:
+        return "趋势行情"
+    if lb >= 65 and lb - tr >= 15:
+        return "混合（偏连板）"
+    if tr >= 65 and tr - lb >= 15:
+        return "混合（偏趋势）"
+    return "混合（均衡）"
+
+
+def _parse_premarket_plan(filepath):
+    """解析当日笔记「第〇部分：昨日预案」中的盘前风格基线。
+
+    这个段落是 D-1 复盘终审后写入的当日盘前执行口径；当当天
+    frontmatter 仍为空时，它比前一日收盘 refresh 的旧风格更权威。
+    """
+    try:
+        with open(filepath) as f:
+            content = f.read()
+    except Exception:
+        return {}
+
+    appendix_m = re.search(r'##\s*附录A[：:]\s*次日盘前速查.*?\n(.*?)(?=\n##\s|\Z)', content, re.DOTALL)
+    if appendix_m:
+        appendix_text = appendix_m.group(1)
+        style = {}
+        if "被动趋势日" in appendix_text:
+            style["风格"] = "被动趋势日"
+        elif "趋势行情" in appendix_text or "趋势日" in appendix_text:
+            style["风格"] = "趋势行情"
+        elif "连板行情" in appendix_text or "连板日" in appendix_text:
+            style["风格"] = "连板行情"
+
+        if re.search(r'连板(?:各层)?gate全关|连板全关', appendix_text):
+            style["连板占比"] = 0
+            style["趋势占比"] = 100
+        else:
+            alloc_m = re.search(
+                r'连板\s*(\d+(?:\.\d+)?)\s*%.*?趋势\s*(\d+(?:\.\d+)?)\s*%',
+                appendix_text,
+                re.DOTALL,
+            )
+            if alloc_m:
+                lb_pct, tr_pct = (float(v) for v in alloc_m.groups())
+                style["连板占比"] = int(lb_pct) if lb_pct.is_integer() else lb_pct
+                style["趋势占比"] = int(tr_pct) if tr_pct.is_integer() else tr_pct
+
+        cap_m = re.search(r'(?:总仓位上限|总上限)\s*(?:正常)?[（(]?\s*(\d+(?:\.\d+)?)\s*%', appendix_text)
+        if not cap_m:
+            cap_m = re.search(r'(?:总仓位上限|总上限)[^。\n]*?(\d+(?:\.\d+)?)\s*%', appendix_text)
+        if cap_m:
+            cap = float(cap_m.group(1))
+            style["总仓位上限"] = int(cap) if cap.is_integer() else cap
+
+        w2_m = re.search(r'新开趋势W2上限\s*[~约]*\s*(\d+(?:\.\d+)?\s*[-~]\s*\d+(?:\.\d+)?)\s*%', appendix_text)
+        if w2_m:
+            style["新开趋势W2上限"] = re.sub(r'\s+', '', w2_m.group(1)) + "%"
+
+        if style:
+            return {"style": style, "source": "appendix_a_plan"}
+
+    m = re.search(r'##\s*第[〇零0]部分[：:][^\n]*昨日预案[^\n]*\n(.*?)(?=\n##\s|\Z)', content, re.DOTALL)
+    if not m:
+        return {}
+    text = m.group(1)
+    style = {}
+
+    style_m = re.search(
+        r'风格[：:]\s*(\d+(?:\.\d+)?)\s*分.*?连板\s*(\d+(?:\.\d+)?)\s*%?\s*/\s*趋势\s*(\d+(?:\.\d+)?)\s*%?',
+        text,
+        re.DOTALL,
+    )
+    if style_m:
+        total, lb_pct, tr_pct = (float(v) for v in style_m.groups())
+        style["总分"] = int(total) if total.is_integer() else total
+        style["连板占比"] = int(lb_pct) if lb_pct.is_integer() else lb_pct
+        style["趋势占比"] = int(tr_pct) if tr_pct.is_integer() else tr_pct
+        style["风格"] = _infer_style_label(lb_pct, tr_pct)
+
+    cap_m = re.search(r'(?:总仓位上限|仓位)[：:][^\n]*?(\d+(?:\.\d+)?)\s*%', text)
+    if cap_m:
+        cap = float(cap_m.group(1))
+        style["总仓位上限"] = int(cap) if cap.is_integer() else cap
+
+    return {"style": style, "source": "premarket_plan"} if style else {}
 
 
 def _data_appendix_has_section(filepath, title):
@@ -998,6 +1099,75 @@ def _fmt_wanyi(v):
         return s
 
 
+def _wanyi_number(v):
+    if v in (None, "", "—"):
+        return None
+    s = str(v).replace(",", "").strip()
+    try:
+        if "万亿" in s:
+            return float(s.replace("万亿", ""))
+        if "亿" in s:
+            return float(s.replace("亿", "")) / 10000
+        return float(s)
+    except ValueError:
+        return None
+
+
+def _first_present(mapping, keys):
+    for key in keys:
+        value = mapping.get(key)
+        if value not in (None, "", "—"):
+            return value
+    return None
+
+
+def _derive_sh_turnover_wanyi(fm):
+    explicit = _first_present(fm, ["上证成交额", "上证指数成交额", "沪市成交额", "上海成交额"])
+    if explicit not in (None, "", "—"):
+        return explicit
+    total = _wanyi_number(fm.get("市场量能"))
+    sz = _wanyi_number(_first_present(fm, ["深证成交额", "深圳成交额", "深证指数成交额", "深圳指数成交额"]))
+    if total is not None and sz is not None and total >= sz:
+        return round(total - sz, 2)
+    return None
+
+
+def _extract_review_section_text(content, section_name):
+    m = re.search(
+        rf"\*\*{re.escape(section_name)}\*\*\s*\n(.*?)(?=\n\*\*[^*\n]+\*\*\s*\n|\n###\s|\Z)",
+        content,
+        re.DOTALL,
+    )
+    return m.group(1) if m else ""
+
+
+def _extract_last_pct(text, labels):
+    values = []
+    for label in labels:
+        pattern = rf"{label}(?:板|指|指数)?(?:\*\*)?\s*([+-]?\d+(?:\.\d+)?)\s*%"
+        values.extend(re.findall(pattern, text))
+    return values[-1] if values else None
+
+
+def _extract_turnover(text):
+    m = re.search(r"(?:上午总成交|半日量能|午盘量能)\s*([0-9]+(?:\.\d+)?)\s*万亿", text)
+    return f"{m.group(1)}万亿" if m else None
+
+
+def _load_sentiment_auto_close(date_str):
+    try:
+        with open(ROOT_DIR / "data" / "sentiment_auto.json") as f:
+            data = json.load(f)
+    except Exception:
+        return {}
+    rows = data.get(date_str) if isinstance(data, dict) else None
+    if not isinstance(rows, list):
+        return {}
+    close_rows = [r for r in rows if str(r.get("node") or r.get("节点") or "").find("收盘") >= 0]
+    source = close_rows[-1] if close_rows else (rows[-1] if rows else {})
+    return source if isinstance(source, dict) else {}
+
+
 def _parse_up_down(raw):
     m = re.search(r"(\d+)\s*/\s*(\d+)", str(raw or ""))
     if not m:
@@ -1012,14 +1182,36 @@ def _build_yesterday_baseline(current_path, as_of_date=None):
     fm = parse_frontmatter(prev_path)
     if not fm:
         return {}
+    try:
+        content = Path(prev_path).read_text()
+    except Exception:
+        content = ""
+    close_text = _extract_review_section_text(content, "收盘")
+    midday_text = _extract_review_section_text(content, "午盘")
+    prev_date = _review_note_date(prev_path)
+    auto_close = _load_sentiment_auto_close(prev_date) if prev_date else {}
     up, down = _parse_up_down(fm.get("涨跌比"))
+    if (up is None or down is None) and auto_close:
+        up = auto_close.get("上涨家数")
+        down = auto_close.get("下跌家数")
     baseline = {
-        "上证昨涨幅": _fmt_pct(fm.get("上证涨幅")),
-        "上证昨成交额": _fmt_wanyi(fm.get("市场量能")),
+        "上证昨涨幅": _fmt_pct(fm.get("上证涨幅") or auto_close.get("上证涨幅")),
+        "上证昨成交额": _fmt_wanyi(_derive_sh_turnover_wanyi(fm)),
+        "深证昨涨幅": _fmt_pct(_first_present(fm, ["深证涨幅", "深圳涨幅", "深证指数涨幅", "深圳指数涨幅"]) or auto_close.get("深证涨幅")),
+        "深证昨成交额": _fmt_wanyi(_first_present(fm, ["深证成交额", "深圳成交额", "深证指数成交额", "深圳指数成交额"])),
+        "创业昨涨幅": _fmt_pct(
+            _first_present(fm, ["创业涨幅", "创业板涨幅", "创业指数涨幅", "创业板指涨幅"])
+            or auto_close.get("创业板涨幅")
+            or auto_close.get("创业涨幅")
+            or _extract_last_pct(close_text or content, ["创业板", "创业"])
+        ),
+        "创业昨成交额": _fmt_wanyi(_first_present(fm, ["创业成交额", "创业板成交额", "创业指数成交额", "创业板指成交额"])),
+        "昨日午间成交额": _fmt_wanyi(_extract_turnover(midday_text)),
+        "昨日全天成交额": _fmt_wanyi(fm.get("市场量能")),
         "上证昨上涨": up,
         "上证昨下跌": down,
         "_source_note": Path(prev_path).name,
-        "_source_note_date": _review_note_date(prev_path),
+        "_source_note_date": prev_date,
     }
     return {k: v for k, v in baseline.items() if v is not None}
 
@@ -1035,6 +1227,8 @@ def build_dashboard_data(review_path):
     """组装完整的 dashboard_data.json"""
     fm = parse_frontmatter(review_path)
     prev_fm = _fallback_frontmatter(review_path)  # 今天空字段用昨天的值
+    premarket_plan = _parse_premarket_plan(review_path)
+    premarket_style = premarket_plan.get("style", {})
     style_review_path = review_path
     if not _fm_has_data(fm, "情绪值"):
         fallback_path = _fallback_review_path(review_path)
@@ -1061,6 +1255,10 @@ def build_dashboard_data(review_path):
     # 规则引擎：计算实际执行
     if not style:
         style = {}
+    premarket_source = premarket_plan.get("source", "premarket_plan")
+    if premarket_style and (premarket_source == "appendix_a_plan" or not _fm_has_data(fm, "情绪值")):
+        style.update(premarket_style)
+        style["_source"] = premarket_source
     style["实际执行"] = compute_style_execution(fm, style)
     if style["实际执行"]["总仓位上限"] != style.get("总仓位上限", 30):
         style["总仓位上限"] = style["实际执行"]["总仓位上限"]
@@ -1267,6 +1465,12 @@ def _preserve_active_positions(new_data):
             new_data.setdefault("positions", []).append(p)
 
 
+def _parse_position_qty(value):
+    text = str(value or "").replace(",", "")
+    m = re.search(r"\d+(?:\.\d+)?", text)
+    return float(m.group(0)) if m else 0.0
+
+
 def _preserve_active_price(new_data):
     """保留活跃持仓现价：旧文件 > pnl_history 推算昨日收盘"""
     old_price_map = {}
@@ -1296,8 +1500,7 @@ def _preserve_active_price(new_data):
         if code in old_price_map:
             p["现价"] = old_price_map[code]
         elif pnl_mv:
-            qty_str = str(p.get("数量", "0"))
-            qty = float(qty_str.replace("股", "")) if qty_str else 0
+            qty = _parse_position_qty(p.get("数量", "0"))
             if qty > 0:
                 p["现价"] = round(pnl_mv / qty, 2)
     # 兜底：仍未设置现价的持仓用成本价

@@ -20,7 +20,7 @@ def valid_inputs(**overrides):
         "freshness": {"quotes": "live", "sentiment": "live"},
     }
     for section, values in overrides.items():
-        data[section].update(values)
+        data.setdefault(section, {}).update(values)
     return data
 
 
@@ -41,11 +41,27 @@ class LiveRuleEngineTest(unittest.TestCase):
                                     datetime(2026, 5, 27, 9, 40))
         self.assertIn("DATA_UNTRUSTED", [b["code"] for b in state["blocks"]])
 
+    def test_stale_quotes_with_complete_valuation_warns_not_blocks(self):
+        state = evaluate_rule_state(
+            valid_inputs(freshness={"quotes": "stale", "sentiment": "live"}),
+            datetime(2026, 5, 27, 9, 40))
+        self.assertTrue(state["tradable"])
+        self.assertNotIn("DATA_UNTRUSTED", [b["code"] for b in state["blocks"]])
+        self.assertIn("QUOTE_STALE", [w["code"] for w in state["warnings"]])
+
     def test_loss_streak_blocks_all(self):
         state = evaluate_rule_state(valid_inputs(risk={"loss_streak": 2}),
                                     datetime(2026, 5, 27, 14, 10))
         self.assertFalse(state["tradable"])
         self.assertIn("LOSS_STREAK", [b["code"] for b in state["blocks"]])
+
+    def test_loss_streak_can_be_advisory_when_plan_overrides(self):
+        state = evaluate_rule_state(
+            valid_inputs(risk={"loss_streak": 2, "loss_streak_hard_stop": False}),
+            datetime(2026, 5, 27, 14, 10))
+        self.assertTrue(state["tradable"])
+        self.assertNotIn("LOSS_STREAK", [b["code"] for b in state["blocks"]])
+        self.assertIn("LOSS_STREAK", [w["code"] for w in state["warnings"]])
 
     def test_loss_streak_one_does_not_trigger(self):
         state = evaluate_rule_state(valid_inputs(risk={"loss_streak": 1}),
@@ -77,14 +93,24 @@ class LiveRuleEngineTest(unittest.TestCase):
             valid_inputs(sentiment={"emotion_pct": 82}),
             datetime(2026, 5, 27, 14, 10))
         self.assertTrue(state["tradable"])
-        self.assertEqual(state["caps"]["base_total_pct"], 40)
-        self.assertEqual(state["caps"]["total_pct"], 20)
+        self.assertEqual(state["caps"]["base_total_pct"], 20)
+        self.assertEqual(state["caps"]["total_pct"], 10)
 
-    def test_sentiment_stale_blocks_all(self):
+    def test_sentiment_stale_with_complete_fields_warns_not_blocks(self):
+        state = evaluate_rule_state(
+            valid_inputs(freshness={"quotes": "live", "sentiment": "stale"}),
+            datetime(2026, 5, 27, 9, 40))
+        self.assertTrue(state["tradable"])
+        self.assertNotIn("SENTIMENT_STALE", [b["code"] for b in state["blocks"]])
+        self.assertIn("SENTIMENT_STALE", [w["code"] for w in state["warnings"]])
+
+    def test_sentiment_dead_with_complete_fields_warns_not_blocks(self):
         state = evaluate_rule_state(
             valid_inputs(freshness={"quotes": "live", "sentiment": "dead"}),
             datetime(2026, 5, 27, 9, 40))
-        self.assertIn("SENTIMENT_STALE", [b["code"] for b in state["blocks"]])
+        self.assertTrue(state["tradable"])
+        self.assertNotIn("SENTIMENT_STALE", [b["code"] for b in state["blocks"]])
+        self.assertIn("SENTIMENT_STALE", [w["code"] for w in state["warnings"]])
 
     def test_missing_sentiment_fields_blocks_all(self):
         state = evaluate_rule_state(
@@ -101,6 +127,12 @@ class LiveRuleEngineTest(unittest.TestCase):
         self.assertIn("FRIDAY_W1", [b["code"] for b in state["blocks"]])
         self.assertEqual(state["caps"]["trend_pct"], 15)
         self.assertTrue(state["windows"]["w2"]["buy_allowed"])
+
+    def test_premarket_window_plan_can_open_friday_w1(self):
+        state = evaluate_rule_state(
+            valid_inputs(time_window={"w1_status": "开放", "w2_status": "开放"}),
+            datetime(2026, 5, 29, 9, 40))
+        self.assertNotIn("FRIDAY_W1", [b["code"] for b in state["blocks"]])
 
     def test_friday_not_auto_close_w2(self):
         state = evaluate_rule_state(valid_inputs(),
@@ -150,7 +182,7 @@ class LiveRuleEngineTest(unittest.TestCase):
         state = evaluate_rule_state(
             valid_inputs(sentiment={"emotion_pct": 15}),
             datetime(2026, 5, 27, 14, 10))
-        self.assertIn("W2_ICE", [b["code"] for b in state["blocks"]])
+        self.assertIn("W2_ICE_RISK", [b["code"] for b in state["blocks"]])
 
     def test_w2_broken_board_blocks(self):
         state = evaluate_rule_state(
@@ -167,19 +199,22 @@ class LiveRuleEngineTest(unittest.TestCase):
         self.assertFalse(state["windows"]["w1"]["buy_allowed"])
         self.assertNotIn("W2_BROKEN_BOARD", [b["code"] for b in state["blocks"]])
 
-    # ── 仓位基础档位 ──
+    # ── Vault 三层基础仓位 ──
 
-    def test_score_below_40_is_twenty_percent(self):
+    def test_ice_with_weak_trend_is_twenty_percent(self):
         state = evaluate_rule_state(
-            valid_inputs(style={"score": 10}),
+            valid_inputs(
+                style={"score": 10},
+                sentiment={"emotion_pct": 15, "previous_emotion_pct": 25, "lianban_risk": 0.3},
+            ),
             datetime(2026, 5, 27, 14, 10))
         self.assertEqual(state["caps"]["base_total_pct"], 20)
 
-    def test_score_40_is_forty_percent(self):
+    def test_default_emotion_keeps_lianban_side_sixty_percent(self):
         state = evaluate_rule_state(
             valid_inputs(style={"score": 40}),
             datetime(2026, 5, 27, 14, 10))
-        self.assertEqual(state["caps"]["base_total_pct"], 40)
+        self.assertEqual(state["caps"]["base_total_pct"], 60)
 
     def test_score_80_is_sixty_percent(self):
         state = evaluate_rule_state(

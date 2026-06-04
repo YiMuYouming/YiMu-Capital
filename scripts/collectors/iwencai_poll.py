@@ -3,7 +3,7 @@
 通过 ym_stock_data 统一接口 → OpenAPI 优先，额度耗尽自动降级 pywencai。
 非交易时段自动跳过。
 """
-import os, sys, json
+import os, sys, json, urllib.parse, urllib.request
 from datetime import datetime, time
 from pathlib import Path
 
@@ -95,6 +95,41 @@ def _max_board(datas):
         return None, None
     uniq = sorted(set(boards), reverse=True)
     return uniq[0], uniq[1] if len(uniq) >= 2 else None
+
+
+def _eastmoney_limit_counts(date_str=None):
+    """东方财富涨跌停池兜底，供云端问财返回空结果时使用。"""
+    date_str = date_str or datetime.now().strftime("%Y%m%d")
+    base = "https://push2ex.eastmoney.com/"
+    common = {
+        "ut": "7eea3edcaed734bea9cbfc24409ed989",
+        "dpt": "wz.ztzt",
+        "Pageindex": 0,
+        "pagesize": 200,
+        "sort": "fbt:asc",
+        "date": date_str,
+    }
+
+    def fetch_count(path):
+        url = base + path + "?" + urllib.parse.urlencode(common)
+        req = urllib.request.Request(url, headers={
+            "User-Agent": "Mozilla/5.0",
+            "Referer": "https://quote.eastmoney.com/ztb/detail",
+        })
+        payload = json.loads(urllib.request.urlopen(req, timeout=10).read().decode("utf-8"))
+        data = (payload or {}).get("data") or {}
+        count = data.get("tc")
+        if count is not None:
+            return int(float(count))
+        return len(data.get("pool") or [])
+
+    try:
+        return {
+            "涨停家数": fetch_count("getTopicZTPool"),
+            "跌停家数": fetch_count("getTopicDTPool"),
+        }
+    except Exception:
+        return {}
 
 
 def poll_iwencai_sentiment(force=False):
@@ -192,6 +227,12 @@ def poll_iwencai_sentiment(force=False):
         close_cnt = len(r.get("datas", []))
         r = _iwencai_query("今日跌停 非st", limit=200)
         dt_cnt = len(r.get("datas", []))
+        if close_cnt == 0:
+            em_counts = _eastmoney_limit_counts()
+            close_cnt = em_counts.get("涨停家数", close_cnt)
+            dt_cnt = em_counts.get("跌停家数", dt_cnt)
+            if em_counts:
+                results["_limit_source"] = "eastmoney_zt_pool"
         if touch_cnt > 0 or close_cnt > 0:
             base = max(touch_cnt, close_cnt)
             results["封板率"] = round(min(close_cnt / base, 1.0), 4) if base > 0 else 0

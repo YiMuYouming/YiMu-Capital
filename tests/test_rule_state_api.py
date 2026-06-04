@@ -151,6 +151,46 @@ class RuleStateBridgeContractTest(unittest.TestCase):
         self.assertEqual(state["caps"]["total_pct"], 0)
         self.assertIn("LOSS_STREAK", [b["code"] for b in state["blocks"]])
 
+    def test_premarket_plan_turns_loss_streak_into_warning(self):
+        """盘前预案明确给出仓位时，自动连亏计数只提示不覆盖预案"""
+        self.tmp_dashboard.write_text(
+            '{"meta":{"date":"2026-05-29"},"market":{"炸板率":20},"sentiment":{'
+            '"情绪值":65,"昨日涨停收益":3.0,"晋级率":25},'
+            '"lianban_pool":[],"trend_pool":[],"positions":[],"decision":{},'
+            '"sectors":[],"risk":{"连亏天数":2},"pnl":{},'
+            '"time_window":{"W1状态":"开放","W2状态":"开放"},'
+            '"style":{"总分":57,"连板占比":57,"趋势占比":43,"dim3_趋势":16,'
+            '"总仓位上限":60,"_source":"premarket_plan"}}'
+        )
+        bridge.CACHE["iwencai"] = {"_updated": "2026-05-29T09:40:00+08:00"}
+        bridge.CACHE["live_quotes"] = {"_updated": "2026-05-29T09:40:00+08:00"}
+
+        state = bridge._build_rule_state(now=datetime(2026, 5, 29, 9, 40))
+
+        self.assertEqual(state["caps"]["base_total_pct"], 60)
+        self.assertEqual(state["caps"]["total_pct"], 60)
+        self.assertNotIn("LOSS_STREAK", [b["code"] for b in state["blocks"]])
+        self.assertIn("LOSS_STREAK", [w["code"] for w in state["warnings"]])
+
+    def test_appendix_a_plan_turns_loss_streak_into_warning(self):
+        """附录A终稿明确给出次日仓位时，连亏计数只提示不覆盖预案"""
+        self.tmp_dashboard.write_text(
+            '{"meta":{"date":"2026-06-02"},"market":{"炸板率":71.43},"sentiment":{'
+            '"情绪值":27.5,"昨日涨停收益":0.78,"晋级率":13.33},'
+            '"lianban_pool":[],"trend_pool":[],"positions":[],"decision":{},'
+            '"sectors":[],"risk":{"连亏天数":2},"pnl":{},'
+            '"time_window":{"W1状态":"开放","W2状态":"开放"},'
+            '"style":{"总分":49,"风格":"被动趋势日","连板占比":0,"趋势占比":100,'
+            '"dim3_趋势":14,"总仓位上限":60,"_source":"appendix_a_plan"}}'
+        )
+        bridge.CACHE["iwencai"] = {"_updated": "2026-06-03T08:40:00+08:00"}
+        bridge.CACHE["live_quotes"] = {"_updated": "2026-06-03T08:40:00+08:00"}
+
+        state = bridge._build_rule_state(now=datetime(2026, 6, 3, 8, 40))
+
+        self.assertNotIn("LOSS_STREAK", [b["code"] for b in state["blocks"]])
+        self.assertIn("LOSS_STREAK", [w["code"] for w in state["warnings"]])
+
     def test_rule_inputs_fall_back_to_baseline_sentiment_fields(self):
         """iwencai 缓存短暂缺字段时，用 baseline 情绪字段补齐规则输入"""
         self.tmp_dashboard.write_text(
@@ -318,25 +358,79 @@ class FreshnessBoundaryTest(unittest.TestCase):
         bridge.DATA_FILE = self.orig_data
         self.tmp.cleanup()
 
-    def test_stale_quotes_triggers_data_untrusted(self):
-        """行情 stale 触发 DATA_UNTRUSTED"""
+    def test_stale_quotes_warns_when_account_valuation_is_complete(self):
+        """行情 stale 但账户估值完整时只提示，不全局阻断"""
         bridge.CACHE["iwencai"] = {
             "情绪值": 65, "昨日涨停收益": 3.0,
             "晋级率": 0.22, "炸板率": 0.20,
             "_updated": "2026-05-27T09:40:00+08:00",
         }
         bridge.CACHE["live_quotes"] = {
-            "_updated": "2026-05-27T09:10:00+08:00",  # 30min old → stale
+            "_updated": "2026-05-27T09:37:00+08:00",  # 3min old → stale
         }
         bridge.CACHE["live_index"] = {}
         bridge.CACHE["breadth"] = {}
         bridge.CACHE["hot_list"] = {}
 
-        from datetime import datetime as _dt, timezone as _tz
-        now = _dt(2026, 5, 27, 9, 40, tzinfo=_tz.utc)
-        state = bridge._build_rule_state(now=now)
+        from datetime import datetime as _dt
+        now = _dt(2026, 5, 27, 9, 40)
+        state = bridge._build_rule_state(
+            now=now,
+            account_state={"pnl_pct": 0.0, "valuation_complete": True, "mv": 0},
+        )
         codes = [b["code"] for b in state["blocks"]]
-        self.assertIn("DATA_UNTRUSTED", codes)
+        warnings = [w["code"] for w in state["warnings"]]
+        self.assertNotIn("DATA_UNTRUSTED", codes)
+        self.assertIn("QUOTE_STALE", warnings)
+        self.assertTrue(state["tradable"])
+
+    def test_premarket_snapshot_before_0915_is_not_dead(self):
+        """09:15前采集器未开跑，同日盘前快照不应被 freshness 判 dead"""
+        from datetime import datetime as _dt
+
+        fresh = bridge._compute_freshness(
+            "live_quote",
+            {"_updated": "2026-05-27T08:54:00+08:00"},
+            now=_dt(2026, 5, 27, 9, 8),
+        )
+
+        self.assertEqual(fresh, "stale")
+
+    def test_stale_sentiment_with_baseline_fields_warns_not_blocks(self):
+        """情绪缓存延迟但 baseline 字段齐全时，不应把总仓位清零"""
+        self.tmp_dashboard.write_text(
+            '{"meta":{"date":"2026-05-29"},"market":{"炸板率":76.2},'
+            '"sentiment":{"情绪值":54,"昨日涨停收益":0.84,"晋级率":19.15},'
+            '"lianban_pool":[],"trend_pool":[],"positions":[],"decision":{},'
+            '"sectors":[],"risk":{"连亏天数":2},"pnl":{},'
+            '"time_window":{"W1状态":"开放","W2状态":"开放"},'
+            '"style":{"总分":57,"连板占比":57,"趋势占比":43,"dim3_趋势":16,'
+            '"总仓位上限":60,"_source":"premarket_plan"}}'
+        )
+        bridge.CACHE["iwencai"] = {
+            "情绪值": 54, "昨日涨停收益": 0.84,
+            "晋级率": 0.1915, "炸板率": 0.762,
+            "_updated": "2026-05-29T09:00:00+08:00",
+        }
+        bridge.CACHE["live_quotes"] = {"_updated": "2026-05-29T09:17:00+08:00"}
+        bridge.CACHE["live_index"] = {}
+        bridge.CACHE["breadth"] = {}
+        bridge.CACHE["hot_list"] = {}
+
+        from datetime import datetime as _dt
+        state = bridge._build_rule_state(
+            now=_dt(2026, 5, 29, 9, 17),
+            account_state={"pnl_pct": 0.0, "valuation_complete": True, "mv": 69040},
+        )
+
+        codes = [b["code"] for b in state["blocks"]]
+        warnings = [w["code"] for w in state["warnings"]]
+        self.assertEqual(state["caps"]["base_total_pct"], 60)
+        self.assertEqual(state["caps"]["total_pct"], 60)
+        self.assertNotIn("SENTIMENT_STALE", codes)
+        self.assertNotIn("FRIDAY_W1", codes)
+        self.assertIn("SENTIMENT_STALE", warnings)
+        self.assertIn("LOSS_STREAK", warnings)
 
     def test_production_format_same_minute_is_live(self):
         """生产 +08:00 同分钟数据必须判为 live（时区回归）"""
@@ -365,8 +459,8 @@ class FreshnessBoundaryTest(unittest.TestCase):
         self.assertTrue(state["tradable"],
                         "同分钟生产数据应为可交易")
 
-    def test_dead_sentiment_triggers_sentiment_stale(self):
-        """情绪 dead 触发 SENTIMENT_STALE"""
+    def test_dead_sentiment_with_complete_fields_warns_not_blocks(self):
+        """情绪 dead 但字段齐全时提示，不阻断总仓位"""
         bridge.CACHE["iwencai"] = {
             "情绪值": 65, "昨日涨停收益": 3.0,
             "晋级率": 0.22, "炸板率": 0.20,
@@ -379,11 +473,36 @@ class FreshnessBoundaryTest(unittest.TestCase):
         bridge.CACHE["breadth"] = {}
         bridge.CACHE["hot_list"] = {}
 
-        from datetime import datetime as _dt, timezone as _tz
-        now = _dt(2026, 5, 27, 9, 40, tzinfo=_tz.utc)
+        from datetime import datetime as _dt
+        now = _dt(2026, 5, 27, 9, 40)
         state = bridge._build_rule_state(now=now)
         codes = [b["code"] for b in state["blocks"]]
-        self.assertIn("SENTIMENT_STALE", codes)
+        warnings = [w["code"] for w in state["warnings"]]
+        self.assertNotIn("SENTIMENT_STALE", codes)
+        self.assertIn("SENTIMENT_STALE", warnings)
+        self.assertTrue(state["tradable"])
+
+
+class Kline15mPayloadFreshnessTest(unittest.TestCase):
+    def tearDown(self):
+        bridge.CACHE.clear()
+
+    def test_kline_15m_without_today_marker_is_hidden_from_payload(self):
+        bridge.CACHE["上证15min"] = [{"t": "15:00", "chg": 0.1}]
+        bridge.CACHE.pop("kline_15m_date", None)
+
+        rows = bridge._kline_15m_payload("上证15min", now=datetime(2026, 6, 3, 10, 0))
+
+        self.assertEqual(rows, [])
+
+    def test_kline_15m_with_today_marker_is_returned(self):
+        expected = [{"t": "09:45", "chg": 0.1}]
+        bridge.CACHE["上证15min"] = expected
+        bridge.CACHE["kline_15m_date"] = "2026-06-03"
+
+        rows = bridge._kline_15m_payload("上证15min", now=datetime(2026, 6, 3, 10, 0))
+
+        self.assertEqual(rows, expected)
 
 
 class DoubleIceIntegrationTest(unittest.TestCase):

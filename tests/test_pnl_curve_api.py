@@ -39,7 +39,16 @@ class PnlQueryZeroValueTests(unittest.TestCase):
         today = "2026-05-27"
         self._insert_daily("2026-05-26", nav=1.05, deposit=100000)  # last=105000
         self._insert_snapshot(f"{today}T09:30:00", 0, 0, 0.0)
-        summary = db.query_pnl_summary()
+        class FrozenDatetime(datetime):
+            @classmethod
+            def now(cls):
+                return cls(2026, 5, 27, 10, 0, 0)
+        original_datetime = db.datetime
+        db.datetime = FrozenDatetime
+        try:
+            summary = db.query_pnl_summary()
+        finally:
+            db.datetime = original_datetime
         self.assertEqual(summary["total_asset"], 0,
             f"total_asset=0 应保留, 实为 {summary['total_asset']}")
         self.assertEqual(summary["mv"], 0,

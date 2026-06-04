@@ -56,9 +56,9 @@ def is_trading_time():
     return (_time_module(9, 15) <= t <= _time_module(11, 30)) or (_time_module(13, 0) <= t <= _time_module(15, 10))
 
 
-def poll_sector_inflow():
+def poll_sector_inflow(force=False):
     """每 5min 获取同花顺行业净流入 TOP20"""
-    if not is_trading_time():
+    if not force and not is_trading_time():
         return
     try:
         r = _pipeline_fetch("sector_inflow", top_n=20)
