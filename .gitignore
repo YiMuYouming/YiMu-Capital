@@ -2,6 +2,20 @@
 data/dashboard_data.json
 data/dashboard_live.json
 data/embedded-data.js
+data/cache_dump.json
+data/*.json
+data/pnl.db
+data/*.db*
+data/pnl.db-*
+data/pnl.db.bak*
+data/*.db-shm
+data/*.db-wal
+data/*.json.bak*
+data/*~
+data/backups/
+data/cloud-backups/
+data/ymwm_report.json
+data/zt_history.json
 
 # OS files
 .DS_Store
@@ -14,5 +28,11 @@ Thumbs.db
 *.bak
 *.bak_*
 __pycache__/
+.pytest_cache/
+venv/
+.venv/
 pnl.db-shm
 pnl.db-wal
+
+# Local runtime state
+scripts/.style_regime_state.json
