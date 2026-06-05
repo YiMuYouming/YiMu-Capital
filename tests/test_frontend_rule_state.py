@@ -477,6 +477,42 @@ console.log(JSON.stringify({calls:calls, html:body.innerHTML.replace(/\s+/g, ' '
         self.assertIsNone(resp["pending"])
         self.assertIn("trade 49", resp["html"])
 
+    def test_w24_fetches_api_when_datastore_ticket_list_is_empty(self):
+        widget_src = (ROOT / "widgets" / "trade-tickets.js").read_text(encoding="utf-8")
+        script = PREAMBLE + "\n" + widget_src + r"""
+(async function() {
+var calls = [];
+global.fetch = function(url) {
+  calls.push(String(url));
+  if (String(url) === '/api/trade/tickets') {
+    return Promise.resolve({ok:true, json:function(){ return Promise.resolve({tickets:[{ticket_id:'TICKET-API-1', status:'blocked', code:'002281', name:'光迅科技', action_type:'reduce', blocking_rule_ids:['sellable_qty']} ]}); }});
+  }
+  return Promise.resolve({ok:false, json:function(){ return Promise.resolve({error:'unexpected'}); }});
+};
+var body = {
+  innerHTML: '',
+  querySelector: function(){ return null; },
+  querySelectorAll: function(){ return []; }
+};
+var cls = WidgetRegistry._map["W24"];
+var inst = new cls({id:"W24"});
+inst.getBody = function() { this._body = body; return body; };
+inst.render({trade_tickets: []});
+await new Promise(function(r){ setTimeout(r, 20); });
+console.log(JSON.stringify({calls:calls, html:body.innerHTML.replace(/\s+/g, ' ')}));
+})();
+"""
+        result = subprocess.run(
+            ["node", "--no-warnings", "-e", script],
+            capture_output=True, text=True, timeout=10,
+            cwd=str(ROOT),
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        resp = json.loads(result.stdout.strip().split("\n")[-1])
+        self.assertIn("/api/trade/tickets", resp["calls"])
+        self.assertIn("TICKET-API-1", resp["html"])
+        self.assertIn("sellable_qty", resp["html"])
+
     def test_w15_manual_backfill_copy_and_payload_metadata(self):
         src = (ROOT / "widgets" / "positions.js").read_text(encoding="utf-8")
         self.assertIn("手工补录成交", src)

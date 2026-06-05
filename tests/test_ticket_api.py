@@ -201,6 +201,52 @@ class TicketApiTest(unittest.TestCase):
         self.assertEqual(body["ticket"]["status"], "executable")
         self.assertNotIn("WIN-ICE-W1-001", body["ticket"]["blocking_rule_ids"])
 
+    def test_reduce_ticket_is_not_blocked_by_lot_reconciliation_or_missing_rule_snapshot(self):
+        bridge._build_trade_context = lambda: {
+            "rule_state": {
+                "version": "g1a-v1",
+                "tradable": True,
+                "blocks": [],
+                "warnings": [],
+                "windows": {"w1": {"blocks": []}, "w2": {"blocks": []}},
+            },
+            "market_snapshot": {"iwencai": {"情绪值": 65}},
+            "account_snapshot": {"account_day_return_pct": 0.9, "lot_reconciliation_ok": False},
+            "context_captured_at": "2026-06-05T10:46:00",
+            "context_status": "trusted",
+            "rule_pack_version": "test-pack",
+            "rule_snapshot_hash": None,
+            "today_execution_card_id": None,
+        }
+        bridge.load_current_account_state = lambda live_quotes: {
+            "date": "2026-06-05",
+            "pnl_pct": 0.9,
+            "account_day_return_pct": 0.9,
+            "positions": [{
+                "代码": "002281",
+                "标的": "光迅科技",
+                "数量": 900,
+                "sellable_qty": 1100,
+                "locked_qty": 0,
+                "lot_reconciliation_ok": False,
+            }],
+            "lot_reconciliation_ok": False,
+        }
+
+        status, body = _call("POST", "/api/trade/tickets/prepare", {
+            "intent_text": "卖出200股锁利",
+            "action_type": "reduce",
+            "code": "002281",
+            "name": "光迅科技",
+            "qty": 200,
+        })
+
+        self.assertEqual(status, 200, body)
+        self.assertEqual(body["ticket"]["status"], "executable")
+        self.assertNotIn("lot_reconciliation", body["ticket"]["blocking_rule_ids"])
+        self.assertNotIn("rule_snapshot_hash", body["ticket"]["blocking_rule_ids"])
+        self.assertEqual(body["ticket"]["sellable_quantity"], 1100)
+
     def test_posthoc_human_override_preserves_hard_blocks_as_audit_degraded(self):
         bridge._build_trade_context = lambda: {
             "rule_state": {

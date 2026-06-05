@@ -134,7 +134,9 @@ class LotMigrationTest(unittest.TestCase):
         )
 
         self.assertFalse(state["lot_reconciliation_ok"])
-        self.assertIn("sell", state["lot_reconciliation_block_actions"])
+        self.assertNotIn("sell", state["lot_reconciliation_block_actions"])
+        self.assertNotIn("reduce", state["lot_reconciliation_block_actions"])
+        self.assertNotIn("clear", state["lot_reconciliation_block_actions"])
         self.assertIn("do_t", state["lot_reconciliation_block_actions"])
         self.assertIn("lot/account quantity mismatch", state["lot_reconciliation_errors"][0]["message"])
 

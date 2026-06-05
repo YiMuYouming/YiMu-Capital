@@ -1181,7 +1181,7 @@ def load_current_account_state(live_quotes, now=None, data_file=None, history_fi
     lot_ok, lot_errors = _lot_reconciliation_for_positions(state.get("positions") or [])
     state["lot_reconciliation_ok"] = lot_ok
     state["lot_reconciliation_errors"] = lot_errors
-    state["lot_reconciliation_block_actions"] = ["sell", "do_t"] if lot_errors else []
+    state["lot_reconciliation_block_actions"] = ["buy", "add", "do_t"] if lot_errors else []
     state["_updated"] = (live_quotes or {}).get("_updated") or effective_at
     anchor_source = anchor.get("source", "recovery")
     anchor_positions = anchor.get("positions") or []

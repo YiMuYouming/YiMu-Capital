@@ -1147,14 +1147,14 @@ def _prepare_trade_ticket(payload):
             sellable_qty = int(pos.get("sellable_qty") or 0)
         else:
             sellable_qty = get_sellable_qty(code, trade_date)
-        if account_state.get("lot_reconciliation_ok") is False:
-            blocking_rule_ids.append("lot_reconciliation")
         if qty is not None and qty > sellable_qty:
             blocking_rule_ids.append("sellable_qty")
             missing_data.append({
                 "field": "sellable_qty",
                 "message": f"requested qty {qty} exceeds sellable_qty {sellable_qty}",
             })
+    if action_type in ("buy", "add", "do_t") and account_state.get("lot_reconciliation_ok") is False:
+        blocking_rule_ids.append("lot_reconciliation")
 
     if ctx.get("context_status") != "trusted":
         blocking_rule_ids.append("context_status")
@@ -1165,7 +1165,7 @@ def _prepare_trade_ticket(payload):
         audit_degraded = True
     rule_snapshot_hash = ctx.get("rule_snapshot_hash")
     today_execution_card_id = ctx.get("today_execution_card_id")
-    if not rule_snapshot_hash or not today_execution_card_id:
+    if action_type in ("buy", "add", "do_t") and (not rule_snapshot_hash or not today_execution_card_id):
         blocking_rule_ids.append("rule_snapshot_hash")
 
     blocking_rule_ids = list(dict.fromkeys(blocking_rule_ids))

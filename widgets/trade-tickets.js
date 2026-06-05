@@ -21,33 +21,43 @@ class TradeTicketsWidget extends YiMuWidget {
     this._selectedTicketId = '';
     this._pendingPreview = null;
     this._lastBody = null;
+    this._apiLoaded = false;
   }
 
   render(data) {
     var body = this.getBody();
     if (!body) return;
     this._lastBody = body;
-    if (data && Array.isArray(data.trade_tickets)) {
+    if (data && Array.isArray(data.trade_tickets) && data.trade_tickets.length) {
       this._tickets = data.trade_tickets;
       this._renderTicketBody(body);
       return;
     }
+    if (data && Array.isArray(data.trade_tickets) && this._apiLoaded) {
+      this._renderTicketBody(body);
+      return;
+    }
     if (!this._tickets && !this._loading) {
-      this._fetch(body);
+      this._tickets = [];
+      this._renderTicketBody(body);
+      this._fetch(body, true);
       return;
     }
     this._renderTicketBody(body);
   }
 
-  _fetch(body) {
+  _fetch(body, silent) {
     var self = this;
     this._lastBody = body;
     this._loading = true;
-    body.innerHTML = '<div style="padding:var(--sp-md);text-align:center;color:var(--text-disabled)">加载票据...</div>';
+    if (!silent) {
+      body.innerHTML = '<div style="padding:var(--sp-md);text-align:center;color:var(--text-disabled)">加载票据...</div>';
+    }
     fetch('/api/trade/tickets')
       .then(function(r){ return r.ok ? r.json() : Promise.reject(new Error('load failed')); })
       .then(function(d){
         self._loading = false;
+        self._apiLoaded = true;
         self._tickets = (d && Array.isArray(d.tickets)) ? d.tickets : [];
         self._renderTicketBody(body);
       })
