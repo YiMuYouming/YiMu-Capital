@@ -616,7 +616,7 @@ def get_sellable_qty(code, trade_date):
     return sum(int(row.get("open_qty") or 0) for row in get_sellable_lots(code, trade_date))
 
 
-def allocate_sell_to_lots(sell_trade):
+def allocate_sell_to_lots(sell_trade, conn=None):
     if int(sell_trade.get("is_reversal") or 0) == 1:
         return []
     action = str(sell_trade.get("action") or "")
@@ -629,13 +629,15 @@ def allocate_sell_to_lots(sell_trade):
     code = str(sell_trade.get("code") or "")
     sell_qty = int(_number(sell_trade.get("qty")))
     sell_price = _number(sell_trade.get("price"))
+    target_lot_id = str(sell_trade.get("target_lot_id") or "").strip()
     if not code or sell_qty <= 0:
         raise ValueError("sell trade requires code and positive qty")
     if not is_trading_day(trade_date):
         raise ValueError(f"{trade_date} is not a trading day")
 
-    conn = get_conn()
-    owns_tx = not conn.in_transaction
+    owns_conn = conn is None
+    conn = conn or get_conn()
+    owns_tx = owns_conn and not conn.in_transaction
     allocations = []
     try:
         if owns_tx:
@@ -648,11 +650,20 @@ def allocate_sell_to_lots(sell_trade):
             if owns_tx:
                 conn.commit()
             return [dict(row) for row in existing]
-        lots = [dict(row) for row in conn.execute("""
-            SELECT * FROM position_lots
-            WHERE code = ? AND status = 'open' AND open_qty > 0 AND locked_until <= ?
-            ORDER BY buy_date ASC, created_at ASC, lot_id ASC
-        """, (code, trade_date)).fetchall()]
+        if target_lot_id:
+            lots = [dict(row) for row in conn.execute("""
+                SELECT * FROM position_lots
+                WHERE lot_id = ? AND code = ? AND status = 'open'
+                  AND open_qty > 0 AND locked_until <= ?
+            """, (target_lot_id, code, trade_date)).fetchall()]
+            if not lots:
+                raise ValueError(f"target lot {target_lot_id} is not sellable for {code} on {trade_date}")
+        else:
+            lots = [dict(row) for row in conn.execute("""
+                SELECT * FROM position_lots
+                WHERE code = ? AND status = 'open' AND open_qty > 0 AND locked_until <= ?
+                ORDER BY buy_date ASC, created_at ASC, lot_id ASC
+            """, (code, trade_date)).fetchall()]
         sellable = sum(int(row["open_qty"] or 0) for row in lots)
         if sell_qty > sellable:
             raise ValueError(f"sell qty {sell_qty} exceeds sellable lot qty {sellable} for {code}")
@@ -811,30 +822,22 @@ def record_confirmed_fill(entry, rule_state=None, market_snapshot=None, confirma
                 (locked_until, trade_id),
             )
         elif is_sell:
-            remaining = qty
-            lots = [dict(row) for row in conn.execute("""
-                SELECT * FROM position_lots
-                WHERE code = ? AND status = 'open' AND open_qty > 0 AND locked_until <= ?
-                ORDER BY buy_date ASC, created_at ASC, lot_id ASC
-            """, (code, trade_date)).fetchall()]
-            for lot in lots:
-                if remaining <= 0:
-                    break
-                lot_qty = int(lot["open_qty"] or 0)
-                alloc_qty = min(remaining, lot_qty)
-                cost_price = _number(lot.get("cost_price"))
-                realized = round((price - cost_price) * alloc_qty, 2) if cost_price else None
-                conn.execute("""
-                    INSERT INTO trade_lot_allocations
-                    (sell_trade_id, lot_id, qty, cost_price, sell_price, realized_pnl)
-                    VALUES (?, ?, ?, ?, ?, ?)
-                """, (trade_id, lot["lot_id"], alloc_qty, cost_price, price, realized))
-                new_open_qty = lot_qty - alloc_qty
+            allocations = allocate_sell_to_lots({
+                "id": trade_id,
+                "trade_date": trade_date,
+                "action": action,
+                "code": code,
+                "price": price,
+                "qty": qty,
+                "target_lot_id": _entry_get(entry, "target_lot_id"),
+                "is_reversal": _entry_get(entry, "is_reversal", default=0),
+            }, conn=conn)
+            realized_values = [a.get("realized_pnl") for a in allocations if a.get("realized_pnl") is not None]
+            if realized_values:
                 conn.execute(
-                    "UPDATE position_lots SET open_qty = ?, status = ? WHERE lot_id = ?",
-                    (new_open_qty, "closed" if new_open_qty == 0 else "open", lot["lot_id"]),
+                    "UPDATE trade_records SET realized_pnl = ? WHERE id = ?",
+                    (round(sum(_number(v) for v in realized_values), 2), trade_id),
                 )
-                remaining -= alloc_qty
 
         conn.execute(
             "UPDATE trade_tickets SET status = ?, updated_at = datetime('now','localtime') WHERE ticket_id = ?",

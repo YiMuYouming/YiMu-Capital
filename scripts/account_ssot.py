@@ -350,6 +350,13 @@ def reduce_account_state(anchor, trades, quotes, now=None, fund_events=None):
         position = by_code.get(code)
         action = str(trade.get("action", ""))
         if "卖出" in action:
+            leg_type = str(trade.get("leg_type") or "")
+            if leg_type == "sell_target_lot_realized_pnl_only":
+                realized = _number(trade.get("realized_pnl"))
+                cash += round(realized, 2)
+                today_pnl_map[code] = today_pnl_map.get(code, 0) + round(realized, 2)
+                continue
+
             old_qty = int(position.get("数量", 0)) if position else 0
             # Oversell guard: qty > available → fail-closed, skip cash and position
             if qty > old_qty:

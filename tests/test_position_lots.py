@@ -148,6 +148,29 @@ class PositionLotsSchemaTest(unittest.TestCase):
         self.assertEqual(lots["C"]["open_qty"], 500)
         self.assertEqual(lots["C"]["status"], "open")
 
+    def test_target_lot_sell_decrements_selected_lot_instead_of_fifo(self):
+        for lot_id, qty, cost in [("overnight", 900, 219.49), ("trade:49", 200, 222.38)]:
+            db._exec_write("""INSERT INTO position_lots
+                (lot_id, code, name, buy_date, original_qty, open_qty, cost_price,
+                 locked_until, lot_source, migration_source, status)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (lot_id, "002281", "光迅科技", "2026-06-04", qty, qty, cost,
+                 "2026-06-05", "test", "test", "open"))
+
+        allocations = db.allocate_sell_to_lots({
+            "id": 50, "trade_date": "2026-06-05", "action": "卖出",
+            "code": "002281", "price": 232.30, "qty": 200,
+            "target_lot_id": "trade:49",
+        })
+        lots = {lot["lot_id"]: lot for lot in db.query_position_lots(code="002281")}
+
+        self.assertEqual([(a["lot_id"], a["qty"]) for a in allocations], [("trade:49", 200)])
+        self.assertEqual(lots["overnight"]["open_qty"], 900)
+        self.assertEqual(lots["overnight"]["status"], "open")
+        self.assertEqual(lots["trade:49"]["open_qty"], 0)
+        self.assertEqual(lots["trade:49"]["status"], "closed")
+        self.assertAlmostEqual(allocations[0]["realized_pnl"], (232.30 - 222.38) * 200)
+
     def test_friday_buy_unlocks_next_monday(self):
         self.assertEqual(db.next_trade_date("2026-06-05"), "2026-06-08")
         db.create_lot_from_buy_trade({
@@ -200,6 +223,65 @@ class PositionLotsSchemaTest(unittest.TestCase):
         self.assertEqual(pos["locked_qty"], 500)
         self.assertEqual(len(pos["lots"]), 2)
         self.assertTrue(pos["lot_reconciliation_ok"])
+
+    def test_lot_close_only_trade_preserves_anchor_quantity_and_adds_realized_pnl(self):
+        db.insert_account_baseline({
+            "date": "2026-06-05",
+            "effective_at": "2026-06-05T09:25:00",
+            "cash": 376215.67,
+            "day_start_asset": 723899.67,
+            "total_deposit": 700000,
+            "source": "previous_close",
+            "positions": [{
+                "标的": "光迅科技", "代码": "002281", "数量": 900,
+                "成本": 219.49, "现价": 224.0, "状态": "持有",
+            }],
+            "_meta": {"day_start_prices": {"002281": 224.0}},
+        })
+        for lot_id, qty, cost in [("overnight:2026-06-04:002281", 900, 219.49), ("trade:49", 200, 222.38)]:
+            db._exec_write("""INSERT INTO position_lots
+                (lot_id, code, name, buy_date, original_qty, open_qty, cost_price,
+                 locked_until, lot_source, migration_source, status)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (lot_id, "002281", "光迅科技", "2026-06-04", qty, qty, cost,
+                 "2026-06-05", "test", "test", "open"))
+        ticket_id = db.create_trade_ticket({
+            "trade_date": "2026-06-05", "code": "002281", "name": "光迅科技",
+            "action_type": "reduce", "status": "executable",
+            "t1_risk_json": {
+                "target_lot_id": "trade:49",
+                "account_effect": "realized_pnl_only",
+            },
+        })
+
+        result = db.record_confirmed_fill({
+            "trade_date": "2026-06-05", "trade_time": "14:45", "action": "卖出",
+            "code": "002281", "name": "光迅科技", "price": 232.30, "qty": 200,
+            "ticket_id": ticket_id, "target_lot_id": "trade:49",
+            "leg_type": "sell_target_lot_realized_pnl_only",
+            "event_id": "target-lot-sell-001",
+        })
+
+        self.assertEqual(result["status"], "inserted")
+        lots = {lot["lot_id"]: lot for lot in db.query_position_lots(code="002281")}
+        self.assertEqual(lots["overnight:2026-06-04:002281"]["open_qty"], 900)
+        self.assertEqual(lots["trade:49"]["open_qty"], 0)
+        trade = dict(db._exec("SELECT * FROM trade_records WHERE id = ?", (result["trade_id"],))[0])
+        self.assertEqual(trade["leg_type"], "sell_target_lot_realized_pnl_only")
+        self.assertAlmostEqual(trade["realized_pnl"], (232.30 - 222.38) * 200)
+
+        state = load_current_account_state(
+            {"002281": {"最新价": 232.30}, "_updated": "2026-06-05T14:50:00"},
+            now="2026-06-05T14:50:01",
+            data_file=self.data_file,
+            history_file=self.history_file,
+        )
+
+        pos = state["positions"][0]
+        self.assertEqual(pos["数量"], 900)
+        self.assertEqual(pos["sellable_qty"], 900)
+        self.assertTrue(pos["lot_reconciliation_ok"])
+        self.assertAlmostEqual(state["cash"], 376215.67 + (232.30 - 222.38) * 200)
 
 
 if __name__ == "__main__":

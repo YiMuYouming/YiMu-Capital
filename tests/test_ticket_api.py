@@ -247,6 +247,81 @@ class TicketApiTest(unittest.TestCase):
         self.assertNotIn("rule_snapshot_hash", body["ticket"]["blocking_rule_ids"])
         self.assertEqual(body["ticket"]["sellable_quantity"], 1100)
 
+    def test_prepare_reduce_ticket_records_target_lot_and_realized_pnl_only_effect(self):
+        bridge._build_trade_context = lambda: {
+            "rule_state": {
+                "version": "g1a-v1",
+                "tradable": True,
+                "blocks": [],
+                "warnings": [],
+                "windows": {"w1": {"blocks": []}, "w2": {"blocks": []}},
+            },
+            "market_snapshot": {"iwencai": {"情绪值": 65}},
+            "account_snapshot": {"account_day_return_pct": 0.9, "lot_reconciliation_ok": False},
+            "context_captured_at": "2026-06-05T14:45:00",
+            "context_status": "trusted",
+            "rule_pack_version": "test-pack",
+            "rule_snapshot_hash": None,
+            "today_execution_card_id": None,
+        }
+        bridge.load_current_account_state = lambda live_quotes: {
+            "date": "2026-06-05",
+            "pnl_pct": 0.9,
+            "account_day_return_pct": 0.9,
+            "positions": [{
+                "代码": "002281",
+                "标的": "光迅科技",
+                "数量": 900,
+                "sellable_qty": 1100,
+                "locked_qty": 0,
+                "lot_reconciliation_ok": False,
+            }],
+            "lot_reconciliation_ok": False,
+        }
+        db._exec_write("""INSERT INTO position_lots
+            (lot_id, code, name, buy_date, original_qty, open_qty, cost_price,
+             locked_until, lot_source, migration_source, status)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            ("trade:49", "002281", "光迅科技", "2026-06-04", 200, 200, 222.38,
+             "2026-06-05", "trade_record", "test", "open"))
+
+        status, body = _call("POST", "/api/trade/tickets/prepare", {
+            "intent_text": "卖掉昨天W2加仓200股，底仓900不动",
+            "action_type": "reduce",
+            "code": "002281",
+            "name": "光迅科技",
+            "qty": 200,
+            "target_lot_id": "trade:49",
+        })
+
+        self.assertEqual(status, 200, body)
+        self.assertEqual(body["ticket"]["status"], "executable")
+        self.assertEqual(body["ticket"]["t1_risk"]["target_lot_id"], "trade:49")
+        self.assertEqual(body["ticket"]["t1_risk"]["target_lot_mode"], "explicit")
+        self.assertEqual(body["ticket"]["t1_risk"]["account_effect"], "realized_pnl_only")
+
+    def test_fill_preview_inherits_target_lot_from_ticket(self):
+        ticket_id = db.create_trade_ticket({
+            "trade_date": "2026-06-05",
+            "code": "002281",
+            "name": "光迅科技",
+            "action_type": "reduce",
+            "status": "executable",
+            "t1_risk_json": {
+                "target_lot_id": "trade:49",
+                "account_effect": "realized_pnl_only",
+            },
+        })
+
+        status, body = _call("POST", "/api/trade/fills/preview", {
+            "input_text": "已卖 光迅科技 200股 232.30",
+            "ticket_id": ticket_id,
+        })
+
+        self.assertEqual(status, 200, body)
+        self.assertEqual(body["parsed"]["target_lot_id"], "trade:49")
+        self.assertEqual(body["parsed"]["leg_type"], "sell_target_lot_realized_pnl_only")
+
     def test_posthoc_human_override_preserves_hard_blocks_as_audit_degraded(self):
         bridge._build_trade_context = lambda: {
             "rule_state": {
@@ -439,6 +514,46 @@ class TicketApiTest(unittest.TestCase):
         self.assertEqual(replay_status, 409, replay_body)
         self.assertEqual(len(db._exec("SELECT * FROM trade_records")), 1)
         self.assertEqual(len(db.query_position_lots(code="002281")), 1)
+
+    def test_fill_confirm_closes_target_lot_instead_of_fifo(self):
+        ticket_id = db.create_trade_ticket({
+            "trade_date": "2026-06-05",
+            "code": "002281",
+            "name": "光迅科技",
+            "action_type": "reduce",
+            "status": "executable",
+            "t1_risk_json": {
+                "target_lot_id": "trade:49",
+                "account_effect": "realized_pnl_only",
+            },
+        })
+        for lot_id, qty, cost in [("overnight", 900, 219.49), ("trade:49", 200, 222.38)]:
+            db._exec_write("""INSERT INTO position_lots
+                (lot_id, code, name, buy_date, original_qty, open_qty, cost_price,
+                 locked_until, lot_source, migration_source, status)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (lot_id, "002281", "光迅科技", "2026-06-04", qty, qty, cost,
+                 "2026-06-05", "test", "test", "open"))
+        preview = _call("POST", "/api/trade/fills/preview", {
+            "input_text": "已卖 光迅科技 200股 232.30",
+            "ticket_id": ticket_id,
+        })[1]
+
+        status, body = _call("POST", "/api/trade/fills/confirm", {
+            "confirmation_id": preview["confirmation_id"],
+            "preview_token": preview["preview_token"],
+            "preview_hash": preview["preview_hash"],
+            "confirmed_by": "yimu",
+        })
+
+        self.assertEqual(status, 200, body)
+        lots = {lot["lot_id"]: lot for lot in db.query_position_lots(code="002281")}
+        self.assertEqual(lots["overnight"]["open_qty"], 900)
+        self.assertEqual(lots["trade:49"]["open_qty"], 0)
+        trade = dict(db._exec("SELECT * FROM trade_records")[0])
+        self.assertEqual(trade["leg_type"], "sell_target_lot_realized_pnl_only")
+        self.assertAlmostEqual(trade["realized_pnl"], (232.30 - 222.38) * 200)
+        self.assertEqual(db.query_trade_ticket(ticket_id)["status"], "filled")
 
     def test_ticket_blocked_after_preview_cannot_confirm_fill(self):
         ticket_id = db.create_trade_ticket({

@@ -1106,7 +1106,7 @@ def _blocking_codes_for_ticket(rule_state, action_type, window):
 
 
 def _prepare_trade_ticket(payload):
-    from scripts.db import create_trade_ticket, query_trade_ticket, get_sellable_qty
+    from scripts.db import create_trade_ticket, query_trade_ticket, get_sellable_qty, get_sellable_lots
 
     allowed = {"buy", "sell", "add", "reduce", "do_t", "clear", "observe"}
     action_type = str((payload or {}).get("action_type") or "").strip()
@@ -1134,6 +1134,7 @@ def _prepare_trade_ticket(payload):
     missing_data = []
     leg_type = "sell_reduce" if action_type == "reduce" else action_type
     sellable_qty = None
+    t1_risk = {}
     qty = (payload or {}).get("qty")
     try:
         qty = int(qty) if qty is not None else None
@@ -1153,6 +1154,50 @@ def _prepare_trade_ticket(payload):
                 "field": "sellable_qty",
                 "message": f"requested qty {qty} exceeds sellable_qty {sellable_qty}",
             })
+        sellable_lots = get_sellable_lots(code, trade_date)
+        requested_target = str((payload or {}).get("target_lot_id") or "").strip()
+        target_lot_mode = "explicit" if requested_target else ""
+        if not requested_target and qty:
+            intent_text = " ".join([
+                str((payload or {}).get("intent_text") or ""),
+                str((payload or {}).get("human_override_reason") or ""),
+            ])
+            wants_add_lot = any(key in intent_text for key in ("加仓", "W2", "尾盘", "做T", "T出", "锁利"))
+            if wants_add_lot:
+                candidates = [
+                    lot for lot in sellable_lots
+                    if str(lot.get("lot_id") or "").startswith("trade:")
+                    or str(lot.get("lot_source") or "") == "trade_record"
+                ]
+                candidates = [lot for lot in candidates if int(lot.get("open_qty") or 0) >= qty]
+                if candidates:
+                    requested_target = str(candidates[-1].get("lot_id") or "")
+                    target_lot_mode = "inferred_add_lot"
+        if requested_target:
+            target_lot = next((lot for lot in sellable_lots if str(lot.get("lot_id") or "") == requested_target), None)
+            if not target_lot:
+                blocking_rule_ids.append("target_lot")
+                missing_data.append({
+                    "field": "target_lot_id",
+                    "message": f"target lot {requested_target} is not sellable for {code} on {trade_date}",
+                })
+            elif qty is not None and qty > int(target_lot.get("open_qty") or 0):
+                blocking_rule_ids.append("target_lot")
+                missing_data.append({
+                    "field": "target_lot_id",
+                    "message": f"requested qty {qty} exceeds target lot open_qty {target_lot.get('open_qty')}",
+                })
+            else:
+                account_qty = int(float(str((pos or {}).get("数量") or 0).replace("股", ""))) if pos else 0
+                locked_qty = int((pos or {}).get("locked_qty") or 0) if pos else 0
+                lot_total = int(sellable_qty or 0) + locked_qty
+                t1_risk.update({
+                    "target_lot_id": requested_target,
+                    "target_lot_mode": target_lot_mode or "explicit",
+                    "target_lot_open_qty": int(target_lot.get("open_qty") or 0),
+                    "target_lot_cost_price": target_lot.get("cost_price"),
+                    "account_effect": "realized_pnl_only" if account_qty < lot_total else "normal",
+                })
     if action_type in ("buy", "add", "do_t") and account_state.get("lot_reconciliation_ok") is False:
         blocking_rule_ids.append("lot_reconciliation")
 
@@ -1202,6 +1247,7 @@ def _prepare_trade_ticket(payload):
         "triggered_rule_ids_json": (payload or {}).get("triggered_rule_ids") or [],
         "account_day_return_pct": account_snapshot.get("account_day_return_pct"),
         "sellable_quantity": sellable_qty,
+        "t1_risk_json": t1_risk,
         "rule_pack_version": ctx.get("rule_pack_version"),
         "rule_snapshot_hash": rule_snapshot_hash,
         "today_execution_card_id": today_execution_card_id,
@@ -1246,10 +1292,18 @@ def _parse_fill_input(input_text, ticket):
     price = price_candidates[-1] if price_candidates else float(nums[-1])
     action_type = str(ticket.get("action_type") or "")
     if action == "卖出":
-        leg_type = "sell_t_old_lot" if action_type in ("do_t", "reduce", "sell") else "sell"
+        t1_risk = ticket.get("t1_risk") or {}
+        target_lot_id = str(t1_risk.get("target_lot_id") or "").strip()
+        account_effect = str(t1_risk.get("account_effect") or "").strip()
+        if target_lot_id and account_effect == "realized_pnl_only":
+            leg_type = "sell_target_lot_realized_pnl_only"
+        elif target_lot_id:
+            leg_type = "sell_target_lot"
+        else:
+            leg_type = "sell_t_old_lot" if action_type in ("do_t", "reduce", "sell") else "sell"
     else:
         leg_type = "buy_add" if action_type in ("add", "buy") else "buy"
-    return {
+    parsed = {
         "时间": datetime.now().strftime("%H:%M:%S"),
         "动作": action,
         "代码": ticket.get("code"),
@@ -1261,6 +1315,15 @@ def _parse_fill_input(input_text, ticket):
         "input_source": "spoken_confirmed",
         "input_text": text,
     }
+    if action == "卖出":
+        t1_risk = ticket.get("t1_risk") or {}
+        target_lot_id = str(t1_risk.get("target_lot_id") or "").strip()
+        account_effect = str(t1_risk.get("account_effect") or "").strip()
+        if target_lot_id:
+            parsed["target_lot_id"] = target_lot_id
+        if account_effect:
+            parsed["account_effect"] = account_effect
+    return parsed
 
 
 def _ticket_can_accept_fills(ticket):
@@ -1306,6 +1369,8 @@ def _create_fill_preview(payload):
             "price": parsed["价格"],
             "qty": parsed["数量"],
             "leg_type": parsed["leg_type"],
+            **({"target_lot_id": parsed["target_lot_id"]} if parsed.get("target_lot_id") else {}),
+            **({"account_effect": parsed["account_effect"]} if parsed.get("account_effect") else {}),
         },
         "requires_confirmation": True,
         "confirmation_id": confirmation_id,
