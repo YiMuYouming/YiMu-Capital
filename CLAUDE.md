@@ -94,6 +94,31 @@ live-dashboard/
 | `/api/trades/review` | GET/POST | W23 逐笔复盘(查询+事后归因备注) | — |
 | `/api/refresh` | POST | 触发gen | — |
 
+## 交易票据与成交落账硬流程
+
+生产事实层只认 SQLite/API，不认 Markdown：
+
+```
+准备/出票据 → /api/trade/tickets/prepare
+已买/已卖 → /api/trade/fills/preview
+用户确认 → /api/trade/fills/confirm
+验收 → trade_records + position_lots + trade_tickets.status + /api/account/state
+```
+
+### 洋米操作规范
+
+- 用户说“出票据/准备买/准备卖/看看能不能做”：只调用 `/api/trade/tickets/prepare`，不写成交。
+- 用户说“已买/已卖/成交了 + 数量 + 价格”：必须先找对应 `executable/audit_degraded` 票据，再调用 `/api/trade/fills/preview`。
+- preview 返回的 `code/name/qty/price/leg_type/target_lot_id` 必须口头复述给用户；用户确认后才调用 `/api/trade/fills/confirm`。
+- confirm 成功后必须核验：
+  - `trade_records` 新增该笔成交；
+  - `position_lots` 扣减/关闭正确；
+  - 票据变 `filled`；
+  - `/api/account/state` 持仓、现金、`lot_reconciliation_ok` 已更新。
+- 禁止只写 `ai-rule-system/daily-runtime/trade_tickets_YYYY-MM-DD.md` 就宣布成交完成；该 Markdown 只是审计副本。
+- 卖“加仓那一手 / T 出 / 锁利那手”必须使用目标 lot：查 `/api/account/state` 或 DB lot，绑定 `target_lot_id`，不得默认 FIFO 扣底仓。
+- `sell/reduce/clear` 是降风险动作，不能被 `LOSS_STREAK`、冰点、情绪不足等买入阻断卡死；仍必须检查 `sellable_quantity`、T+1、目标 lot。
+
 ## 股票数据处理
 
 - 接口字段名通常带日期后缀（如`竞价评级[20260520]`），代码必须用`find_field()`/`_v()`模糊匹配，别用`d.get()`精确查找
