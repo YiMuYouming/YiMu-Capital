@@ -53,7 +53,7 @@ def is_trading_time():
     if now.weekday() >= 5:
         return False
     t = now.time()
-    return (time(9, 25) <= t <= time(11, 30)) or (time(13, 0) <= t <= time(15, 10))
+    return (time(9, 25) <= t <= time(11, 30)) or (time(13, 0) <= t <= time(16, 0))
 
 
 def _clean(v):
@@ -233,12 +233,20 @@ def poll_iwencai_sentiment(force=False):
             dt_cnt = em_counts.get("跌停家数", dt_cnt)
             if em_counts:
                 results["_limit_source"] = "eastmoney_zt_pool"
+        limit_counts_valid = touch_cnt > 0 or close_cnt > 0 or dt_cnt > 0
         if touch_cnt > 0 or close_cnt > 0:
             base = max(touch_cnt, close_cnt)
             results["封板率"] = round(min(close_cnt / base, 1.0), 4) if base > 0 else 0
             results["炸板率"] = round(max((touch_cnt - close_cnt) / base, 0), 4)
-        results["涨停家数"] = close_cnt
-        results["跌停家数"] = dt_cnt
+        if limit_counts_valid:
+            results["涨停家数"] = close_cnt
+            results["跌停家数"] = dt_cnt
+        else:
+            prev = CACHE.get("iwencai", {})
+            if prev.get("涨停家数") is not None or prev.get("跌停家数") is not None:
+                results["涨停家数"] = prev.get("涨停家数")
+                results["跌停家数"] = prev.get("跌停家数")
+                results["_limit_source"] = prev.get("_limit_source", "previous_valid")
 
         # === 连板风险值 ===
         jj = results.get("晋级率")

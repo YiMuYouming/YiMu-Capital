@@ -46,9 +46,10 @@ class MarketOverviewWidget extends YiMuWidget {
       : (m['涨跌比'] || '—');
     var amp = li['上证指数振幅'] || '—';
     var iw = d.iwencai || {};
+    var iwUsable = isW04IwencaiUsable(iw);
     var sent = d.sentiment || {};
-    var zt = pickW04LiveFirst(iw, '涨停家数', m['涨停家数']);
-    var dt = pickW04LiveFirst(iw, '跌停家数', m['跌停家数']);
+    var zt = pickW04LiveFirst(iw, '涨停家数', m['涨停家数'], iwUsable);
+    var dt = pickW04LiveFirst(iw, '跌停家数', m['跌停家数'], iwUsable);
 
     html += '<div style="display:flex;gap:6px">';
     html += '<div class="kpi-card" style="flex:1;padding:6px 8px"><div class="kpi-label">成交额</div><div class="kpi-value" style="font-size:14px">'+(li['成交额']||'—')+'</div>'+(amtCompareText?'<div class="kpi-verdict ' + amtDir + '">' + amtCompareText + '</div>':'')+'</div>';
@@ -58,7 +59,7 @@ class MarketOverviewWidget extends YiMuWidget {
     html += '</div>';
 
     // === 涨跌分布条 (更宽，更醒目) ===
-    var br = d.live_breadth || {};
+    var br = d.live_breadth || d.breadth || {};
     var bt = br['_total'] || 0;
     if (bt > 0) {
       var isCoarseBreadth = br['_source'] === 'live_index_fallback';
@@ -107,7 +108,7 @@ class MarketOverviewWidget extends YiMuWidget {
 
     // === 第三行：实时情绪（iwencai 2min 轮询）===
     var iw = d.iwencai || {};
-    var hasLiveIwencai = !!iw['_updated'];
+    var hasLiveIwencai = !!iw['_updated'] && isW04IwencaiUsable(iw);
     var upCnt2 = li['上涨家数'];
     var dnCnt2 = li['下跌家数'];
     var emotionVal = (upCnt2 != null && dnCnt2 != null && upCnt2 + dnCnt2 > 0)
@@ -204,13 +205,18 @@ function hasW04Own(obj, key) {
   return Object.prototype.hasOwnProperty.call(obj || {}, key);
 }
 
-function pickW04LiveFirst(liveObj, key, fallback) {
-  if (hasW04Own(liveObj, key)) return liveObj[key];
+function isW04IwencaiUsable(iw) {
+  var level = iw && iw._freshness && iw._freshness.level;
+  return level !== 'dead';
+}
+
+function pickW04LiveFirst(liveObj, key, fallback, liveUsable) {
+  if (liveUsable !== false && hasW04Own(liveObj, key)) return liveObj[key];
   return fallback != null ? fallback : null;
 }
 
 function pickW04Return(liveObj, key, fallback, hasLiveIwencai) {
-  if (hasW04Own(liveObj, key)) return liveObj[key];
+  if (hasLiveIwencai && hasW04Own(liveObj, key)) return liveObj[key];
   return hasLiveIwencai ? null : fallback;
 }
 

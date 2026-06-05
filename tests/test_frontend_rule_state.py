@@ -328,6 +328,12 @@ class TradeTicketsWidgetRenderTest(unittest.TestCase):
         self.assertIn("已阻断", html)
         self.assertIn("已成交/关闭", html)
         self.assertIn("sellable_qty", html)
+        self.assertIn("买入", html)
+        self.assertIn("可执行", html)
+        self.assertIn("阻断原因", html)
+        self.assertIn("已成交", html)
+        self.assertNotIn(">buy<", html)
+        self.assertNotIn(">filled<", html)
 
     def test_w24_displays_linked_trades_and_conflict_summary(self):
         result = _render_widget("trade-tickets.js", "W24", {
@@ -512,6 +518,70 @@ console.log(JSON.stringify({calls:calls, html:body.innerHTML.replace(/\s+/g, ' '
         self.assertIn("/api/trade/tickets", resp["calls"])
         self.assertIn("TICKET-API-1", resp["html"])
         self.assertIn("sellable_qty", resp["html"])
+
+    def test_w24_preview_without_selected_ticket_shows_friendly_message(self):
+        widget_src = (ROOT / "widgets" / "trade-tickets.js").read_text(encoding="utf-8")
+        script = PREAMBLE + "\n" + widget_src + r"""
+(async function() {
+var calls = [];
+global.fetch = function(url, opts) {
+  calls.push({url:String(url), body: opts && opts.body ? JSON.parse(opts.body) : null});
+  return Promise.resolve({ok:false, json:function(){ return Promise.resolve({error:'ticket not found:'}); }});
+};
+var body = {
+  innerHTML: '',
+  querySelector: function(){ return null; },
+  querySelectorAll: function(){ return []; }
+};
+var cls = WidgetRegistry._map["W24"];
+var inst = new cls({id:"W24"});
+inst.getBody = function() { this._body = body; return body; };
+inst.render({trade_tickets: []});
+try {
+  await inst._previewFill({input_text:'已卖 光迅科技 200股 232.30'});
+} catch (e) {}
+console.log(JSON.stringify({calls:calls, html:body.innerHTML.replace(/\s+/g, ' ')}));
+})();
+"""
+        result = subprocess.run(
+            ["node", "--no-warnings", "-e", script],
+            capture_output=True, text=True, timeout=10,
+            cwd=str(ROOT),
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        resp = json.loads(result.stdout.strip().split("\n")[-1])
+        self.assertNotIn("/api/trade/fills/preview", [c["url"] for c in resp["calls"]])
+        self.assertIn("请先选择一张票据", resp["html"])
+        self.assertNotIn("ticket not found", resp["html"])
+
+    def test_w24_preserves_selected_action_in_form(self):
+        widget_src = (ROOT / "widgets" / "trade-tickets.js").read_text(encoding="utf-8")
+        script = PREAMBLE + "\n" + widget_src + r"""
+var body = {
+  innerHTML: '',
+  querySelector: function(sel){
+    if (sel === '[data-tt-action]') return {value:'reduce'};
+    return {value:'', addEventListener:function(){}};
+  },
+  querySelectorAll: function(){ return []; }
+};
+var cls = WidgetRegistry._map["W24"];
+var inst = new cls({id:"W24"});
+inst.getBody = function() { this._body = body; return body; };
+inst._selectedAction = 'reduce';
+inst.render({trade_tickets: []});
+var form = inst._readForm(body);
+console.log(JSON.stringify({html:body.innerHTML.replace(/\s+/g, ' '), action:form.action_type}));
+"""
+        result = subprocess.run(
+            ["node", "--no-warnings", "-e", script],
+            capture_output=True, text=True, timeout=10,
+            cwd=str(ROOT),
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        resp = json.loads(result.stdout.strip().split("\n")[-1])
+        self.assertEqual(resp["action"], "reduce")
+        self.assertIn('value="reduce"', resp["html"])
 
     def test_w15_manual_backfill_copy_and_payload_metadata(self):
         src = (ROOT / "widgets" / "positions.js").read_text(encoding="utf-8")
@@ -700,6 +770,43 @@ global.Date = class extends RealDate {
         self.assertIn(">0</span>/<span class=\"down\">0<", html,
                       f"W04 应采用问财实时 0/0，不应回退昨日基线: {html[:800]}")
         self.assertNotIn(">100</span>/<span class=\"down\">8<", html)
+
+    def test_w04_ignores_dead_iwencai_zero_limit_counts(self):
+        result = _render_widget("market-overview.js", "W04", {
+            "live_index": {},
+            "market": {"涨停家数": 73, "跌停家数": 11},
+            "iwencai": {
+                "涨停家数": 0,
+                "跌停家数": 0,
+                "_updated": "2026-06-05T15:07:01+08:00",
+                "_freshness": {"level": "dead", "type": "iwencai", "age_seconds": 2040},
+            },
+            "sentiment": {},
+        })
+        html = result.get("html", "")
+        self.assertIn(">73</span>/<span class=\"down\">11<", html,
+                      f"W04 应忽略 dead 的问财 0/0，回退有效口径: {html[:900]}")
+        self.assertNotIn(">0</span>/<span class=\"down\">0<", html)
+
+    def test_w04_uses_baseline_returns_when_iwencai_dead(self):
+        result = _render_widget("market-overview.js", "W04", {
+            "live_index": {},
+            "market": {},
+            "iwencai": {
+                "昨日涨停收益": -0.6,
+                "_updated": "2026-06-05T15:07:01+08:00",
+                "_freshness": {"level": "dead", "type": "iwencai", "age_seconds": 2040},
+            },
+            "sentiment": {
+                "昨日涨停收益": 3.1,
+                "连板收益": 3.88,
+                "昨日炸板收益": -0.18,
+            },
+        })
+        html = result.get("html", "")
+        self.assertIn("+3.1%", html, f"W04 应在问财 dead 时回退昨停收益基线: {html[:900]}")
+        self.assertIn("+3.88%", html, f"W04 应在问财 dead 时回退连板收益基线: {html[:900]}")
+        self.assertIn("-0.18%", html, f"W04 应在问财 dead 时回退炸板收益基线: {html[:900]}")
 
     def test_w04_does_not_show_baseline_returns_as_live_when_iwencai_partial(self):
         result = _render_widget("market-overview.js", "W04", {

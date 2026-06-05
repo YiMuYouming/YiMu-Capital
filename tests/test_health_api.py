@@ -141,6 +141,21 @@ class LiveIndexBaselineFallbackTests(unittest.TestCase):
         self.assertEqual(payload["live_index"]["成交额"], "3.24万亿")
         self.assertEqual(payload["rule_state"], {"status": "test"})
 
+    def test_live_payload_marks_iwencai_freshness(self):
+        bridge.CACHE["iwencai"] = {
+            "涨停家数": 0,
+            "跌停家数": 0,
+            "_updated": "2026-06-05T15:07:01+08:00",
+        }
+
+        payload = bridge._build_live_quotes_payload()
+
+        freshness = payload["iwencai"].get("_freshness") or {}
+        self.assertEqual(freshness.get("type"), "iwencai")
+        self.assertIn(freshness.get("level"), ("live", "delayed", "stale", "dead"))
+        self.assertEqual(bridge.CACHE["iwencai"].get("_freshness"), None,
+                         "payload freshness 不应反向污染 CACHE")
+
 
 if __name__ == "__main__":
     unittest.main()

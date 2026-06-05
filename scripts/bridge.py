@@ -1562,6 +1562,9 @@ def _kline_15m_payload(key, now=None):
 
 def _build_live_quotes_payload(rule_state=None):
     """Build the live payload shared by polling and SSE endpoints."""
+    iwencai = dict(CACHE.get('iwencai', {}) or {})
+    if iwencai:
+        _add_freshness(iwencai, 'iwencai', iwencai.get('_updated'))
     return {
         'live_index': _live_index_with_baseline(),
         'live_quotes': CACHE.get('live_quotes', {}),
@@ -1570,7 +1573,7 @@ def _build_live_quotes_payload(rule_state=None):
         'hot_list': CACHE.get('hot_list', {}),
         'sector_inflow': CACHE.get('sector_inflow', {}),
         'northbound': CACHE.get('northbound', {}),
-        'iwencai': CACHE.get('iwencai', {}),
+        'iwencai': iwencai,
         '上证15min': _kline_15m_payload('上证15min'),
         '深证15min': _kline_15m_payload('深证15min'),
         '创业15min': _kline_15m_payload('创业15min'),
