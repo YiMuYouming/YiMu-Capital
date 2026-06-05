@@ -1086,6 +1086,8 @@ def _send_json(handler, status, payload):
 
 
 def _blocking_codes_for_ticket(rule_state, action_type, window):
+    if action_type in ("sell", "reduce", "clear"):
+        return []
     blocks = []
     for block in (rule_state or {}).get("blocks") or []:
         scope = str(block.get("scope") or "")

@@ -247,6 +247,51 @@ class TicketApiTest(unittest.TestCase):
         self.assertNotIn("rule_snapshot_hash", body["ticket"]["blocking_rule_ids"])
         self.assertEqual(body["ticket"]["sellable_quantity"], 1100)
 
+    def test_reduce_ticket_is_not_blocked_by_loss_streak_all_scope(self):
+        bridge._build_trade_context = lambda: {
+            "rule_state": {
+                "version": "g1a-v1",
+                "tradable": False,
+                "blocks": [{"code": "LOSS_STREAK", "scope": "all"}],
+                "warnings": [],
+                "windows": {"w1": {"blocks": []}, "w2": {"blocks": []}},
+            },
+            "market_snapshot": {"iwencai": {"情绪值": 25}},
+            "account_snapshot": {"account_day_return_pct": -1.2, "lot_reconciliation_ok": True},
+            "context_captured_at": "2026-06-05T14:30:00",
+            "context_status": "trusted",
+            "rule_pack_version": "test-pack",
+            "rule_snapshot_hash": "hash-1",
+            "today_execution_card_id": "EXEC-20260605",
+        }
+        bridge.load_current_account_state = lambda live_quotes: {
+            "date": "2026-06-05",
+            "pnl_pct": -1.2,
+            "account_day_return_pct": -1.2,
+            "positions": [{
+                "代码": "002281",
+                "标的": "光迅科技",
+                "数量": 900,
+                "sellable_qty": 900,
+                "locked_qty": 0,
+                "lot_reconciliation_ok": True,
+            }],
+            "lot_reconciliation_ok": True,
+        }
+
+        status, body = _call("POST", "/api/trade/tickets/prepare", {
+            "intent_text": "光迅跌破230主动风险线，减300股降仓位",
+            "action_type": "reduce",
+            "code": "002281",
+            "name": "光迅科技",
+            "qty": 300,
+        })
+
+        self.assertEqual(status, 200, body)
+        self.assertEqual(body["ticket"]["status"], "executable")
+        self.assertNotIn("LOSS_STREAK", body["ticket"]["blocking_rule_ids"])
+        self.assertEqual(body["ticket"]["sellable_quantity"], 900)
+
     def test_prepare_reduce_ticket_records_target_lot_and_realized_pnl_only_effect(self):
         bridge._build_trade_context = lambda: {
             "rule_state": {
