@@ -90,6 +90,24 @@ class QuotesCollectorTests(unittest.TestCase):
         self.assertEqual(iw["跌停家数"], 11)
         self.assertEqual(iw["_limit_source"], "eastmoney_zt_pool")
 
+    def test_iwencai_empty_limit_sources_do_not_preserve_previous_zero_zero(self):
+        iwencai_poll.CACHE["iwencai"] = {
+            "涨停家数": 0,
+            "跌停家数": 0,
+        }
+
+        def fake_query(query, limit=100):
+            return {"datas": []}
+
+        with patch("scripts.collectors.iwencai_poll._iwencai_query", side_effect=fake_query), \
+             patch("scripts.collectors.iwencai_poll._eastmoney_limit_counts",
+                   return_value={}):
+            iwencai_poll.poll_iwencai_sentiment(force=True)
+
+        iw = iwencai_poll.CACHE["iwencai"]
+        self.assertNotIn("涨停家数", iw)
+        self.assertNotIn("跌停家数", iw)
+
     def test_collect_yesterday_compare_uses_eastmoney_15m_when_pytdx_disabled(self):
         quotes.CACHE["live_index"] = {
             "上证指数成交额": "7803.40亿",

@@ -243,7 +243,9 @@ def poll_iwencai_sentiment(force=False):
             results["跌停家数"] = dt_cnt
         else:
             prev = CACHE.get("iwencai", {})
-            if prev.get("涨停家数") is not None or prev.get("跌停家数") is not None:
+            prev_zt = int(prev.get("涨停家数") or 0)
+            prev_dt = int(prev.get("跌停家数") or 0)
+            if prev_zt > 0 or prev_dt > 0:
                 results["涨停家数"] = prev.get("涨停家数")
                 results["跌停家数"] = prev.get("跌停家数")
                 results["_limit_source"] = prev.get("_limit_source", "previous_valid")
