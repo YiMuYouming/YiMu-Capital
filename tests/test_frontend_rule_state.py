@@ -1904,13 +1904,18 @@ class WidgetPanelUxTest(unittest.TestCase):
         theme = (ROOT / "css" / "theme.css").read_text(encoding="utf-8")
         self.assertIn('id="evidenceShelfBtn"', index)
         self.assertIn('id="evidenceShelfOverlay"', index)
+        self.assertIn('id="evidenceShelfSummary"', index)
         self.assertIn("EVIDENCE_SHELF_WIDGETS", index)
         for wid in ["W10", "W12", "W13", "W21"]:
             self.assertIn("'" + wid + "'", index)
         self.assertIn("REQUIRED_LAYOUT_WIDGETS = ['W25', 'W15', 'W24']", index)
         self.assertIn("_showEvidenceShelf", index)
+        self.assertIn("_renderEvidenceShelfSummary", index)
+        self.assertIn("evidence-shelf-summary", index)
         self.assertIn("SHELF_", index)
         self.assertIn(".evidence-shelf-overlay", theme)
+        self.assertIn(".evidence-shelf-summary", theme)
+        self.assertIn(".evidence-shelf-summary-grid", theme)
         self.assertIn(".evidence-shelf-grid", theme)
         self.assertIn(".evidence-shelf-card", theme)
 

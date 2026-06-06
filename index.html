@@ -197,6 +197,7 @@ body.ready{opacity:1}
     <div class="evidence-shelf-note">
       主屏保留作战态势；这里集中核对板块热度、候选池和涨停梯队，不发起写入。
     </div>
+    <div class="evidence-shelf-summary" id="evidenceShelfSummary"></div>
     <div class="evidence-shelf-grid" id="evidenceShelfBody"></div>
   </div>
 </div>
@@ -517,16 +518,44 @@ function _mountEvidenceShelfWidget(widgetId) {
   inst.mount(card);
 }
 
+function _renderEvidenceShelfSummary() {
+  var el = document.getElementById('evidenceShelfSummary');
+  if (!el) return;
+  var data = DataStore.merged || {};
+  var sectors = Array.isArray(data.sectors) ? data.sectors : [];
+  var lianbanPool = Array.isArray(data.lianban_pool) ? data.lianban_pool : [];
+  var trendPool = Array.isArray(data.trend_pool) ? data.trend_pool : [];
+  var hotList = data.hot_list || {};
+  var confirmed = Array.isArray(hotList.zt_stocks) ? hotList.zt_stocks.length : 0;
+  var observe = Array.isArray(hotList.stocks) ? hotList.stocks.length : 0;
+  var iwc = data.iwencai || {};
+  var linked = Array.isArray(iwc['连板股列表']) ? iwc['连板股列表'].length : 0;
+  var source = confirmed > 0 ? '同花顺涨停' : (linked > 0 ? '问财连板' : '待确认');
+
+  el.innerHTML = '<div class="evidence-shelf-summary-main">' +
+      '<span class="evidence-inline-ref">E3</span><b>证据总览</b><em>候选池、板块与涨停源状态。</em>' +
+    '</div>' +
+    '<div class="evidence-shelf-summary-grid">' +
+      '<div><span>板块</span><b>' + sectors.length + '</b></div>' +
+      '<div><span>连板池</span><b>' + lianbanPool.length + '</b></div>' +
+      '<div><span>趋势池</span><b>' + trendPool.length + '</b></div>' +
+      '<div><span>确认/观察</span><b>' + confirmed + '/' + observe + '</b></div>' +
+    '</div>' +
+    '<div class="evidence-shelf-summary-source">' + _uiEsc(source) + '</div>';
+}
+
 function _showEvidenceShelf() {
   _closeTopbarMenus();
   _clearEvidenceShelf();
   var overlay = document.getElementById('evidenceShelfOverlay');
   if (!overlay) return;
   overlay.classList.add('show');
+  _renderEvidenceShelfSummary();
   EVIDENCE_SHELF_WIDGETS.forEach(_mountEvidenceShelfWidget);
 }
 
 function _refreshEvidenceShelf() {
+  _renderEvidenceShelfSummary();
   Object.keys(evidenceShelfInstances).forEach(function(id) {
     var inst = evidenceShelfInstances[id];
     if (inst && typeof inst.refresh === 'function') inst.refresh();

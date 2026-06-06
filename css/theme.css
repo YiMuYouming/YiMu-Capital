@@ -427,6 +427,70 @@ html,body{
   font-size:var(--fs-label);
   line-height:1.45;
 }
+.evidence-shelf-summary{
+  display:grid;
+  grid-template-columns:minmax(180px,1.1fr) minmax(320px,1.5fr) auto;
+  align-items:center;
+  gap:10px;
+  padding:10px 16px;
+  border-bottom:1px solid var(--border-light);
+  background:linear-gradient(180deg,#fff,var(--bg-base));
+}
+.evidence-shelf-summary-main{min-width:0}
+.evidence-shelf-summary-main b{
+  display:block;
+  margin-top:2px;
+  font-size:14px;
+  font-weight:900;
+  color:var(--text-primary);
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
+.evidence-shelf-summary-main em{
+  display:block;
+  margin-top:2px;
+  font-style:normal;
+  font-size:var(--fs-label);
+  color:var(--text-secondary);
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
+.evidence-shelf-summary-grid{
+  display:grid;
+  grid-template-columns:repeat(4,minmax(0,1fr));
+  gap:6px;
+}
+.evidence-shelf-summary-grid>div{min-width:0}
+.evidence-shelf-summary-grid span{
+  display:block;
+  font-size:10px;
+  font-weight:800;
+  color:var(--text-disabled);
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
+.evidence-shelf-summary-grid b{
+  display:block;
+  margin-top:1px;
+  font-family:var(--font-mono);
+  font-size:16px;
+  line-height:1.2;
+  color:var(--text-primary);
+}
+.evidence-shelf-summary-source{
+  justify-self:end;
+  padding:3px 8px;
+  border:1px solid rgba(37,99,235,.22);
+  border-radius:var(--radius-sm);
+  background:rgba(37,99,235,.08);
+  color:var(--info);
+  font-size:var(--fs-label);
+  font-weight:800;
+  white-space:nowrap;
+}
 .evidence-shelf-grid{
   display:grid;
   grid-template-columns:repeat(2,minmax(0,1fr));
@@ -451,6 +515,8 @@ html,body{
 @media(max-width:980px){
   .evidence-shelf-overlay{padding:8px}
   .evidence-shelf{max-height:calc(100vh - 16px)}
+  .evidence-shelf-summary{grid-template-columns:1fr}
+  .evidence-shelf-summary-source{justify-self:start}
   .evidence-shelf-grid{grid-template-columns:1fr}
   .evidence-shelf-title{flex-direction:column;gap:2px}
 }
