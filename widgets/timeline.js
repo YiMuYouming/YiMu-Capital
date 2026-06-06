@@ -66,38 +66,38 @@ class TimelineWidget extends YiMuWidget {
     var html = '';
 
     // 左侧：状态区
-    html += '<div class="time-line" style="display:flex;align-items:center;min-height:56px;gap:var(--sp-md);overflow:hidden">';
+    html += '<div class="time-line timeline-shell">';
 
     // 状态文字 + 倒计时
-    html += '<div style="flex:0 0 130px;min-width:0">';
+    html += '<div class="timeline-status">';
     if (isWeekend) {
-      html += '<div style="font-size:var(--fs-subtitle);font-weight:700;color:var(--text-disabled)">休市</div>';
-      html += '<div style="font-size:var(--fs-body);color:var(--text-disabled)">周末</div>';
+      html += '<div class="timeline-status-title timeline-muted">休市</div>';
+      html += '<div class="timeline-status-sub timeline-muted">周末</div>';
     } else if (isBefore) {
       var minToOpen = totalStart - nowHM;
-      html += '<div style="font-size:var(--fs-subtitle);font-weight:700;color:var(--warn)">盘前准备</div>';
-      html += '<div style="font-size:var(--fs-body);color:var(--text-secondary)">距开盘 ' + Math.floor(minToOpen/60) + '时' + (minToOpen%60) + '分</div>';
+      html += '<div class="timeline-status-title timeline-warn">盘前准备</div>';
+      html += '<div class="timeline-status-sub">距开盘 ' + Math.floor(minToOpen/60) + '时' + (minToOpen%60) + '分</div>';
     } else if (isAfter) {
-      html += '<div style="font-size:var(--fs-subtitle);font-weight:700;color:var(--text-disabled)">已闭市</div>';
-      html += '<div style="font-size:var(--fs-body);color:var(--text-disabled)">明日 9:15 开盘</div>';
+      html += '<div class="timeline-status-title timeline-muted">已闭市</div>';
+      html += '<div class="timeline-status-sub timeline-muted">明日 9:15 开盘</div>';
     } else if (current) {
       var remaining = current.end - nowHM;
       var rmStr = remaining >= 60 ? Math.floor(remaining/60) + '时' + (remaining%60) + '分' : remaining + '分钟';
-      html += '<div style="font-size:var(--fs-subtitle);font-weight:700;color:' + current.color + ';line-height:1.2">' + current.label + '</div>';
-      html += '<div style="font-size:var(--fs-body);margin-top:2px">' +
-        '<span style="color:var(--text-secondary)">剩余 </span>' +
-        '<span style="font-weight:700;color:var(--text-primary);font-family:var(--font-mono);font-variant-numeric:tabular-nums">' + rmStr + '</span>' +
+      html += '<div class="timeline-status-title" style="color:' + current.color + '">' + current.label + '</div>';
+      html += '<div class="timeline-status-sub">' +
+        '<span>剩余 </span>' +
+        '<b>' + rmStr + '</b>' +
         '</div>';
-      html += '<div style="font-size:var(--fs-label);color:var(--text-disabled);margin-top:1px">' +
+      html += '<div class="timeline-window">' +
         fmtHM(current.start) + ' — ' + fmtHM(current.end) + '</div>';
     }
     html += '</div>';
 
     // 右侧：进度条 + 百分比
-    html += '<div style="flex:1;min-width:0">';
+    html += '<div class="timeline-main">';
 
     // 色条
-    html += '<div style="display:flex;height:8px;border-radius:4px;overflow:hidden;gap:1px;margin-bottom:6px">';
+    html += '<div class="timeline-track">';
     segments.forEach(function(s, i) {
       var sDur = (s.end.h*60+s.end.m) - (s.start.h*60+s.start.m);
       var op = 1;
@@ -105,24 +105,24 @@ class TimelineWidget extends YiMuWidget {
       else if (i < (current||{}).idx) op = 0.35;
       else if (i === (current||{}).idx) op = 1;
       else op = 0.2;
-      html += '<div style="flex:' + sDur + ';background:' + s.color + ';opacity:' + op + ';min-width:2px;border-radius:1px" title="' + s.label + ' ' + fmtHM(s.start.h*60+s.start.m) + '-' + fmtHM(s.end.h*60+s.end.m) + '"></div>';
+      html += '<div class="timeline-slice" style="flex:' + sDur + ';background:' + s.color + ';opacity:' + op + '" title="' + s.label + ' ' + fmtHM(s.start.h*60+s.start.m) + '-' + fmtHM(s.end.h*60+s.end.m) + '"></div>';
     });
     html += '</div>';
 
     // 时段标签
-    html += '<div style="display:flex;font-size:var(--fs-micro);color:var(--text-disabled)">';
+    html += '<div class="timeline-label-row">';
     segments.forEach(function(s, i) {
       var sDur = (s.end.h*60+s.end.m) - (s.start.h*60+s.start.m);
       var isCur = i === (current||{}).idx;
-      html += '<div style="flex:' + sDur + ';text-align:center;min-width:0;overflow:hidden;white-space:nowrap;' + (isCur ? 'color:var(--text-primary);font-weight:600' : '') + '">' + s.label + '</div>';
+      html += '<div class="timeline-label' + (isCur ? ' is-current' : '') + '" style="flex:' + sDur + '">' + s.label + '</div>';
     });
     html += '</div>';
 
     // 全天进度
     var pctCls = dayProgress >= 80 ? 'danger' : dayProgress >= 50 ? 'warn' : 'info';
-    html += '<div style="display:flex;align-items:center;justify-content:flex-end;margin-top:4px;gap:var(--sp-sm)">' +
-      '<span style="font-size:var(--fs-label);color:var(--text-secondary)">全天进度</span>' +
-      '<span style="font-family:var(--font-mono);font-size:var(--fs-body);font-weight:700;color:var(--' + pctCls + ')">' + dayProgress + '%</span>' +
+    html += '<div class="timeline-progress-row">' +
+      '<span>全天进度</span>' +
+      '<b class="' + pctCls + '">' + dayProgress + '%</b>' +
       '</div>';
 
     html += '</div></div>';

@@ -1,4 +1,4 @@
-// widgets/llm-chat.js — AI盯盘浮动聊天框
+// widgets/llm-chat.js — 研判历史浮动框（只读）
 // 继承 YiMuWidget 统一生命周期管理（_timers / _domListeners 自动清理）
 'use strict';
 
@@ -25,7 +25,6 @@ class LlmChatWidget extends YiMuWidget {
     this._initDOM();
     this._bindEvents();
     this._loadHistory();
-    this._startTimers();
   }
 
   unmount() {
@@ -48,17 +47,17 @@ class LlmChatWidget extends YiMuWidget {
       '<div class="chat-overlay" id="chatOverlay">' +
         '<div class="chat-panel" id="chatPanel">' +
           '<div class="chat-header" id="chatHeader">' +
-            '<span style="font-size:var(--fs-subtitle);font-weight:600">🤖 AI盯盘</span>' +
+            '<span style="font-size:var(--fs-subtitle);font-weight:600">研判历史</span>' +
             '<div style="display:flex;gap:var(--sp-sm);align-items:center">' +
-              '<button id="chatRefresh" style="background:var(--info);color:#fff;border:none;padding:2px 12px;border-radius:var(--radius-sm);cursor:pointer;font-size:var(--fs-body)">🔄 立即研判</button>' +
+              '<button id="chatRefresh" style="background:var(--bg-base);color:var(--text-secondary);border:1px solid var(--border);padding:2px 12px;border-radius:var(--radius-sm);cursor:pointer;font-size:var(--fs-body)">刷新历史</button>' +
               '<button id="chatClose" style="background:none;border:none;font-size:18px;cursor:pointer;color:var(--text-secondary);padding:0 4px">×</button>' +
             '</div>' +
           '</div>' +
           '<div class="chat-messages" id="chatMessages" tabindex="0"></div>' +
-          '<div class="chat-typing" id="chatTyping" style="display:none">🤖 AI分析中...</div>' +
+          '<div class="chat-typing" id="chatTyping" style="display:none">加载中...</div>' +
           '<div class="chat-input-row">' +
-            '<input id="chatInput" type="text" placeholder="问AI一个问题..." autocomplete="off" />' +
-            '<button id="chatSend">发送</button>' +
+            '<input id="chatInput" type="text" placeholder="仪表盘仅保留研判历史" autocomplete="off" disabled />' +
+            '<button id="chatSend" disabled>发送</button>' +
           '</div>' +
         '</div>' +
       '</div>';
@@ -93,13 +92,9 @@ class LlmChatWidget extends YiMuWidget {
         self._sendManual();
       }
     });
-    this._on(this._msgEl, 'focus', function() {
-      window._llmBadgeCount = 0;
-      if (typeof window._updateLlmBadge === 'function') window._updateLlmBadge();
-    });
-    // 立即研判（P1-4 修正: 用 'auto' 模式，因为没有用户问题）
+    // 仪表盘只读：刷新历史，不触发研判。
     this._on(document.getElementById('chatRefresh'), 'click', function() {
-      self._triggerManual();
+      self._loadHistory();
     });
   }
 
@@ -123,7 +118,7 @@ class LlmChatWidget extends YiMuWidget {
           self._conversation = [{
             role: 'system',
             ts: self._now(),
-            text: 'AI盯盘已启动，每15分钟自动研判。\n可问：大盘走向 · 持仓分析 · 板块机会 · 个股研判',
+            text: 'AI研判历史',
             auto: false,
           }].concat(conv);
         }
@@ -139,7 +134,7 @@ class LlmChatWidget extends YiMuWidget {
     this._conversation.push({
       role: 'system',
       ts: this._now(),
-      text: 'AI盯盘已启动，每15分钟自动研判。\n可问：大盘走向 · 持仓分析 · 板块机会 · 个股研判',
+      text: 'AI研判历史',
       auto: false,
     });
     this._renderMessages();
@@ -148,11 +143,7 @@ class LlmChatWidget extends YiMuWidget {
   // === 定时器 ===
 
   _startTimers() {
-    var self = this;
-    var timer = setInterval(function() {
-      if (self._shouldTrigger()) self._triggerAuto();
-    }, 30000);
-    this._timers.push(timer);
+    this._loadHistory();
   }
 
   _shouldTrigger() {
@@ -164,103 +155,27 @@ class LlmChatWidget extends YiMuWidget {
   }
 
   _triggerAuto() {
-    if (this._loading) return;
-    this._lastTriggerTime = Date.now();
-    this._send('', 'auto');
+    this._loadHistory();
   }
 
-  // P1-4: 立即研判走 'auto' 模式（无用户提问）
   _triggerManual() {
-    if (this._loading) return;
-    this._lastTriggerTime = Date.now();
-    this._send('', 'auto');
+    this._loadHistory();
   }
 
   _sendManual() {
-    var q = (this._inputEl.value || '').trim();
-    if (!q) return;
-    if (this._cooldown) {
-      if (typeof window.showToast === 'function') window.showToast('请求太频繁，请30秒后再试');
-      return;
-    }
-    this._cooldown = true;
-    var self = this;
-    setTimeout(function() { self._cooldown = false; }, 30000);
-
-    var userMsg = {
-      role: 'user',
-      ts: this._now(),
-      text: q,
-      auto: false,
-    };
-    this._conversation.push(userMsg);
-    this._inputEl.value = '';
-    this._renderMessages();
-    this._send(q, 'manual', userMsg);
+    this._send();
   }
 
-  /**
-   * P1-3: userMsg 传给后端，由后端写入 llm_insights.json conversation
-   * P1-4: mode='auto' 时 question 为空字符串，调用 auto 模式 prompt
-   */
-  _send(question, mode, userMsg) {
-    var self = this;
-    this._loading = true;
-    this._showTyping(true);
-
-    // P1-3: 附上用户消息供后端持久化
-    fetch('/api/llm', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        mode: mode,
-        question: question || '',
-        userMsg: userMsg || null,
-      }),
-    })
-    .then(function(r) { return r.json(); })
-    .then(function(res) {
-      self._loading = false;
-      self._showTyping(false);
-      if (res.ok) {
-        self._conversation.push({
-          role: 'assistant',
-          ts: res.timestamp,
-          text: res.text || '(无内容)',
-          signals: res.signals || [],
-          auto: mode === 'auto',
-        });
-        self._renderMessages();
-        if (mode === 'auto' && typeof window._notifyLLMAuto === 'function') {
-          window._notifyLLMAuto(res.text);
-        }
-        if (mode === 'manual') {
-          if (typeof window.showToast === 'function') window.showToast('研判已完成');
-        }
-      } else {
-        self._conversation.push({
-          role: 'system',
-          ts: self._now(),
-          text: '研判失败: ' + (res.error || '未知错误'),
-          auto: false,
-        });
-        self._renderMessages();
-        if (typeof window.showToast === 'function') {
-          window.showToast('研判失败: ' + (res.error || '未知错误'));
-        }
-      }
-    })
-    .catch(function() {
-      self._loading = false;
-      self._showTyping(false);
-      self._conversation.push({
-        role: 'system',
-        ts: self._now(),
-        text: '网络错误，请重试',
-        auto: false,
-      });
-      self._renderMessages();
+  _send() {
+    this._conversation.push({
+      role: 'system',
+      ts: this._now(),
+      text: '仪表盘仅保留研判历史',
+      auto: false,
     });
+    this._loading = false;
+    this._showTyping(false);
+    this._renderMessages();
   }
 
   // === UI ===
@@ -329,8 +244,6 @@ class LlmChatWidget extends YiMuWidget {
 
   show() {
     if (this._panelOverlay) this._panelOverlay.classList.add('show');
-    window._llmBadgeCount = 0;
-    if (typeof window._updateLlmBadge === 'function') window._updateLlmBadge();
     if (this._msgEl) {
       this._msgEl.focus();
       requestAnimationFrame(function() { this._msgEl.scrollTop = this._msgEl.scrollHeight; }.bind(this));

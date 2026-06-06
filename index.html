@@ -15,6 +15,8 @@
 <script src="store.js"></script>
 <script src="widget-base.js"></script>
 <script src="widget-registry.js?v=20260604-ticket"></script>
+<!-- W25 Evidence Summary 共享模块（必须在组件前加载） -->
+<script src="evidence-summary.js?v=20260606-evidence"></script>
 <!-- 24 Widget 组件 -->
 <script src="widgets/timeline.js"></script>
 <script src="widgets/style-detect.js"></script>
@@ -36,11 +38,12 @@
 <script src="widgets/anchor-stocks.js"></script>
 <script src="widgets/midday-review.js"></script>
 <script src="widgets/llm-monitor.js"></script>
-<script src="widgets/llm-chat.js"></script>
 <script src="widgets/zt-echelon.js"></script>
 <script src="widgets/pnl-curve.js"></script>
 <script src="widgets/trade-review.js"></script>
 <script src="widgets/trade-tickets.js?v=20260605-ticket-ux"></script>
+<!-- W25 态势证据屏 -->
+<script src="widgets/evidence-board.js?v=20260606-evidence"></script>
 <style>
 /* Inline critical styles for initial load */
 body{opacity:0;transition:opacity .3s}
@@ -49,16 +52,27 @@ body.ready{opacity:1}
 /* Widget Panel */
 .widget-panel-overlay{display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.6);z-index:var(--z-modal);align-items:center;justify-content:center}
 .widget-panel-overlay.show{display:flex}
-.widget-panel{background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-lg);box-shadow:var(--shadow-modal);width:90%;max-width:640px;max-height:80vh;overflow:hidden;display:flex;flex-direction:column}
-.widget-panel-header{display:flex;align-items:center;justify-content:space-between;padding:var(--sp-md) var(--sp-lg);border-bottom:1px solid var(--border-light)}
-.widget-panel-body{overflow-y:auto;padding:var(--sp-md) var(--sp-lg)}
-.widget-panel-section{margin-bottom:var(--sp-md)}
-.widget-panel-section-title{font-size:var(--fs-label);text-transform:uppercase;letter-spacing:var(--ls-label);color:var(--text-disabled);margin-bottom:var(--sp-sm);padding-bottom:var(--sp-xs);border-bottom:1px solid var(--border-light)}
-.widget-panel-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:var(--sp-sm)}
-.widget-panel-item{padding:var(--sp-sm) var(--sp-md);background:var(--bg-base);border:1px solid var(--border-light);border-radius:var(--radius-md);cursor:pointer;transition:background .15s,border-color .15s;font-size:var(--fs-body)}
-.widget-panel-item:hover{background:var(--bg-hover);border-color:var(--info)}
-.widget-panel-item .item-title{font-weight:600;color:var(--text-primary)}
-.widget-panel-item .item-desc{font-size:var(--fs-label);color:var(--text-secondary);margin-top:2px}
+.widget-panel{background:var(--bg-card);border:1px solid var(--border);border-radius:var(--radius-lg);box-shadow:var(--shadow-modal);width:90%;max-width:760px;max-height:84vh;overflow:hidden;display:flex;flex-direction:column}
+.widget-panel-header{display:flex;align-items:center;justify-content:space-between;padding:12px 16px;border-bottom:1px solid var(--border-light);background:linear-gradient(180deg,#fff,var(--bg-base))}
+.widget-panel-title{display:flex;align-items:baseline;gap:8px;font-size:var(--fs-subtitle);font-weight:800;color:var(--text-primary)}
+.widget-panel-title span{font-family:var(--font-mono);font-size:10px;color:var(--text-disabled);font-weight:700}
+.widget-panel-body{overflow-y:auto;padding:14px 16px;background:var(--bg-deep)}
+.widget-panel-section{margin-bottom:14px}
+.widget-panel-section-title{display:flex;align-items:center;justify-content:space-between;font-size:11px;font-weight:800;color:var(--text-secondary);margin-bottom:8px;padding-bottom:6px;border-bottom:1px solid var(--border-light);letter-spacing:0}
+.widget-panel-section-title span:last-child{font-family:var(--font-mono);font-size:10px;color:var(--text-disabled)}
+.widget-panel-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:8px}
+.widget-panel-item{position:relative;min-height:74px;padding:9px 10px 8px;background:var(--bg-card);border:1px solid var(--border-light);border-left:3px solid var(--border);border-radius:var(--radius-md);cursor:pointer;transition:background .15s,border-color .15s,box-shadow .15s,transform .12s;font-size:var(--fs-body)}
+.widget-panel-item:hover{background:#fff;border-color:var(--border);box-shadow:var(--shadow-elevated);transform:translateY(-1px)}
+.widget-panel-item[data-category="decision"]{border-left-color:var(--color-decision)}
+.widget-panel-item[data-category="risk"]{border-left-color:var(--color-risk)}
+.widget-panel-item[data-category="data"]{border-left-color:var(--color-data)}
+.widget-panel-item[data-category="tool"]{border-left-color:var(--color-tool)}
+.widget-panel-item .item-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px}
+.widget-panel-item .item-title{font-weight:750;color:var(--text-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.widget-panel-item .item-ref{font-family:var(--font-mono);font-size:10px;color:var(--text-disabled);font-weight:800;flex:0 0 auto}
+.widget-panel-item .item-desc{display:flex;align-items:center;gap:5px;flex-wrap:wrap;font-size:var(--fs-label);color:var(--text-secondary);margin-top:2px}
+.widget-panel-item .item-pill{border:1px solid var(--border-light);border-radius:3px;padding:1px 5px;background:var(--bg-base);font-family:var(--font-mono);font-size:10px;color:var(--text-secondary)}
+.widget-panel-item .item-pill-priority{font-weight:800;color:var(--accent);background:var(--accent-bg);border-color:rgba(217,119,6,.18)}
 /* W21 涨停梯队 v1.2 — 字号整体+2 */
 .zt-date-row{display:flex;gap:6px;padding:8px 12px;overflow-x:auto}
 .zt-date-tab{padding:4px 14px;border-radius:4px;font-size:13px;cursor:pointer;color:var(--text-secondary);white-space:nowrap;transition:background .15s}
@@ -71,7 +85,7 @@ body.ready{opacity:1}
 .zt-concept-tag.active{background:var(--accent-purple);color:#fff;border-color:var(--accent-purple)}
 .zt-concept-tag.zt-muted{opacity:.55}
 .zt-concept-tag b{font-family:var(--font-mono);font-size:13px}
-.zt-empty{padding:var(--sp-xl);text-align:center;color:var(--text-disabled);font-size:14px}
+.zt-empty{padding:12px 10px;border:1px dashed var(--border-light);border-radius:var(--radius-md);background:var(--bg-soft);text-align:center;color:var(--text-disabled);font-size:var(--fs-small)}
 .zt-table-header{display:grid;grid-template-columns:1fr 66px 58px 66px 70px 1fr;gap:4px;padding:5px 12px;font-size:11px;color:var(--text-disabled);border-bottom:1px solid var(--border);text-transform:uppercase;letter-spacing:.5px}
 .zt-sortable{cursor:pointer;transition:color .15s}
 .zt-sortable:hover{color:var(--accent-purple)}
@@ -113,18 +127,20 @@ body.ready{opacity:1}
     <span class="topbar-metric" id="topbarPosPct" title="仓位占比">仓位 —</span>
     <span class="topbar-metric" id="topbarCash" title="可用资金">可用 —</span>
   </div>
-  <div class="topbar-shortcuts" aria-label="常用组件快捷入口">
-    <button class="topbar-shortcut topbar-shortcut-data" data-widget="W04" title="W04 市场全景"><b>W04</b><span>全景</span></button>
-    <button class="topbar-shortcut topbar-shortcut-trade" data-widget="W24" title="W24 交易票据"><b>W24</b><span>票据</span></button>
-    <button class="topbar-shortcut topbar-shortcut-trade" data-widget="W15" title="W15 持仓操作清仓"><b>W15</b><span>持仓</span></button>
-    <button class="topbar-shortcut topbar-shortcut-data" data-widget="W12" title="W12 连板池"><b>W12</b><span>连板</span></button>
-    <button class="topbar-shortcut topbar-shortcut-data" data-widget="W13" title="W13 趋势池"><b>W13</b><span>趋势</span></button>
-    <button id="inputPanelBtn" class="topbar-shortcut topbar-shortcut-tool" title="W16 报数面板"><b>W16</b><span>报数</span></button>
-    <button id="llmPanelBtn" class="topbar-shortcut topbar-shortcut-ai" title="W20 AI盯盘"><b>W20</b><span>AI</span><span class="btn-badge" id="llmBadge" style="display:none">0</span></button>
-    <button id="pnlCurveBtn" class="topbar-shortcut topbar-shortcut-pnl" title="W22 收益曲线"><b>W22</b><span>曲线</span></button>
-    <button id="addWidgetBtn" class="topbar-shortcut topbar-shortcut-add" title="添加组件"><b>+</b><span>组件</span></button>
-    <button id="compactBtn" class="topbar-shortcut topbar-shortcut-quiet" title="隐藏非核心组件"><b>核心</b><span>视图</span></button>
-  </div>
+  <details class="topbar-action-menu">
+    <summary title="操作入口">操作</summary>
+    <div class="topbar-shortcuts" aria-label="操作入口">
+      <button class="topbar-shortcut topbar-shortcut-data" data-widget="W04" title="W04 市场全景"><b>W04</b><span>全景</span></button>
+      <button class="topbar-shortcut topbar-shortcut-trade" data-widget="W24" title="W24 交易票据"><b>W24</b><span>票据</span></button>
+      <button class="topbar-shortcut topbar-shortcut-trade" data-widget="W15" title="W15 持仓操作清仓"><b>W15</b><span>持仓</span></button>
+      <button class="topbar-shortcut topbar-shortcut-data" data-widget="W12" title="W12 连板池"><b>W12</b><span>连板</span></button>
+      <button class="topbar-shortcut topbar-shortcut-data" data-widget="W13" title="W13 趋势池"><b>W13</b><span>趋势</span></button>
+      <button id="inputPanelBtn" class="topbar-shortcut topbar-shortcut-tool" title="W16 报数面板"><b>W16</b><span>报数</span></button>
+      <button id="pnlCurveBtn" class="topbar-shortcut topbar-shortcut-pnl" title="W22 收益曲线"><b>W22</b><span>曲线</span></button>
+      <button id="addWidgetBtn" class="topbar-shortcut topbar-shortcut-add" title="添加组件"><b>+</b><span>组件</span></button>
+      <button id="compactBtn" class="topbar-shortcut topbar-shortcut-quiet" title="隐藏非核心组件"><b>核心</b><span>视图</span></button>
+    </div>
+  </details>
   <details class="topbar-layout-menu">
     <summary title="布局操作">布局</summary>
     <div class="topbar-layout-popover">
@@ -136,6 +152,17 @@ body.ready{opacity:1}
   <input type="file" id="importFileInput" accept=".json" style="display:none">
 </header>
 
+<div class="file-mode-notice" id="fileModeNotice" style="display:none">
+  <div class="file-mode-notice-title">本地文件模式无法读取看板 API</div>
+  <div class="file-mode-notice-detail">
+    当前是静态文件预览，持仓、收益曲线、票据和健康状态不会从服务端更新。请使用
+    <a href="http://localhost:18088/">http://localhost:18088/</a>
+    只读预览，或使用
+    <a href="http://localhost:8088/">http://localhost:8088/</a>
+    生产看板。
+  </div>
+</div>
+
 <!-- GridStack Container -->
 <div class="grid-stack" id="grid"></div>
 
@@ -146,7 +173,7 @@ body.ready{opacity:1}
 <div class="widget-panel-overlay" id="widgetPanelOverlay">
   <div class="widget-panel" id="widgetPanel">
     <div class="widget-panel-header">
-      <span style="font-size:var(--fs-subtitle);font-weight:600">添加组件</span>
+      <span class="widget-panel-title">组件库 <span>VIEW MODULES</span></span>
       <button class="widget-btn" id="widgetPanelClose" style="font-size:18px">×</button>
     </div>
     <div class="widget-panel-body" id="widgetPanelBody"></div>
@@ -164,13 +191,13 @@ body.ready{opacity:1}
   </div>
 </div>
 
-<!-- W20 AI盯盘浮窗 -->
+<!-- W20 研判摘要浮窗（只读历史） -->
 <div class="widget-panel-overlay" id="llmPanelOverlay">
   <div class="widget-panel" style="max-width:720px;max-height:85vh">
     <div class="widget-panel-header">
-      <span style="font-size:var(--fs-subtitle);font-weight:600">🤖 AI盯盘</span>
+      <span style="font-size:var(--fs-subtitle);font-weight:600">研判摘要</span>
       <div style="display:flex;gap:var(--sp-sm)">
-        <button id="llmPanelRefresh" style="background:var(--info);color:#fff;border:none;padding:2px 12px;border-radius:var(--radius-sm);cursor:pointer;font-size:var(--fs-body)">🔄 立即研判</button>
+        <button id="llmPanelRefresh" style="background:var(--bg-base);color:var(--text-secondary);border:1px solid var(--border);padding:2px 12px;border-radius:var(--radius-sm);cursor:pointer;font-size:var(--fs-body)">刷新</button>
         <button class="widget-btn" id="llmPanelClose" style="font-size:18px">×</button>
       </div>
     </div>
@@ -181,9 +208,6 @@ body.ready{opacity:1}
 <!-- Toast -->
 <div class="toast" id="toast"></div>
 
-<!-- LLM Chat 浮动框容器 -->
-<div id="llmChatMount"></div>
-
 <script src="https://cdn.jsdelivr.net/npm/gridstack@12.0.0/dist/gridstack-all.min.js"></script>
 <script>
 'use strict';
@@ -191,7 +215,7 @@ body.ready{opacity:1}
 // === GridStack Init ===
 var grid = null;
 var activePreset = null;
-var REQUIRED_LAYOUT_WIDGETS = ['W24'];
+var REQUIRED_LAYOUT_WIDGETS = ['W25', 'W15', 'W24'];
 
 function initGrid() {
   grid = GridStack.init({
@@ -262,14 +286,16 @@ function _addWidgetToGrid(widgetId) {
   });
 
   // GridStack v12 标准：addWidget 返回 HTMLElement，直接取 grid-stack-item-content 挂载
-  var gsItem = grid.addWidget({ w: meta.defaultSize.w, h: meta.defaultSize.h, id: widgetId });
+  var addConfig = { w: meta.defaultSize.w, h: meta.defaultSize.h, id: widgetId };
+  if (widgetId === 'W25') {
+    addConfig.x = 0;
+    addConfig.y = 0;
+  }
+  var gsItem = grid.addWidget(addConfig);
   var contentEl = gsItem.querySelector('.grid-stack-item-content');
   if (contentEl) contentEl.id = 'content_' + widgetId;
   widgetInstances[widgetId] = instance;
-  requestAnimationFrame(function() {
-    var contentEl = document.getElementById('content_' + widgetId);
-    if (contentEl) instance.mount(contentEl);
-  });
+  if (contentEl) instance.mount(contentEl);
 }
 
 function _ensureRequiredLayoutWidgets() {
@@ -320,6 +346,22 @@ function _onWidgetResize(el) {
   }
 }
 
+function _closeTopbarMenus() {
+  document.querySelectorAll('.topbar-action-menu,.topbar-layout-menu').forEach(function(menu) {
+    menu.open = false;
+  });
+}
+
+function _closeTransientSurfaces() {
+  _closeTopbarMenus();
+  var contextMenu = document.getElementById('contextMenu');
+  if (contextMenu) contextMenu.classList.remove('show');
+  ['widgetPanelOverlay', 'inputPanelOverlay', 'llmPanelOverlay'].forEach(function(id) {
+    var el = document.getElementById(id);
+    if (el) el.classList.remove('show');
+  });
+}
+
 // === Context Menu ===
 function _showContextMenu(x, y) {
   var menu = document.getElementById('contextMenu');
@@ -330,7 +372,8 @@ function _showContextMenu(x, y) {
   ['decision', 'risk', 'data', 'tool'].forEach(function(cat) {
     html += '<div class="context-menu-section">' + catLabels[cat] + '</div>';
     (cats[cat] || []).forEach(function(w) {
-      html += '<div class="context-menu-item" data-widget="' + w.id + '">' + w.title + '</div>';
+      html += '<div class="context-menu-item" data-widget="' + w.id + '" data-category="' + w.category + '">' +
+        '<span>' + w.title + '</span><b>' + w.id + '</b></div>';
     });
   });
 
@@ -338,6 +381,11 @@ function _showContextMenu(x, y) {
   menu.style.left = x + 'px';
   menu.style.top = y + 'px';
   menu.classList.add('show');
+  var rect = menu.getBoundingClientRect();
+  var safeLeft = Math.max(8, Math.min(x, window.innerWidth - rect.width - 8));
+  var safeTop = Math.max(8, Math.min(y, window.innerHeight - rect.height - 8));
+  menu.style.left = safeLeft + 'px';
+  menu.style.top = safeTop + 'px';
 
   menu.querySelectorAll('.context-menu-item').forEach(function(item) {
     item.addEventListener('click', function() {
@@ -351,25 +399,32 @@ function _showContextMenu(x, y) {
 document.addEventListener('click', function(e) {
   var menu = document.getElementById('contextMenu');
   if (!menu.contains(e.target)) menu.classList.remove('show');
+  if (!e.target.closest('.topbar-action-menu,.topbar-layout-menu')) _closeTopbarMenus();
 });
 
 // === Widget Panel (v2.1.1: 组件选择面板) ===
 function _showWidgetPanel() {
+  _closeTopbarMenus();
   var overlay = document.getElementById('widgetPanelOverlay');
   var body = document.getElementById('widgetPanelBody');
   var cats = WidgetRegistry.listByCategory();
   var catLabels = { decision: '决策类', data: '数据类', risk: '风控类', tool: '工具类' };
-  var catIcons = { decision: '🎯', data: '📊', risk: '💰', tool: '🔧' };
+  var tierLabels = { tick: '实时', fast: '快速', slow: '慢速', manual: '手动', daily: '日线' };
 
   var html = '';
   ['decision', 'risk', 'data', 'tool'].forEach(function(cat) {
+    var list = cats[cat] || [];
     html += '<div class="widget-panel-section">';
-    html += '<div class="widget-panel-section-title">' + (catIcons[cat]||'') + ' ' + catLabels[cat] + '</div>';
+    html += '<div class="widget-panel-section-title"><span>' + catLabels[cat] + '</span><span>' + list.length + '</span></div>';
     html += '<div class="widget-panel-grid">';
-    (cats[cat] || []).forEach(function(w) {
-      html += '<div class="widget-panel-item" data-widget="' + w.id + '">' +
-        '<div class="item-title">' + w.title + '</div>' +
-        '<div class="item-desc">' + w.defaultSize.w + '×' + w.defaultSize.h + ' · ' + w.id + '</div>' +
+    list.forEach(function(w) {
+      html += '<div class="widget-panel-item" data-widget="' + w.id + '" data-category="' + w.category + '">' +
+        '<div class="item-head"><div class="item-title">' + w.title + '</div><div class="item-ref">' + w.id + '</div></div>' +
+        '<div class="item-desc">' +
+          '<span class="item-pill item-pill-priority">' + w.priority + '</span>' +
+          '<span class="item-pill">' + (tierLabels[w.tier] || w.tier) + '</span>' +
+          '<span class="item-pill">' + w.defaultSize.w + '×' + w.defaultSize.h + '</span>' +
+        '</div>' +
         '</div>';
     });
     html += '</div></div>';
@@ -398,22 +453,24 @@ document.getElementById('widgetPanelClose').addEventListener('click', function()
 
 // 顶栏按钮
 document.getElementById('addWidgetBtn').addEventListener('click', _showWidgetPanel);
-document.getElementById('inputPanelBtn').addEventListener('click', _showInputPanel);
-document.getElementById('llmPanelBtn').addEventListener('click', function() {
-  if (window._llmChat) window._llmChat.show();
-  else _showLLMPanel();  // fallback
-});
-document.getElementById('pnlCurveBtn').addEventListener('click', function() { _addWidgetToGrid('W22'); });
+document.getElementById('inputPanelBtn').addEventListener('click', function() { _closeTopbarMenus(); _showInputPanel(); });
+document.getElementById('pnlCurveBtn').addEventListener('click', function() { _closeTopbarMenus(); _addWidgetToGrid('W22'); });
 document.querySelectorAll('.topbar-shortcut[data-widget]').forEach(function(btn) {
-  btn.addEventListener('click', function() { _addWidgetToGrid(btn.dataset.widget); });
+  btn.addEventListener('click', function() { _closeTopbarMenus(); _addWidgetToGrid(btn.dataset.widget); });
 });
 
 // === 运行模式检测 ===
 function _detectRuntimeMode() {
-  if (location.protocol === 'file:') return { key: 'file', label: '本地文件', readonly: true };
+  if (location.protocol === 'file:') return { key: 'file', label: '本地文件 · API不可用', readonly: true };
   if (/^180(8[0-9]|9[0-9])$/.test(location.port || '')) return { key: 'preview', label: '本地预览 · 只读', readonly: true };
   if (location.port === '8088') return { key: 'prod', label: '云端生产', readonly: false };
   return { key: 'local', label: '本地服务', readonly: false };
+}
+function _renderFileModeNotice() {
+  var notice = document.getElementById('fileModeNotice');
+  var isFile = location.protocol === 'file:';
+  if (notice) notice.style.display = isFile ? 'block' : 'none';
+  document.body.classList.toggle('file-mode', isFile);
 }
 function _updateRuntimeModeLabel() {
   var el = document.getElementById('runtimeModeLabel');
@@ -422,46 +479,28 @@ function _updateRuntimeModeLabel() {
   var colors = { prod: '#16a34a', preview: '#ea580c', file: '#64748b', local: '#6366f1' };
   el.textContent = mode.label;
   el.style.color = colors[mode.key] || '#64748b';
-  el.title = mode.readonly ? '只读模式，不录真实交易' : '生产模式，所有操作写入云端';
+  el.title = mode.key === 'file' ? '本地文件模式无法读取 /api，请使用 18088 或 8088' : (mode.readonly ? '只读模式，不录真实交易' : '生产模式，所有操作写入云端');
+  _renderFileModeNotice();
 }
 
-// === W20 AI盯盘浮窗（红点+Toast）===
+// === W20 研判摘要浮窗（只读历史）===
 var _llmLoading = false;
-var _llmBadgeCount = 0;
 
-function _updateLlmBadge() {
-  var badge = document.getElementById('llmBadge');
-  if (!badge) return;
-  if (_llmBadgeCount > 0) {
-    badge.textContent = _llmBadgeCount > 9 ? '9+' : _llmBadgeCount;
-    badge.style.display = '';
-  } else {
-    badge.style.display = 'none';
-  }
-}
-
-function _notifyLLMAuto(text) {
-  var summary = (text || '').substring(0, 80);
-  showToast('🤖 AI研判: ' + summary + (summary.length >= 80 ? '...' : ''));
-  // 红点（聊天框未聚焦时计数）
-  var panelBody = document.getElementById('chatMessages');
-  if (!panelBody || !panelBody.contains(document.activeElement)) {
-    _llmBadgeCount++;
-  }
-  _updateLlmBadge();
+function _uiEsc(s) {
+  if (s == null) return '';
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
 function _showLLMPanel() {
+  _closeTopbarMenus();
   document.getElementById('llmPanelOverlay').classList.add('show');
-  _llmBadgeCount = 0;   // 打开即清红点
-  _updateLlmBadge();
   _refreshLLMPanel();
 }
 function _refreshLLMPanel() {
   if (_llmLoading) return;
   var body = document.getElementById('llmPanelBody');
   _llmLoading = true;
-  body.innerHTML = '<div style="text-align:center;padding:var(--sp-lg);color:var(--text-secondary)">⏳ 加载研判数据...</div>';
+  body.innerHTML = '<div class="ui-empty"><div class="ui-empty-title">加载研判数据</div><div class="ui-empty-detail">读取外部 Agent 已写入的只读记录</div></div>';
 
   // 加载 llm_insights.json
   fetch('data/llm_insights.json?t=' + Date.now())
@@ -479,15 +518,15 @@ function _refreshLLMPanel() {
 
       var html = '';
       if (entries.length === 0) {
-        html += '<div style="text-align:center;padding:var(--sp-lg);color:var(--text-disabled)">今日暂无研判<br><span style="font-size:var(--fs-label)">盘中每15分钟自动触发，或点🔄手动触发</span></div>';
+        html += '<div class="ui-empty"><div class="ui-empty-title">今日暂无研判</div><div class="ui-empty-detail">确认、追问和生成仍在 CodexIDE 或终端完成</div></div>';
       } else {
         entries.forEach(function(e) {
           html += '<div style="margin-bottom:var(--sp-md);padding:var(--sp-sm) var(--sp-md);background:var(--bg-base);border-radius:var(--radius-md);border-left:3px solid var(--info)">'+
             '<div style="display:flex;align-items:center;gap:var(--sp-sm);margin-bottom:var(--sp-xs)">'+
-              '<span style="font-weight:700;font-size:14px;color:var(--info)">'+e.node+'</span>'+
-              '<span style="font-size:var(--fs-label);color:var(--text-disabled)">'+e.ts+'</span>'+
+              '<span style="font-weight:700;font-size:14px;color:var(--info)">'+_uiEsc(e.node)+'</span>'+
+              '<span style="font-size:var(--fs-label);color:var(--text-disabled)">'+_uiEsc(e.ts)+'</span>'+
             '</div>'+
-            '<div style="font-size:14px;line-height:1.8">'+(e.text||'').replace(/\n/g,'<br>')+'</div>'+
+            '<div style="font-size:14px;line-height:1.8">'+_uiEsc(e.text || '').replace(/\n/g,'<br>')+'</div>'+
             '</div>';
         });
       }
@@ -496,32 +535,7 @@ function _refreshLLMPanel() {
     });
 }
 function _triggerLLMFromPanel() {
-  if (_llmLoading) return;
-  var body = document.getElementById('llmPanelBody');
-  _llmLoading = true;
-  body.innerHTML = '<div style="text-align:center;padding:var(--sp-lg);color:var(--warn)">⏳ AI 正在分析全盘数据...</div>';
-
-  fetch('/api/llm', {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({mode: 'manual'})
-  })
-  .then(function(r) { return r.json(); })
-  .then(function(res) {
-    _llmLoading = false;
-    if (res.ok) {
-      showToast('研判已完成');
-      _refreshLLMPanel();
-    } else {
-      showToast('研判失败: ' + (res.error || '未知错误'));
-      _refreshLLMPanel();
-    }
-  })
-  .catch(function() {
-    _llmLoading = false;
-    showToast('网络错误，请重试');
-    _refreshLLMPanel();
-  });
+  _refreshLLMPanel();
 }
 document.getElementById('llmPanelClose').addEventListener('click', function() {
   document.getElementById('llmPanelOverlay').classList.remove('show');
@@ -529,18 +543,12 @@ document.getElementById('llmPanelClose').addEventListener('click', function() {
 document.getElementById('llmPanelOverlay').addEventListener('click', function(e) {
   if (e.target === this) this.classList.remove('show');
 });
-// 聊天框焦点控制红点
-var llmPanelBody = document.getElementById('llmPanelBody');
-if (llmPanelBody) {
-  llmPanelBody.addEventListener('focus', function() {
-    _llmBadgeCount = 0;
-    _updateLlmBadge();
-  });
-}
-document.getElementById('llmPanelRefresh').addEventListener('click', _triggerLLMFromPanel);
+var llmPanelRefresh = document.getElementById('llmPanelRefresh');
+if (llmPanelRefresh) llmPanelRefresh.addEventListener('click', _triggerLLMFromPanel);
 
 // === W16 报数面板浮窗 ===
 function _showInputPanel() {
+  _closeTopbarMenus();
   var overlay = document.getElementById('inputPanelOverlay');
   var body = document.getElementById('inputPanelBody');
   var manual = DataStore.manualData.getAll();
@@ -650,7 +658,7 @@ function _showInputPanel() {
     DataStore.merge();
     DataStore.notifyAll();
     var ts = document.getElementById('inputLastUpdate');
-    if (ts) ts.textContent = '✓ 已更新 ' + new Date().toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
+    if (ts) ts.textContent = '已更新 ' + new Date().toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
     showToast('报数已刷新');
   });
 
@@ -720,11 +728,10 @@ function _loadSavedLayout() {
       }
     }
   } catch(e) {}
-  // 旧格式或不兼容 → 清除，并加载票据优先的兜底工作台
+  // 旧格式或不兼容 → 清除，并加载票据+态势优先的兜底工作台
   try { localStorage.removeItem(STORAGE_KEYS.layout); } catch(e) {}
-  _addWidgetToGrid('W24');
-  _addWidgetToGrid('W15');
-  showToast('已加载默认工作台：W24 交易票据 + W15 手工补录');
+  _ensureRequiredLayoutWidgets();
+  showToast('已加载默认工作台：W25 作战态势 + W15 持仓 + W24 票据');
 }
 function exportLayout() {
   var layout = grid.save(false);
@@ -754,6 +761,10 @@ function importLayout(file) {
 
 // === Keyboard Shortcuts ===
 document.addEventListener('keydown', function(e) {
+  if (e.key === 'Escape') {
+    _closeTransientSurfaces();
+    return;
+  }
   if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT' || e.target.tagName === 'TEXTAREA') return;
 
   if (e.key === 'r' || e.key === 'R') {
@@ -845,6 +856,17 @@ window._healthConfirmed = false;
     var hDot = document.getElementById('healthDot');
     var hLabel = document.getElementById('healthLabel');
     if (!hDot || !hLabel) return;
+    if (location.protocol === 'file:') {
+      hDot.className = 'health-dot dead';
+      hLabel.textContent = '文件模式';
+      hLabel.title = '本地文件模式无法读取 /api，请使用 http://localhost:18088/ 或 http://localhost:8088/';
+      hLabel.style.color = 'var(--danger)';
+      window._healthCritical = true;
+      window._healthConfirmed = false;
+      var fileBar = document.getElementById('topbar');
+      if (fileBar) fileBar.style.boxShadow = 'inset 0 -2px 0 var(--danger)';
+      return;
+    }
 
     fetch('/api/health').then(function(r) {
       // HTTP non-2xx -> 无响应
@@ -915,7 +937,7 @@ window._healthConfirmed = false;
 
 // === Compact Mode ===
 var _compactMode = false;
-var CORE_IDS = ['W04','W07','W08','W09','W14','W24','W15','W22'];
+var CORE_IDS = ['W25','W04','W07','W08','W09','W14','W24','W15','W22'];
 (function() {
   var btn = document.getElementById('compactBtn');
   if (!btn) return;
@@ -975,9 +997,10 @@ function showToast(msg) {
 }
 
 // === Event bindings ===// v2.1: preset select removed
-document.getElementById('saveLayoutBtn').addEventListener('click', function() { _autoSaveLayout(); showToast('已保存'); });
-document.getElementById('exportLayoutBtn').addEventListener('click', exportLayout);
+document.getElementById('saveLayoutBtn').addEventListener('click', function() { _closeTopbarMenus(); _autoSaveLayout(); showToast('已保存'); });
+document.getElementById('exportLayoutBtn').addEventListener('click', function() { _closeTopbarMenus(); exportLayout(); });
 document.getElementById('importLayoutBtn').addEventListener('click', function() {
+  _closeTopbarMenus();
   document.getElementById('importFileInput').click();
 });
 document.getElementById('importFileInput').addEventListener('change', function() {
@@ -994,12 +1017,7 @@ function waitForGridStack() {
     DataStore.init();
     // 初始化组件注册（widget 脚本已加载时自动注册见各 widget 文件末尾）
     initGrid();
-    // LlmChatWidget（浮动聊天框，独立于 GridStack）
-    if (window.LlmChatWidget) {
-      var chatEl = document.getElementById('llmChatMount');
-      window._llmChat = new LlmChatWidget({ id: 'LLM_CHAT' });
-      window._llmChat.mount(chatEl);
-    }
+    // AI 交互迁移到 Codex/终端；仪表盘默认不挂载聊天框，避免自动 POST。
     // 尝试拉取基线数据（file:// 协议下会失败，降级到兜底数据）
     DataStore.fetchAll();
     // v3.0 PyTDX 实时管线：每个 tick 组件自带 5s 定时器刷新

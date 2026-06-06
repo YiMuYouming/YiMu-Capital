@@ -25,12 +25,8 @@ class TradeReviewWidget extends YiMuWidget {
 
     if (this._error) {
       body.textContent = '';
-      var errHtml = '<div style="text-align:center;padding:var(--sp-md);color:var(--danger);margin-bottom:var(--sp-sm)">复盘数据加载失败</div>' +
-        '<div style="display:flex;align-items:center;gap:var(--sp-sm);justify-content:center">' +
-          '<span style="font-weight:600;font-size:var(--fs-body)">复盘日期</span>' +
-          '<input type="date" id="w23_date" value="' + _esc(this._date) + '" style="border:1px solid var(--border);border-radius:var(--radius-sm);padding:2px 6px;font-size:var(--fs-body);background:var(--bg-card);color:var(--text-primary)">' +
-          '<button id="w23_refresh" style="background:var(--info);color:#fff;border:none;padding:2px 10px;border-radius:var(--radius-sm);cursor:pointer;font-size:var(--fs-body)">重试</button>' +
-        '</div>';
+      var errHtml = '<div class="ui-degraded w23-error"><strong>复盘数据加载失败</strong><span>请核对日期或稍后重试。</span></div>' +
+        this._toolbarHtml(this._date, '重试');
       body.innerHTML = errHtml;
       this.updateTimestamp();
       var self = this;
@@ -51,7 +47,7 @@ class TradeReviewWidget extends YiMuWidget {
     }
 
     if (this._loading) {
-      body.innerHTML = '<div style="text-align:center;padding:var(--sp-md);color:var(--text-disabled)">加载复盘数据...</div>';
+      body.innerHTML = this._loadingHtml();
       this.updateTimestamp();
       return;
     }
@@ -65,7 +61,7 @@ class TradeReviewWidget extends YiMuWidget {
     this._loading = true;
     this._error = null;
     var reqId = ++this._reqId;
-    body.innerHTML = '<div style="text-align:center;padding:var(--sp-md);color:var(--text-disabled)">加载复盘数据...</div>';
+    body.innerHTML = this._loadingHtml();
 
     fetch('/api/trades/review?date=' + date)
       .then(function(r) {
@@ -90,6 +86,23 @@ class TradeReviewWidget extends YiMuWidget {
 
   _td(innerHTML) {
     return '<td style="padding:3px 6px;white-space:nowrap">' + innerHTML + '</td>';
+  }
+
+  _loadingHtml() {
+    return '<div class="ui-empty ui-empty-inline w23-loading"><div class="ui-empty-title">加载复盘数据</div></div>';
+  }
+
+  _toolbarHtml(date, actionText) {
+    return '<div class="w23-toolbar">' +
+      '<span class="w23-toolbar-label">复盘日期</span>' +
+      '<input type="date" id="w23_date" class="w23-date-input" value="' + _esc(date) + '">' +
+      '<button id="w23_refresh" class="btn-xs btn-info w23-action-btn">' + _esc(actionText || '查看') + '</button>' +
+      '</div>';
+  }
+
+  _filterButton(id, value, label, filter) {
+    var active = filter === value ? ' active' : '';
+    return '<button id="' + id + '" class="filter-btn w23-filter-btn' + active + '" data-f="' + value + '">' + _esc(label) + '</button>';
   }
 
   _tradeGroupKey(r, idx) {
@@ -119,31 +132,27 @@ class TradeReviewWidget extends YiMuWidget {
     if (ticket) sub.push(ticket);
     if (key && key !== ticket && key.indexOf('single-') !== 0) sub.push(key);
     if (tradeIds) sub.push('trade ' + tradeIds);
-    return '<tr style="background:var(--bg-hover);border-top:1px solid var(--border)">' +
-      '<td colspan="12" style="padding:4px 6px;font-size:11px;color:var(--text-secondary)">' +
-        '<span style="font-weight:700;color:var(--text-primary);margin-right:6px">' + _esc(name) + '</span>' +
-        '<span style="margin-right:8px">' + _esc(label) + '</span>' +
-        '<span style="font-family:var(--font-mono)">' + _esc(sub.join(' · ')) + '</span>' +
+    return '<tr class="w23-group-row">' +
+      '<td colspan="12" class="w23-group-cell">' +
+        '<span class="w23-group-name">' + _esc(name) + '</span>' +
+        '<span class="w23-group-type">' + _esc(label) + '</span>' +
+        '<span class="w23-group-meta">' + _esc(sub.join(' · ')) + '</span>' +
       '</td></tr>';
   }
 
   _renderTable(body, reviews, date) {
     var html = '';
 
-    html += '<div style="display:flex;align-items:center;gap:var(--sp-sm);margin-bottom:var(--sp-sm)">' +
-      '<span style="font-weight:600;font-size:var(--fs-body)">复盘日期</span>' +
-      '<input type="date" id="w23_date" value="' + _esc(date) + '" style="border:1px solid var(--border);border-radius:var(--radius-sm);padding:2px 6px;font-size:var(--fs-body);background:var(--bg-card);color:var(--text-primary)">' +
-      '<button id="w23_refresh" style="background:var(--info);color:#fff;border:none;padding:2px 10px;border-radius:var(--radius-sm);cursor:pointer;font-size:var(--fs-body)">查看</button>' +
-      '</div>';
+    html += this._toolbarHtml(date, '查看');
 
     // Phase 5: context 状态筛选
     var filter = this._filter || 'all';
-    html += '<div style="margin-bottom:var(--sp-sm);display:flex;gap:4px;align-items:center">' +
-      '<span style="font-size:11px;color:var(--text-secondary);margin-right:4px">上下文:</span>' +
-      '<button id="w23_filter_all" class="w23-filter-btn" data-f="all" style="' + (filter==='all'?'font-weight:600;background:var(--info);color:#fff':'background:var(--bg-base);color:var(--text-secondary)') + ';border:1px solid var(--border);padding:2px 8px;border-radius:var(--radius-sm);cursor:pointer;font-size:11px">全部</button>' +
-      '<button id="w23_filter_trusted" class="w23-filter-btn" data-f="trusted" style="' + (filter==='trusted'?'font-weight:600;background:var(--info);color:#fff':'background:var(--bg-base);color:var(--text-secondary)') + ';border:1px solid var(--border);padding:2px 8px;border-radius:var(--radius-sm);cursor:pointer;font-size:11px">已验证</button>' +
-      '<button id="w23_filter_unverified" class="w23-filter-btn" data-f="unverified" style="' + (filter==='unverified'?'font-weight:600;background:var(--info);color:#fff':'background:var(--bg-base);color:var(--text-secondary)') + ';border:1px solid var(--border);padding:2px 8px;border-radius:var(--radius-sm);cursor:pointer;font-size:11px">未验证</button>' +
-      '<button id="w23_filter_unavailable" class="w23-filter-btn" data-f="unavailable" style="' + (filter==='unavailable'?'font-weight:600;background:var(--info);color:#fff':'background:var(--bg-base);color:var(--text-secondary)') + ';border:1px solid var(--border);padding:2px 8px;border-radius:var(--radius-sm);cursor:pointer;font-size:11px">上下文不可用</button>' +
+    html += '<div class="filter-bar w23-filter-bar">' +
+      '<span class="w23-filter-label">上下文</span>' +
+      this._filterButton('w23_filter_all', 'all', '全部', filter) +
+      this._filterButton('w23_filter_trusted', 'trusted', '已验证', filter) +
+      this._filterButton('w23_filter_unverified', 'unverified', '未验证', filter) +
+      this._filterButton('w23_filter_unavailable', 'unavailable', '上下文不可用', filter) +
       '</div>';
 
     var filtered = reviews;
@@ -157,23 +166,22 @@ class TradeReviewWidget extends YiMuWidget {
 
     if (!filtered.length) {
       var emptyMsg = (filter === 'all') ? '暂无成交记录' : '无符合筛选的成交记录';
-      html += '<div style="text-align:center;padding:var(--sp-lg);color:var(--text-disabled)">' +
-        _esc(date) + ' ' + emptyMsg + '</div>';
+      html += '<div class="ui-empty w23-empty"><div class="ui-empty-title">' + _esc(emptyMsg) + '</div><div class="ui-empty-detail">' + _esc(date) + '</div></div>';
     } else {
-      html += '<div style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:12px">' +
-        '<thead><tr style="border-bottom:2px solid var(--border);text-align:left">' +
-          '<th style="padding:3px 6px;white-space:nowrap">时间</th>' +
-          '<th style="padding:3px 6px;white-space:nowrap">动作</th>' +
-          '<th style="padding:3px 6px;white-space:nowrap">标的</th>' +
-          '<th style="padding:3px 6px;white-space:nowrap">代码</th>' +
-          '<th style="padding:3px 6px;white-space:nowrap">价格</th>' +
-          '<th style="padding:3px 6px;white-space:nowrap">数量</th>' +
-          '<th style="padding:3px 6px;white-space:nowrap">票据</th>' +
-          '<th style="padding:3px 6px;white-space:nowrap">窗口</th>' +
-          '<th style="padding:3px 6px;white-space:nowrap">原因</th>' +
-          '<th style="padding:3px 6px;white-space:nowrap">收盘结果</th>' +
-          '<th style="padding:3px 6px;white-space:nowrap">状态</th>' +
-          '<th style="padding:3px 6px;white-space:nowrap">归因备注</th>' +
+      html += '<div class="w23-table-wrap"><table class="data-table w23-table">' +
+        '<thead><tr>' +
+          '<th>时间</th>' +
+          '<th>动作</th>' +
+          '<th>标的</th>' +
+          '<th>代码</th>' +
+          '<th>价格</th>' +
+          '<th>数量</th>' +
+          '<th>票据</th>' +
+          '<th>窗口</th>' +
+          '<th>原因</th>' +
+          '<th>收盘结果</th>' +
+          '<th>状态</th>' +
+          '<th>归因备注</th>' +
         '</tr></thead><tbody>';
 
       var groupRows = {};
@@ -259,8 +267,8 @@ class TradeReviewWidget extends YiMuWidget {
       var buyCount = filtered.filter(function(r){return(r.action||'').indexOf('买')>=0;}).length;
       var sellCount = filtered.filter(function(r){return(r.action||'').indexOf('卖')>=0;}).length;
       var unverifiedCount = filtered.filter(function(r){return !(r.rule_state && r.market_snapshot);}).length;
-      html += '<tr style="background:var(--bg-hover);font-size:11px;color:var(--text-secondary)">' +
-        '<td colspan="12" style="padding:4px 6px">' +
+      html += '<tr class="w23-summary-row">' +
+        '<td colspan="12">' +
           '共 ' + filtered.length + ' 笔 | 买入 ' + buyCount + ' | 卖出 ' + sellCount + ' | 未验证 ' + unverifiedCount +
         '</td></tr>';
 

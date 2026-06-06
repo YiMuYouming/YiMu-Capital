@@ -2,68 +2,6 @@
 // Canvas 折线图: 账户TWR收益 vs 指数参考 + 仓位 + 自动回撤高亮
 'use strict';
 
-// 注入一次 CSS
-(function() {
-  if (document.getElementById('pnl-curve-style')) return;
-  var style = document.createElement('style');
-  style.id = 'pnl-curve-style';
-  style.textContent =
-    '.pnl-root{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}' +
-    // KPI
-    '.pnl-kpi{display:grid;grid-template-columns:repeat(5,1fr);gap:1px;background:var(--border);margin-bottom:2px}' +
-    '.pnl-kpi-card{background:var(--bg-card);padding:12px 16px;min-height:70px}' +
-    '.pnl-kpi-lbl{font-size:10px;text-transform:uppercase;letter-spacing:.3px;color:var(--text-secondary);margin-bottom:3px;font-weight:500}' +
-    '.pnl-kpi-val{font-size:24px;font-weight:700;font-family:var(--font-mono);line-height:1.2}' +
-    '.pnl-kpi-sub{font-size:10px;color:var(--text-disabled);margin-top:2px}' +
-    '.pnl-kpi-dyn{border-left:2px solid var(--accent)}' +
-    // Controls
-    '.pnl-ctrl{display:flex;align-items:center;gap:6px;padding:8px 14px;border-bottom:1px solid var(--border-light);background:var(--bg-base);flex-wrap:wrap}' +
-    '.pnl-ctrl-label{font-size:10px;color:var(--text-disabled);letter-spacing:.3px;text-transform:uppercase;margin-right:4px}' +
-    '.pnl-index,.pnl-periods{display:flex;gap:3px}' +
-    '.pnl-idx-btn,.pnl-period{padding:3px 10px;border-radius:4px;font-size:11px;cursor:pointer;color:var(--text-secondary);background:transparent;border:none;font-family:inherit;font-weight:500;transition:all .12s}' +
-    '.pnl-idx-btn:hover,.pnl-period:hover{background:var(--bg-hover);color:var(--text)}' +
-    '.pnl-idx-btn.active{background:var(--info-bg);color:var(--info);font-weight:600}' +
-    '.pnl-period.active{background:var(--info-bg);color:var(--info);font-weight:600}' +
-    '.pnl-period-custom{border:1px dashed var(--border);color:var(--text-disabled);margin-left:auto}' +
-    // Chart
-    '.pnl-chart-wrap{position:relative;padding:8px 14px 4px}' +
-    '.pnl-chart-wrap canvas{width:100%;height:280px;display:block;border-radius:6px}' +
-    // Legend
-    '.pnl-legend{display:flex;gap:20px;padding:0 14px 8px;align-items:center;flex-wrap:wrap}' +
-    '.pnl-leg-item{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--text-secondary)}' +
-    '.pnl-leg-line{width:20px;height:3px;border-radius:2px;flex-shrink:0}' +
-    // Drawer
-    // 辅助功能
-    // Drawer
-    '.pnl-drawer-trigger{padding:0 14px 10px}' +
-    '.pnl-drawer-btn{width:100%;padding:9px 14px;border-radius:6px;font-size:13px;cursor:pointer;background:var(--bg-base);border:1px solid var(--border);color:var(--text);font-family:inherit;font-weight:600;transition:all .12s;display:flex;align-items:center;justify-content:center;gap:6px}' +
-    '.pnl-drawer-btn:hover{background:var(--accent-bg);border-color:var(--accent);color:var(--accent)}' +
-    '.pnl-drawer-btn.pnl-drawer-btn-open{background:var(--accent-bg);border-color:var(--accent);color:var(--accent)}' +
-    '.pnl-drawer-btn::after{content:"▼";font-size:9px;color:var(--text-disabled);transition:transform .2s}' +
-    '.pnl-drawer-btn.pnl-drawer-btn-open::after{transform:rotate(180deg)}' +
-    '.pnl-drawer{display:none;margin:0 14px 14px;border-radius:8px;border:1px solid var(--border-light);overflow-x:auto}' +
-    '.pnl-drawer.pnl-drawer-open{display:block}' +
-    // Table
-    '.pnl-table{width:100%;border-collapse:collapse;font-size:12px}' +
-    '.pnl-table th{background:var(--bg-base);padding:8px 12px;font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:var(--text-secondary);font-weight:600;border-bottom:1px solid var(--border-light);white-space:nowrap}' +
-    '.pnl-table td{padding:8px 12px;border-bottom:1px solid var(--border-light);font-variant-numeric:tabular-nums}' +
-    '.pnl-table tbody tr:hover td{background:var(--bg-hover)}' +
-    '.pnl-table tbody tr:last-child td{border-bottom:none}' +
-    '.pnl-td-period{font-weight:600;white-space:nowrap;width:72px}' +
-    '.pnl-td-num{font-family:var(--font-mono);text-align:right;white-space:nowrap}' +
-    '.pnl-td-bold{font-weight:600}' +
-    '.pnl-table th.pnl-td-period{text-align:left}' +
-    '.pnl-table th.pnl-td-num{text-align:right}' +
-    '.pnl-cum-row{background:var(--bg-base)}' +
-    '.pnl-cum-row td{font-weight:600;border-top:2px solid var(--border);padding:10px 12px}' +
-    // Summary
-    '.pnl-summary{display:grid;grid-template-columns:repeat(5,1fr);gap:1px;background:var(--border);border-top:1px solid var(--border)}' +
-    '.pnl-sum-cell{background:var(--bg-card);padding:10px 14px;text-align:right}' +
-    '.pnl-sum-lbl{font-size:9px;text-transform:uppercase;letter-spacing:.3px;color:var(--text-disabled);margin-bottom:2px}' +
-    '.pnl-sum-val{font-size:14px;font-weight:600;font-family:var(--font-mono)}';
-  document.head.appendChild(style);
-})();
-
 function hasW22Own(obj, key) {
   return Object.prototype.hasOwnProperty.call(obj || {}, key);
 }
@@ -162,7 +100,7 @@ class PnLCurveWidget extends YiMuWidget {
       var drawer = document.getElementById('pnl_drawer_' + this.id);
       var btn = document.getElementById('pnl_drawer_btn_' + this.id);
       if (drawer) drawer.classList.add('pnl-drawer-open');
-      if (btn) { btn.classList.add('pnl-drawer-btn-open'); btn.innerHTML = '📊 收起损益明细'; }
+      if (btn) { btn.classList.add('pnl-drawer-btn-open'); btn.innerHTML = '收起损益明细'; }
     }
     // 恢复 tab 激活态
     var root = document.getElementById('pnl_' + this.id);
@@ -183,7 +121,7 @@ class PnLCurveWidget extends YiMuWidget {
     return '<div class="pnl-root" id="pnl_' + this.id + '">' +
       // KPI row 1: 累计（慢变）
       '<div class="pnl-kpi" id="pnl_kpi1_' + this.id + '">' +
-        '<div class="pnl-kpi-card"><div class="pnl-kpi-lbl">当前资产</div><div class="pnl-kpi-val" id="pnl_asset">—</div><div class="pnl-kpi-sub" id="pnl_asset_sub">—</div></div>' +
+        '<div class="pnl-kpi-card"><div class="pnl-kpi-lbl"><span class="evidence-inline-ref">E4</span>当前资产</div><div class="pnl-kpi-val" id="pnl_asset">—</div><div class="pnl-kpi-sub" id="pnl_asset_sub">—</div></div>' +
         '<div class="pnl-kpi-card"><div class="pnl-kpi-lbl">TWR累计</div><div class="pnl-kpi-val" id="pnl_twr">—</div><div class="pnl-kpi-sub" id="pnl_twr_sub">—</div></div>' +
         '<div class="pnl-kpi-card"><div class="pnl-kpi-lbl">指数参考</div><div class="pnl-kpi-val" id="pnl_bm_twr">—</div><div class="pnl-kpi-sub" id="pnl_bm_twr_sub">—</div></div>' +
         '<div class="pnl-kpi-card"><div class="pnl-kpi-lbl">相对指数</div><div class="pnl-kpi-val" id="pnl_alpha">—</div><div class="pnl-kpi-sub" id="pnl_alpha_sub">—</div></div>' +
@@ -215,15 +153,15 @@ class PnLCurveWidget extends YiMuWidget {
         '</div>' +
       '</div>' +
       // Chart
-      '<div class="pnl-chart-wrap"><canvas id="pnl_canvas_' + this.id + '"></canvas></div>' +
+      '<div class="pnl-chart-wrap"><canvas class="pnl-chart" id="pnl_canvas_' + this.id + '"></canvas><div class="ui-empty pnl-chart-empty" id="pnl_empty_' + this.id + '"><div class="ui-empty-title">收益曲线暂无数据</div><div class="ui-empty-detail">等待盘中收益快照或历史曲线返回。</div></div></div>' +
       // Legend
       '<div class="pnl-legend">' +
-        '<div class="pnl-leg-item"><div class="pnl-leg-line" style="background:#DC2626"></div><span>账户收益(TWR)</span></div>' +
-        '<div class="pnl-leg-item"><div class="pnl-leg-line" style="background:#2563EB"></div><span id="pnl_idx_label_' + this.id + '">上证指数参考</span></div>' +
-        '<div class="pnl-leg-item" style="margin-left:auto;font-size:10px;color:var(--text-disabled)" id="pnl_ts_' + this.id + '">—</div>' +
+        '<div class="pnl-leg-item"><div class="pnl-leg-line pnl-leg-portfolio"></div><span>账户收益(TWR)</span></div>' +
+        '<div class="pnl-leg-item"><div class="pnl-leg-line pnl-leg-benchmark"></div><span id="pnl_idx_label_' + this.id + '">上证指数参考</span></div>' +
+        '<div class="pnl-leg-item pnl-leg-ts" id="pnl_ts_' + this.id + '">—</div>' +
       '</div>' +
       // Drawer trigger
-      '<div class="pnl-drawer-trigger"><button class="pnl-drawer-btn" id="pnl_drawer_btn_' + this.id + '">📊 查看损益明细</button></div>' +
+      '<div class="pnl-drawer-trigger"><button class="pnl-drawer-btn" id="pnl_drawer_btn_' + this.id + '">查看损益明细</button></div>' +
       // Drawer
       '<div class="pnl-drawer" id="pnl_drawer_' + this.id + '">' +
         '<table class="pnl-table"><thead><tr>' +
@@ -734,10 +672,21 @@ class PnLCurveWidget extends YiMuWidget {
   }
 
   // ===== Chart =====
+  _setChartEmpty(show, detail) {
+    var empty = document.getElementById('pnl_empty_' + this.id);
+    if (!empty) return;
+    empty.classList.toggle('is-visible', !!show);
+    var detailEl = empty.querySelector ? empty.querySelector('.ui-empty-detail') : null;
+    if (detailEl && detail) detailEl.textContent = detail;
+  }
+
   _drawChart(chartData) {
-    if (!chartData) return;
     var canvas = document.getElementById('pnl_canvas_' + this.id);
     if (!canvas) return;
+    if (!chartData) {
+      this._setChartEmpty(true, '等待 /api/pnl 返回有效收益曲线。');
+      return;
+    }
     var rect = canvas.getBoundingClientRect();
     if (rect.width === 0 || rect.height === 0) return;
 
@@ -760,13 +709,10 @@ class PnLCurveWidget extends YiMuWidget {
     ctx.fillRect(0, 0, W, H);
 
     if (!chartData || !chartData.portfolio || chartData.portfolio.length < 2) {
-      ctx.fillStyle = '#8A8480';
-      ctx.font = '13px -apple-system,sans-serif';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText('暂无数据，请确保 poll_live.py 运行中', W/2, H/2);
+      this._setChartEmpty(true, '请确认收益快照服务已返回至少两个采样点。');
       return;
     }
+    this._setChartEmpty(false);
 
     var p = chartData.portfolio;
     var b = chartData.benchmark;
@@ -1023,8 +969,8 @@ class PnLCurveWidget extends YiMuWidget {
         if (drawer) drawer.classList.toggle('pnl-drawer-open', self._state.drawerOpen);
         this.classList.toggle('pnl-drawer-btn-open', self._state.drawerOpen);
         this.innerHTML = self._state.drawerOpen
-          ? '📊 收起损益明细'
-          : '📊 查看损益明细';
+          ? '收起损益明细'
+          : '查看损益明细';
       });
     }
 
@@ -1040,7 +986,7 @@ class PnLCurveWidget extends YiMuWidget {
       // 创建十字线 div
       var crossEl = document.createElement('div');
       crossEl.id = 'pnl_cross_' + this.id;
-      crossEl.style.cssText = 'position:absolute;top:0;width:1px;background:#D97706;pointer-events:none;z-index:var(--z-dropdown);display:none;border-left:1px dashed #D97706';
+      crossEl.className = 'pnl-cross';
       mainCanvas.parentElement.appendChild(crossEl);
 
       mainCanvas.addEventListener('mousemove', function(e) {
@@ -1065,7 +1011,7 @@ class PnLCurveWidget extends YiMuWidget {
         if (!tip) {
           tip = document.createElement('div');
           tip.id = 'pnl_tooltip_' + self.id;
-          tip.style.cssText = 'position:fixed;background:var(--bg-card,#FFFFFF);color:var(--text-primary,#2D2926);padding:6px 10px;border-radius:4px;border:1px solid var(--border,#E5E2DE);font-size:11px;pointer-events:none;z-index:var(--z-tooltip);line-height:1.6;font-family:var(--font-mono);box-shadow:0 2px 8px rgba(0,0,0,0.1)';
+          tip.className = 'pnl-tooltip';
           document.body.appendChild(tip);
         }
         var isDaily = cd.type === 'daily';

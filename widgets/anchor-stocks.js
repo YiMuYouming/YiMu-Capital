@@ -8,7 +8,7 @@ class AnchorStocksWidget extends YiMuWidget {
     var anchors = (data && data.decision && data.decision['锚定股状态']) || [];
 
     if (!anchors.length) {
-      body.innerHTML = '<div style="padding:var(--sp-lg);text-align:center;color:var(--text-disabled)">锚定股数据未录入</div>';
+      body.innerHTML = '<div class="ui-empty"><div class="ui-empty-title">锚定股数据未录入</div><div class="ui-empty-detail">等待决策面板写入锚定股状态。</div></div>';
       this.updateTimestamp();
       return;
     }
@@ -25,9 +25,9 @@ class AnchorStocksWidget extends YiMuWidget {
     });
 
     function lampStyle(lamp) {
-      if (lamp === 'green') return { border: 'var(--info)', bg: 'rgba(59,130,246,0.06)', dot: '🟢', label: '正常' };
-      if (lamp === 'red') return { border: 'var(--danger)', bg: 'rgba(255,59,48,0.05)', dot: '🔴', label: '危险' };
-      return { border: 'var(--warn)', bg: 'rgba(255,149,0,0.05)', dot: '🟠', label: '关注' };
+      if (lamp === 'green') return { border: 'var(--info)', bg: 'rgba(59,130,246,0.06)', label: '正常' };
+      if (lamp === 'red') return { border: 'var(--danger)', bg: 'rgba(255,59,48,0.05)', label: '危险' };
+      return { border: 'var(--warn)', bg: 'rgba(255,149,0,0.05)', label: '关注' };
     }
 
     var html = '<div style="display:flex;gap:var(--sp-sm);flex-wrap:wrap">';
@@ -49,7 +49,7 @@ class AnchorStocksWidget extends YiMuWidget {
       html += '<div style="flex:1;min-width:180px;padding:var(--sp-sm) var(--sp-md);background:var(--bg-base);border-radius:var(--radius-md);border-left:3px solid ' + st.border + '">' +
         // 第一行：灯 + 名称 + 窗口标签 + 涨幅
         '<div style="display:flex;align-items:center;justify-content:space-between;gap:var(--sp-sm)">' +
-          '<span style="font-weight:700;font-size:13px;color:var(--text-primary)">' + st.dot + ' ' + name +
+          '<span style="font-weight:700;font-size:13px;color:var(--text-primary)">' + st.label + ' · ' + name +
             (code ? ' <span style="font-size:10px;color:var(--text-disabled)">' + code + '</span>' : '') +
             (win ? ' <span style="font-size:10px;padding:0 4px;border-radius:2px;background:var(--bg-hover);color:var(--text-secondary)">'+win+'</span>' : '') +
           '</span>' +

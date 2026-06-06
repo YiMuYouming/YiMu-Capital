@@ -1,6 +1,11 @@
 // widgets/market-overview.js — W04 市场全景 v2.5 (品牌级视觉升级)
 'use strict';
 
+function _w04Esc(s) {
+  if (s == null) return '';
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
 class MarketOverviewWidget extends YiMuWidget {
   constructor(config) {
     super(config);
@@ -15,10 +20,13 @@ class MarketOverviewWidget extends YiMuWidget {
     var m = d.market || {};
     var yb = d.yesterday_baseline || {};
 
-    var html = '<div style="display:flex;flex-direction:column;gap:6px;height:100%">';
+    var html = '<div class="w04-board">';
+
+    // === E3 Evidence anchor ===
+    html += '<div class="w04-title"><span class="evidence-inline-ref">E3</span>市场全景</div>';
 
     // === 顶层行：三大指数 KPI (紧凑，视觉吸睛) ===
-    html += '<div style="display:flex;gap:6px">';
+    html += '<div class="w04-index-grid">';
     [
       {name:'上证', price:li['上证指数']||'—', chg:String(li['上证指数涨幅']||'—')},
       {name:'深证', price:li['深证指数']||'—', chg:String(li['深证指数涨幅']||'—')},
@@ -27,10 +35,10 @@ class MarketOverviewWidget extends YiMuWidget {
       var dir = idx.chg.charAt(0) === '+' ? 'up' : idx.chg.charAt(0) === '-' ? 'down' : '';
       var pctNum = parseFloat(idx.chg.replace('+','').replace('%',''));
       var arrow = pctNum > 0 ? '▲' : pctNum < 0 ? '▼' : '—';
-      html += '<div class="kpi-card" style="flex:1;padding:8px 10px">' +
-        '<div class="kpi-label" style="margin-bottom:2px">' + idx.name + '</div>' +
-        '<div class="kpi-value ' + dir + '" style="font-size:20px">' + idx.price + '</div>' +
-        '<div class="kpi-verdict ' + dir + '">' + arrow + ' ' + idx.chg + '</div>' +
+      html += '<div class="kpi-card w04-index-card">' +
+        '<div class="kpi-label">' + _w04Esc(idx.name) + '</div>' +
+        '<div class="kpi-value ' + dir + '">' + _w04Esc(idx.price) + '</div>' +
+        '<div class="kpi-verdict ' + dir + '">' + _w04Esc(arrow + ' ' + idx.chg) + '</div>' +
         '</div>';
     });
     html += '</div>';
@@ -42,8 +50,8 @@ class MarketOverviewWidget extends YiMuWidget {
     var upCnt = li['上涨家数'];
     var dnCnt = li['下跌家数'];
     var udHtml = (upCnt != null && dnCnt != null)
-      ? '<span class="up">' + upCnt + '</span>/<span class="down">' + dnCnt + '</span>'
-      : (m['涨跌比'] || '—');
+      ? '<span class="up">' + _w04Esc(upCnt) + '</span>/<span class="down">' + _w04Esc(dnCnt) + '</span>'
+      : _w04Esc(m['涨跌比'] || '—');
     var amp = li['上证指数振幅'] || '—';
     var iw = d.iwencai || {};
     var iwUsable = isW04IwencaiUsable(iw);
@@ -51,11 +59,11 @@ class MarketOverviewWidget extends YiMuWidget {
     var zt = pickW04LiveFirst(iw, '涨停家数', m['涨停家数'], iwUsable);
     var dt = pickW04LiveFirst(iw, '跌停家数', m['跌停家数'], iwUsable);
 
-    html += '<div style="display:flex;gap:6px">';
-    html += '<div class="kpi-card" style="flex:1;padding:6px 8px"><div class="kpi-label">成交额</div><div class="kpi-value" style="font-size:14px">'+(li['成交额']||'—')+'</div>'+(amtCompareText?'<div class="kpi-verdict ' + amtDir + '">' + amtCompareText + '</div>':'')+'</div>';
-    html += '<div class="kpi-card" style="flex:1;padding:6px 8px"><div class="kpi-label">涨跌比</div><div class="kpi-value" style="font-size:14px">'+udHtml+'</div></div>';
-    html += '<div class="kpi-card" style="flex:1;padding:6px 8px"><div class="kpi-label">振幅</div><div class="kpi-value" style="font-size:14px;color:var(--warn)">'+amp+'</div></div>';
-    html += '<div class="kpi-card" style="flex:1;padding:6px 8px"><div class="kpi-label">涨跌停</div><div class="kpi-value" style="font-size:14px"><span class="up">'+(zt!=null?zt:'—')+'</span>/<span class="down">'+(dt!=null?dt:'—')+'</span></div></div>';
+    html += '<div class="w04-metric-grid">';
+    html += '<div class="kpi-card w04-metric-card"><div class="kpi-label">成交额</div><div class="kpi-value">'+_w04Esc(li['成交额']||'—')+'</div>'+(amtCompareText?'<div class="kpi-verdict ' + amtDir + '">' + _w04Esc(amtCompareText) + '</div>':'')+'</div>';
+    html += '<div class="kpi-card w04-metric-card"><div class="kpi-label">涨跌比</div><div class="kpi-value">'+udHtml+'</div></div>';
+    html += '<div class="kpi-card w04-metric-card"><div class="kpi-label">振幅</div><div class="kpi-value warn">'+_w04Esc(amp)+'</div></div>';
+    html += '<div class="kpi-card w04-metric-card"><div class="kpi-label">涨跌停</div><div class="kpi-value"><span class="up">'+_w04Esc(zt!=null?zt:'—')+'</span>/<span class="down">'+_w04Esc(dt!=null?dt:'—')+'</span></div></div>';
     html += '</div>';
 
     // === 涨跌分布条 (更宽，更醒目) ===
@@ -69,38 +77,38 @@ class MarketOverviewWidget extends YiMuWidget {
       var dnColors = ['#D1FAE5', '#A7F3D0', '#6EE7B7', '#34D399', '#059669'];
       var allCats = upCats.concat(dnCats);
       var allColors = upColors.concat(dnColors);
-      html += '<div style="flex:1;display:flex;flex-direction:column;justify-content:center">';
+      html += '<div class="w04-breadth">';
       if (isCoarseBreadth) {
         var coarseUp = li['上涨家数'] != null ? li['上涨家数'] : (br['0~3%'] || 0);
         var coarseDn = li['下跌家数'] != null ? li['下跌家数'] : (br['-0~-3%'] || 0);
         var coarseTotal = Math.max(coarseUp + coarseDn, 1);
         var upPct = coarseUp / coarseTotal * 100;
         var dnPct = coarseDn / coarseTotal * 100;
-        html += '<div style="display:flex;align-items:center;height:16px;border-radius:3px;overflow:hidden;background:var(--bg-base)">';
-        if (upPct > 0) html += '<div title="上涨: '+coarseUp+'" style="width:'+upPct.toFixed(1)+'%;height:100%;background:#DC2626"></div>';
-        if (dnPct > 0) html += '<div title="下跌: '+coarseDn+'" style="width:'+dnPct.toFixed(1)+'%;height:100%;background:#059669"></div>';
+        html += '<div class="w04-breadth-bar">';
+        if (upPct > 0) html += '<div class="w04-breadth-seg w04-breadth-up" title="上涨: '+_w04Esc(coarseUp)+'" style="width:'+upPct.toFixed(1)+'%"></div>';
+        if (dnPct > 0) html += '<div class="w04-breadth-seg w04-breadth-down" title="下跌: '+_w04Esc(coarseDn)+'" style="width:'+dnPct.toFixed(1)+'%"></div>';
         html += '</div>';
-        html += '<div style="display:flex;align-items:center;gap:8px;font-size:9px;color:var(--text-secondary);margin-top:3px">'+
-          '<span class="up" style="font-weight:700">涨 '+coarseUp+'</span>'+
-          '<span class="down" style="font-weight:700">跌 '+coarseDn+'</span>'+
+        html += '<div class="w04-breadth-labels w04-breadth-labels-compact">'+
+          '<span class="up">涨 '+_w04Esc(coarseUp)+'</span>'+
+          '<span class="down">跌 '+_w04Esc(coarseDn)+'</span>'+
           '</div>';
       } else {
         // 色条
-        html += '<div style="display:flex;align-items:center;gap:1px;height:16px;border-radius:3px;overflow:hidden">';
+        html += '<div class="w04-breadth-bar w04-breadth-bar-full">';
         allCats.forEach(function(cat, i) {
           var n = br[cat] || 0;
           var pct = (n / bt * 100);
           if (pct > 0.3) {
-            html += '<div title="' + cat + ': ' + n + ' (' + pct.toFixed(1) + '%)" style="width:' + pct.toFixed(1) + '%;height:100%;background:' + allColors[i] + ';cursor:pointer;min-width:2px;transition:opacity .15s" onmouseover="this.style.opacity=\'.7\'" onmouseout="this.style.opacity=\'1\'"></div>';
+            html += '<div class="w04-breadth-seg" title="' + _w04Esc(cat + ': ' + n + ' (' + pct.toFixed(1) + '%)') + '" style="width:' + pct.toFixed(1) + '%;background:' + allColors[i] + '"></div>';
           }
         });
         html += '</div>';
         // 计数标签
-        html += '<div style="display:flex;justify-content:space-between;font-size:8px;color:var(--text-disabled);margin-top:2px">';
-        upCats.forEach(function(c) { html += '<span>' + (br[c]||0) + '</span>'; });
-        html += '<span style="width:6px"></span>';
-        dnCats.forEach(function(c) { html += '<span>' + (br[c]||0) + '</span>'; });
-        html += '<span style="color:var(--text-secondary);font-weight:600">' + bt + '只</span>';
+        html += '<div class="w04-breadth-labels">';
+        upCats.forEach(function(c) { html += '<span>' + _w04Esc(br[c]||0) + '</span>'; });
+        html += '<span class="w04-breadth-gap"></span>';
+        dnCats.forEach(function(c) { html += '<span>' + _w04Esc(br[c]||0) + '</span>'; });
+        html += '<span class="w04-breadth-total">' + _w04Esc(bt) + '只</span>';
         html += '</div>';
       }
       html += '</div>';
@@ -113,18 +121,18 @@ class MarketOverviewWidget extends YiMuWidget {
     var dnCnt2 = li['下跌家数'];
     var emotionVal = (upCnt2 != null && dnCnt2 != null && upCnt2 + dnCnt2 > 0)
       ? Math.round(upCnt2 / (upCnt2 + dnCnt2) * 100) : null;
-    html += '<div style="display:flex;gap:6px">';
+    html += '<div class="w04-metric-grid">';
     var emotionDisplay = emotionVal != null ? emotionVal + '%' : (sent['情绪值'] != null ? sent['情绪值'] + '%' : '—');
-    html += '<div class="kpi-card" style="flex:1;padding:6px 8px"><div class="kpi-label">情绪值</div><div class="kpi-value" style="font-size:14px">'+ emotionDisplay +'</div></div>';
+    html += '<div class="kpi-card w04-metric-card"><div class="kpi-label">情绪值</div><div class="kpi-value">'+ _w04Esc(emotionDisplay) +'</div></div>';
     var ztVal = pickW04Return(iw, '昨日涨停收益', sent['昨日涨停收益'], hasLiveIwencai);
     var ztCls = (ztVal != null && !isNaN(parseFloat(ztVal)) && parseFloat(ztVal) > 0) ? 'up' : (ztVal != null && !isNaN(parseFloat(ztVal)) && parseFloat(ztVal) < 0) ? 'down' : '';
-    html += '<div class="kpi-card" style="flex:1;padding:6px 8px"><div class="kpi-label">昨停今日</div><div class="kpi-value'+(ztCls?' '+ztCls:'')+'" style="font-size:14px">'+ formatW04Pct(ztVal) +'</div></div>';
+    html += '<div class="kpi-card w04-metric-card"><div class="kpi-label">昨停今日</div><div class="kpi-value'+(ztCls?' '+ztCls:'')+'">'+ _w04Esc(formatW04Pct(ztVal)) +'</div></div>';
     var lbVal = pickW04Return(iw, '连板收益', sent['连板收益'], hasLiveIwencai);
     var lbCls = (lbVal != null && !isNaN(parseFloat(lbVal)) && parseFloat(lbVal) > 0) ? 'up' : (lbVal != null && !isNaN(parseFloat(lbVal)) && parseFloat(lbVal) < 0) ? 'down' : '';
-    html += '<div class="kpi-card" style="flex:1;padding:6px 8px"><div class="kpi-label">连板今日</div><div class="kpi-value'+(lbCls?' '+lbCls:'')+'" style="font-size:14px">'+ formatW04Pct(lbVal) +'</div></div>';
+    html += '<div class="kpi-card w04-metric-card"><div class="kpi-label">连板今日</div><div class="kpi-value'+(lbCls?' '+lbCls:'')+'">'+ _w04Esc(formatW04Pct(lbVal)) +'</div></div>';
     var zbVal = pickW04Return(iw, '炸板收益', sent['昨日炸板收益'], hasLiveIwencai);
     var zbCls = (zbVal != null && !isNaN(parseFloat(zbVal)) && parseFloat(zbVal) > 0) ? 'up' : (zbVal != null && !isNaN(parseFloat(zbVal)) && parseFloat(zbVal) < 0) ? 'down' : '';
-    html += '<div class="kpi-card" style="flex:1;padding:6px 8px"><div class="kpi-label">炸板今日</div><div class="kpi-value'+(zbCls?' '+zbCls:'')+'" style="font-size:14px">'+ formatW04Pct(zbVal) +'</div></div>';
+    html += '<div class="kpi-card w04-metric-card"><div class="kpi-label">炸板今日</div><div class="kpi-value'+(zbCls?' '+zbCls:'')+'">'+ _w04Esc(formatW04Pct(zbVal)) +'</div></div>';
     html += '</div>';
 
     // === 北向资金 (60s 实时) ===
@@ -135,10 +143,10 @@ class MarketOverviewWidget extends YiMuWidget {
       var total_nb = hgt + sgt;
       var nbCls = total_nb >= 0 ? 'up' : 'down';
       var nbSign = total_nb >= 0 ? '+' : '';
-      html += '<div style="display:flex;gap:6px;padding:4px 0">' +
-        '<div class="kpi-card" style="flex:1;padding:4px 8px">' +
-        '<span style="font-size:9px;color:var(--text-disabled)">北向资金</span> ' +
-        '<span class="' + nbCls + '" style="font-weight:600;font-size:14px">' + nbSign + total_nb.toFixed(1) + '亿</span>' +
+      html += '<div class="w04-northbound-row">' +
+        '<div class="kpi-card w04-northbound-card">' +
+        '<span class="w04-northbound-label">北向资金</span> ' +
+        '<span class="' + nbCls + '">' + _w04Esc(nbSign + total_nb.toFixed(1) + '亿') + '</span>' +
         '</div></div>';
     }
 
@@ -151,20 +159,20 @@ class MarketOverviewWidget extends YiMuWidget {
     var yestBody = '';
       yestIndexes.forEach(function(yi) {
         var ydir = yi.chg.charAt(0) === '+' ? 'up' : yi.chg.charAt(0) === '-' ? 'down' : '';
-        yestBody += '<span style="display:inline-flex;align-items:center;gap:4px;padding:2px 8px;background:var(--bg-base);border-radius:4px;font-size:11px">' +
-          '<strong style="color:var(--text-primary);font-size:12px">' + yi.name + '</strong> ' +
-          '<span class="' + ydir + '" style="font-weight:600">' + yi.chg + '</span>' +
-          '<span style="color:var(--text-disabled)">' + yi.amt + '</span>';
+        yestBody += '<span class="w04-baseline-pill">' +
+          '<strong>' + _w04Esc(yi.name) + '</strong> ' +
+          '<span class="' + ydir + '">' + _w04Esc(yi.chg) + '</span>' +
+          '<span>' + _w04Esc(yi.amt) + '</span>';
         if (yi.up != null && yi.dn != null) {
-          yestBody += ' <span class="up">' + yi.up + '</span>/<span class="down">' + yi.dn + '</span>';
+          yestBody += ' <span class="up">' + _w04Esc(yi.up) + '</span>/<span class="down">' + _w04Esc(yi.dn) + '</span>';
         }
         yestBody += '</span>';
       });
 
-      html += '<div style="border-top:1px solid var(--border-light);padding-top:4px">' +
-        '<div id="w04_baseline_toggle" style="display:flex;align-items:center;gap:4px;cursor:pointer;user-select:none;font-size:9px;color:var(--text-disabled);text-transform:uppercase;letter-spacing:0.5px">' +
-        '<span style="font-size:8px;transition:transform .2s;transform:rotate(90deg)" id="w04_baseline_arrow">▶</span> 昨日收盘基线</div>' +
-        '<div id="w04_baseline_body" style="display:flex;margin-top:4px;gap:6px;flex-wrap:wrap">' + yestBody + '</div>' +
+      html += '<div class="w04-baseline">' +
+        '<div id="w04_baseline_toggle" class="w04-baseline-toggle">' +
+        '<span id="w04_baseline_arrow" class="w04-baseline-arrow">▶</span> 昨日收盘基线</div>' +
+        '<div id="w04_baseline_body" class="w04-baseline-body">' + yestBody + '</div>' +
         '</div>';
 
     html += '</div>';

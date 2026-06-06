@@ -110,15 +110,13 @@ class W1CheckWidget extends YiMuWidget {
     // Phase 4: 健康门禁 — trade_entry_allowed=false 时整版关闭
     if (data && data.trade_entry_allowed === false) {
       var reason = data.trade_entry_reason || '系统健康检查未通过';
-      body.innerHTML = '<div style="text-align:center;padding:20px;color:var(--danger);font-weight:600">交易入口已关闭</div>'
-        + '<div style="font-size:12px;color:var(--text-secondary);text-align:center">' + reason + '</div>';
+      body.innerHTML = '<div class="ui-degraded"><strong>交易入口已关闭</strong><span>' + reason + '</span></div>';
       this.updateTimestamp();
       return;
     }
 
     if (rsMissing) {
-      body.innerHTML = '<div style="text-align:center;padding:20px;color:var(--danger);font-weight:600">规则状态不可用</div>'
-        +'<div style="font-size:12px;color:var(--text-disabled);text-align:center">后端 rule_state 未生成</div>';
+      body.innerHTML = '<div class="ui-degraded"><strong>规则状态不可用</strong><span>后端 rule_state 未生成，W1 结论暂停显示。</span></div>';
       this.updateTimestamp();
       return;
     }
@@ -429,7 +427,7 @@ class W1CheckWidget extends YiMuWidget {
       html += '</div>';
     }
 
-    // ===== AI 盯盘信号 =====
+    // ===== 外部研判信号 =====
     this._loadAI();
     if (this._aiInsights) {
       var today = new Date().toISOString().slice(0,10);
@@ -443,7 +441,7 @@ class W1CheckWidget extends YiMuWidget {
         var watchCount = aiSignals.filter(function(s){return s.type==='WATCH';}).length;
         html += '<div style="padding:6px 8px;margin-top:4px;background:rgba(59,130,246,0.06);border-radius:6px;border-left:3px solid var(--info)">'+
           '<div style="display:flex;align-items:center;gap:6px;margin-bottom:2px">'+
-            '<span style="font-size:11px;font-weight:700;color:var(--info)">AI 盯盘</span>'+
+            '<span style="font-size:11px;font-weight:700;color:var(--info)">研判信号</span>'+
             '<span style="font-size:10px;color:var(--text-disabled)">'+aiNodes[0]+'</span>'+
             (buyCount>0?'<span style="font-size:10px;color:var(--up)">'+buyCount+' BUY</span>':'')+
             (watchCount>0?'<span style="font-size:10px;color:var(--info)">'+watchCount+' WATCH</span>':'')+

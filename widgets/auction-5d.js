@@ -9,19 +9,19 @@ class Auction5DWidget extends YiMuWidget {
     var snap = (data && data.auction_snapshot) || {};
 
     if (!snap._available) {
-      body.innerHTML = '<div style="font-size:var(--fs-label);color:var(--text-disabled);text-align:center;padding:var(--sp-md)">竞价数据不可用</div>';
+      body.innerHTML = '<div class="ui-empty ui-empty-inline"><div class="ui-empty-title">竞价数据不可用</div></div>';
       this.updateTimestamp();
       return;
     }
 
     if (snap._stale) {
-      body.innerHTML = '<div style="font-size:var(--fs-label);color:var(--warn);text-align:center;padding:var(--sp-md)">竞价数据过期</div>';
+      body.innerHTML = '<div class="ui-degraded"><strong>竞价数据过期</strong><span>请核对 9:28 快照是否已生成。</span></div>';
       this.updateTimestamp();
       return;
     }
 
     if (!snap['指数竞价'] || !snap['信号灯']) {
-      body.innerHTML = '<div style="font-size:var(--fs-label);color:var(--text-disabled);text-align:center;padding:var(--sp-md)">竞价数据结构不完整</div>';
+      body.innerHTML = '<div class="ui-empty ui-empty-inline"><div class="ui-empty-title">竞价数据结构不完整</div></div>';
       this.updateTimestamp();
       return;
     }
@@ -33,7 +33,7 @@ class Auction5DWidget extends YiMuWidget {
     var lights = snap['信号灯'] || {};
     var overall = lights['综合'] || {};
     var lightColors = {green:'var(--info)', orange:'var(--warn)', red:'var(--danger)'};
-    var lightDots = {green:'🟢', orange:'🟠', red:'🔴'};
+    var lightText = {green:'正常', orange:'关注', red:'风险'};
     var lightBg = {green:'rgba(59,130,246,0.06)', orange:'rgba(255,149,0,0.05)', red:'rgba(255,59,48,0.05)'};
 
     var html = '';
@@ -41,7 +41,7 @@ class Auction5DWidget extends YiMuWidget {
     // === 顶部综合条 ===
     var oc = overall['灯'] || 'orange';
     html += '<div style="display:flex;align-items:center;gap:var(--sp-sm);padding:var(--sp-xs) var(--sp-md);margin-bottom:var(--sp-sm);background:'+(lightBg[oc]||lightBg.orange)+';border-radius:var(--radius-md);border-left:3px solid '+(lightColors[oc]||lightColors.orange)+'">' +
-      '<span style="font-size:16px">'+(lightDots[oc]||'🟠')+'</span>' +
+      '<span style="font-size:11px;font-weight:800;color:'+(lightColors[oc]||lightColors.orange)+'">'+(lightText[oc]||'关注')+'</span>' +
       '<span style="font-weight:700;font-size:var(--fs-subtitle);color:'+(lightColors[oc]||lightColors.orange)+'">'+(overall['label']||'—')+'</span>' +
       '<span style="font-size:var(--fs-body);color:var(--text-secondary)">强势'+(snap['竞价强势家数']||0)+'只</span>' +
       '<span style="font-size:var(--fs-body);color:var(--text-secondary)">涨'+(snap['涨跌家数']['上涨']||0)+'/跌'+(snap['涨跌家数']['下跌']||0)+'</span>' +
@@ -125,7 +125,7 @@ class Auction5DWidget extends YiMuWidget {
     ['涨跌','强势','高标'].forEach(function(k) {
       var l = lights[k] || {};
       var c = l['灯'] || 'orange';
-      html += '<span style="padding:1px 6px;border-radius:3px;background:'+(lightBg[c]||'')+';color:'+(lightColors[c]||'')+'">'+(lightDots[c]||'')+' '+k+':'+(l['label']||'—')+'</span>';
+      html += '<span style="padding:1px 6px;border-radius:3px;background:'+(lightBg[c]||'')+';color:'+(lightColors[c]||'')+'">'+(lightText[c]||'关注')+' '+k+':'+(l['label']||'—')+'</span>';
     });
     var sectors = snap['板块竞价'] || [];
     sectors.forEach(function(sec) {

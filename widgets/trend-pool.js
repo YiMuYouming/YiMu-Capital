@@ -19,7 +19,7 @@ class TrendPoolWidget extends YiMuWidget {
     var pool = (data && data.trend_pool) || [];
 
     if (!pool.length) {
-      body.innerHTML = '<div style="padding:var(--sp-lg);text-align:center;color:var(--text-disabled)">趋势池数据未录入</div>';
+      body.innerHTML = '<div class="ui-empty"><div class="ui-empty-title">趋势池数据未录入</div><div class="ui-empty-detail">等待复盘基线或实时自选池同步。</div></div>';
       return;
     }
 

@@ -92,7 +92,7 @@ class SectorHeatWidget extends YiMuWidget {
     if (!inflow.length) this._loadSectorInflow();
 
     if (!sectors.length) {
-      body.innerHTML = '<div class="w10-empty">板块状态未录入</div>';
+      body.innerHTML = '<div class="ui-empty w10-empty"><div class="ui-empty-title">板块状态未录入</div></div>';
       this.updateTimestamp();
       return;
     }

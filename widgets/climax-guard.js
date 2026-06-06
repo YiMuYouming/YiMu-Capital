@@ -10,8 +10,7 @@ class ClimaxGuardWidget extends YiMuWidget {
 
     // ── rule_state 缺失 → 不可确认 ──
     if (!RS) {
-      body.innerHTML = '<div style="text-align:center;padding:20px;color:var(--danger);font-weight:600">规则状态不可用</div>'
-        +'<div style="font-size:12px;color:var(--text-disabled);text-align:center">缺少 rule_state，高潮保护结论不可确认</div>';
+      body.innerHTML = '<div class="ui-degraded"><strong>规则状态不可用</strong><span>缺少 rule_state，高潮保护结论不可确认。</span></div>';
       this.updateTimestamp();
       return;
     }
@@ -67,7 +66,7 @@ class ClimaxGuardWidget extends YiMuWidget {
 
     // 规则来源标注
     html += '<div style="margin-top:var(--sp-sm);text-align:center;font-size:var(--fs-body);font-weight:600;color:var(--'+(triggered?'danger':'down')+')">'+
-      (triggered ? '⚠ 高潮保护触发' : '✓ 高潮未触发') +
+      (triggered ? '高潮保护触发' : '高潮未触发') +
       '</div>';
     html += '<div style="font-size:10px;color:var(--text-disabled);text-align:center;margin-top:2px">来源: rule_state</div>';
 

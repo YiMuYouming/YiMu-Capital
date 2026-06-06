@@ -69,15 +69,13 @@ class W2CheckWidget extends YiMuWidget {
     // Phase 4: 健康门禁 — trade_entry_allowed=false 时整版关闭
     if (data && data.trade_entry_allowed === false) {
       var reason = data.trade_entry_reason || '系统健康检查未通过';
-      body.innerHTML = '<div style="text-align:center;padding:20px;color:var(--danger);font-weight:600">交易入口已关闭</div>'
-        + '<div style="font-size:12px;color:var(--text-secondary);text-align:center">' + reason + '</div>';
+      body.innerHTML = '<div class="ui-degraded"><strong>交易入口已关闭</strong><span>' + reason + '</span></div>';
       this.updateTimestamp();
       return;
     }
 
     if (rsMissing) {
-      body.innerHTML = '<div style="text-align:center;padding:20px;color:var(--danger);font-weight:600">规则状态不可用</div>'
-        +'<div style="font-size:12px;color:var(--text-disabled);text-align:center">后端 rule_state 未生成</div>';
+      body.innerHTML = '<div class="ui-degraded"><strong>规则状态不可用</strong><span>后端 rule_state 未生成，W2 结论暂停显示。</span></div>';
       this.updateTimestamp();
       return;
     }

@@ -68,11 +68,11 @@ def _render_widget(widget_file, widget_id, data_fixture, extra_js=""):
     script += r"""
 var cls = WidgetRegistry._map["WIDGET_ID"];
 if (!cls) { console.log(JSON.stringify({_error: "Widget not registered"})); process.exit(); }
+var body = document.createElement('div');
 var inst = new cls({id: "WIDGET_ID"});
-// Inject body
-inst.getBody = function() { var d = document.createElement('div'); this._body = d; return d; };
+inst.getBody = function() { return body; };
 inst.render(DATA_FIXTURE);
-var html = inst._body.innerHTML.replace(/\s+/g, ' ');
+var html = body.innerHTML.replace(/\s+/g, ' ');
 console.log(JSON.stringify({html: html}));
 """.replace("WIDGET_ID", widget_id).replace("DATA_FIXTURE", json.dumps(data_fixture))
 
@@ -156,6 +156,7 @@ class W07W14W19MissingRuleStateTest(unittest.TestCase):
         result = _render_widget("climax-guard.js", "W07", _missing_rs_fixture())
         html = result.get("html", "")
         self.assertIn("不可用", html, f"W07 缺失 rule_state 应显示不可用: {html[:200]}")
+        self.assertIn("ui-degraded", html, f"W07 缺失 rule_state 应使用统一降级态: {html[:200]}")
         self.assertNotIn("未触发", html)
         self.assertNotIn("W1 正常", html)
         self.assertNotIn("W2 正常", html)
@@ -164,6 +165,7 @@ class W07W14W19MissingRuleStateTest(unittest.TestCase):
         result = _render_widget("risk-panel.js", "W14", _missing_rs_fixture())
         html = result.get("html", "")
         self.assertIn("不可用", html, f"W14 缺失 rule_state 应显示不可用: {html[:200]}")
+        self.assertIn("ui-degraded", html, f"W14 缺失 rule_state 应使用统一降级态: {html[:300]}")
 
     def test_w19_missing_rs_no_double_ice_conclusion(self):
         result = _render_widget("midday-review.js", "W19", _missing_rs_fixture())
@@ -231,17 +233,76 @@ class RuleCodeDisplayTest(unittest.TestCase):
         self.assertIn("连亏计数提示，盘前预案已覆盖", html,
                       f"W14 应展示连亏 warning: {html[:600]}")
         self.assertIn("2天", html, f"W14 风控线应展示 warning 中的连亏天数: {html[:600]}")
-        self.assertIn("⚠ 提示", html, f"W14 连亏 warning 不应显示为正常: {html[:600]}")
-        self.assertNotIn("2天</span><span style=\"color:var(--info)\">✓ 正常", html)
+        self.assertIn(">提示</span>", html, f"W14 连亏 warning 不应显示为正常: {html[:600]}")
+        self.assertNotIn("2天</span><span style=\"color:var(--info)\">正常", html)
 
     def test_w03_shows_baseline_and_execution_sources(self):
         fixture = _day_stop_fixture()
         fixture["style"] = {"总仓位上限": 40, "连板占比": 45, "趋势占比": 55}
         result = _render_widget("position-calc.js", "W03", fixture)
         html = result.get("html", "")
+        theme = (ROOT / "css" / "theme.css").read_text()
+        self.assertIn("w03-command is-blocked", html, f"W03 应先展示仓位指令摘要: {html[:500]}")
+        self.assertIn("仓位指令", html, f"W03 应有主结论标题: {html[:500]}")
+        self.assertIn("可新开", html, f"W03 应把可新开金额前置: {html[:500]}")
         self.assertIn("执行上限", html, f"W03 应区分实时执行口径: {html[:500]}")
         self.assertIn("风格基线", html, f"W03 应展示 W02 风格基线: {html[:500]}")
         self.assertIn("全局门禁", html, f"W03 阻断应分组展示: {html[:500]}")
+        self.assertIn(".w03-command-grid", theme)
+        self.assertIn(".w03-track-lb{background:var(--up)}", theme)
+        self.assertIn(".w03-track-trend{background:var(--info)}", theme)
+
+    def test_w03_escapes_warning_messages(self):
+        fixture = _missing_rs_fixture()
+        fixture["rule_state"] = {
+            "version": "g1a-v1",
+            "tradable": True,
+            "caps": {
+                "base_total_pct": 60, "total_pct": 60,
+                "lianban_pct": 57, "trend_pct": 43, "first_entry_pct": 10,
+            },
+            "windows": {"w1": {}, "w2": {}},
+            "blocks": [],
+            "warnings": [
+                {"code": "CUSTOM", "scope": "position",
+                 "message": "<img src=x onerror=alert(1)>",
+                 "evidence": {}},
+            ],
+        }
+        result = _render_widget("position-calc.js", "W03", fixture)
+        html = result.get("html", "")
+        self.assertIn("&lt;img src=x onerror=alert(1)&gt;", html,
+                      f"W03 warning 文案应转义: {html[:600]}")
+        self.assertNotIn("<img src=x", html, f"W03 不应注入 HTML: {html[:600]}")
+
+    def test_w03_sanitizes_caps_and_style_numbers(self):
+        fixture = _missing_rs_fixture()
+        fixture["style"] = {
+            "总仓位上限": "60<img src=x onerror=alert(2)>",
+            "连板占比": "56<img src=x onerror=alert(3)>",
+            "趋势占比": "44<img src=x onerror=alert(4)>",
+            "新开趋势W2上限": "10-14%<img src=x onerror=alert(5)>",
+        }
+        fixture["rule_state"] = {
+            "version": "g1a-v1",
+            "tradable": True,
+            "caps": {
+                "base_total_pct": "40<img src=x onerror=alert(6)>",
+                "total_pct": "20<img src=x onerror=alert(7)>",
+                "lianban_pct": "12<img src=x onerror=alert(8)>",
+                "trend_pct": "8<img src=x onerror=alert(9)>",
+                "first_entry_pct": "10<img src=x onerror=alert(10)>",
+            },
+            "windows": {"w1": {}, "w2": {}},
+            "blocks": [],
+            "warnings": [],
+        }
+        result = _render_widget("position-calc.js", "W03", fixture)
+        html = result.get("html", "")
+        self.assertNotIn("<img", html, f"W03 caps/style 不应注入 HTML: {html[:900]}")
+        self.assertIn("20%", html, f"W03 应保留合法 total_pct 数值: {html[:500]}")
+        self.assertIn("W2 10-14%", html, f"W03 应只展示合法 W2 区间: {html[:900]}")
+        self.assertNotIn("alert(", html, f"W03 不应展示污染脚本文案: {html[:900]}")
 
     def test_w03_keeps_plan_allocation_visible_when_execution_blocked(self):
         fixture = _day_stop_fixture()
@@ -310,6 +371,21 @@ class W01TimelineRenderTest(unittest.TestCase):
         )
         self.assertIn("全天进度", html, f"W01 应显示进度: {html[:300]}")
         self.assertIn("time-line", html, f"W01 应使用稳定布局 class: {html[:300]}")
+        self.assertIn("timeline-shell", html, f"W01 应使用稳定布局 class: {html[:300]}")
+        self.assertIn("timeline-track", html, f"W01 应使用稳定时间条 class: {html[:300]}")
+
+
+class W11VolumeBarsRenderTest(unittest.TestCase):
+    """W11 量价图应使用统一空态和稳定 tooltip class。"""
+
+    def test_w11_empty_uses_shared_quiet_state(self):
+        result = _render_widget("volume-bars.js", "W11", {})
+        html = result.get("html", "")
+        self.assertIn("w11-tip", html)
+        self.assertIn("ui-empty", html)
+        self.assertIn("w11-empty", html)
+        self.assertIn("等待今日15min数据", html)
+        self.assertNotIn("style=\"height:156px;display:flex", html)
 
 
 class TradeTicketsWidgetRenderTest(unittest.TestCase):
@@ -327,6 +403,10 @@ class TradeTicketsWidgetRenderTest(unittest.TestCase):
         self.assertIn("可执行", html)
         self.assertIn("已阻断", html)
         self.assertIn("已成交/关闭", html)
+        self.assertIn("ticket-summary-grid", html)
+        self.assertIn("ticket-summary-pill", html)
+        self.assertIn("ticket-card", html)
+        self.assertIn("ticket-section-title", html)
         self.assertIn("sellable_qty", html)
         self.assertIn("买入", html)
         self.assertIn("可执行", html)
@@ -361,6 +441,76 @@ class TradeTicketsWidgetRenderTest(unittest.TestCase):
         self.assertIn("T1_SELLABLE_QTY", html)
         self.assertIn("7000", html)
         self.assertIn("10000", html)
+
+    def test_w24_empty_sections_use_shared_quiet_state(self):
+        result = _render_widget("trade-tickets.js", "W24", {"trade_tickets": []})
+        self.assertNotIn("_error", result)
+        html = result["html"]
+        self.assertIn("ui-empty ui-empty-inline", html)
+        self.assertIn("暂无", html)
+        self.assertNotIn("border:1px dashed var(--border-light)", html)
+
+    def test_w24_readonly_mode_hides_mutating_controls(self):
+        readonly_js = """
+global.window = {
+  _detectRuntimeMode: function(){ return {readonly:true}; },
+  _healthConfirmed: true,
+  _healthCritical: false,
+  _tradeEntryAllowed: true
+};
+"""
+        result = _render_widget("trade-tickets.js", "W24", {
+            "trade_tickets": [
+                {"ticket_id": "TICKET-1", "code": "002281", "name": "光迅科技",
+                 "action_type": "buy", "status": "executable", "window": "W2", "max_qty": 100}
+            ]
+        }, extra_js=readonly_js)
+        self.assertNotIn("_error", result)
+        html = result["html"]
+        self.assertIn("只读闭环", html)
+        self.assertNotIn("data-tt-prepare", html)
+        self.assertNotIn("data-tt-preview", html)
+        self.assertNotIn("data-tt-confirm", html)
+
+    def test_w24_readonly_direct_write_methods_do_not_post(self):
+        widget_src = (ROOT / "widgets" / "trade-tickets.js").read_text(encoding="utf-8")
+        script = PREAMBLE + "\n" + r"""
+global.window = {
+  _detectRuntimeMode: function(){ return {readonly:true}; },
+  _healthConfirmed: true,
+  _healthCritical: false,
+  _tradeEntryAllowed: true
+};
+""" + widget_src + r"""
+(async function() {
+var calls = [];
+global.fetch = function(url, opts) {
+  calls.push({url:String(url), method:(opts && opts.method) || 'GET'});
+  return Promise.resolve({ok:true, json:function(){ return Promise.resolve({ok:true}); }});
+};
+var cls = WidgetRegistry._map["W24"];
+var inst = new cls({id:"W24"});
+var body = { innerHTML:'', querySelector:function(){ return null; }, querySelectorAll:function(){ return []; } };
+inst.getBody = function(){ return body; };
+var err = '';
+try {
+  await inst._prepareTicket({intent_text:'准备 W2 买 光迅科技', action_type:'buy', code:'002281', name:'光迅科技', window:'W2', qty:200});
+} catch (e) {
+  err = e && e.message || String(e);
+}
+console.log(JSON.stringify({calls:calls, err:err, status:inst._statusMessage}));
+})();
+"""
+        result = subprocess.run(
+            ["node", "--no-warnings", "-e", script],
+            capture_output=True, text=True, timeout=10,
+            cwd=str(ROOT),
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        resp = json.loads(result.stdout.strip().split("\n")[-1])
+        self.assertEqual([], resp["calls"])
+        self.assertIn("只读", resp["err"])
+        self.assertIn("只读", resp["status"])
 
     def test_w24_mount_uses_base_render_lifecycle(self):
         base_src = (ROOT / "widget-base.js").read_text(encoding="utf-8")
@@ -589,12 +739,45 @@ console.log(JSON.stringify({html:body.innerHTML.replace(/\s+/g, ' '), action:for
         self.assertIn("优先用交易票据确认成交", src)
         self.assertIn("manual_backfill", src)
         self.assertIn("audit_note", src)
+        self.assertIn("w15-kpi-grid", src)
+        self.assertIn("w15-kpi-value", src)
+        self.assertIn("data-table w15-table", src)
+
+    def test_w15_readonly_mode_hides_manual_backfill(self):
+        readonly_js = """
+global.window = {
+  _detectRuntimeMode: function(){ return {readonly:true}; },
+  _healthConfirmed: true,
+  _healthCritical: false,
+  _tradeEntryAllowed: true
+};
+"""
+        result = _render_widget("positions.js", "W15", {
+            "pnl_live": {
+                "total_asset": 100000,
+                "cash": 100000,
+                "mv": 0,
+                "pos_pct": 0,
+                "pnl_amount": 0,
+                "pnl_pct": 0,
+                "positions": [],
+                "trades": [],
+            },
+            "live_quotes": {},
+        }, extra_js=readonly_js)
+        self.assertNotIn("_error", result)
+        html = result["html"]
+        self.assertIn("w15-readonly-lock", html)
+        self.assertIn("只读", html)
+        self.assertNotIn("w15_add", html)
+        self.assertNotIn("应急补录", html)
 
     def test_index_exposes_ticket_entry_and_default_workspace(self):
         src = (ROOT / "index.html").read_text(encoding="utf-8")
         self.assertIn('data-widget="W24"', src)
-        self.assertIn("_addWidgetToGrid('W24')", src)
+        self.assertIn("_ensureRequiredLayoutWidgets()", src)
         self.assertIn("本地预览 · 只读", src)
+        self.assertIn("REQUIRED_LAYOUT_WIDGETS", src)
 
     def test_w23_groups_review_rows_by_ticket_or_trade_group(self):
         wpath = ROOT / "widgets" / "trade-review.js"
@@ -625,6 +808,43 @@ console.log(JSON.stringify({html: body.innerHTML.replace(/\s+/g, ' ')}));
         self.assertIn("光迅科技", html)
         self.assertIn("买入票据", html)
         self.assertIn("trade 43", html)
+        self.assertIn("w23-toolbar", html)
+        self.assertIn("filter-btn w23-filter-btn active", html)
+        self.assertIn("w23-table-wrap", html)
+        self.assertIn("data-table w23-table", html)
+        self.assertIn("w23-group-row", html)
+        self.assertIn("w23-summary-row", html)
+
+    def test_w23_empty_and_loading_use_shared_quiet_state(self):
+        wpath = ROOT / "widgets" / "trade-review.js"
+        widget_src = wpath.read_text(encoding="utf-8")
+        script = PREAMBLE + "\n" + widget_src + r"""
+var cls = WidgetRegistry._map["W23"];
+var inst = new cls({id:"W23"});
+inst.getBody = function() { var d = document.createElement('div'); this._body = d; return d; };
+var body = inst.getBody();
+inst._renderTable(body, [], "2026-06-03");
+var emptyHtml = body.innerHTML.replace(/\s+/g, ' ');
+body.innerHTML = inst._loadingHtml();
+var loadingHtml = body.innerHTML.replace(/\s+/g, ' ');
+inst._error = 'fail';
+inst.render();
+var errorHtml = inst._body.innerHTML.replace(/\s+/g, ' ');
+console.log(JSON.stringify({emptyHtml: emptyHtml, loadingHtml: loadingHtml, errorHtml: errorHtml}));
+"""
+        result = subprocess.run(
+            ["node", "--no-warnings", "-e", script],
+            capture_output=True, text=True, timeout=10,
+            cwd=str(ROOT),
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        payload = json.loads(result.stdout.strip().split("\n")[-1])
+        self.assertIn("ui-empty w23-empty", payload["emptyHtml"])
+        self.assertIn("暂无成交记录", payload["emptyHtml"])
+        self.assertIn("w23-filter-bar", payload["emptyHtml"])
+        self.assertIn("ui-empty ui-empty-inline w23-loading", payload["loadingHtml"])
+        self.assertIn("ui-degraded w23-error", payload["errorHtml"])
+        self.assertNotIn("text-align:center;padding:var(--sp-md)", payload["errorHtml"])
 
 
 class W02StyleDisplayTest(unittest.TestCase):
@@ -656,6 +876,7 @@ class W02StyleDisplayTest(unittest.TestCase):
         self.assertIn("每日基线", html, f"W02 应标明这是每日基线: {html[:400]}")
         self.assertIn("基线仓位", html, f"W02 仓位口径应避免误认为实时可开仓: {html[:400]}")
         self.assertIn("3.24万亿", html, f"W02 应展示可读成交额: {html[:400]}")
+        self.assertIn("style-detect-head", html, f"W02 应使用稳定头部布局 class: {html[:400]}")
         self.assertNotIn("class=\"tag down\"", html, f"W02 不应用涨跌色表达趋势风格: {html[:400]}")
 
     def test_w02_weak_dimension_uses_renderable_progress_class(self):
@@ -677,9 +898,66 @@ class W02StyleDisplayTest(unittest.TestCase):
         css = (ROOT / "css" / "theme.css").read_text(encoding="utf-8")
         self.assertIn(".progress-fill.danger", css)
 
+    def test_w02_warning_and_exec_messages_are_escaped(self):
+        result = _render_widget("style-detect.js", "W02", {
+            "style": {
+                "总分": 30,
+                "风格": "混合<script>",
+                "连板占比": 50,
+                "趋势占比": 50,
+                "预警": ["<script>alert(1)</script>"],
+                "实际执行": {
+                    "原因": "<b>硬卡</b>",
+                    "原因2": "<img src=x onerror=alert(1)>",
+                },
+            },
+        })
+        html = result.get("html", "")
+        self.assertIn("style-detect-warning", html)
+        self.assertIn("style-detect-exec-block", html)
+        self.assertIn("&lt;script&gt;alert(1)&lt;/script&gt;", html)
+        self.assertIn("&lt;b&gt;硬卡&lt;/b&gt;", html)
+        self.assertIn("&lt;img src=x onerror=alert(1)&gt;", html)
+        self.assertNotIn("<script>", html)
+        self.assertNotIn("<img", html)
+
 
 class W04MarketOverviewTest(unittest.TestCase):
     """W04 市场全景成交额与昨日基线口径"""
+
+    def test_w04_uses_stable_layout_classes_and_escapes_dynamic_text(self):
+        result = _render_widget("market-overview.js", "W04", {
+            "live_index": {
+                "上证指数": "<script>alert(1)</script>",
+                "上证指数涨幅": "+1.23%",
+                "深证指数": "10000",
+                "深证指数涨幅": "-0.45%",
+                "创业指数": "2000",
+                "创业指数涨幅": "<img src=x onerror=alert(1)>",
+                "成交额": "<b>2万亿</b>",
+                "上涨家数": "<u>3000</u>",
+                "下跌家数": 2000,
+            },
+            "live_breadth": {"_total": 100, "涨停": 5, "0~3%": 45, "-0~-3%": 50},
+            "yesterday_baseline": {
+                "上证昨涨幅": "<svg onload=alert(1)>",
+                "上证昨成交额": "2.97万亿",
+            },
+        })
+        html = result.get("html", "")
+        self.assertIn("w04-board", html)
+        self.assertIn("w04-index-grid", html)
+        self.assertIn("w04-metric-grid", html)
+        self.assertIn("w04-breadth-bar", html)
+        self.assertIn("w04-baseline-pill", html)
+        self.assertIn("&lt;script&gt;alert(1)&lt;/script&gt;", html)
+        self.assertIn("&lt;b&gt;2万亿&lt;/b&gt;", html)
+        self.assertIn("&lt;u&gt;3000&lt;/u&gt;", html)
+        self.assertIn("&lt;svg onload=alert(1)&gt;", html)
+        self.assertNotIn("<script>", html)
+        self.assertNotIn("<b>2万亿</b>", html)
+        self.assertNotIn("onmouseover=", html)
+        self.assertNotIn("onmouseout=", html)
 
     def test_w04_uses_midday_same_period_turnover_not_scaled_full_day(self):
         extra_js = """
@@ -826,6 +1104,39 @@ global.Date = class extends RealDate {
         self.assertNotIn("+12.74%", html, f"盘中问财收益缺失时不应显示复盘基线: {html[:900]}")
 
 
+class W06Auction5DTest(unittest.TestCase):
+    """W06 有效竞价快照主路径不应因状态灯文案崩溃"""
+
+    def test_w06_renders_valid_snapshot_without_emoji_light_dependency(self):
+        result = _render_widget("auction-5d.js", "W06", {
+            "auction_snapshot": {
+                "_available": True,
+                "_stale": False,
+                "time": "09:28",
+                "竞价强势家数": 12,
+                "涨跌家数": {"上涨": 3200, "下跌": 1800, "涨跌比": "1.78"},
+                "指数竞价": [{"名称": "上证", "竞价涨幅": 0.23}],
+                "情绪指标": {"情绪值": 58, "赚钱效应": "中性", "昨日涨停收益": 1.2},
+                "高标竞价": [{"名称": "测试高标", "板数": 3, "竞价涨幅": 5.2, "异动": "抢筹"}],
+                "自选池竞价": [{"名称": "测试自选", "来源": "趋势", "竞价涨幅": -1.3}],
+                "板块竞价": [{"板块": "算力", "竞价涨幅": 2.4}],
+                "信号灯": {
+                    "综合": {"灯": "green", "label": "可观察"},
+                    "涨跌": {"灯": "green", "label": "扩散"},
+                    "强势": {"灯": "orange", "label": "分歧"},
+                    "高标": {"灯": "red", "label": "风险"},
+                },
+            }
+        })
+        self.assertNotIn("_error", result)
+        html = result["html"]
+        self.assertIn("正常 涨跌:扩散", html)
+        self.assertIn("关注 强势:分歧", html)
+        self.assertIn("风险 高标:风险", html)
+        self.assertNotIn("🟢", html)
+        self.assertNotIn("🔴", html)
+
+
 class W10SectorHeatTest(unittest.TestCase):
     """W10 应以复盘板块为主线，实时数据只做校验"""
 
@@ -862,6 +1173,13 @@ class W10SectorHeatTest(unittest.TestCase):
         self.assertNotIn("待分析", html)
         self.assertNotIn("🔥", html)
         self.assertNotIn("⭐", html)
+
+    def test_w10_empty_uses_shared_quiet_state(self):
+        result = _render_widget("sector-heat.js", "W10", {"sectors": []})
+        html = result.get("html", "")
+        self.assertIn("ui-empty", html)
+        self.assertIn("w10-empty", html)
+        self.assertIn("板块状态未录入", html)
 
     def test_w10_falls_back_to_review_status_metrics(self):
         result = _render_widget("sector-heat.js", "W10", {
@@ -937,6 +1255,26 @@ global.fetch = function() { return Promise.resolve({ok: false}); };
         self.assertNotIn("最高板: <b>—</b>", html)
         self.assertNotIn("共2只", html, f"W21 不应把热榜 2 只计为确认涨停: {html[:900]}")
         self.assertNotIn("🤖", html)
+
+    def test_w21_empty_uses_shared_quiet_state(self):
+        extra_js = """
+var RealDate = Date;
+global.Date = class extends RealDate {
+  constructor() {
+    if (arguments.length === 0) return new RealDate('2026-05-29T12:30:00+08:00');
+    return new RealDate(...arguments);
+  }
+  static now() { return new RealDate('2026-05-29T12:30:00+08:00').getTime(); }
+  static parse(v) { return RealDate.parse(v); }
+  static UTC() { return RealDate.UTC.apply(RealDate, arguments); }
+};
+global.localStorage = { getItem: function() { return null; }, setItem: function() {} };
+"""
+        result = _render_widget("zt-echelon.js", "W21", {"hot_list": {"date": "2026-05-29", "stocks": [], "zt_stocks": []}}, extra_js=extra_js)
+        html = result.get("html", "")
+        self.assertIn("ui-empty", html)
+        self.assertIn("zt-empty", html)
+        self.assertIn("今日确认涨停源暂不可用", html)
 
 
 class StoreMergeRuleStateTest(unittest.TestCase):
@@ -1032,12 +1370,6 @@ console.log(JSON.stringify({tickets: DataStore.merged && DataStore.merged.trade_
         resp = json.loads(result.stdout.strip().split("\n")[-1])
         self.assertEqual(resp["tickets"][0]["ticket_id"], "T-1")
 
-
-if __name__ == "__main__":
-    unittest.main()
-
-
-
 class W1TradeEntryGateTest(unittest.TestCase):
     """v3 Phase 4: W1 录入入口按 trade_entry_allowed 关闭"""
 
@@ -1049,6 +1381,13 @@ class W1TradeEntryGateTest(unittest.TestCase):
         result = _render_widget("w1-check.js", "W08", fixture)
         html = result.get("html", "")
         self.assertIn("关闭", html, f"trade_entry_allowed=false W1 应显示关闭: {html[:200]}")
+        self.assertIn("ui-degraded", html, f"trade_entry_allowed=false W1 应使用统一降级态: {html[:200]}")
+
+    def test_w1_missing_rule_state_uses_degraded_state(self):
+        result = _render_widget("w1-check.js", "W08", _missing_rs_fixture())
+        html = result.get("html", "")
+        self.assertIn("规则状态不可用", html, f"W1 缺失 rule_state 应显示不可用: {html[:200]}")
+        self.assertIn("ui-degraded", html, f"W1 缺失 rule_state 应使用统一降级态: {html[:200]}")
 
     def test_w1_shows_candidates_when_trade_entry_allowed(self):
         """trade_entry_allowed=true 且 rule_state 正常 → W1 显示候选"""
@@ -1081,6 +1420,13 @@ class W2TradeEntryGateTest(unittest.TestCase):
         result = _render_widget("w2-check.js", "W09", fixture)
         html = result.get("html", "")
         self.assertIn("关闭", html, f"trade_entry_allowed=false W2 应显示关闭: {html[:200]}")
+        self.assertIn("ui-degraded", html, f"trade_entry_allowed=false W2 应使用统一降级态: {html[:200]}")
+
+    def test_w2_missing_rule_state_uses_degraded_state(self):
+        result = _render_widget("w2-check.js", "W09", _missing_rs_fixture())
+        html = result.get("html", "")
+        self.assertIn("规则状态不可用", html, f"W2 缺失 rule_state 应显示不可用: {html[:200]}")
+        self.assertIn("ui-degraded", html, f"W2 缺失 rule_state 应使用统一降级态: {html[:200]}")
 
     def test_w2_shows_candidates_when_trade_entry_allowed(self):
         """trade_entry_allowed=true 且 rule_state 正常 → W2 显示候选"""
@@ -1103,6 +1449,241 @@ class W2TradeEntryGateTest(unittest.TestCase):
         result = _render_widget("w2-check.js", "W09", fixture)
         html = result.get("html", "")
         self.assertNotIn("关闭", html, f"trade_entry_allowed=true W2 不应说关闭: {html[:200]}")
+
+class EvidenceBoardWidgetTest(unittest.TestCase):
+    """W25 renders stable S0/E/A/R references for external AI workflows"""
+
+    def test_w25_renders_s0_evidence_alert_risk(self):
+        fixture = {
+            "pnl_live": {
+                "total_asset": 720227.67,
+                "cash": 583679.67,
+                "mv": 136548,
+                "pos_pct": 18.96,
+                "pnl_pct": -0.51,
+                "quote_status": "close_snapshot",
+                "valuation_complete": True,
+                "positions": [{"标的": "光讯科技", "代码": "002281", "市值": 136548, "成本": 219.49, "today_pnl_pct": 4.12}],
+            },
+            "trade_tickets": [{"status": "filled"}, {"status": "closed"}],
+            "sentiment": {"情绪值": 59},
+            "iwencai": {"涨停家数": 46, "跌停家数": 2, "_freshness": {"level": "delayed"}},
+            "rule_state": {"tradable": True, "caps": {"total_pct": 40}, "blocks": []},
+        }
+        extra_js = (ROOT / "evidence-summary.js").read_text(encoding="utf-8")
+        result = _render_widget("evidence-board.js", "W25", fixture, extra_js=extra_js)
+        html = result.get("html", "")
+        self.assertNotIn("_error", html)
+        self.assertIn("S0", html)
+        self.assertIn("E1", html)
+        self.assertIn("A1", html)
+        self.assertIn("R1", html)
+        self.assertIn("光讯科技", html)
+        self.assertIn("收盘快照", html)
+
+
+class ReadOnlyInsightUxTest(unittest.TestCase):
+    """Dashboard keeps AI interaction outside the cockpit surface."""
+
+    def test_dashboard_does_not_mount_chat_or_post_llm(self):
+        index = (ROOT / "index.html").read_text(encoding="utf-8")
+        chat = (ROOT / "widgets" / "llm-chat.js").read_text(encoding="utf-8")
+        monitor = (ROOT / "widgets" / "llm-monitor.js").read_text(encoding="utf-8")
+        registry = (ROOT / "widget-registry.js").read_text(encoding="utf-8")
+        w1 = (ROOT / "widgets" / "w1-check.js").read_text(encoding="utf-8")
+        pnl = (ROOT / "widgets" / "pnl-curve.js").read_text(encoding="utf-8")
+
+        self.assertNotIn('src="widgets/llm-chat.js"', index)
+        self.assertNotIn("llmChatMount", index)
+        self.assertNotIn("llmPanelBtn", index)
+        self.assertNotIn("fetch('/api/llm'", index)
+        self.assertNotIn('fetch("/api/llm"', index)
+        self.assertNotIn("fetch('/api/llm'", chat)
+        self.assertNotIn('fetch("/api/llm"', chat)
+        self.assertIn("function _uiEsc", index)
+        self.assertIn("_uiEsc(e.text || '')", index)
+        self.assertIn("_uiEsc(e.node)", index)
+        self.assertIn("_uiEsc(e.ts)", index)
+        self.assertIn("研判摘要", registry)
+        self.assertNotIn("title:'AI盯盘'", registry)
+        self.assertNotIn("打开对话", monitor)
+        self.assertNotIn("_llmChat", monitor)
+        self.assertIn("只读展示", monitor)
+        self.assertNotIn("AI 盯盘", w1)
+        self.assertIn("研判信号", w1)
+        self.assertNotIn("📊", pnl)
+
+
+class CoreQuietStateUxTest(unittest.TestCase):
+    """Core cockpit widgets share the same empty/degraded state language."""
+
+    def test_shared_quiet_state_css_exists(self):
+        theme = (ROOT / "css" / "theme.css").read_text(encoding="utf-8")
+        self.assertIn(".ui-empty{", theme)
+        self.assertIn(".ui-empty-inline", theme)
+        self.assertIn(".ui-empty-title", theme)
+        self.assertIn(".ui-empty-detail", theme)
+        self.assertIn(".ui-degraded{", theme)
+
+    def test_core_cockpit_refinement_css_exists(self):
+        theme = (ROOT / "css" / "theme.css").read_text(encoding="utf-8")
+        for cls in [
+            ".ticket-summary-grid",
+            ".ticket-summary-pill",
+            ".ticket-card",
+            ".ticket-entry-grid",
+            ".w15-kpi-grid",
+            ".w15-kpi-value",
+            ".data-table.w15-table",
+        ]:
+            self.assertIn(cls, theme)
+
+    def test_secondary_widgets_use_shared_empty_states(self):
+        files = [
+            "today-ops.js",
+            "midday-review.js",
+            "lianban-pool.js",
+            "trend-pool.js",
+            "anchor-stocks.js",
+            "auction-5d.js",
+            "sentiment-dash.js",
+            "position-calc.js",
+            "trade-tickets.js",
+        ]
+        joined = "\n".join((ROOT / "widgets" / f).read_text(encoding="utf-8") for f in files)
+        self.assertIn("ui-note", (ROOT / "css" / "theme.css").read_text(encoding="utf-8"))
+        for phrase in [
+            "今日无操作",
+            "午盘数据待录入",
+            "连板池数据未录入",
+            "趋势池数据未录入",
+            "锚定股数据未录入",
+            "竞价数据不可用",
+            "情绪节点数据不可用",
+            "规则状态不可用",
+            "加载票据",
+        ]:
+            self.assertIn(phrase, joined)
+        self.assertNotIn("🤖 待研判", joined)
+        self.assertNotIn("🟢", joined)
+        self.assertNotIn("🔴", joined)
+        self.assertNotIn("🟠", joined)
+        self.assertNotIn("padding:var(--sp-lg);text-align:center;color:var(--text-disabled)", joined)
+
+    def test_decision_risk_widgets_avoid_alert_emoji_states(self):
+        files = [
+            "climax-guard.js",
+            "risk-panel.js",
+        ]
+        joined = "\n".join((ROOT / "widgets" / f).read_text(encoding="utf-8") for f in files)
+        for phrase in [
+            "规则状态不可用",
+            "高潮保护触发",
+            "单日熔断",
+            "止损触发",
+            "接近止损",
+        ]:
+            self.assertIn(phrase, joined)
+        for noisy in ["⚠ ", "✓ ", "🔴", "🟡"]:
+            self.assertNotIn(noisy, joined)
+
+    def test_visible_status_copy_uses_quiet_text(self):
+        sources = {
+            "index": (ROOT / "index.html").read_text(encoding="utf-8"),
+            "input": (ROOT / "widgets" / "input-panel.js").read_text(encoding="utf-8"),
+            "style": (ROOT / "widgets" / "style-detect.js").read_text(encoding="utf-8"),
+            "theme": (ROOT / "css" / "theme.css").read_text(encoding="utf-8"),
+        }
+        self.assertNotIn("✓ 已更新", sources["index"])
+        self.assertNotIn("✓ 已更新", sources["input"])
+        self.assertNotIn("⚠ ' + w", sources["style"])
+        self.assertIn("style-detect-warning", sources["style"])
+        self.assertIn(".w10-empty{padding:12px 10px", sources["theme"])
+        self.assertIn(".zt-empty{padding:12px 10px", sources["index"])
+
+    def test_data_widgets_have_stable_layout_classes(self):
+        theme = (ROOT / "css" / "theme.css").read_text(encoding="utf-8")
+        for cls in [
+            ".timeline-shell",
+            ".timeline-track",
+            ".style-detect-head",
+            ".style-detect-warning",
+            ".style-detect-exec-block",
+            ".w11-empty",
+            ".w11-tip",
+            ".w23-toolbar",
+            ".w23-filter-bar",
+            ".w23-table-wrap",
+            ".data-table.w23-table",
+            ".w04-board",
+            ".w04-index-grid",
+            ".w04-breadth-bar",
+            ".w04-baseline-pill",
+        ]:
+            self.assertIn(cls, theme)
+
+    def test_core_widgets_use_shared_quiet_states(self):
+        index = (ROOT / "index.html").read_text(encoding="utf-8")
+        monitor = (ROOT / "widgets" / "llm-monitor.js").read_text(encoding="utf-8")
+        tickets = (ROOT / "widgets" / "trade-tickets.js").read_text(encoding="utf-8")
+        positions = (ROOT / "widgets" / "positions.js").read_text(encoding="utf-8")
+
+        for src in (index, monitor, tickets, positions):
+            self.assertIn("ui-empty", src)
+
+        self.assertIn("ui-degraded", tickets)
+        self.assertNotIn("⏳", index)
+        self.assertNotIn("等待外部 Agent 写入研判</div>", monitor)
+        self.assertNotIn("数据不可用 — 锚点被阻断</div>", positions)
+        self.assertNotIn("padding:var(--sp-sm);text-align:center;color:var(--text-disabled);font-size:var(--fs-body)", positions)
+
+
+class WidgetPanelUxTest(unittest.TestCase):
+    """Widget picker uses cockpit-style metadata instead of the old dev panel."""
+
+    def test_widget_panel_uses_ref_priority_and_tier_pills(self):
+        index = (ROOT / "index.html").read_text(encoding="utf-8")
+        self.assertIn("widget-panel-title", index)
+        self.assertIn("VIEW MODULES", index)
+        self.assertIn("item-ref", index)
+        self.assertIn("item-pill-priority", index)
+        self.assertIn("tierLabels", index)
+        self.assertNotIn("catIcons", index)
+        self.assertNotIn("🎯", index)
+        self.assertNotIn("📊", index)
+        self.assertNotIn("💰", index)
+        self.assertNotIn("🔧", index)
+        self.assertNotIn(" + w.defaultSize.w + '×' + w.defaultSize.h + ' · ' + w.id", index)
+
+    def test_w03_default_size_matches_command_card_density(self):
+        registry = (ROOT / "widget-registry.js").read_text(encoding="utf-8")
+        self.assertIn("id:'W03'", registry)
+        self.assertIn("defaultSize:{w:6,h:6}", registry)
+        self.assertIn("'style.趋势占比'", registry)
+
+
+class TransientSurfaceUxTest(unittest.TestCase):
+    """Menus and overlays should not linger on a monitoring cockpit."""
+
+    def test_default_widget_mount_does_not_depend_on_raf(self):
+        index = (ROOT / "index.html").read_text(encoding="utf-8")
+        self.assertIn("if (contentEl) instance.mount(contentEl);", index)
+        self.assertNotIn("requestAnimationFrame(function() {\n    var contentEl = document.getElementById('content_' + widgetId);", index)
+
+    def test_menus_close_on_actions_and_escape(self):
+        index = (ROOT / "index.html").read_text(encoding="utf-8")
+        theme = (ROOT / "css" / "theme.css").read_text(encoding="utf-8")
+
+        self.assertIn("function _closeTopbarMenus()", index)
+        self.assertIn("function _closeTransientSurfaces()", index)
+        self.assertIn("if (e.key === 'Escape')", index)
+        self.assertIn("_closeTopbarMenus(); _addWidgetToGrid", index)
+        self.assertIn("_closeTopbarMenus(); exportLayout();", index)
+        self.assertIn("safeLeft", index)
+        self.assertIn("safeTop", index)
+        self.assertIn(".context-menu-item b", theme)
+        self.assertIn('" data-category="', index)
+        self.assertIn("w.category", index)
 
 
 if __name__ == "__main__":

@@ -41,10 +41,10 @@ class VolumeBarsWidget extends YiMuWidget {
     var html = '';
 
     // tooltip
-    html += '<div id="w11tip" style="display:none;position:fixed;background:rgba(0,0,0,0.85);color:#fff;padding:3px 9px;border-radius:5px;font-size:11px;white-space:nowrap;z-index:var(--z-tooltip);pointer-events:none"></div>';
+    html += '<div id="w11tip" class="w11-tip"></div>';
 
     if (!hasTodayBars) {
-      html += '<div style="height:156px;display:flex;align-items:center;justify-content:center;color:var(--text-disabled);font-size:12px;background:var(--bg-base);border-radius:var(--radius-sm)">等待今日15min数据</div>';
+      html += '<div class="ui-empty w11-empty"><div class="ui-empty-title">等待今日15min数据</div><div class="ui-empty-detail">盘中量价柱将在首个有效分时段后显示。</div></div>';
       body.innerHTML = html;
       this.updateTimestamp();
       return;

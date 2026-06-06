@@ -1,6 +1,12 @@
 // widgets/position-calc.js — W03 三层仓位计 (v3.0 rule_state 驱动)
 'use strict';
 
+function _w03Esc(v) {
+  return String(v == null ? '' : v).replace(/[&<>"']/g, function(ch) {
+    return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch];
+  });
+}
+
 function _w03RuleText(code) {
   var map = {
     DATA_UNTRUSTED: '数据不可信',
@@ -31,6 +37,21 @@ function _w03Money(n) {
   return Math.round(n).toLocaleString();
 }
 
+function _w03Num(v, fallback) {
+  var n = parseFloat(v);
+  return isFinite(n) ? n : (fallback || 0);
+}
+
+function _w03PctText(v) {
+  var n = _w03Num(v, 0);
+  return Math.round(n * 100) / 100;
+}
+
+function _w03PctRangeText(range) {
+  var m = String(range || '').match(/(\d+(?:\.\d+)?)\s*[-~]\s*(\d+(?:\.\d+)?)/);
+  return m ? (_w03PctText(m[1]) + '-' + _w03PctText(m[2]) + '%') : '';
+}
+
 function _w03PctRangeMoney(range, totalCapital) {
   var m = String(range || '').match(/(\d+(?:\.\d+)?)\s*[-~]\s*(\d+(?:\.\d+)?)/);
   if (!m) return '';
@@ -43,13 +64,13 @@ function _w03BlockChips(blocks, scope) {
   var items = (blocks || []).filter(function(b){ return b.scope === scope; });
   if (!items.length) return '';
   return items.map(function(b) {
-    return '<span class="w03-chip w03-chip-' + (scope === 'all' ? 'risk' : 'warn') + '">' + _w03RuleText(b.code) + '</span>';
+    return '<span class="w03-chip w03-chip-' + (scope === 'all' ? 'risk' : 'warn') + '">' + _w03Esc(_w03RuleText(b.code)) + '</span>';
   }).join('');
 }
 
 function _w03WindowChips(codes) {
   return (codes || []).map(function(code) {
-    return '<span class="w03-chip w03-chip-muted">' + _w03RuleText(code) + '</span>';
+    return '<span class="w03-chip w03-chip-muted">' + _w03Esc(_w03RuleText(code)) + '</span>';
   }).join('');
 }
 
@@ -67,15 +88,15 @@ class PositionCalcWidget extends YiMuWidget {
     var rsWarnings = (RS && RS.warnings) || [];
     var rsWindows = (RS && RS.windows) || {};
 
-    var totalCap = rsCaps.total_pct != null ? rsCaps.total_pct : (ST['总仓位上限'] || 0);
-    var baseCap = rsCaps.base_total_pct != null ? rsCaps.base_total_pct : (ST['总仓位上限'] || 0);
-    var lbPct = rsCaps.lianban_pct != null ? rsCaps.lianban_pct : (ST['连板占比'] || 0);
-    var trPct = rsCaps.trend_pct != null ? rsCaps.trend_pct : (ST['趋势占比'] || 0);
-    var baseLbPct = ST['连板占比'] || lbPct || 0;
-    var baseTrPct = ST['趋势占比'] || trPct || 0;
-    var planTotalCap = ST['总仓位上限'] || baseCap || totalCap || 0;
+    var totalCap = _w03Num(rsCaps.total_pct != null ? rsCaps.total_pct : ST['总仓位上限'], 0);
+    var baseCap = _w03Num(rsCaps.base_total_pct != null ? rsCaps.base_total_pct : ST['总仓位上限'], 0);
+    var lbPct = _w03Num(rsCaps.lianban_pct != null ? rsCaps.lianban_pct : ST['连板占比'], 0);
+    var trPct = _w03Num(rsCaps.trend_pct != null ? rsCaps.trend_pct : ST['趋势占比'], 0);
+    var baseLbPct = _w03Num(ST['连板占比'] != null ? ST['连板占比'] : lbPct, 0);
+    var baseTrPct = _w03Num(ST['趋势占比'] != null ? ST['趋势占比'] : trPct, 0);
+    var planTotalCap = _w03Num(ST['总仓位上限'] != null ? ST['总仓位上限'] : (baseCap || totalCap), 0);
     var planW2Cap = ST['新开趋势W2上限'] || '';
-    var firstEntryPct = rsCaps.first_entry_pct != null ? rsCaps.first_entry_pct : 10;
+    var firstEntryPct = _w03Num(rsCaps.first_entry_pct != null ? rsCaps.first_entry_pct : 10, 10);
 
     // 全局阻断：tradable=false 或 scope=all 的 blocks
     var globallyBlocked = RS ? !RS.tradable : false;
@@ -121,16 +142,37 @@ class PositionCalcWidget extends YiMuWidget {
     var maxPosition = Math.round(totalCapital * (totalCap||0) / 100);
     var planMaxPosition = Math.round(totalCapital * (planTotalCap||0) / 100);
     var availPct = Math.max(0, totalCap - currentPosPct);
+    var newCap = Math.max(0, maxPosition - currentPosVal);
+    var planNewCap = Math.max(0, planMaxPosition - currentPosVal);
+    var lbMoney = globallyBlocked ? 0 : Math.round(newCap * lbPct / 100);
+    var trMoney = globallyBlocked ? 0 : Math.round(newCap * trPct / 100);
+    var sumMoney = lbMoney + trMoney;
+    var planLbMoney = Math.round(planNewCap * baseLbPct / 100);
+    var planTrMoney = Math.round(planNewCap * baseTrPct / 100);
+    var w2RangeMoney = _w03PctRangeMoney(planW2Cap, totalCapital);
 
     // ── rule_state 缺失提示 ──
     if (rsMissing) {
-      html += '<div style="padding:var(--sp-md);text-align:center;color:var(--danger);font-weight:600">'
-        +'规则状态不可用</div>'
-        +'<div style="font-size:var(--fs-body);color:var(--text-disabled);text-align:center">后端 rule_state 未生成，实时仓位结论暂停显示</div>';
+      html += '<div class="ui-degraded"><strong>规则状态不可用</strong><span>后端 rule_state 未生成，实时仓位结论暂停显示。</span></div>';
       body.innerHTML = html;
       this.updateTimestamp();
       return;
     }
+
+    var commandState = globallyBlocked ? '阻断' : (rsWarnings.length ? '提示' : '可执行');
+    var commandClass = globallyBlocked ? 'is-blocked' : (rsWarnings.length ? 'is-watch' : 'is-ready');
+    var planW2CapText = _w03PctRangeText(planW2Cap);
+    html += '<div class="w03-command ' + commandClass + '">' +
+      '<div class="w03-command-head">' +
+        '<span><i>S0</i> 仓位指令</span>' +
+        '<b>' + commandState + '</b>' +
+      '</div>' +
+      '<div class="w03-command-grid">' +
+        '<div><span>执行上限</span><b class="' + (globallyBlocked ? 'danger' : 'info') + '">' + _w03PctText(totalCap) + '%</b><em>基础 ' + _w03PctText(baseCap) + '% / 计划 ' + _w03PctText(planTotalCap) + '%</em></div>' +
+        '<div><span>当前仓位</span><b>' + currentPosPct + '%</b><em>已持仓 ' + _w03Money(currentPosVal) + '</em></div>' +
+        '<div><span>可新开</span><b class="' + (globallyBlocked ? 'danger' : 'up') + '">' + _w03Money(sumMoney) + '</b><em>执行口径，扣除已持仓</em></div>' +
+      '</div>' +
+    '</div>';
 
     html += '<div class="w03-stack">';
 
@@ -141,11 +183,11 @@ class PositionCalcWidget extends YiMuWidget {
         '<span class="w03-layer-title">总仓位门禁</span>' +
       '</div>' +
       '<div class="w03-layer-main">' +
-        '<div><div class="w03-kpi ' + (globallyBlocked ? 'danger' : 'info') + '">' + totalCap + '%</div><div class="w03-caption">执行上限</div></div>' +
+        '<div><div class="w03-kpi ' + (globallyBlocked ? 'danger' : 'info') + '">' + _w03PctText(totalCap) + '%</div><div class="w03-caption">执行上限</div></div>' +
         '<div class="w03-metrics">' +
-          '<span>基础 <b>' + baseCap + '%</b></span>' +
-          (planTotalCap !== baseCap ? '<span>计划 <b>' + planTotalCap + '%</b></span>' : '') +
-          '<span>首笔 <b>' + firstEntryPct + '%</b></span>' +
+          '<span>基础 <b>' + _w03PctText(baseCap) + '%</b></span>' +
+          (planTotalCap !== baseCap ? '<span>计划 <b>' + _w03PctText(planTotalCap) + '%</b></span>' : '') +
+          '<span>首笔 <b>' + _w03PctText(firstEntryPct) + '%</b></span>' +
         '</div>' +
       '</div>' +
       (globallyBlocked ? '<div class="w03-note">全局阻断后执行上限归零</div>' : '<div class="w03-note">按实时规则引擎输出执行仓位</div>') +
@@ -158,11 +200,11 @@ class PositionCalcWidget extends YiMuWidget {
         '<span class="w03-layer-title">风格分配</span>' +
       '</div>' +
       '<div class="w03-split-row">' +
-        '<div class="w03-split-item"><span>连板执行</span><b class="up">' + lbPct + '%</b></div>' +
-        '<div class="w03-split-item"><span>趋势执行</span><b class="info">' + trPct + '%</b></div>' +
+        '<div class="w03-split-item"><span>连板执行</span><b class="up">' + _w03PctText(lbPct) + '%</b></div>' +
+        '<div class="w03-split-item"><span>趋势执行</span><b class="info">' + _w03PctText(trPct) + '%</b></div>' +
       '</div>' +
-      '<div class="w03-track"><i style="width:' + Math.max(0, Math.min(100, baseLbPct)) + '%;background:var(--up)"></i><i style="width:' + Math.max(0, Math.min(100, baseTrPct)) + '%;background:var(--info)"></i></div>' +
-      '<div class="w03-note">风格基线 / 计划分配：连板 ' + baseLbPct + '% / 趋势 ' + baseTrPct + '%' + (planW2Cap ? ' / W2 ' + planW2Cap : '') + '</div>' +
+      '<div class="w03-track"><i class="w03-track-lb" style="--w03-track-width:' + Math.max(0, Math.min(100, baseLbPct)) + '%"></i><i class="w03-track-trend" style="--w03-track-width:' + Math.max(0, Math.min(100, baseTrPct)) + '%"></i></div>' +
+      '<div class="w03-note">风格基线 / 计划分配：连板 ' + _w03PctText(baseLbPct) + '% / 趋势 ' + _w03PctText(baseTrPct) + '%' + (planW2CapText ? ' / W2 ' + planW2CapText : '') + '</div>' +
       '</section>';
 
     // ===== Layer 3: W1/W2 窗口 =====
@@ -190,25 +232,16 @@ class PositionCalcWidget extends YiMuWidget {
     html += '</div>';
 
     // ===== 金额计算 =====
-    var newCap = Math.max(0, maxPosition - currentPosVal);
-    var planNewCap = Math.max(0, planMaxPosition - currentPosVal);
-    var lbMoney = globallyBlocked ? 0 : Math.round(newCap * lbPct / 100);
-    var trMoney = globallyBlocked ? 0 : Math.round(newCap * trPct / 100);
-    var sumMoney = lbMoney + trMoney;
-    var planLbMoney = Math.round(planNewCap * baseLbPct / 100);
-    var planTrMoney = Math.round(planNewCap * baseTrPct / 100);
-    var w2RangeMoney = _w03PctRangeMoney(planW2Cap, totalCapital);
-
     html += '<div class="w03-money">' +
       '<div class="w03-money-head">' +
         '<span>金额测算</span>' +
         '<b class="' + (globallyBlocked ? 'danger' : 'info') + '">' + _w03Money(sumMoney) + '</b>' +
       '</div>' +
-      '<div class="w03-money-meta">执行上限 ' + totalCap + '% = ' + _w03Money(maxPosition) + ' / 已持仓 ' + _w03Money(currentPosVal) + ' / 当前可新开 ' + _w03Money(newCap) + '</div>' +
-      '<div class="w03-money-meta">计划上限 ' + planTotalCap + '% = ' + _w03Money(planMaxPosition) + ' / 计划可新开 ' + _w03Money(planNewCap) + (w2RangeMoney ? ' / W2趋势上限 ' + w2RangeMoney : '') + '</div>' +
+      '<div class="w03-money-meta">执行上限 ' + _w03PctText(totalCap) + '% = ' + _w03Money(maxPosition) + ' / 已持仓 ' + _w03Money(currentPosVal) + ' / 当前可新开 ' + _w03Money(newCap) + '</div>' +
+      '<div class="w03-money-meta">计划上限 ' + _w03PctText(planTotalCap) + '% = ' + _w03Money(planMaxPosition) + ' / 计划可新开 ' + _w03Money(planNewCap) + (w2RangeMoney ? ' / W2趋势上限 ' + w2RangeMoney : '') + '</div>' +
       '<div class="w03-money-grid">' +
-        '<div><span>连板计划可新开</span><b class="up">' + _w03Money(planLbMoney) + '</b><em>' + _w03Money(planNewCap) + ' × ' + baseLbPct + '%</em></div>' +
-        '<div><span>趋势计划可新开</span><b class="info">' + _w03Money(planTrMoney) + '</b><em>' + _w03Money(planNewCap) + ' × ' + baseTrPct + '%</em></div>' +
+        '<div><span>连板计划可新开</span><b class="up">' + _w03Money(planLbMoney) + '</b><em>' + _w03Money(planNewCap) + ' × ' + _w03PctText(baseLbPct) + '%</em></div>' +
+        '<div><span>趋势计划可新开</span><b class="info">' + _w03Money(planTrMoney) + '</b><em>' + _w03Money(planNewCap) + ' × ' + _w03PctText(baseTrPct) + '%</em></div>' +
       '</div></div>';
 
     // 阻断详情
@@ -226,7 +259,7 @@ class PositionCalcWidget extends YiMuWidget {
     }
     if (rsWarnings.length) {
       html += '<div class="w03-blocks">';
-      rsWarnings.forEach(function(w){ html += '<div class="w03-block-row"><span>提示</span><div><span class="w03-chip w03-chip-warn">'+w.message+'</span></div></div>'; });
+      rsWarnings.forEach(function(w){ html += '<div class="w03-block-row"><span>提示</span><div><span class="w03-chip w03-chip-warn">'+_w03Esc(w.message)+'</span></div></div>'; });
       html += '</div>';
     }
 

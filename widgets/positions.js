@@ -28,6 +28,24 @@ function _fmtPct(v) {
   return (n >= 0 ? '+' : '') + n.toFixed(2) + '%';
 }
 
+function _w15WriteGate() {
+  var w = (typeof window !== 'undefined') ? window : null;
+  var loc = (typeof location !== 'undefined') ? location : null;
+  var readonly = false;
+  if (w && typeof w._detectRuntimeMode === 'function') {
+    try { readonly = !!(w._detectRuntimeMode() || {}).readonly; } catch (e) { readonly = false; }
+  } else if (loc) {
+    readonly = loc.protocol === 'file:' || /^180(8[0-9]|9[0-9])$/.test(loc.port || '');
+  }
+  if (readonly) return { canWrite: false, reason: '本地预览只读，不录真实交易' };
+  if (w) {
+    if (w._healthConfirmed !== true) return { canWrite: false, reason: '健康状态未确认' };
+    if (w._healthCritical === true) return { canWrite: false, reason: '健康门禁阻断' };
+    if (w._tradeEntryAllowed === false) return { canWrite: false, reason: '交易录入已关闭' };
+  }
+  return { canWrite: true, reason: '' };
+}
+
 class PositionsWidget extends YiMuWidget {
   render(data) {
     var body = this.getBody();
@@ -82,6 +100,8 @@ class PositionsWidget extends YiMuWidget {
     var cashDisplay = cashNull ? naData : _fmtAmount(cash);
     var posPctDisplay = posPctNull ? naDash : posPct + '%';
     var posPctColor = posPctNull ? '' : (posPct > 80 ? 'var(--danger)' : posPct > 50 ? 'var(--warn)' : 'var(--info)');
+    var pnlColorStyle = tc ? ' style="color:var(--' + tc + ')"' : '';
+    var posColorStyle = posPctColor ? ' style="color:' + posPctColor + '"' : '';
 
     var pnlCardHtml;
     if (isUnavailable) {
@@ -126,21 +146,21 @@ class PositionsWidget extends YiMuWidget {
     }
 
     html += '<div id="w15_sync_status" style="display:none;font-size:var(--fs-small);margin-bottom:var(--sp-xs);padding:2px 6px;border-radius:3px;background:var(--bg-base)"></div>' +
-      '<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:var(--sp-xs) var(--sp-sm);margin-bottom:var(--sp-md);padding:var(--sp-sm);background:var(--bg-base);border-radius:var(--radius-md);font-size:var(--fs-body)">' +
-      '<div style="text-align:center"><div class="kpi-label">总资产</div><div style="font-family:var(--font-mono);font-size:var(--fs-subtitle);font-weight:700">' + taDisplay + '</div></div>' +
-      '<div style="text-align:center"><div class="kpi-label">持仓市值</div><div style="font-family:var(--font-mono);font-size:var(--fs-subtitle);font-weight:700">' + mvDisplay + '</div></div>' +
-      '<div style="text-align:center"><div class="kpi-label">今日盈亏</div><div style="font-family:var(--font-mono);font-size:var(--fs-subtitle);font-weight:700;color:var(--' + tc + ')">' + pnlCardHtml + '</div></div>' +
-      '<div style="text-align:center"><div class="kpi-label">可用资金</div><div style="font-family:var(--font-mono);font-size:var(--fs-subtitle);font-weight:700">' + cashDisplay + '</div></div>' +
-      '<div style="text-align:center"><div class="kpi-label">仓位</div><div style="font-family:var(--font-mono);font-size:var(--fs-subtitle);font-weight:700;color:' + posPctColor + '">' + posPctDisplay + '</div></div>' +
+      '<div class="w15-kpi-grid">' +
+      '<div class="w15-kpi-card"><div class="kpi-label">总资产</div><div class="w15-kpi-value">' + taDisplay + '</div></div>' +
+      '<div class="w15-kpi-card"><div class="kpi-label">持仓市值</div><div class="w15-kpi-value">' + mvDisplay + '</div></div>' +
+      '<div class="w15-kpi-card"><div class="kpi-label">今日盈亏</div><div class="w15-kpi-value"' + pnlColorStyle + '>' + pnlCardHtml + '</div></div>' +
+      '<div class="w15-kpi-card"><div class="kpi-label">可用资金</div><div class="w15-kpi-value">' + cashDisplay + '</div></div>' +
+      '<div class="w15-kpi-card"><div class="kpi-label">仓位</div><div class="w15-kpi-value"' + posColorStyle + '>' + posPctDisplay + '</div></div>' +
       '</div>';
 
     // ===== 持仓 (SSOT) =====
     if (isBlocked) {
-      html += '<div style="padding:var(--sp-md);text-align:center;color:var(--text-disabled);font-size:var(--fs-body)">数据不可用 — 锚点被阻断</div>';
+      html += '<div class="ui-empty"><div class="ui-empty-title">数据不可用</div><div class="ui-empty-detail">锚点被阻断，持仓快照进入只读核对态</div></div>';
     } else {
-    html += '<div style="font-size:var(--fs-body);font-weight:600;margin-bottom:var(--sp-xs)">持仓 <span style="font-weight:400;color:var(--text-disabled)">（由成交流水驱动）</span></div>';
+    html += '<div class="w15-section-title"><span class="evidence-inline-ref">E1</span><span>持仓</span><span>（由成交流水驱动）</span></div>';
     if (active.length) {
-      html += '<table class="data-table"><thead><tr><th>标的</th><th>市值</th><th>现价</th><th>成本</th><th>今日盈亏</th><th>累计盈亏</th><th>止损</th></tr></thead><tbody>';
+      html += '<table class="data-table w15-table"><thead><tr><th>标的</th><th>市值</th><th>现价</th><th>成本</th><th>今日盈亏</th><th>累计盈亏</th><th>止损</th></tr></thead><tbody>';
       active.forEach(function(p) {
         var tPnL = p['today_pnl'], tPct = p['today_pnl_pct'];
         var totPnL = p['total_pnl'], totPct = p['total_pnl_pct'];
@@ -196,17 +216,21 @@ class PositionsWidget extends YiMuWidget {
       });
       html += '</tbody></table>';
     } else {
-      html += '<div style="padding:var(--sp-sm);text-align:center;color:var(--text-disabled);font-size:var(--fs-body)">空仓</div>';
+      html += '<div class="ui-empty ui-empty-inline"><div class="ui-empty-title">空仓</div></div>';
     }
 
     // ===== 今日记录 (SSOT trade_records) =====
-    html += '<div style="display:flex;align-items:center;gap:var(--sp-sm);margin-top:var(--sp-md);margin-bottom:var(--sp-xs)">' +
-      '<span style="font-size:var(--fs-body);font-weight:600">今日记录</span>' +
-      '<button id="w15_add" style="background:var(--info);color:var(--text-inverse);border:none;padding:2px 10px;border-radius:var(--radius-sm);cursor:pointer;font-size:var(--fs-body);font-family:var(--font-sans)">手工补录成交</button></div>';
+    var writeGate = _w15WriteGate();
+    html += '<div class="w15-record-head">' +
+      '<span>今日记录</span>' +
+      (writeGate.canWrite ?
+        '<details class="w15-emergency-entry"><summary>应急补录</summary><button id="w15_add">打开补录</button></details>' :
+        '<span class="w15-readonly-lock" title="' + _esc(writeGate.reason) + '">只读</span>') +
+      '</div>';
 
     var trades = Array.isArray(pnlLive.trades) ? pnlLive.trades : [];
     if (trades.length) {
-      html += '<table class="data-table"><thead><tr><th>时间</th><th>动作</th><th>标的</th><th>代码</th><th>价格</th><th>数量</th><th>窗口</th><th>原因</th></tr></thead><tbody>';
+      html += '<table class="data-table w15-table"><thead><tr><th>时间</th><th>动作</th><th>标的</th><th>代码</th><th>价格</th><th>数量</th><th>窗口</th><th>原因</th></tr></thead><tbody>';
       trades.forEach(function(t) {
         var act = t.action || '—';
         var isBuy = act.indexOf('买入') >= 0 || act.indexOf('追') >= 0;
@@ -223,7 +247,7 @@ class PositionsWidget extends YiMuWidget {
       });
       html += '</tbody></table>';
     } else {
-      html += '<div style="padding:var(--sp-sm);text-align:center;color:var(--text-disabled);font-size:var(--fs-body)">今日无操作</div>';
+      html += '<div class="ui-empty ui-empty-inline"><div class="ui-empty-title">今日无操作</div></div>';
     }
 
     // ===== 清仓跟踪 (SSOT closed_positions only, 7个交易日) =====
@@ -232,7 +256,7 @@ class PositionsWidget extends YiMuWidget {
       var tracked = closed;
       if (tracked.length) {
         html += '<div style="margin-top:var(--sp-md)"><span style="font-size:var(--fs-body);font-weight:600">清仓跟踪（7个交易日）</span></div>';
-        html += '<table class="data-table"><thead><tr><th>标的</th><th>卖出价</th><th>已实现盈亏</th><th>现价</th><th>卖出后涨跌</th><th>原因</th></tr></thead><tbody>';
+        html += '<table class="data-table w15-table"><thead><tr><th>标的</th><th>卖出价</th><th>已实现盈亏</th><th>现价</th><th>卖出后涨跌</th><th>原因</th></tr></thead><tbody>';
         tracked.forEach(function(c) {
           var sp = parseFloat(c.sell_price) || 0;
           var lq = liveQ[(c.code || '')] || {};
@@ -264,12 +288,18 @@ class PositionsWidget extends YiMuWidget {
 
   _bindEvents(active) {
     var self = this;
+    if (!_w15WriteGate().canWrite) return;
     var body = this.getBody();
     var addBtn = body.querySelector('#w15_add');
     if (addBtn) addBtn.onclick = function() { self._showForm(active); };
   }
 
   _showForm(active) {
+    var gate = _w15WriteGate();
+    if (!gate.canWrite) {
+      if (typeof showToast === 'function') showToast(gate.reason);
+      return;
+    }
     var self = this;
     var pf = DataStore._prefill || {};
 
@@ -457,6 +487,11 @@ function _nowTime() {
 }
 
 function _bridgeSync(entry, onSuccess, onError) {
+  var gate = _w15WriteGate();
+  if (!gate.canWrite) {
+    if (onError) onError(gate.reason);
+    return;
+  }
   if (location.protocol === 'file:') { if (onSuccess) onSuccess(); return; }
   fetch('/api/sync', {
     method: 'POST',

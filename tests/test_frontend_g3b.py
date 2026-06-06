@@ -1323,6 +1323,16 @@ console.log(JSON.stringify(_detectRuntimeMode()));
         result = _run_node(script)
         self.assertEqual(result.get("key"), "file", "file: 协议应 file")
 
+    def test_file_mode_has_blocking_api_guidance(self):
+        """file:// 模式应明确提示 API 不可用，避免误判数据丢失"""
+        html = (ROOT / "index.html").read_text(encoding="utf-8")
+        css = (ROOT / "css/theme.css").read_text(encoding="utf-8")
+        self.assertIn("fileModeNotice", html)
+        self.assertIn("本地文件模式无法读取看板 API", html)
+        self.assertIn("http://localhost:18088/", html)
+        self.assertIn("http://localhost:8088/", html)
+        self.assertIn(".file-mode-notice", css)
+
     def test_positions_js_has_w15_sync_status(self):
         """W15 渲染包含 w15_sync_status"""
         src = (ROOT / "widgets/positions.js").read_text(encoding="utf-8")

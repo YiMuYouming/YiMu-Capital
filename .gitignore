@@ -36,3 +36,4 @@ pnl.db-wal
 
 # Local runtime state
 scripts/.style_regime_state.json
+.superpowers/

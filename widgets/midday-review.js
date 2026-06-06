@@ -15,7 +15,7 @@ class MiddayReviewWidget extends YiMuWidget {
     var doubleIceBlock = rsBlocks.filter(function(b){ return b.code === 'DOUBLE_ICE'; });
 
     if (!vRev['场景'] && !doubleIceBlock.length && !RS) {
-      body.innerHTML = '<div style="padding:var(--sp-lg);text-align:center;color:var(--text-disabled)">午盘数据待录入</div>';
+      body.innerHTML = '<div class="ui-empty"><div class="ui-empty-title">午盘数据待录入</div><div class="ui-empty-detail">等待 V 反检测与 rule_state 复核数据。</div></div>';
       return;
     }
 
@@ -46,7 +46,7 @@ class MiddayReviewWidget extends YiMuWidget {
         '<span style="font-family:var(--font-mono);font-weight:600;color:'+(todayMood!=='—'&&todayMood<20?'var(--warn)':'var(--text-primary)')+'">'+(todayMood!=='—'?todayMood+'%':'—')+'</span>' +
       '</div>' +
       '<div style="margin-top:var(--sp-sm);padding-top:var(--sp-xs);border-top:1px solid var(--border-light);text-align:center;font-size:var(--fs-subtitle);font-weight:700;color:var(--'+(dbTriggered?'warn':RS?'info':'text-disabled')+')">'+
-        (RS ? (dbTriggered ? '⚠ 双冰信号 (rule_state)' : '✓ 无双冰 (rule_state)') : '⚠ 规则状态不可用') +
+        (RS ? (dbTriggered ? '双冰信号 (rule_state)' : '无双冰 (rule_state)') : '规则状态不可用') +
       '</div>' +
       '<div style="font-size:10px;color:var(--text-disabled);text-align:center;margin-top:2px">来源: '+(RS?'rule_state':'不可确认')+'</div>' +
       '</div>';

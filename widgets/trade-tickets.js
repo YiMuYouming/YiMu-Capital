@@ -48,6 +48,24 @@ function _ttFriendlyError(message) {
   return text || '操作失败，请稍后重试。';
 }
 
+function _ttWriteGate() {
+  var w = (typeof window !== 'undefined') ? window : null;
+  var loc = (typeof location !== 'undefined') ? location : null;
+  var readonly = false;
+  if (w && typeof w._detectRuntimeMode === 'function') {
+    try { readonly = !!(w._detectRuntimeMode() || {}).readonly; } catch (e) { readonly = false; }
+  } else if (loc) {
+    readonly = loc.protocol === 'file:' || /^180(8[0-9]|9[0-9])$/.test(loc.port || '');
+  }
+  if (readonly) return { canWrite: false, reason: '本地预览只读，不发起写入' };
+  if (w) {
+    if (w._healthConfirmed !== true) return { canWrite: false, reason: '健康状态未确认' };
+    if (w._healthCritical === true) return { canWrite: false, reason: '健康门禁阻断' };
+    if (w._tradeEntryAllowed === false) return { canWrite: false, reason: '交易录入已关闭' };
+  }
+  return { canWrite: true, reason: '' };
+}
+
 class TradeTicketsWidget extends YiMuWidget {
   constructor(config) {
     super(config);
@@ -89,7 +107,7 @@ class TradeTicketsWidget extends YiMuWidget {
     this._lastBody = body;
     this._loading = true;
     if (!silent) {
-      body.innerHTML = '<div style="padding:var(--sp-md);text-align:center;color:var(--text-disabled)">加载票据...</div>';
+      body.innerHTML = '<div class="ui-empty ui-empty-inline"><div class="ui-empty-title">加载票据</div></div>';
     }
     fetch('/api/trade/tickets')
       .then(function(r){ return r.ok ? r.json() : Promise.reject(new Error('load failed')); })
@@ -107,6 +125,8 @@ class TradeTicketsWidget extends YiMuWidget {
   }
 
   _postJson(url, payload) {
+    var gate = _ttWriteGate();
+    if (!gate.canWrite) return Promise.reject(new Error(gate.reason));
     return fetch(url, {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
@@ -254,17 +274,17 @@ class TradeTicketsWidget extends YiMuWidget {
   }
 
   _summaryPill(label, count, tone) {
-    return '<div style="border:1px solid var(--border-light);border-radius:var(--radius-sm);padding:6px 8px;background:var(--bg-card);min-width:0">' +
-      '<div style="font-size:10px;color:var(--text-disabled);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + _ttEsc(label) + '</div>' +
-      '<div style="font-family:var(--font-mono);font-size:16px;font-weight:800;color:var(--' + tone + ');line-height:1.1;margin-top:2px">' + _ttEsc(count) + '</div>' +
+    return '<div class="ticket-summary-pill">' +
+      '<div class="ticket-summary-label">' + _ttEsc(label) + '</div>' +
+      '<div class="ticket-summary-value" style="color:var(--' + tone + ')">' + _ttEsc(count) + '</div>' +
     '</div>';
   }
 
   _section(title, tickets, tone, compact) {
-    var html = '<div style="min-width:0"><div style="font-size:var(--fs-label);font-weight:700;color:var(--text-secondary);margin-bottom:4px">' +
-      _ttEsc(title) + ' <span style="font-family:var(--font-mono);color:var(--text-disabled)">' + tickets.length + '</span></div>';
+    var html = '<div class="ticket-section"><div class="ticket-section-title"><span>' +
+      _ttEsc(title) + '</span><span class="ticket-section-count">' + tickets.length + '</span></div>';
     if (!tickets.length) {
-      return html + '<div style="padding:10px 8px;border:1px dashed var(--border-light);border-radius:var(--radius-sm);color:var(--text-disabled);font-size:var(--fs-small);text-align:center;background:var(--bg-soft)">暂无</div></div>';
+      return html + '<div class="ui-empty ui-empty-inline"><div class="ui-empty-title">暂无</div></div></div>';
     }
     var self = this;
     tickets.slice(0, compact ? 6 : 8).forEach(function(t) {
@@ -285,21 +305,21 @@ class TradeTicketsWidget extends YiMuWidget {
       var selected = self._selectedTicketId && self._selectedTicketId === t.ticket_id;
       var qty = t.max_qty != null ? t.max_qty : (t.qty != null ? t.qty : '');
       var titleText = (t.name || t.code || '未命名') + '｜' + _ttActionLabel(t.action_type) + (qty ? ' ' + qty + '股' : '');
-      html += '<button data-tt-select="' + _ttEsc(t.ticket_id) + '" style="display:block;width:100%;text-align:left;border:1px solid ' + (selected ? 'var(--info)' : 'var(--border)') + ';border-left:4px solid var(--' + tone + ');border-radius:var(--radius-sm);padding:8px;margin-bottom:7px;background:' + (selected ? 'var(--bg-soft)' : 'var(--bg-card)') + ';cursor:pointer;color:var(--text-primary)">' +
-        '<div style="display:flex;justify-content:space-between;gap:8px;align-items:flex-start">' +
-          '<span style="font-weight:800;font-size:var(--fs-body);line-height:1.25;min-width:0;word-break:break-word">' + _ttEsc(titleText) + '</span>' +
-          '<span style="flex:0 0 auto;border:1px solid var(--border-light);border-radius:999px;padding:1px 6px;font-size:10px;color:var(--text-secondary);background:var(--bg-soft)">' + _ttEsc(_ttStatusLabel(t.status)) + '</span>' +
+      html += '<button class="ticket-card' + (selected ? ' is-selected' : '') + '" data-tt-select="' + _ttEsc(t.ticket_id) + '" style="--ticket-tone:var(--' + tone + ')">' +
+        '<div class="ticket-card-head">' +
+          '<span class="ticket-card-title">' + _ttEsc(titleText) + '</span>' +
+          '<span class="ticket-card-status">' + _ttEsc(_ttStatusLabel(t.status)) + '</span>' +
         '</div>' +
-        '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:4px;font-size:var(--fs-small);color:var(--text-secondary)">' +
+        '<div class="ticket-card-meta">' +
           (t.window ? '<span>窗口 ' + _ttEsc(t.window) + '</span>' : '') +
           (t.sellable_quantity != null ? '<span>可卖 ' + _ttEsc(t.sellable_quantity) + '</span>' : '') +
           (t.target_lot_id ? '<span>目标 ' + _ttEsc(t.target_lot_id) + '</span>' : '') +
         '</div>' +
-        (trades.length ? '<div style="margin-top:4px;font-size:10px;color:var(--text-secondary);font-family:var(--font-mono)">已关联成交 trade ' + _ttEsc(trades.join(',')) + '</div>' : '') +
-        (t.ticket_id ? '<div style="margin-top:4px;font-size:10px;color:var(--text-disabled);font-family:var(--font-mono);white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="' + _ttEsc(t.ticket_id) + '">' + _ttEsc(t.ticket_id) + '</div>' : '') +
-        (blockText ? '<div style="margin-top:4px;font-size:10px;color:var(--danger);white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="' + _ttEsc(blockText) + '">阻断原因 ' + _ttEsc(blockText) + '</div>' : '') +
-        (missingText ? '<div style="margin-top:4px;font-size:10px;color:var(--warn);white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="' + _ttEsc(missingText) + '">缺数据 ' + _ttEsc(missingText) + '</div>' : '') +
-        (conflictText ? '<div style="margin-top:4px;font-size:10px;color:var(--danger);white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="' + _ttEsc(conflictText) + '">冲突 ' + _ttEsc(conflictText) + '</div>' : '') +
+        (trades.length ? '<div class="ticket-card-note trade-link">已关联成交 trade ' + _ttEsc(trades.join(',')) + '</div>' : '') +
+        (t.ticket_id ? '<div class="ticket-card-note mono" title="' + _ttEsc(t.ticket_id) + '">' + _ttEsc(t.ticket_id) + '</div>' : '') +
+        (blockText ? '<div class="ticket-card-note danger" title="' + _ttEsc(blockText) + '">阻断原因 ' + _ttEsc(blockText) + '</div>' : '') +
+        (missingText ? '<div class="ticket-card-note warn" title="' + _ttEsc(missingText) + '">缺数据 ' + _ttEsc(missingText) + '</div>' : '') +
+        (conflictText ? '<div class="ticket-card-note danger" title="' + _ttEsc(conflictText) + '">冲突 ' + _ttEsc(conflictText) + '</div>' : '') +
       '</button>';
     });
     return html + '</div>';
@@ -307,7 +327,8 @@ class TradeTicketsWidget extends YiMuWidget {
 
   _renderTicketBody(body) {
     if (this._error) {
-      body.innerHTML = '<div style="padding:var(--sp-md);text-align:center;color:var(--danger)">' + _ttEsc(this._error) + '</div>';
+      body.innerHTML = '<div class="ticket-brief-head"><span><span class="evidence-inline-ref">E2</span>票据闭环</span><span>降级</span></div>' +
+        '<div class="ticket-degraded ui-degraded"><strong>票据接口不可达</strong><span>' + _ttEsc(this._error) + '，当前只读态势保留，真实操作请先复核 8088 服务。</span></div>';
       this.updateTimestamp();
       return;
     }
@@ -321,13 +342,18 @@ class TradeTicketsWidget extends YiMuWidget {
     var pendingText = this._pendingPreview ? ('待确认 ' + this._pendingPreview.confirmation_id) : '';
     var selectedText = this._selectedTicketId ? '当前票据 ' + this._selectedTicketId : '未选择票据';
     var activeAction = this._selectedAction || 'buy';
+    var writeGate = _ttWriteGate();
     function actionButton(action, label) {
       var active = activeAction === action;
-      return '<button data-tt-action-set="' + _ttEsc(action) + '" style="padding:4px 8px;border:1px solid ' + (active ? 'var(--info)' : 'var(--border)') + ';border-radius:var(--radius-sm);background:' + (active ? 'var(--bg-soft)' : 'var(--bg-card)') + ';font-size:11px;font-weight:' + (active ? '800' : '500') + '">' + _ttEsc(label) + '</button>';
+      return '<button class="ticket-action-toggle' + (active ? ' is-active' : '') + '" data-tt-action-set="' + _ttEsc(action) + '">' + _ttEsc(label) + '</button>';
     }
-    body.innerHTML = '<div style="display:grid;grid-template-columns:1fr auto;gap:8px;margin-bottom:8px;align-items:start">' +
-      '<div style="min-width:0">' +
-        '<div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:6px">' +
+    body.innerHTML = '<div class="ticket-brief-head"><span><span class="evidence-inline-ref">E2</span>票据闭环</span><span>已成交 ' + filled.length + ' / 已取消 ' + cancelled.length + '</span></div>' +
+      (writeGate.canWrite ?
+      '<details class="ticket-emergency-entry">' +
+      '<summary>应急录入</summary>' +
+      '<div class="ticket-entry-grid">' +
+      '<div class="ticket-entry-main">' +
+        '<div class="ticket-action-row">' +
           actionButton('buy', '买入') +
           actionButton('add', '加仓') +
           actionButton('reduce', '减仓') +
@@ -336,36 +362,37 @@ class TradeTicketsWidget extends YiMuWidget {
           actionButton('observe', '观察') +
         '</div>' +
         '<input data-tt-action value="' + _ttEsc(activeAction) + '" type="hidden">' +
-        '<div style="display:grid;grid-template-columns:2fr 72px 1.2fr 70px 80px;gap:5px;margin-bottom:5px">' +
-          '<input data-tt-intent placeholder="准备 W2 买 光迅科技 200股" style="min-width:0;padding:6px;border:1px solid var(--border);border-radius:var(--radius-sm);font-size:11px">' +
-          '<input data-tt-code placeholder="代码" style="min-width:0;padding:6px;border:1px solid var(--border);border-radius:var(--radius-sm);font-size:11px">' +
-          '<input data-tt-name placeholder="名称" style="min-width:0;padding:6px;border:1px solid var(--border);border-radius:var(--radius-sm);font-size:11px">' +
-          '<input data-tt-window placeholder="W2" value="W2" style="min-width:0;padding:6px;border:1px solid var(--border);border-radius:var(--radius-sm);font-size:11px">' +
-          '<input data-tt-qty placeholder="股数" style="min-width:0;padding:6px;border:1px solid var(--border);border-radius:var(--radius-sm);font-size:11px">' +
+        '<div class="ticket-prepare-grid">' +
+          '<input class="ticket-input" data-tt-intent placeholder="准备 W2 买 光迅科技 200股">' +
+          '<input class="ticket-input" data-tt-code placeholder="代码">' +
+          '<input class="ticket-input" data-tt-name placeholder="名称">' +
+          '<input class="ticket-input" data-tt-window placeholder="W2" value="W2">' +
+          '<input class="ticket-input" data-tt-qty placeholder="股数">' +
         '</div>' +
-        '<input data-tt-fill placeholder="成交口令：已买/已卖 光迅科技 200股 232.30" style="width:100%;box-sizing:border-box;min-width:0;padding:6px;border:1px solid var(--border);border-radius:var(--radius-sm);font-size:11px">' +
+        '<input class="ticket-input ticket-fill-input" data-tt-fill placeholder="成交口令：已买/已卖 光迅科技 200股 232.30">' +
       '</div>' +
-      '<div style="display:grid;grid-template-columns:1fr;gap:5px;min-width:112px">' +
-        '<button data-tt-prepare style="padding:7px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg-card);font-weight:700;font-size:11px">出票据</button>' +
-        '<button data-tt-preview style="padding:7px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg-card);font-weight:700;font-size:11px">预览成交</button>' +
-        '<button data-tt-confirm style="padding:7px;border:1px solid var(--border);border-radius:var(--radius-sm);background:var(--bg-card);font-weight:700;font-size:11px">确认入账</button>' +
+      '<div class="ticket-entry-actions">' +
+        '<button class="ticket-command-btn" data-tt-prepare>出票据</button>' +
+        '<button class="ticket-command-btn" data-tt-preview>预览成交</button>' +
+        '<button class="ticket-command-btn" data-tt-confirm>确认入账</button>' +
       '</div>' +
-      ((this._statusMessage || pendingText || selectedText) ? '<div style="grid-column:1/-1;color:' + (this._statusMessage ? 'var(--text-secondary)' : 'var(--text-disabled)') + ';font-size:10px;font-family:var(--font-mono);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">' + _ttEsc(this._statusMessage || pendingText || selectedText) + '</div>' : '') +
-    '</div>' +
-    '<div style="display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:6px;margin-bottom:8px">' +
+      ((this._statusMessage || pendingText || selectedText) ? '<div class="ticket-status-line' + (this._statusMessage ? ' has-message' : '') + '">' + _ttEsc(this._statusMessage || pendingText || selectedText) + '</div>' : '') +
+    '</div></details>' :
+      '<div class="ticket-readonly-lock ui-empty ui-empty-inline"><div class="ui-empty-title">只读闭环</div><div class="ui-empty-detail">' + _ttEsc(writeGate.reason) + '，票据状态仅用于核对。</div></div>') +
+    '<div class="ticket-summary-grid">' +
       this._summaryPill('待确认', pending.length, 'info') +
       this._summaryPill('可执行', exec.length, 'up') +
       this._summaryPill('已阻断', blocked.length, 'danger') +
       this._summaryPill('已成交', filled.length, 'text-secondary') +
       this._summaryPill('已取消', cancelled.length, 'text-disabled') +
       '</div>' +
-      '<div style="display:grid;grid-template-columns:2fr 1fr;gap:var(--sp-sm);font-size:var(--fs-body);align-items:start">' +
-      '<div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:var(--sp-sm);min-width:0">' +
+      '<div class="ticket-layout">' +
+      '<div class="ticket-primary-sections">' +
       this._section('待确认', pending, 'info') +
       this._section('可执行', exec, 'up') +
       this._section('已阻断', blocked, 'danger') +
       '</div>' +
-      '<div style="min-width:0">' +
+      '<div class="ticket-history-section">' +
       this._section('已成交/关闭', filled, 'text-secondary', true) +
       (cancelled.length ? '<details style="margin-top:6px"><summary style="font-size:var(--fs-label);color:var(--text-disabled);cursor:pointer">已取消 ' + cancelled.length + '</summary>' + this._section('取消记录', cancelled, 'text-disabled', true) + '</details>' : '') +
       '</div>' +

@@ -17,7 +17,7 @@ class TodayOpsWidget extends YiMuWidget {
     var html = '';
 
     if (!trades.length) {
-      html += '<div style="padding:var(--sp-lg);text-align:center;color:var(--text-disabled);font-size:var(--fs-body)">今日无操作（优先用 W24 交易票据确认成交，W15 仅手工补录成交）</div>';
+      html += '<div class="ui-empty"><div class="ui-empty-title">今日无操作</div><div class="ui-empty-detail">优先用 W24 交易票据确认成交，W15 仅作为应急补录。</div></div>';
       body.innerHTML = html;
       this.updateTimestamp();
       return;

@@ -2,6 +2,15 @@
 'use strict';
 
 class StyleDetectWidget extends YiMuWidget {
+  _esc(value) {
+    return String(value == null ? '' : value)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
   _formatWanYi(value) {
     var n = Number(value);
     if (!isFinite(n) || n <= 0) return '';
@@ -20,6 +29,7 @@ class StyleDetectWidget extends YiMuWidget {
   render(data) {
     var body = this.getBody();
     if (!body) return;
+    var esc = this._esc;
     var ST = (data && data.style) || {};
     var meta = (data && data.meta) || {};
 
@@ -48,15 +58,15 @@ class StyleDetectWidget extends YiMuWidget {
     var html = '';
 
     // === 顶部：每日基线 + 分数 + 风格标签 ===
-    html += '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:var(--sp-sm);margin-bottom:var(--sp-xs)">' +
-      '<div style="min-width:0">' +
-        '<div style="font-size:var(--fs-label);color:var(--text-disabled);margin-bottom:2px">每日基线' + (updated ? ' · ' + updated : '') + '</div>' +
-        '<div style="display:flex;align-items:baseline;gap:var(--sp-sm);min-width:0">' +
-          '<span style="font-family:var(--font-mono);font-size:34px;font-weight:700;color:' + toneColor + ';line-height:1">' + score + '</span>' +
-          '<span class="style-chip" style="font-size:var(--fs-body);padding:2px 8px;border-radius:var(--radius-sm);font-weight:700;color:' + toneColor + ';background:' + toneBg + ';border:1px solid ' + toneBorder + ';white-space:nowrap">' + mode + '</span>' +
+    html += '<div class="style-detect-head">' +
+      '<div class="style-detect-main">' +
+        '<div class="style-detect-label">每日基线' + (updated ? ' · ' + esc(updated) : '') + '</div>' +
+        '<div class="style-detect-score-row">' +
+          '<span class="style-detect-score" style="color:' + toneColor + '">' + score + '</span>' +
+          '<span class="style-chip" style="font-size:var(--fs-body);padding:2px 8px;border-radius:var(--radius-sm);font-weight:700;color:' + toneColor + ';background:' + toneBg + ';border:1px solid ' + toneBorder + ';white-space:nowrap">' + esc(mode) + '</span>' +
         '</div>' +
       '</div>' +
-      '<div style="text-align:right;flex:0 0 auto;font-size:var(--fs-label);color:var(--text-disabled);line-height:1.6">' +
+      '<div class="style-detect-side">' +
         '<div>置信 <b style="font-family:var(--font-mono);color:var(--text-secondary)">' + conf + '%</b></div>' +
         (daysInRegime ? '<div>持续 <b style="font-family:var(--font-mono);color:var(--text-secondary)">' + daysInRegime + '</b> 天</div>' : '') +
       '</div>' +
@@ -123,23 +133,23 @@ class StyleDetectWidget extends YiMuWidget {
     // === 信号描述（连板/趋势独立判断）===
     if (lbsDesc || trsDesc) {
       html += '<div style="display:flex;gap:var(--sp-xs);margin-top:var(--sp-xs);font-size:var(--fs-label)">' +
-        '<span style="color:var(--up)">' + lbsDesc + '</span>' +
+        '<span style="color:var(--up)">' + esc(lbsDesc) + '</span>' +
         '<span style="color:var(--text-disabled)">|</span>' +
-        '<span style="color:var(--down)">' + trsDesc + '</span>' +
+        '<span style="color:var(--down)">' + esc(trsDesc) + '</span>' +
         '</div>';
     }
 
     // === 预警 ===
     warnings.forEach(function(w) {
-      html += '<div style="margin-top:var(--sp-xs);padding:var(--sp-xs) var(--sp-sm);background:var(--warn-bg);border:1px solid var(--warn);border-radius:var(--radius-sm);font-size:var(--fs-body);color:var(--warn)">⚠ ' + w + '</div>';
+      html += '<div class="ui-note style-detect-warning"><b>预警</b><span>' + esc(w) + '</span></div>';
     });
 
     // === 硬卡/熔断（规则引擎判定）===
     var exec = ST['实际执行'] || {};
     if (exec['原因'] || exec['原因2']) {
-      html += '<div style="margin-top:var(--sp-xs);padding:var(--sp-xs) var(--sp-sm);background:var(--danger-bg);border:1px solid var(--danger);border-radius:var(--radius-sm);font-size:var(--fs-body);line-height:1.4">' +
-        '<div style="color:var(--danger);font-weight:700">' + (exec['原因']||'') + '</div>' +
-        (exec['原因2'] ? '<div style="color:var(--danger);font-size:var(--fs-label);margin-top:1px">' + exec['原因2'] + '</div>' : '') +
+      html += '<div class="ui-degraded style-detect-exec-block">' +
+        '<strong>' + esc(exec['原因']||'执行限制') + '</strong>' +
+        (exec['原因2'] ? '<span>' + esc(exec['原因2']) + '</span>' : '') +
         '</div>';
     }
 

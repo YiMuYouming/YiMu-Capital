@@ -249,13 +249,13 @@ class ZtEchelonWidget extends YiMuWidget {
     }
 
     if (displayStocks.length === 0) {
-      html += '<div class="zt-empty">';
+      html += '<div class="ui-empty zt-empty"><div class="ui-empty-title">';
       if (isToday) {
         html += '今日确认涨停源暂不可用，可先看热榜观察和历史日期。';
       } else {
         html += '该日期暂无涨停历史快照。';
       }
-      html += '</div>';
+      html += '</div></div>';
     } else {
       html += this._renderStockTable('确认梯队', displayStocks, true);
     }

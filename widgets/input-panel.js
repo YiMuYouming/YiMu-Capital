@@ -130,7 +130,7 @@ class InputPanelWidget extends YiMuWidget {
     DataStore.notifyAll();
 
     var ts = document.getElementById('lastUpdate');
-    if (ts) ts.textContent = '✓ 已更新 ' + new Date().toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
+    if (ts) ts.textContent = '已更新 ' + new Date().toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
   }
 
   _togglePanel() {

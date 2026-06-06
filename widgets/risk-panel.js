@@ -172,8 +172,7 @@ class RiskPanelWidget extends YiMuWidget {
     html += '<div style="font-size:var(--fs-label);font-weight:600;color:var(--text-primary);margin-bottom:var(--sp-xs)">风控线</div>';
 
     if (!RS) {
-      html += '<div style="text-align:center;padding:8px;color:var(--danger);font-size:var(--fs-body);font-weight:600">规则状态不可用</div>'+
-        '<div style="font-size:10px;color:var(--text-disabled);text-align:center">无法确认实时风控结论</div>';
+      html += '<div class="ui-degraded"><strong>规则状态不可用</strong><span>无法确认实时风控结论。</span></div>';
     } else {
       // 从 rule_state 取实时阻断结论
       var dayStopBlock = rsBlocks.filter(function(b){ return b.code === 'DAY_STOP'; });
@@ -192,13 +191,13 @@ class RiskPanelWidget extends YiMuWidget {
       html += '<div style="display:flex;justify-content:space-between;padding:2px 0;font-size:var(--fs-body)">'+
         '<span style="color:var(--text-secondary)">单日熔断</span>'+
         '<span style="font-family:var(--font-mono)">阈值 -3%</span>'+
-        '<span style="color:'+(dayHit?'var(--danger)':'var(--info)')+'">'+(dayHit?'⚠ 触发':'✓ 未触发')+'</span></div>';
+        '<span style="color:'+(dayHit?'var(--danger)':'var(--info)')+'">'+(dayHit?'已触发':'未触发')+'</span></div>';
 
       html += '<div style="display:flex;justify-content:space-between;padding:2px 0;font-size:var(--fs-body)">'+
         '<span style="color:var(--text-secondary)">连亏天数</span>'+
         '<span style="font-family:var(--font-mono)">'+lossDaysDisplay+'天</span>'+
         '<span style="color:'+(streakHit?'var(--danger)':streakWarn?'var(--warn)':'var(--info)')+'">'+
-          (streakHit?'⚠ 空仓':streakWarn?'⚠ 提示':'✓ 正常')+
+          (streakHit?'强制空仓':streakWarn?'提示':'正常')+
         '</span></div>';
     }
 
@@ -208,7 +207,7 @@ class RiskPanelWidget extends YiMuWidget {
     html += '<div style="display:flex;justify-content:space-between;padding:2px 0;font-size:var(--fs-body)">'+
       '<span style="color:var(--text-secondary)">周回撤</span>'+
       '<span style="font-family:var(--font-mono)">'+pct(weekDD)+' / '+weekWarnLine+'%</span>'+
-      '<span class="'+wCls+'" style="font-weight:600">'+(weekAbs>=weekWarnLine?'⚠ 触发':'—')+'</span></div>';
+      '<span class="'+wCls+'" style="font-weight:600">'+(weekAbs>=weekWarnLine?'已触发':'—')+'</span></div>';
 
     // 月回撤
     var monthAbs = Math.abs(monthDD);
@@ -216,7 +215,7 @@ class RiskPanelWidget extends YiMuWidget {
     html += '<div style="display:flex;justify-content:space-between;padding:2px 0;font-size:var(--fs-body)">'+
       '<span style="color:var(--text-secondary)">月回撤</span>'+
       '<span style="font-family:var(--font-mono)">'+pct(monthDD)+' / '+monthWarnLine+'%</span>'+
-      '<span class="'+mCls+'" style="font-weight:600">'+(monthAbs>=monthWarnLine?'⚠ 触发':'—')+'</span></div>';
+      '<span class="'+mCls+'" style="font-weight:600">'+(monthAbs>=monthWarnLine?'已触发':'—')+'</span></div>';
 
     // ===== 止损提醒（只读，优先 SSOT 止损字段，规则兜底明确标记）=====
     var slAlerts = [];
@@ -245,7 +244,7 @@ class RiskPanelWidget extends YiMuWidget {
         '<div style="font-size:11px;font-weight:700;color:var(--danger);margin-bottom:4px">止损提醒</div>';
       slAlerts.forEach(function(a) {
         html += '<div class="' + (a.hit ? 'sl-alert' : '') + '" style="' + (a.hit ? '' : 'font-size:11px;padding:2px 8px;color:var(--warn);') + '">' +
-          (a.hit ? '🔴 ' : '🟡 ') + a.name + ' ' + a.code +
+          (a.hit ? '止损触发 · ' : '接近止损 · ') + a.name + ' ' + a.code +
           ' 成本' + a.cost.toFixed(2) + ' 现价' + a.price.toFixed(2) +
           ' 止损' + a.sl.toFixed(2) + a.source + ' 浮亏' + (a.pnlPct >= 0 ? '+' : '') + a.pnlPct.toFixed(2) + '%' +
           '</div>';

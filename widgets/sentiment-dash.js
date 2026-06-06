@@ -9,7 +9,7 @@ class SentimentDashWidget extends YiMuWidget {
     var nodes = (data && data.sentiment_nodes) || {};
 
     if (!nodes._available) {
-      body.innerHTML = '<div style="font-size:var(--fs-label);color:var(--text-disabled);text-align:center;padding:var(--sp-md)">情绪节点数据不可用</div>';
+      body.innerHTML = '<div class="ui-empty ui-empty-inline"><div class="ui-empty-title">情绪节点数据不可用</div></div>';
       this.updateTimestamp();
       return;
     }
@@ -120,8 +120,7 @@ class SentimentDashWidget extends YiMuWidget {
 
     html += '</tbody></table>';
 
-    html += '<div style="margin-top:var(--sp-sm);padding:3px 8px;background:var(--bg-base);border-radius:var(--radius-sm);font-size:var(--fs-body);border:1px dashed var(--border-light)" id="w05-llm-text">' +
-      '<span style="color:var(--text-disabled)">🤖 待研判</span></div>';
+    html += '<div class="ui-note ui-note-muted" id="w05-llm-text">等待外部研判记录</div>';
 
     body.innerHTML = html;
     this.updateTimestamp();

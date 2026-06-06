@@ -383,6 +383,39 @@ class W22CodeStructureTests(unittest.TestCase):
         src = (ROOT / "widgets" / "pnl-curve.js").read_text()
         self.assertIn("absMax === 0", src, "应有全零保护")
 
+    def test_w22_styles_live_in_theme_not_inline_injection(self):
+        src = (ROOT / "widgets" / "pnl-curve.js").read_text()
+        theme = (ROOT / "css" / "theme.css").read_text()
+        self.assertNotIn("pnl-curve-style", src)
+        self.assertNotIn("document.head.appendChild(style)", src)
+        self.assertIn(".pnl-root", theme)
+        self.assertIn(".pnl-kpi-sub{font-size:10px;color:var(--text-disabled);margin-top:2px;line-height:1.25", theme)
+        self.assertIn(".pnl-chart-empty.ui-empty", theme)
+        self.assertIn(".pnl-tooltip", theme)
+        self.assertLess(theme.index(".pnl-chart-empty.ui-empty"), theme.index(".ui-empty{"))
+
+    def test_w22_layout_has_dom_empty_state_and_stable_legend_classes(self):
+        script = r"""
+var inst = new PnLCurveWidget({id:'W22'});
+inst.id = 'W22';
+var html = inst._buildLayout();
+console.log(JSON.stringify({
+  hasEmpty: html.indexOf('ui-empty pnl-chart-empty') >= 0,
+  hasCanvasClass: html.indexOf('<canvas class="pnl-chart"') >= 0,
+  hasEmptyTitle: html.indexOf('收益曲线暂无数据') >= 0,
+  hasPortfolioLegend: html.indexOf('pnl-leg-line pnl-leg-portfolio') >= 0,
+  hasBenchmarkLegend: html.indexOf('pnl-leg-line pnl-leg-benchmark') >= 0,
+  hasInlineLegendColor: html.indexOf('style="background:#DC2626"') >= 0
+}));
+"""
+        result = _run_node(script, files=["widgets/pnl-curve.js"])
+        self.assertTrue(result.get("hasEmpty"), f"W22 图表应有 DOM 空态: {result}")
+        self.assertTrue(result.get("hasCanvasClass"), f"W22 canvas 应有稳定 class: {result}")
+        self.assertTrue(result.get("hasEmptyTitle"), f"W22 空态应有稳定标题: {result}")
+        self.assertTrue(result.get("hasPortfolioLegend"), f"W22 图例应使用 class: {result}")
+        self.assertTrue(result.get("hasBenchmarkLegend"), f"W22 图例应使用 class: {result}")
+        self.assertFalse(result.get("hasInlineLegendColor"), f"W22 图例不应保留内联颜色: {result}")
+
 
 
 class W22Phase5CodeCheckTests(unittest.TestCase):

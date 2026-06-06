@@ -1,5 +1,10 @@
-// widgets/llm-monitor.js — W20 AI盯盘（精简：摘要视图，聊天交给 llm-chat.js）
+// widgets/llm-monitor.js — W20 外部研判摘要（只读展示）
 'use strict';
+
+function _w20Esc(s) {
+  if (s == null) return '';
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
 
 class LLMMonitorWidget extends YiMuWidget {
   constructor(config) {
@@ -8,7 +13,7 @@ class LLMMonitorWidget extends YiMuWidget {
     this._loading = false;
   }
 
-  // 重写：60s 轮询最新研判，不再自己触发 LLM
+  // 60s 轮询最新研判，只读展示，不触发 LLM。
   _startTimers() {
     var self = this;
     var timer = setInterval(function() {
@@ -54,12 +59,9 @@ class LLMMonitorWidget extends YiMuWidget {
 
     var html = '';
 
-    // 顶栏
-    html += '<div style="display:flex;align-items:center;gap:var(--sp-sm);margin-bottom:var(--sp-sm)">' +
-      '<span style="font-weight:700;font-size:14px;color:var(--info)">🤖 AI 盯盘</span>' +
-      '<span style="font-size:var(--fs-body);color:var(--text-secondary)">' +
-        (insight ? '上次: ' + insight.ts : '等待首次研判') +
-      '</span>' +
+    html += '<div class="w20-head">' +
+      '<span>外部研判摘要</span>' +
+      '<em>' + (insight ? '上次 ' + _w20Esc(insight.ts) : '等待写入') + '</em>' +
       '</div>';
 
     // 研判摘要（限200字）
@@ -69,7 +71,7 @@ class LLMMonitorWidget extends YiMuWidget {
       html += '<div style="padding:var(--sp-sm) var(--sp-md);margin-bottom:var(--sp-sm);' +
         'background:var(--bg-base);border-radius:var(--radius-md);' +
         'border-left:3px solid var(--info);font-size:14px;line-height:1.7">' +
-        truncated.replace(/\n/g, '<br>') +
+        _w20Esc(truncated).replace(/\n/g, '<br>') +
         '</div>';
 
       // 信号统计
@@ -78,40 +80,33 @@ class LLMMonitorWidget extends YiMuWidget {
         var watchSig = (insight.signals || []).filter(function(s) { return s.type === 'WATCH'; }).length;
         var riskSig = (insight.signals || []).filter(function(s) { return s.type === 'RISK'; }).length;
         var statParts = [];
-        if (buySig > 0) statParts.push('<span style="color:var(--up)">BUY ×' + buySig + '</span>');
-        if (watchSig > 0) statParts.push('<span style="color:var(--info)">WATCH ×' + watchSig + '</span>');
-        if (riskSig > 0) statParts.push('<span style="color:var(--danger)">RISK ×' + riskSig + '</span>');
-        statParts.push('<span style="color:var(--up)">✅' + verified + '</span>');
-        if (warnings > 0) statParts.push('<span style="color:var(--warn)">⚠️' + warnings + '</span>');
+        if (buySig > 0) statParts.push('<span style="color:var(--up)">买入 ×' + buySig + '</span>');
+        if (watchSig > 0) statParts.push('<span style="color:var(--info)">观察 ×' + watchSig + '</span>');
+        if (riskSig > 0) statParts.push('<span style="color:var(--danger)">风险 ×' + riskSig + '</span>');
+        statParts.push('<span style="color:var(--text-secondary)">已核 ' + verified + '</span>');
+        if (warnings > 0) statParts.push('<span style="color:var(--warn)">待核 ' + warnings + '</span>');
 
         html += '<div style="font-size:var(--fs-body);margin-bottom:var(--sp-sm);display:flex;gap:var(--sp-sm);flex-wrap:wrap">' +
           statParts.join(' ') + '</div>';
       }
     } else if (this._loading) {
-      html += '<div style="padding:var(--sp-md);text-align:center;color:var(--text-secondary)">⏳ 加载研判数据...</div>';
+      html += '<div class="ui-empty"><div class="ui-empty-title">加载研判数据</div><div class="ui-empty-detail">读取外部 Agent 已写入的只读记录</div></div>';
     } else {
-      html += '<div style="padding:var(--sp-md);text-align:center;color:var(--text-disabled)">等待首次研判</div>';
+      html += '<div class="ui-empty"><div class="ui-empty-title">等待研判记录</div><div class="ui-empty-detail">仪表盘只展示结果，不在这里触发对话</div></div>';
     }
 
-    // 打开对话按钮
-    html += '<div style="text-align:center;margin-top:var(--sp-sm)">' +
-      '<button id="w20_openChat" style="' +
-        'background:var(--info);color:#fff;border:none;' +
-        'padding:5px 18px;border-radius:20px;cursor:pointer;' +
-        'font-size:var(--fs-body);font-weight:600">' +
-        '💬 打开对话' +
-      '</button>' +
+    html += '<div class="w20-foot">' +
+      '<span>只读展示，不在仪表盘触发研判</span>' +
+      (typeof window !== 'undefined' && typeof window._showLLMPanel === 'function' ? '<button id="w20_openHistory">查看历史</button>' : '') +
       '</div>';
 
     body.innerHTML = html;
     this.updateTimestamp();
 
-    // 绑定按钮
-    var self = this;
-    var btn = body.querySelector('#w20_openChat');
+    var btn = body.querySelector('#w20_openHistory');
     if (btn) {
       btn.addEventListener('click', function() {
-        if (window._llmChat) window._llmChat.show();
+        if (typeof window._showLLMPanel === 'function') window._showLLMPanel();
       });
     }
   }
