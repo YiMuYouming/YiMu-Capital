@@ -1738,6 +1738,11 @@ class EvidenceBoardWidgetTest(unittest.TestCase):
         self.assertIn("R1", html)
         self.assertIn("光讯科技", html)
         self.assertIn("收盘快照", html)
+        self.assertIn("s0-command-strip", html)
+        self.assertIn("当前状态", html)
+        self.assertIn("关键风险", html)
+        self.assertIn("下一步", html)
+        self.assertIn("复核收盘快照", html)
 
 
 class ReadOnlyInsightUxTest(unittest.TestCase):

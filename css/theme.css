@@ -2137,6 +2137,48 @@ body.compact-mode .grid-stack-item:not(.core-widget) { display: none !important;
 .evidence-hero-metrics div{background:rgba(255,255,255,.68);border:1px solid var(--border-light);border-radius:var(--radius-sm);padding:6px 8px;min-width:0}
 .evidence-hero-metrics span{display:block;font-size:9px;color:var(--text-disabled);font-weight:700;letter-spacing:var(--ls-label)}
 .evidence-hero-metrics strong{display:block;margin-top:2px;font-family:var(--font-mono);font-size:14px;line-height:1.15;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.s0-command-strip{
+  display:grid;
+  grid-template-columns:1.2fr 1fr .9fr;
+  gap:7px;
+}
+.s0-command-strip>div{
+  min-width:0;
+  padding:7px 8px;
+  border:1px solid var(--border-light);
+  border-radius:var(--radius-sm);
+  background:var(--bg-card);
+}
+.s0-command-strip span{
+  display:block;
+  font-size:10px;
+  font-weight:850;
+  color:var(--text-disabled);
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
+.s0-command-strip b{
+  display:block;
+  margin-top:3px;
+  color:var(--text-primary);
+  font-size:12px;
+  line-height:1.25;
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
+.s0-command-strip em{
+  display:block;
+  margin-top:3px;
+  color:var(--text-secondary);
+  font-style:normal;
+  font-size:10px;
+  line-height:1.35;
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
 .evidence-section-grid{display:grid;grid-template-columns:1.35fr 1fr 1fr;gap:8px;min-height:0;flex:1}
 .evidence-section{min-width:0;overflow:hidden}
 .evidence-section-title{display:flex;align-items:center;justify-content:space-between;margin-bottom:5px;font-size:11px;font-weight:800;color:var(--text-secondary);letter-spacing:0}
@@ -2156,7 +2198,7 @@ body.compact-mode .grid-stack-item:not(.core-widget) { display: none !important;
 .evidence-tone-warn .evidence-ref{background:var(--warn-bg);color:var(--warn)}
 .evidence-section-alerts .evidence-card,.evidence-section-risks .evidence-card{padding:6px 8px}
 .evidence-section-alerts .evidence-card-value,.evidence-section-risks .evidence-card-value{display:none}
-@media (max-width:900px){.evidence-hero{grid-template-columns:1fr}.evidence-hero-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}.evidence-section-grid{grid-template-columns:1fr}}
+@media (max-width:900px){.evidence-hero{grid-template-columns:1fr}.evidence-hero-metrics{grid-template-columns:repeat(4,minmax(0,1fr))}.s0-command-strip{grid-template-columns:repeat(3,minmax(0,1fr))}.evidence-section-grid{grid-template-columns:1fr}}
 
 /* ===== Evidence inline markers for core components ===== */
 .evidence-inline-ref{display:inline-flex;align-items:center;justify-content:center;min-width:22px;padding:0 5px;margin-right:4px;border-radius:4px;background:var(--bg-soft);color:var(--text-secondary);font-family:var(--font-mono);font-size:10px;font-weight:800;line-height:16px;vertical-align:middle}

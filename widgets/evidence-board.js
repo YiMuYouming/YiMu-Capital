@@ -45,6 +45,39 @@ class EvidenceBoardWidget extends YiMuWidget {
     return html + '</div>';
   }
 
+  _firstPriority(items) {
+    items = Array.isArray(items) ? items : [];
+    return items.find(function(item) { return item && item.tone === 'danger'; }) ||
+      items.find(function(item) { return item && item.tone === 'warn'; }) ||
+      items[0] || null;
+  }
+
+  _nextAction(snapshot) {
+    var s = snapshot.situation || {};
+    var health = s.health || {};
+    var trade = s.trade || {};
+    var connection = s.connection || {};
+    var alerts = Array.isArray(snapshot.alerts) ? snapshot.alerts : [];
+    var risks = Array.isArray(snapshot.risks) ? snapshot.risks : [];
+    if (connection.status === 'close_snapshot' || connection.label === '收盘快照') return '复核收盘快照';
+    if (!health.confirmed) return '等待健康确认';
+    if (!trade.allowed) return '停止交易，复核 ' + ((risks[0] && risks[0].id) || 'R1');
+    if (alerts.length) return '核对 ' + alerts[0].id + ' 后执行';
+    return '核对票据闭环';
+  }
+
+  _commandStrip(headline, snapshot) {
+    var risk = this._firstPriority((snapshot.risks || []).concat(snapshot.alerts || []));
+    var riskTitle = risk ? ((risk.id ? risk.id + ' ' : '') + risk.title) : '暂无关键阻断';
+    var riskDetail = risk ? (risk.detail || risk.source || '') : '保持只读核对，等待外部 AI/终端动作';
+    var nextAction = this._nextAction(snapshot);
+    return '<div class="s0-command-strip">' +
+      '<div><span>当前状态</span><b>' + _evEsc(headline) + '</b><em>首屏只显示结论，细节见 E/A/R。</em></div>' +
+      '<div><span>关键风险</span><b>' + _evEsc(riskTitle) + '</b><em>' + _evEsc(riskDetail) + '</em></div>' +
+      '<div><span>下一步</span><b>' + _evEsc(nextAction) + '</b><em>在 CodexIDE / 终端完成交互，本屏用于验收。</em></div>' +
+    '</div>';
+  }
+
   render(data) {
     var body = this.getBody();
     if (!body) return;
@@ -76,6 +109,7 @@ class EvidenceBoardWidget extends YiMuWidget {
           '<div><span>连接</span><strong>' + _evEsc(connection.label || connection.status || '—') + '</strong></div>' +
         '</div>' +
       '</div>' +
+      this._commandStrip(headline, snapshot) +
       '<div class="evidence-section-grid">' +
         this._section('关键证据', snapshot.evidence || [], 'evidence') +
         this._section('注意事项', snapshot.alerts || [], 'alerts') +
