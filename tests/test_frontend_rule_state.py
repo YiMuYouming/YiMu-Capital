@@ -479,6 +479,50 @@ class W11VolumeBarsRenderTest(unittest.TestCase):
         self.assertNotIn("style=\"height:156px;display:flex", html)
 
 
+class CandidatePoolWidgetTest(unittest.TestCase):
+    def test_w12_lianban_pool_shows_summary_and_escapes_rows(self):
+        fixture = {
+            "lianban_pool": [
+                {"标的": "<img src=x onerror=alert(1)>", "代码": "000001", "板块": "科技", "窗口": "W1", "角色": "1进2", "操作": "追涨", "涨幅": "+4.2%"},
+                {"标的": "测试B", "代码": "000002", "板块": "消费", "窗口": "W2", "角色": "观察", "操作": "只盯", "涨幅": "-1.1%"},
+            ],
+            "live_quotes": {"000001": {"涨幅": "+5.0%", "最新价": "10.2"}},
+        }
+        result = _render_widget("lianban-pool.js", "W12", fixture)
+        html = result.get("html", "")
+        theme = (ROOT / "css" / "theme.css").read_text()
+        self.assertIn("candidate-brief", html)
+        self.assertIn("连板池验收", html)
+        self.assertIn("W1", html)
+        self.assertIn("W2", html)
+        self.assertIn("candidate-table-wrap", html)
+        self.assertNotIn("<img", html, f"W12 不应注入 HTML: {html[:900]}")
+        self.assertNotIn("alert(", html, f"W12 不应显示污染脚本文案: {html[:900]}")
+        self.assertIn("测试B", html)
+        self.assertIn("000001", html)
+        self.assertIn(".candidate-brief-grid", theme)
+
+    def test_w13_trend_pool_shows_summary_and_escapes_rows(self):
+        fixture = {
+            "trend_pool": [
+                {"标的": "趋势A", "代码": "000003", "板块": "AI", "窗口": "W2", "角色": "持仓", "操作": "买入", "涨幅": "+2.3%"},
+                {"标的": "趋势B", "代码": "000004", "板块": "<script>alert(2)</script>", "窗口": "观察", "角色": "观察", "操作": "等待", "涨幅": "-0.5%"},
+            ],
+            "live_quotes": {"000003": {"涨幅": "+3.0%", "最新价": "20.1"}},
+        }
+        result = _render_widget("trend-pool.js", "W13", fixture)
+        html = result.get("html", "")
+        self.assertIn("candidate-brief", html)
+        self.assertIn("趋势池验收", html)
+        self.assertIn("W2", html)
+        self.assertIn("观察", html)
+        self.assertIn("candidate-table-wrap", html)
+        self.assertNotIn("<script", html, f"W13 不应注入 HTML: {html[:900]}")
+        self.assertNotIn("alert(", html, f"W13 不应显示污染脚本文案: {html[:900]}")
+        self.assertIn("趋势A", html)
+        self.assertIn("000004", html)
+
+
 class TradeTicketsWidgetRenderTest(unittest.TestCase):
     def test_w24_renders_ticket_sections_and_blocking_rules(self):
         result = _render_widget("trade-tickets.js", "W24", {

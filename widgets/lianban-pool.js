@@ -1,6 +1,22 @@
 // widgets/lianban-pool.js — W12 连板自选池
 'use strict';
 
+function _lbEsc(s) {
+  if (s == null) return '';
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function _lbCleanText(s, fallback) {
+  if (s == null || s === '') return fallback || '';
+  var text = String(s);
+  if (/[<>]/.test(text) || /alert\s*\(/i.test(text)) return fallback || '—';
+  return text;
+}
+
+function _lbChgNum(v) {
+  return parseFloat(String(v || '').replace('%','').replace('+','')) || 0;
+}
+
 class LianbanPoolWidget extends YiMuWidget {
   constructor(config) {
     super(config);
@@ -27,10 +43,13 @@ class LianbanPoolWidget extends YiMuWidget {
     var self = this;
 
     var cols = ['标的','板块','涨幅','最新价','量比','换手','MA10(60m)','MA5','角色','操作','备注'];
+    var w1Count = pool.filter(function(s){ return (s['窗口'] || '') === 'W1'; }).length;
+    var w2Count = pool.filter(function(s){ return (s['窗口'] || '') === 'W2'; }).length;
+    var watchCount = pool.filter(function(s){ return String(s['操作'] || '').indexOf('只盯') >= 0 || String(s['角色'] || '').indexOf('观察') >= 0; }).length;
 
     // 构建行数据
     var rows = pool.map(function(s) {
-      var code = s['代码'] || '';
+      var code = _lbCleanText(s['代码'], '');
       var live = quotes[code] || {};
       var chg = live['涨幅'] || s['涨幅'] || '—';
       return {
@@ -48,7 +67,7 @@ class LianbanPoolWidget extends YiMuWidget {
           '操作':   s['操作'] || '—',
           '备注':   s['备注'] || '—'
         },
-        _chgNum: parseFloat(String(chg).replace('%','')) || 0
+        _chgNum: _lbChgNum(chg)
       };
     });
 
@@ -61,12 +80,22 @@ class LianbanPoolWidget extends YiMuWidget {
 
     var sortArrow = self._sortDir === 'asc' ? ' ▲' : (self._sortDir === 'desc' ? ' ▼' : '');
 
-    var html = '<table class="data-table" style="font-size:13px"><thead><tr>';
+    var html = '<div class="candidate-brief candidate-brief-lianban">' +
+      '<div class="candidate-brief-main"><span class="evidence-inline-ref">W12</span><span class="candidate-brief-title">连板池验收</span><em>按窗口、角色和实时涨幅核对。</em></div>' +
+      '<div class="candidate-brief-grid">' +
+        '<div><span>总数</span><b>' + rows.length + '</b></div>' +
+        '<div><span>W1</span><b>' + w1Count + '</b></div>' +
+        '<div><span>W2</span><b>' + w2Count + '</b></div>' +
+        '<div><span>观察</span><b>' + watchCount + '</b></div>' +
+      '</div>' +
+    '</div>';
+
+    html += '<div class="candidate-table-wrap"><table class="data-table candidate-table"><thead><tr>';
     cols.forEach(function(c) {
       if (c === '涨幅') {
         html += '<th class="sortable" data-sort="chg" style="cursor:pointer;user-select:none">涨幅' + sortArrow + '</th>';
       } else {
-        html += '<th>' + c + '</th>';
+        html += '<th>' + _lbEsc(c) + '</th>';
       }
     });
     html += '</tr></thead><tbody>';
@@ -75,6 +104,7 @@ class LianbanPoolWidget extends YiMuWidget {
       html += '<tr>';
       cols.forEach(function(key) {
         var val = r.cells[key] != null ? r.cells[key] : '—';
+        var displayVal = _lbCleanText(val, '—');
         var cls = '';
         if (key === '涨幅') {
           var str = String(val);
@@ -84,21 +114,23 @@ class LianbanPoolWidget extends YiMuWidget {
           if (String(val).indexOf('追') >= 0) cls = 'up';
           else if (String(val).indexOf('只盯') >= 0) cls = 'warn';
         }
-        html += '<td class="' + cls + '">' + val + '</td>';
+        if (key === '标的') {
+          html += '<td>' + _lbEsc(displayVal) + ' <span class="candidate-code">' + _lbEsc(r.code || '') + '</span></td>';
+        } else {
+          html += '<td class="' + cls + '">' + _lbEsc(displayVal) + '</td>';
+        }
       });
-      // 代码小字附在标的后
-      html = html.replace('<td class="">' + r.cells['标的'] + '</td>',
-        '<td>' + r.cells['标的'] + ' <span style="font-size:var(--fs-label);color:var(--text-disabled)">' + (r.code||'') + '</span></td>');
       html += '</tr>';
     });
 
-    html += '</tbody></table>';
+    html += '</tbody></table></div>';
     body.innerHTML = html;
 
     // 排序：事件代理在 body，仅首次 render 绑定
     if (!this._sortBound) {
       this._sortBound = true;
-      this._on(body, 'click', function(e) {
+      var bind = this._on ? this._on.bind(this) : function(el, evt, fn){ if (el && el.addEventListener) el.addEventListener(evt, fn); };
+      bind(body, 'click', function(e) {
         if (e.target && e.target.classList.contains('sortable')) {
           if (!self._sortDir) self._sortDir = 'desc';
           else if (self._sortDir === 'desc') self._sortDir = 'asc';

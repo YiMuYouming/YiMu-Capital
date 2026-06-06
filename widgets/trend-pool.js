@@ -1,6 +1,22 @@
 // widgets/trend-pool.js — W13 趋势自选池
 'use strict';
 
+function _trEsc(s) {
+  if (s == null) return '';
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function _trCleanText(s, fallback) {
+  if (s == null || s === '') return fallback || '';
+  var text = String(s);
+  if (/[<>]/.test(text) || /alert\s*\(/i.test(text)) return fallback || '—';
+  return text;
+}
+
+function _trChgNum(v) {
+  return parseFloat(String(v || '').replace('%','').replace('+','')) || 0;
+}
+
 class TrendPoolWidget extends YiMuWidget {
   constructor(config) {
     super(config);
@@ -27,9 +43,12 @@ class TrendPoolWidget extends YiMuWidget {
     var self = this;
 
     var cols = ['标的','板块','涨幅','最新价','量比','换手','MA10(60m)','MA5','角色','操作','备注'];
+    var w2Count = pool.filter(function(s){ return (s['窗口'] || '') === 'W2'; }).length;
+    var holdingCount = pool.filter(function(s){ return String(s['角色'] || '').indexOf('持仓') >= 0; }).length;
+    var watchCount = pool.filter(function(s){ return String(s['窗口'] || '') === '观察' || String(s['操作'] || '').indexOf('等待') >= 0 || String(s['角色'] || '').indexOf('观察') >= 0; }).length;
 
     var rows = pool.map(function(s) {
-      var code = s['代码'] || '';
+      var code = _trCleanText(s['代码'], '');
       var live = quotes[code] || {};
       var chg = live['涨幅'] || s['涨幅'] || '—';
       return {
@@ -47,7 +66,7 @@ class TrendPoolWidget extends YiMuWidget {
           '操作':   s['操作'] || '—',
           '备注':   s['备注'] || '—'
         },
-        _chgNum: parseFloat(String(chg).replace('%','')) || 0
+        _chgNum: _trChgNum(chg)
       };
     });
 
@@ -59,12 +78,22 @@ class TrendPoolWidget extends YiMuWidget {
 
     var sortArrow = self._sortDir === 'asc' ? ' ▲' : (self._sortDir === 'desc' ? ' ▼' : '');
 
-    var html = '<table class="data-table" style="font-size:13px"><thead><tr>';
+    var html = '<div class="candidate-brief candidate-brief-trend">' +
+      '<div class="candidate-brief-main"><span class="evidence-inline-ref">W13</span><span class="candidate-brief-title">趋势池验收</span><em>按持仓、窗口和回踩状态核对。</em></div>' +
+      '<div class="candidate-brief-grid">' +
+        '<div><span>总数</span><b>' + rows.length + '</b></div>' +
+        '<div><span>W2</span><b>' + w2Count + '</b></div>' +
+        '<div><span>持仓</span><b>' + holdingCount + '</b></div>' +
+        '<div><span>观察</span><b>' + watchCount + '</b></div>' +
+      '</div>' +
+    '</div>';
+
+    html += '<div class="candidate-table-wrap"><table class="data-table candidate-table"><thead><tr>';
     cols.forEach(function(c) {
       if (c === '涨幅') {
         html += '<th class="sortable" data-sort="chg" style="cursor:pointer;user-select:none">涨幅' + sortArrow + '</th>';
       } else {
-        html += '<th>' + c + '</th>';
+        html += '<th>' + _trEsc(c) + '</th>';
       }
     });
     html += '</tr></thead><tbody>';
@@ -73,6 +102,7 @@ class TrendPoolWidget extends YiMuWidget {
       html += '<tr>';
       cols.forEach(function(key) {
         var val = r.cells[key] != null ? r.cells[key] : '—';
+        var displayVal = _trCleanText(val, '—');
         var cls = '';
         if (key === '涨幅') {
           var str = String(val);
@@ -81,19 +111,22 @@ class TrendPoolWidget extends YiMuWidget {
         if (key === '操作') {
           if (String(val).indexOf('买入') >= 0) cls = 'down';
         }
-        html += '<td class="' + cls + '">' + val + '</td>';
+        if (key === '标的') {
+          html += '<td>' + _trEsc(displayVal) + ' <span class="candidate-code">' + _trEsc(r.code || '') + '</span></td>';
+        } else {
+          html += '<td class="' + cls + '">' + _trEsc(displayVal) + '</td>';
+        }
       });
-      html = html.replace('<td class="">' + r.cells['标的'] + '</td>',
-        '<td>' + r.cells['标的'] + ' <span style="font-size:var(--fs-label);color:var(--text-disabled)">' + (r.code||'') + '</span></td>');
       html += '</tr>';
     });
 
-    html += '</tbody></table>';
+    html += '</tbody></table></div>';
     body.innerHTML = html;
 
     if (!this._sortBound) {
       this._sortBound = true;
-      this._on(body, 'click', function(e) {
+      var bind = this._on ? this._on.bind(this) : function(el, evt, fn){ if (el && el.addEventListener) el.addEventListener(evt, fn); };
+      bind(body, 'click', function(e) {
         if (e.target && e.target.classList.contains('sortable')) {
           if (!self._sortDir) self._sortDir = 'desc';
           else if (self._sortDir === 'desc') self._sortDir = 'asc';

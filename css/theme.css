@@ -1297,6 +1297,49 @@ html,body{
 .window-command-grid em{display:block;margin-top:2px;font-style:normal;font-size:var(--fs-label);color:var(--text-disabled);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 @media(max-width:760px){.window-command-grid{grid-template-columns:1fr}.window-command-head b{font-size:16px}}
 
+/* ===== Candidate pool summaries (W12/W13) ===== */
+.candidate-brief{
+  display:grid;
+  grid-template-columns:minmax(150px,1.1fr) minmax(220px,1fr);
+  gap:var(--sp-xs);
+  margin-bottom:var(--sp-sm);
+}
+.candidate-brief>div{
+  min-width:0;
+  padding:var(--sp-xs) var(--sp-sm);
+  border:1px solid var(--border-light);
+  border-radius:var(--radius-sm);
+  background:linear-gradient(180deg,#fff,var(--bg-base));
+}
+.candidate-brief-main .candidate-brief-title{
+  display:block;
+  margin-top:2px;
+  font-size:13px;
+  font-weight:850;
+  color:var(--text-primary);
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
+.candidate-brief-main em{
+  display:block;
+  margin-top:2px;
+  font-style:normal;
+  font-size:var(--fs-label);
+  color:var(--text-secondary);
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
+.candidate-brief-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:4px}
+.candidate-brief-grid>div{padding:0;border:0;background:transparent}
+.candidate-brief-grid span{display:block;font-size:10px;font-weight:800;color:var(--text-disabled);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.candidate-brief-grid b{display:block;margin-top:1px;font-family:var(--font-mono);font-size:15px;line-height:1.2;color:var(--text-primary)}
+.candidate-table-wrap{overflow-x:auto;border:1px solid var(--border-light);border-radius:var(--radius-md);background:var(--bg-card)}
+.data-table.candidate-table{font-size:12px;min-width:880px}
+.candidate-code{font-size:var(--fs-label);color:var(--text-disabled);font-family:var(--font-mono);white-space:nowrap}
+@media(max-width:760px){.candidate-brief{grid-template-columns:1fr}.candidate-brief-grid{grid-template-columns:repeat(4,minmax(0,1fr))}}
+
 /* ===== W21 zt echelon ===== */
 .zt-source-row{
   display:flex;
