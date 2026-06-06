@@ -491,6 +491,56 @@ html,body{
   font-weight:800;
   white-space:nowrap;
 }
+.evidence-shelf-nav{
+  display:flex;
+  gap:6px;
+  align-items:center;
+  padding:7px 16px;
+  border-bottom:1px solid var(--border-light);
+  background:var(--bg-card);
+  overflow-x:auto;
+}
+.evidence-shelf-nav-btn{
+  display:inline-grid;
+  grid-template-columns:auto auto auto;
+  align-items:center;
+  gap:5px;
+  min-height:26px;
+  padding:3px 8px;
+  border:1px solid var(--border-light);
+  border-radius:var(--radius-sm);
+  background:var(--bg-base);
+  color:var(--text-secondary);
+  cursor:pointer;
+  white-space:nowrap;
+  transition:background .12s,border-color .12s,color .12s;
+}
+.evidence-shelf-nav-btn:hover{
+  background:var(--bg-hover);
+  border-color:var(--border);
+  color:var(--text-primary);
+}
+.evidence-shelf-nav-btn b{
+  font-family:var(--font-mono);
+  font-size:10px;
+  color:var(--text-disabled);
+}
+.evidence-shelf-nav-btn span{
+  font-size:var(--fs-label);
+  font-weight:800;
+}
+.evidence-shelf-nav-btn em{
+  min-width:18px;
+  padding:1px 5px;
+  border-radius:999px;
+  background:var(--bg-card);
+  color:var(--text-primary);
+  font-style:normal;
+  font-family:var(--font-mono);
+  font-size:10px;
+  font-weight:850;
+  text-align:center;
+}
 .evidence-shelf-grid{
   display:grid;
   grid-template-columns:repeat(2,minmax(0,1fr));

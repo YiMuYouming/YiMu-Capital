@@ -198,6 +198,7 @@ body.ready{opacity:1}
       主屏保留作战态势；这里集中核对板块热度、候选池和涨停梯队，不发起写入。
     </div>
     <div class="evidence-shelf-summary" id="evidenceShelfSummary"></div>
+    <div class="evidence-shelf-nav" id="evidenceShelfNav"></div>
     <div class="evidence-shelf-grid" id="evidenceShelfBody"></div>
   </div>
 </div>
@@ -544,6 +545,35 @@ function _renderEvidenceShelfSummary() {
     '<div class="evidence-shelf-summary-source">' + _uiEsc(source) + '</div>';
 }
 
+function _renderEvidenceShelfNav() {
+  var nav = document.getElementById('evidenceShelfNav');
+  if (!nav) return;
+  var data = DataStore.merged || {};
+  var hotList = data.hot_list || {};
+  var iwc = data.iwencai || {};
+  var items = [
+    { id: 'W10', label: '板块', value: Array.isArray(data.sectors) ? data.sectors.length : 0 },
+    { id: 'W12', label: '连板', value: Array.isArray(data.lianban_pool) ? data.lianban_pool.length : 0 },
+    { id: 'W13', label: '趋势', value: Array.isArray(data.trend_pool) ? data.trend_pool.length : 0 },
+    { id: 'W21', label: '梯队', value: (Array.isArray(hotList.zt_stocks) ? hotList.zt_stocks.length : 0) + '/' + (Array.isArray(iwc['连板股列表']) ? iwc['连板股列表'].length : 0) },
+  ];
+  nav.innerHTML = items.map(function(item) {
+    return '<button class="evidence-shelf-nav-btn" data-target="SHELF_' + item.id + '" title="跳转到 ' + item.id + '">' +
+      '<b>' + item.id + '</b><span>' + _uiEsc(item.label) + '</span><em>' + _uiEsc(item.value) + '</em></button>';
+  }).join('');
+  nav.querySelectorAll('.evidence-shelf-nav-btn').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      var target = document.getElementById('content_' + btn.getAttribute('data-target'));
+      var scroller = document.getElementById('evidenceShelfBody');
+      if (target && scroller && typeof scroller.scrollTo === 'function') {
+        scroller.scrollTo({ top: Math.max(0, target.offsetTop - scroller.offsetTop), behavior: 'smooth' });
+      } else if (target) {
+        target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+    });
+  });
+}
+
 function _showEvidenceShelf() {
   _closeTopbarMenus();
   _clearEvidenceShelf();
@@ -551,11 +581,13 @@ function _showEvidenceShelf() {
   if (!overlay) return;
   overlay.classList.add('show');
   _renderEvidenceShelfSummary();
+  _renderEvidenceShelfNav();
   EVIDENCE_SHELF_WIDGETS.forEach(_mountEvidenceShelfWidget);
 }
 
 function _refreshEvidenceShelf() {
   _renderEvidenceShelfSummary();
+  _renderEvidenceShelfNav();
   Object.keys(evidenceShelfInstances).forEach(function(id) {
     var inst = evidenceShelfInstances[id];
     if (inst && typeof inst.refresh === 'function') inst.refresh();
