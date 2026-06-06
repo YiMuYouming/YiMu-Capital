@@ -298,6 +298,25 @@ class TradeTicketsWidget extends YiMuWidget {
     '</div>';
   }
 
+  _chainStep(stage, label, value, detail, tone) {
+    return '<div class="ticket-chain-step' + (tone ? ' tone-' + _ttEsc(tone) : '') + '" data-ticket-chain="' + _ttEsc(stage) + '">' +
+      '<span>' + _ttEsc(label) + '</span>' +
+      '<b>' + _ttEsc(value) + '</b>' +
+      '<em>' + _ttEsc(detail) + '</em>' +
+    '</div>';
+  }
+
+  _executionChain(counts) {
+    counts = counts || {};
+    return '<div class="ticket-execution-chain" aria-label="票据到持仓执行链">' +
+      '<div class="ticket-chain-title"><span>执行链</span><b>AI → 终端 → 账户</b></div>' +
+      this._chainStep('ticket', 'E2票据', counts.total + '张票据', counts.exec ? counts.exec + '张待执行' : '票据已分流', '') +
+      this._chainStep('trade', 'W23成交', counts.linkedTrades + '笔成交', counts.filled ? counts.filled + '张已回填' : '等待回填', '') +
+      this._chainStep('account', 'E1账户', counts.accountPending + '张待核', counts.accountPending ? '到 W15 核对' : '暂无账户动作', '') +
+      this._chainStep('risk', '异常', counts.conflicts + '项冲突', counts.conflicts ? '需复核' : '无冲突', counts.conflicts ? 'danger' : '') +
+    '</div>';
+  }
+
   _section(title, tickets, tone, compact) {
     var html = '<div class="ticket-section"><div class="ticket-section-title"><span>' +
       _ttEsc(title) + '</span><span class="ticket-section-count">' + tickets.length + '</span></div>';
@@ -357,11 +376,26 @@ class TradeTicketsWidget extends YiMuWidget {
     var done = tickets.filter(function(t){ return ['filled','partially_filled','closed','closed_with_conflict','cancelled'].indexOf(t.status) >= 0; });
     var filled = done.filter(function(t){ return ['filled','partially_filled','closed','closed_with_conflict'].indexOf(t.status) >= 0; });
     var cancelled = done.filter(function(t){ return t.status === 'cancelled'; });
+    var linkedTrades = [];
+    var conflictCount = 0;
+    tickets.forEach(function(t) {
+      linkedTrades = linkedTrades.concat(_ttList(t.linked_trade_ids || t.trade_ids));
+      conflictCount += _ttList(t.conflicts || t.ticket_conflict_log || t.conflict_log).length;
+    });
     var pendingText = this._pendingPreview ? ('待确认 ' + this._pendingPreview.confirmation_id) : '';
     var selectedText = this._selectedTicketId ? '当前票据 ' + this._selectedTicketId : '未选择票据';
     var activeAction = this._selectedAction || 'buy';
     var writeGate = _ttWriteGate();
-    var counts = { pending: pending.length, exec: exec.length, blocked: blocked.length, filled: filled.length, total: tickets.length };
+    var counts = {
+      pending: pending.length,
+      exec: exec.length,
+      blocked: blocked.length,
+      filled: filled.length,
+      total: tickets.length,
+      linkedTrades: linkedTrades.length,
+      accountPending: filled.length,
+      conflicts: conflictCount
+    };
     var nextAction = pending.length ? '复核待确认票据' :
       exec.length ? '等待终端执行回填' :
       blocked.length ? '复核阻断原因' :
@@ -408,6 +442,7 @@ class TradeTicketsWidget extends YiMuWidget {
       '<div><span>下一步</span><b>' + _ttEsc(nextAction) + '</b><em>' + _ttEsc(selectedText) + '</em></div>' +
       '<div><span>闭环</span><b>' + filled.length + '/' + tickets.length + '</b><em>成交 ' + filled.length + ' · 取消 ' + cancelled.length + '</em></div>' +
     '</div>' +
+    this._executionChain(counts) +
     this._acceptanceRail(counts) +
     '<div class="ticket-summary-grid">' +
       this._summaryPill('待确认', pending.length, 'info') +

@@ -586,6 +586,33 @@ class TradeTicketsWidgetRenderTest(unittest.TestCase):
         self.assertIn("7000", html)
         self.assertIn("10000", html)
 
+    def test_w24_shows_execution_chain_from_ticket_to_account(self):
+        result = _render_widget("trade-tickets.js", "W24", {
+            "trade_tickets": [
+                {"ticket_id": "TICKET-PENDING", "code": "002281", "name": "光迅科技", "action_type": "buy", "status": "executable"},
+                {"ticket_id": "TICKET-FILLED", "code": "000001", "name": "测试A", "action_type": "buy", "status": "filled", "linked_trade_ids": [42]},
+                {"ticket_id": "TICKET-CONFLICT", "code": "600726", "name": "华电能源", "action_type": "clear", "status": "closed_with_conflict", "linked_trade_ids": [45, 46], "conflicts": [{"conflict_type": "T1_SELLABLE_QTY"}]},
+            ]
+        })
+        self.assertNotIn("_error", result)
+        html = result["html"]
+        self.assertIn("ticket-execution-chain", html)
+        self.assertIn('data-ticket-chain="ticket"', html)
+        self.assertIn('data-ticket-chain="trade"', html)
+        self.assertIn('data-ticket-chain="account"', html)
+        self.assertIn('data-ticket-chain="risk"', html)
+        self.assertIn("执行链", html)
+        self.assertIn("E2票据", html)
+        self.assertIn("W23成交", html)
+        self.assertIn("E1账户", html)
+        self.assertIn("异常", html)
+        self.assertIn("3张票据", html)
+        self.assertIn("3笔成交", html)
+        self.assertIn("2张待核", html)
+        self.assertIn("1项冲突", html)
+        self.assertLess(html.index("ticket-command-strip"), html.index("ticket-execution-chain"))
+        self.assertLess(html.index("ticket-execution-chain"), html.index("ticket-acceptance-rail"))
+
     def test_w24_empty_sections_use_shared_quiet_state(self):
         result = _render_widget("trade-tickets.js", "W24", {"trade_tickets": []})
         self.assertNotIn("_error", result)
