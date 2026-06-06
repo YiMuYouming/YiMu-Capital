@@ -541,6 +541,29 @@ class TradeTicketsWidgetRenderTest(unittest.TestCase):
         self.assertIn("暂无", html)
         self.assertNotIn("border:1px dashed var(--border-light)", html)
 
+    def test_w24_prioritizes_acceptance_view_and_keeps_emergency_entry(self):
+        result = _render_widget("trade-tickets.js", "W24", {
+            "trade_tickets": [
+                {"ticket_id": "TICKET-DRAFT", "code": "002281", "name": "光迅科技", "action_type": "buy", "status": "draft", "window": "W2", "max_qty": 100},
+                {"ticket_id": "TICKET-EXEC", "code": "000001", "name": "测试A", "action_type": "add", "status": "executable", "window": "W2", "max_qty": 200},
+                {"ticket_id": "TICKET-BLOCK", "code": "000002", "name": "测试B", "action_type": "clear", "status": "blocked", "blocking_rule_ids": ["sellable_qty"]},
+                {"ticket_id": "TICKET-FILLED", "code": "000003", "name": "测试C", "action_type": "sell", "status": "filled", "linked_trade_ids": [51]},
+            ]
+        })
+        self.assertNotIn("_error", result)
+        html = result["html"]
+        self.assertIn("ticket-command-strip", html)
+        self.assertIn("AI验收台", html)
+        self.assertIn("下一步", html)
+        self.assertIn("ticket-emergency-dock", html)
+        self.assertIn("ticket-emergency-entry", html)
+        self.assertIn("data-tt-prepare", html, "应急出票据入口必须保留")
+        self.assertIn("data-tt-preview", html, "应急预览成交入口必须保留")
+        self.assertIn("data-tt-confirm", html, "应急确认入账入口必须保留")
+        self.assertLess(html.index("ticket-command-strip"), html.index("ticket-layout"))
+        self.assertLess(html.index("ticket-layout"), html.index("ticket-emergency-entry"),
+                        f"应急入口应收在主验收视图之后: {html[:1000]}")
+
     def test_w24_readonly_mode_hides_mutating_controls(self):
         readonly_js = """
 global.window = {
@@ -905,6 +928,37 @@ console.log(JSON.stringify({html: body.innerHTML.replace(/\s+/g, ' ')}));
         self.assertIn("data-table w23-table", html)
         self.assertIn("w23-group-row", html)
         self.assertIn("w23-summary-row", html)
+
+    def test_w23_shows_review_acceptance_summary_before_table(self):
+        wpath = ROOT / "widgets" / "trade-review.js"
+        widget_src = wpath.read_text(encoding="utf-8")
+        reviews = [
+            {"id": 1, "trade_time": "10:01", "action": "买入", "name": "可信", "code": "000001", "qty": 100, "context_status": "trusted", "rule_state": {"tradable": True, "windows": {"w2": {"buy_allowed": True}}, "blocks": [], "warnings": []}, "market_snapshot": {"iwencai": {"情绪值": 59}, "live_index": {}}},
+            {"id": 2, "trade_time": "10:02", "action": "卖出", "name": "未验证", "code": "000002", "qty": 100, "context_status": "unverified"},
+            {"id": 3, "trade_time": "10:03", "action": "卖出", "name": "不可用", "code": "000003", "qty": 100, "context_status": "unavailable", "context_unavailable_reason": "历史补录"},
+        ]
+        script = PREAMBLE + "\n" + widget_src + r"""
+var cls = WidgetRegistry._map["W23"];
+var inst = new cls({id:"W23"});
+inst.getBody = function() { var d = document.createElement('div'); this._body = d; return d; };
+var body = inst.getBody();
+inst._renderTable(body, REVIEWS, "2026-06-06");
+console.log(JSON.stringify({html: body.innerHTML.replace(/\s+/g, ' ')}));
+""".replace("REVIEWS", json.dumps(reviews))
+        result = subprocess.run(
+            ["node", "--no-warnings", "-e", script],
+            capture_output=True, text=True, timeout=10,
+            cwd=str(ROOT),
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        html = json.loads(result.stdout.strip().split("\n")[-1])["html"]
+        self.assertIn("w23-review-brief", html)
+        self.assertIn("复盘验收", html)
+        self.assertIn("已验证", html)
+        self.assertIn("未验证", html)
+        self.assertIn("不可用", html)
+        self.assertLess(html.index("w23-review-brief"), html.index("w23-filter-bar"))
+        self.assertLess(html.index("w23-review-brief"), html.index("w23-table-wrap"))
 
     def test_w23_empty_and_loading_use_shared_quiet_state(self):
         wpath = ROOT / "widgets" / "trade-review.js"

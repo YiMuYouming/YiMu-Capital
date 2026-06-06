@@ -105,6 +105,21 @@ class TradeReviewWidget extends YiMuWidget {
     return '<button id="' + id + '" class="filter-btn w23-filter-btn' + active + '" data-f="' + value + '">' + _esc(label) + '</button>';
   }
 
+  _reviewBriefHtml(reviews) {
+    reviews = Array.isArray(reviews) ? reviews : [];
+    var trusted = reviews.filter(function(r) { return r.context_status === 'trusted' || (r.rule_state && r.market_snapshot); }).length;
+    var unavailable = reviews.filter(function(r) { return r.context_status === 'unavailable'; }).length;
+    var unverified = Math.max(0, reviews.length - trusted - unavailable);
+    var next = unavailable ? '先看不可用上下文' : (unverified ? '复核未验证成交' : (reviews.length ? '核对归因备注' : '等待成交记录'));
+    return '<div class="w23-review-brief">' +
+      '<div class="w23-review-main"><span class="evidence-inline-ref">E1</span><span class="w23-review-value">复盘验收</span><em>' + _esc(next) + '</em></div>' +
+      '<div><span>总笔数</span><span class="w23-review-value">' + reviews.length + '</span></div>' +
+      '<div><span>已验证</span><span class="w23-review-value">' + trusted + '</span></div>' +
+      '<div><span>未验证</span><span class="w23-review-value">' + unverified + '</span></div>' +
+      '<div><span>不可用</span><span class="w23-review-value">' + unavailable + '</span></div>' +
+    '</div>';
+  }
+
   _tradeGroupKey(r, idx) {
     return r.trade_group_id || r.ticket_id || ('single-' + idx);
   }
@@ -144,6 +159,7 @@ class TradeReviewWidget extends YiMuWidget {
     var html = '';
 
     html += this._toolbarHtml(date, '查看');
+    html += this._reviewBriefHtml(reviews || []);
 
     // Phase 5: context 状态筛选
     var filter = this._filter || 'all';

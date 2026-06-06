@@ -343,14 +343,18 @@ class TradeTicketsWidget extends YiMuWidget {
     var selectedText = this._selectedTicketId ? '当前票据 ' + this._selectedTicketId : '未选择票据';
     var activeAction = this._selectedAction || 'buy';
     var writeGate = _ttWriteGate();
+    var nextAction = pending.length ? '复核待确认票据' :
+      exec.length ? '等待终端执行回填' :
+      blocked.length ? '复核阻断原因' :
+      filled.length ? '核对已成交闭环' : '暂无票据动作';
     function actionButton(action, label) {
       var active = activeAction === action;
       return '<button class="ticket-action-toggle' + (active ? ' is-active' : '') + '" data-tt-action-set="' + _ttEsc(action) + '">' + _ttEsc(label) + '</button>';
     }
-    body.innerHTML = '<div class="ticket-brief-head"><span><span class="evidence-inline-ref">E2</span>票据闭环</span><span>已成交 ' + filled.length + ' / 已取消 ' + cancelled.length + '</span></div>' +
-      (writeGate.canWrite ?
+    var emergencyHtml = writeGate.canWrite ?
+      '<div class="ticket-emergency-dock">' +
       '<details class="ticket-emergency-entry">' +
-      '<summary>应急录入</summary>' +
+      '<summary><span>应急</span><em>手工出票 / 成交确认</em></summary>' +
       '<div class="ticket-entry-grid">' +
       '<div class="ticket-entry-main">' +
         '<div class="ticket-action-row">' +
@@ -377,8 +381,14 @@ class TradeTicketsWidget extends YiMuWidget {
         '<button class="ticket-command-btn" data-tt-confirm>确认入账</button>' +
       '</div>' +
       ((this._statusMessage || pendingText || selectedText) ? '<div class="ticket-status-line' + (this._statusMessage ? ' has-message' : '') + '">' + _ttEsc(this._statusMessage || pendingText || selectedText) + '</div>' : '') +
-    '</div></details>' :
-      '<div class="ticket-readonly-lock ui-empty ui-empty-inline"><div class="ui-empty-title">只读闭环</div><div class="ui-empty-detail">' + _ttEsc(writeGate.reason) + '，票据状态仅用于核对。</div></div>') +
+    '</div></details></div>' :
+      '<div class="ticket-readonly-lock ui-empty ui-empty-inline"><div class="ui-empty-title">只读闭环</div><div class="ui-empty-detail">' + _ttEsc(writeGate.reason) + '，票据状态仅用于核对。</div></div>';
+    body.innerHTML = '<div class="ticket-brief-head"><span><span class="evidence-inline-ref">E2</span>票据闭环</span><span>已成交 ' + filled.length + ' / 已取消 ' + cancelled.length + '</span></div>' +
+    '<div class="ticket-command-strip">' +
+      '<div><span class="evidence-inline-ref">E2</span><b>AI验收台</b><em>票据由 AI/终端生成与执行，本面板只做状态核对。</em></div>' +
+      '<div><span>下一步</span><b>' + _ttEsc(nextAction) + '</b><em>' + _ttEsc(selectedText) + '</em></div>' +
+      '<div><span>闭环</span><b>' + filled.length + '/' + tickets.length + '</b><em>成交 ' + filled.length + ' · 取消 ' + cancelled.length + '</em></div>' +
+    '</div>' +
     '<div class="ticket-summary-grid">' +
       this._summaryPill('待确认', pending.length, 'info') +
       this._summaryPill('可执行', exec.length, 'up') +
@@ -396,7 +406,8 @@ class TradeTicketsWidget extends YiMuWidget {
       this._section('已成交/关闭', filled, 'text-secondary', true) +
       (cancelled.length ? '<details style="margin-top:6px"><summary style="font-size:var(--fs-label);color:var(--text-disabled);cursor:pointer">已取消 ' + cancelled.length + '</summary>' + this._section('取消记录', cancelled, 'text-disabled', true) + '</details>' : '') +
       '</div>' +
-      '</div>';
+      '</div>' +
+      emergencyHtml;
     this._bindActions(body);
     this.updateTimestamp();
   }

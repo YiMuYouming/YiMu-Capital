@@ -807,6 +807,23 @@ html,body{
 .w23-date-input{border:1px solid var(--border);border-radius:var(--radius-sm);padding:2px 6px;font-size:var(--fs-body);background:var(--bg-card);color:var(--text-primary);height:24px}
 .w23-action-btn{height:24px}
 .w23-error{margin-bottom:var(--sp-sm)}
+.w23-review-brief{
+  display:grid;
+  grid-template-columns:minmax(150px,1.25fr) repeat(4,minmax(64px,.55fr));
+  gap:6px;
+  margin-bottom:var(--sp-sm);
+}
+.w23-review-brief>div{
+  min-width:0;
+  padding:7px 9px;
+  border:1px solid var(--border-light);
+  border-radius:var(--radius-sm);
+  background:linear-gradient(180deg,#fff,var(--bg-base));
+}
+.w23-review-brief span{display:block;font-size:10px;font-weight:800;color:var(--text-disabled);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.w23-review-value{display:block!important;margin-top:2px;font-family:var(--font-mono);font-size:15px!important;line-height:1.2;color:var(--text-primary)!important;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.w23-review-main .w23-review-value{font-family:inherit}
+.w23-review-main em{display:block;margin-top:2px;font-style:normal;font-size:10px;color:var(--text-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .w23-filter-bar{flex-wrap:wrap}
 .w23-filter-label{font-size:11px;color:var(--text-secondary);margin-right:2px;font-weight:700}
 .w23-empty{min-height:92px}
@@ -820,6 +837,7 @@ html,body{
 .w23-group-type{margin-right:8px}
 .w23-group-meta{font-family:var(--font-mono)}
 .w23-summary-row{background:var(--bg-hover)!important;font-size:11px;color:var(--text-secondary);font-weight:700}
+@media(max-width:760px){.w23-review-brief{grid-template-columns:1fr 1fr}.w23-review-main{grid-column:1/-1}}
 
 /* ===== Sector heat (W10) ===== */
 .w10-board{display:flex;flex-direction:column;gap:6px}
@@ -1794,16 +1812,34 @@ body.compact-mode .grid-stack-item:not(.core-widget) { display: none !important;
 /* ===== Ticket cockpit refinements (W24) ===== */
 .ticket-brief-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:8px;color:var(--text-secondary);font-size:var(--fs-label);font-weight:800}
 .ticket-brief-head > span:last-child{font-family:var(--font-mono);font-weight:700;color:var(--text-disabled)}
+.ticket-command-strip{
+  display:grid;
+  grid-template-columns:1.35fr 1fr .72fr;
+  gap:6px;
+  margin-bottom:8px;
+}
+.ticket-command-strip>div{
+  min-width:0;
+  padding:8px 10px;
+  border:1px solid var(--border-light);
+  border-radius:var(--radius-sm);
+  background:linear-gradient(180deg,#fff,var(--bg-base));
+}
+.ticket-command-strip span{display:block;font-size:10px;font-weight:800;color:var(--text-disabled);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ticket-command-strip b{display:block;margin-top:2px;font-size:13px;line-height:1.25;color:var(--text-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ticket-command-strip em{display:block;margin-top:2px;font-style:normal;font-size:10px;color:var(--text-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .ticket-summary-grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:6px;margin-bottom:8px}
 .ticket-summary-pill{border:1px solid var(--border-light);border-radius:var(--radius-sm);padding:6px 8px;background:linear-gradient(180deg,#fff,var(--bg-base));min-width:0}
 .ticket-summary-label{font-size:10px;color:var(--text-disabled);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .ticket-summary-value{font-family:var(--font-mono);font-size:16px;font-weight:850;line-height:1.1;margin-top:2px}
-.ticket-emergency-entry{margin-bottom:8px;border:1px solid var(--border-light);border-radius:var(--radius-md);background:var(--bg-base);padding:0 8px}
-.ticket-emergency-entry summary{height:30px;display:flex;align-items:center;cursor:pointer;color:var(--text-secondary);font-size:11px;font-weight:700;list-style:none}
+.ticket-emergency-dock{margin-top:8px;border-top:1px solid var(--border-light);padding-top:6px}
+.ticket-emergency-entry{border:1px solid transparent;border-radius:var(--radius-md);background:transparent;padding:0 8px}
+.ticket-emergency-entry summary{height:26px;display:flex;align-items:center;gap:6px;cursor:pointer;color:var(--text-disabled);font-size:11px;font-weight:700;list-style:none}
 .ticket-emergency-entry summary::-webkit-details-marker{display:none}
 .ticket-emergency-entry summary::before{content:'▸';font-size:10px;margin-right:6px;color:var(--text-disabled);transition:transform .16s}
+.ticket-emergency-entry summary em{font-style:normal;font-weight:500;color:var(--text-disabled)}
 .ticket-emergency-entry[open] summary::before{transform:rotate(90deg)}
-.ticket-emergency-entry[open]{padding-bottom:8px;background:var(--bg-card)}
+.ticket-emergency-entry[open]{padding-bottom:8px;background:var(--bg-base);border-color:var(--border-light)}
 .ticket-entry-grid{display:grid;grid-template-columns:1fr auto;gap:8px;margin-top:8px;align-items:start}
 .ticket-entry-main{min-width:0}
 .ticket-action-row{display:flex;gap:4px;flex-wrap:wrap;margin-bottom:6px}
@@ -1833,6 +1869,11 @@ body.compact-mode .grid-stack-item:not(.core-widget) { display: none !important;
 .ticket-card-note.trade-link{font-family:var(--font-mono);color:var(--text-secondary)}
 .ticket-card-note.danger{color:var(--danger)}
 .ticket-card-note.warn{color:var(--warn)}
+@media(max-width:760px){
+  .ticket-command-strip{grid-template-columns:1fr}
+  .ticket-layout{grid-template-columns:1fr}
+  .ticket-primary-sections{grid-template-columns:1fr}
+}
 .w15-record-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:var(--sp-md);margin-bottom:var(--sp-xs)}
 .w15-record-head>span{font-size:var(--fs-body);font-weight:700;color:var(--text-primary)}
 .w15-readonly-lock{border:1px solid var(--border-light);border-radius:var(--radius-sm);background:var(--bg-base);color:var(--text-disabled);font-size:11px;font-weight:800;padding:4px 8px}
