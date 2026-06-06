@@ -268,6 +268,37 @@ console.log(JSON.stringify({
         self.assertEqual(result.get("periodVal"), "—")
         self.assertEqual(result.get("ddVal"), "—")
 
+    def test_render_respects_null_ssot_asset_over_baseline_pnl(self):
+        """pnl_live.total_asset=null 时不得回退显示 baseline.pnl.总资产/累计入金"""
+        script = r"""
+var inst = new PnLCurveWidget({id:'W22'});
+inst.id = 'W22';
+inst.getBody = function(){ return document.createElement('div'); };
+inst._layoutBuilt = true;
+global.location = { protocol:'file:' };
+inst.render({
+  pnl:{'总资产':210477,'累计入金':'200000'},
+  pnl_live:{
+    total_asset:null,
+    anchor_blocked:true,
+    valuation_complete:false,
+    quote_status:'missing'
+  },
+  live_quotes:{}
+});
+console.log(JSON.stringify({
+  asset: document.getElementById('pnl_asset').textContent,
+  assetSub: document.getElementById('pnl_asset_sub').textContent,
+  totalAsset: inst._state.totalAsset,
+  totalDeposit: inst._state.totalDeposit
+}));
+"""
+        result = _run_node(script, files=["widgets/pnl-curve.js"])
+        self.assertEqual(result.get("asset"), "—", f"SSOT null 不得显示旧资产: {result}")
+        self.assertIn("锚点阻断", result.get("assetSub", ""), f"应说明锚点阻断: {result}")
+        self.assertIsNone(result.get("totalAsset"), f"state.totalAsset 应保留 null: {result}")
+        self.assertIsNone(result.get("totalDeposit"), f"state.totalDeposit 不应回退旧累计入金: {result}")
+
 
 class W22DrawChartBehaviorTests(unittest.TestCase):
     """_drawChart 行为测试：null slot + 全零曲线 实际调用不崩溃"""

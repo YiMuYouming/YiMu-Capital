@@ -64,6 +64,10 @@
   document.head.appendChild(style);
 })();
 
+function hasW22Own(obj, key) {
+  return Object.prototype.hasOwnProperty.call(obj || {}, key);
+}
+
 
 class PnLCurveWidget extends YiMuWidget {
   render(data) {
@@ -92,8 +96,14 @@ class PnLCurveWidget extends YiMuWidget {
         positions = (data && data.positions) || [];
       }
     }
-    var totalAsset = pnlLive.total_asset != null ? parseFloat(pnlLive.total_asset) : (pnlCfg['总资产'] != null ? parseFloat(pnlCfg['总资产']) : ((this._state && this._state.totalAsset != null) ? this._state.totalAsset : 0));
-    var totalDeposit = pnlLive.total_deposit != null ? pnlLive.total_deposit : (pnlCfg['累计入金'] != null ? pnlCfg['累计入金'] : ((this._state && this._state.totalDeposit != null) ? this._state.totalDeposit : 0));
+    var hasPnlLiveAsset = hasW22Own(pnlLive, 'total_asset');
+    var hasPnlLiveDeposit = hasW22Own(pnlLive, 'total_deposit');
+    var totalAsset = hasPnlLiveAsset
+      ? (pnlLive.total_asset == null ? null : parseFloat(pnlLive.total_asset))
+      : (pnlCfg['总资产'] != null ? parseFloat(pnlCfg['总资产']) : ((this._state && this._state.totalAsset != null) ? this._state.totalAsset : 0));
+    var totalDeposit = hasPnlLiveDeposit
+      ? pnlLive.total_deposit
+      : (hasPnlLiveAsset ? null : (pnlCfg['累计入金'] != null ? pnlCfg['累计入金'] : ((this._state && this._state.totalDeposit != null) ? this._state.totalDeposit : 0)));
 
     this._state = {
       period: (this._state && this._state.period) || 'today',
@@ -123,10 +133,10 @@ class PnLCurveWidget extends YiMuWidget {
         .then(function(s) {
           if (s) {
             self._state._pnlSummary = s;
-            if (s.total_asset != null) self._state.totalAsset = s.total_asset;
+            if (hasW22Own(s, 'total_asset')) self._state.totalAsset = s.total_asset;
             self._state.pnlLive = s;
             if (Array.isArray(s.positions)) self._state.positions = s.positions;
-            if (s.total_deposit != null) self._state.totalDeposit = s.total_deposit;
+            if (hasW22Own(s, 'total_deposit')) self._state.totalDeposit = s.total_deposit;
             self._updateSummary();
             // 用真实总资产刷新 KPI
             self._fetchChartData(function(cd) {
