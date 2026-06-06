@@ -82,6 +82,22 @@ class W2CheckWidget extends YiMuWidget {
 
     var w2BuyAllowed = rsW2.buy_allowed;
     var html = '';
+    var w2ScopeCodes = rsBlocks.filter(function(b){ return b.scope === 'w2' || b.scope === 'all'; });
+    var w2CandidateCount = trPool.length + lbPool.length;
+    var w2RuleState = w2BuyAllowed ? (rsW2.in_session ? '允许' : '待开') : '关闭';
+    var w2WindowLabel = rsW2.in_session ? '14:00-14:50' : '非W2时段';
+    var w2CommandClass = w2BuyAllowed ? (rsW2.in_session ? 'is-ready' : 'is-watch') : 'is-blocked';
+    function windowCommandHtml(title, cls, state, windowLabel, candidateCount, blockCount, detail) {
+      return '<div class="window-command ' + cls + '">' +
+        '<div class="window-command-head"><span><i>' + title + '</i>窗口验收</span><b>' + state + '</b></div>' +
+        '<div class="window-command-grid">' +
+          '<div><span>当前窗口</span><b>' + windowLabel + '</b><em>' + detail + '</em></div>' +
+          '<div><span>规则状态</span><b>' + state + '</b><em>阻断 ' + blockCount + ' / rule_state</em></div>' +
+          '<div><span>候选</span><b>' + candidateCount + '</b><em>趋势 ' + trPool.length + ' / 连板 ' + lbPool.length + '</em></div>' +
+        '</div>' +
+      '</div>';
+    }
+    html += windowCommandHtml('W2验收', w2CommandClass, w2RuleState, w2WindowLabel, w2CandidateCount, w2ScopeCodes.length, w2BuyAllowed ? '盘中候选按窗口规则核对' : '窗口关闭，仅保留观察');
 
     // ===== 顶栏：rule_state 结论 + 本地三条件详情 =====
     var c1 = qx >= 20;
@@ -113,7 +129,6 @@ class W2CheckWidget extends YiMuWidget {
       '</div>';
 
     // W2 阻断展示（rule_state blocks 中 scope=w2 或 scope=all 的项）
-    var w2ScopeCodes = rsBlocks.filter(function(b){ return b.scope === 'w2' || b.scope === 'all'; });
     if (w2ScopeCodes.length) {
       html += '<div style="margin-top:6px;display:flex;flex-direction:column;gap:4px">';
       w2ScopeCodes.forEach(function(b){
@@ -221,7 +236,7 @@ class W2CheckWidget extends YiMuWidget {
             (t.chg>=0?'+':'')+t.chg.toFixed(1)+'%</div>'+
           '<div style="font-size:10px">'+(t.price?t.price.toFixed(2):'—')+'</div>'+
           '<div style="font-size:9px;color:var(--text-disabled)">MA10 '+(t.ma10_60m?t.ma10_60m.toFixed(2):'—')+'</div>'+
-          (!window._healthCritical && stockOk?'<button onclick="event.stopPropagation();_prefillW15(\''+t.name.replace(/'/g,"\\'")+'\',\''+t.code+'\',\'W2\',\'趋势W2买入:MA回踩+缩量+未大跌\')" style="margin-top:2px;background:var(--down);color:#fff;border:none;padding:1px 6px;border-radius:3px;cursor:pointer;font-size:9px;white-space:nowrap">录入</button>':'')+
+          ((typeof window === 'undefined' || !window._healthCritical) && stockOk?'<button onclick="event.stopPropagation();_prefillW15(\''+t.name.replace(/'/g,"\\'")+'\',\''+t.code+'\',\'W2\',\'趋势W2买入:MA回踩+缩量+未大跌\')" style="margin-top:2px;background:var(--down);color:#fff;border:none;padding:1px 6px;border-radius:3px;cursor:pointer;font-size:9px;white-space:nowrap">录入</button>':'')+
           '</div>';
 
         html += '</div>';

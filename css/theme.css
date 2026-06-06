@@ -1257,6 +1257,46 @@ html,body{
   .w14-risk-line{grid-template-columns:minmax(52px,.8fr) minmax(70px,1fr) minmax(42px,.65fr)}
 }
 
+/* ===== Window acceptance cards (W08/W09) ===== */
+.window-command{
+  margin-bottom:var(--sp-sm);
+  padding:var(--sp-sm);
+  border-radius:var(--radius-md);
+  border:1px solid var(--border-light);
+  background:linear-gradient(180deg,rgba(255,255,255,.95),rgba(250,249,247,.88));
+  box-shadow:0 6px 18px rgba(32,28,24,.05);
+}
+.window-command.is-ready{border-color:rgba(22,163,74,.2);background:linear-gradient(180deg,rgba(240,253,244,.88),rgba(255,255,255,.94))}
+.window-command.is-watch{border-color:rgba(217,119,6,.22);background:linear-gradient(180deg,rgba(255,251,235,.9),rgba(255,255,255,.94))}
+.window-command.is-blocked{border-color:rgba(220,38,38,.2);background:linear-gradient(180deg,rgba(254,242,242,.86),rgba(255,255,255,.94))}
+.window-command-head{display:flex;align-items:center;justify-content:space-between;gap:var(--sp-sm);margin-bottom:var(--sp-sm)}
+.window-command-head span{display:inline-flex;align-items:center;gap:6px;font-size:var(--fs-body);font-weight:800;color:var(--text-primary)}
+.window-command-head i{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  min-width:34px;
+  height:18px;
+  padding:0 6px;
+  border-radius:var(--radius-sm);
+  background:var(--text-primary);
+  color:var(--bg-card);
+  font-style:normal;
+  font-family:var(--font-mono);
+  font-size:10px;
+  line-height:1;
+}
+.window-command-head b{font-family:var(--font-mono);font-size:18px;color:var(--text-primary)}
+.window-command.is-ready .window-command-head b{color:var(--up)}
+.window-command.is-watch .window-command-head b{color:var(--warn)}
+.window-command.is-blocked .window-command-head b{color:var(--danger)}
+.window-command-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:var(--sp-xs)}
+.window-command-grid>div{min-width:0;padding:var(--sp-xs) var(--sp-sm);border-radius:var(--radius-sm);border:1px solid rgba(124,117,111,.12);background:rgba(255,255,255,.62)}
+.window-command-grid span{display:block;margin-bottom:2px;font-size:var(--fs-label);color:var(--text-secondary)}
+.window-command-grid b{display:block;font-family:var(--font-mono);font-size:16px;line-height:1.25;color:var(--text-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.window-command-grid em{display:block;margin-top:2px;font-style:normal;font-size:var(--fs-label);color:var(--text-disabled);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+@media(max-width:760px){.window-command-grid{grid-template-columns:1fr}.window-command-head b{font-size:16px}}
+
 /* ===== W21 zt echelon ===== */
 .zt-source-row{
   display:flex;

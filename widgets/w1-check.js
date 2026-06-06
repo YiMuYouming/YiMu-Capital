@@ -127,6 +127,7 @@ class W1CheckWidget extends YiMuWidget {
     // ===== 环境阻断（展示 rule_state blocks + 本地详情补充，结论一律服从 buy_allowed）=====
     var blocks = [];
     rsBlocks.forEach(function(b) {
+      if (b.scope !== 'w1' && b.scope !== 'all') return;
       blocks.push({label: ruleLabel(b.code), detail: b.message, scope: scopeLabel(b.scope)});
     });
 
@@ -145,9 +146,25 @@ class W1CheckWidget extends YiMuWidget {
 
     // ===== 渲染 =====
     var html = '';
+    var w1CandidateCount = lbPool.length + trPool.length;
+    var w1RuleState = w1BuyAllowed ? (rsW1.in_session ? '允许' : '待开') : '关闭';
+    var w1WindowLabel = rsW1.in_session ? '09:30-10:00' : '非W1时段';
+    var w1CommandClass = w1BuyAllowed ? (rsW1.in_session ? 'is-ready' : 'is-watch') : 'is-blocked';
+
+    function windowCommandHtml(title, cls, state, windowLabel, candidateCount, blockCount, detail) {
+      return '<div class="window-command ' + cls + '">' +
+        '<div class="window-command-head"><span><i>' + title + '</i>窗口验收</span><b>' + state + '</b></div>' +
+        '<div class="window-command-grid">' +
+          '<div><span>当前窗口</span><b>' + windowLabel + '</b><em>' + detail + '</em></div>' +
+          '<div><span>规则状态</span><b>' + state + '</b><em>阻断 ' + blockCount + ' / rule_state</em></div>' +
+          '<div><span>候选</span><b>' + candidateCount + '</b><em>连板 ' + lbPool.length + ' / 趋势 ' + trPool.length + '</em></div>' +
+        '</div>' +
+      '</div>';
+    }
 
     // rule_state 结论：W1 不允许买入时展示阻断原因
     if (!w1BuyAllowed) {
+      html += windowCommandHtml('W1验收', w1CommandClass, w1RuleState, w1WindowLabel, w1CandidateCount, blocks.length, '早盘追涨入口暂不可用');
       html += '<div style="height:100%;display:flex;flex-direction:column;justify-content:center;padding:14px 18px">'+
         '<div style="display:flex;align-items:center;gap:12px;justify-content:center;margin-bottom:12px">'+
           '<div style="width:42px;height:42px;border-radius:50%;background:var(--danger);box-shadow:0 8px 22px rgba(220,38,38,0.22);line-height:42px;font-size:22px;color:var(--text-inverse);text-align:center">✕</div>'+
@@ -172,6 +189,8 @@ class W1CheckWidget extends YiMuWidget {
       this.updateTimestamp();
       return;
     }
+
+    html += windowCommandHtml('W1验收', w1CommandClass, w1RuleState, w1WindowLabel, w1CandidateCount, 0, rsW1.in_session ? '早盘窗口可按三件套继续核对' : '未到窗口，仅看预案');
 
     // ===== 信号灯样式函数 =====
     function signalDot(ok, size) {
@@ -421,7 +440,7 @@ class W1CheckWidget extends YiMuWidget {
           '<span style="font-weight:600;color:'+(chg>=0?'var(--up)':'var(--down)')+'">'+(chg>=0?'+':'')+chg.toFixed(1)+'%</span>'+
           (distMA5!==null?'<span style="font-size:10px;color:var(--text-disabled)">MA5 '+(distMA5>=0?'+':'')+distMA5.toFixed(1)+'%</span>':'<span style="font-size:10px;color:var(--text-disabled)">MA5 —</span>')+
           (s['止损']?'<span style="font-size:10px;color:var(--danger)">止损'+s['止损']+'</span>':'')+
-          (!window._healthCritical && w1BuyAllowed && dotOk ? '<button onclick="event.stopPropagation();_prefillW15(\''+(s['标的']||'').replace(/'/g,"\\'")+'\',\''+code+'\',\'W1\',\'W1买入信号：涨幅'+chg.toFixed(1)+'%\')" style="margin-left:4px;background:var(--info);color:#fff;border:none;padding:1px 6px;border-radius:3px;cursor:pointer;font-size:10px;white-space:nowrap">录入</button>' : '')+
+          ((typeof window === 'undefined' || !window._healthCritical) && w1BuyAllowed && dotOk ? '<button onclick="event.stopPropagation();_prefillW15(\''+(s['标的']||'').replace(/'/g,"\\'")+'\',\''+code+'\',\'W1\',\'W1买入信号：涨幅'+chg.toFixed(1)+'%\')" style="margin-left:4px;background:var(--info);color:#fff;border:none;padding:1px 6px;border-radius:3px;cursor:pointer;font-size:10px;white-space:nowrap">录入</button>' : '')+
           '</div>';
       });
       html += '</div>';

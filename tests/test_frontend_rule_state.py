@@ -1553,6 +1553,37 @@ class W1TradeEntryGateTest(unittest.TestCase):
         html = result.get("html", "")
         self.assertNotIn("关闭", html, f"trade_entry_allowed=true W1 不应说关闭: {html[:200]}")
 
+    def test_w1_shows_window_acceptance_command_first(self):
+        fixture = {
+            "rule_state": {
+                "version": "g1a-v1", "tradable": True,
+                "caps": {"base_total_pct": 40, "total_pct": 20},
+                "windows": {"w1": {"in_session": True, "buy_allowed": True},
+                            "w2": {"in_session": False, "buy_allowed": False}},
+                "blocks": [], "warnings": [],
+            },
+            "sentiment": {"情绪值": 65, "昨日涨停收益": "3.2%", "最高板": "4板"},
+            "market": {"涨停家数": 54, "炸板率": "18%"},
+            "iwencai": {"涨停家数": 54, "一进二晋级率": 0.4},
+            "live_index": {}, "live_quotes": {},
+            "lianban_pool": [
+                {"标的": "测试连板", "代码": "000001", "板块": "科技", "角色": "1进2", "窗口": "W1", "涨幅": "+4"}
+            ],
+            "trend_pool": [],
+            "trade_entry_allowed": True,
+        }
+        result = _render_widget("w1-check.js", "W08", fixture)
+        html = result.get("html", "")
+        theme = (ROOT / "css" / "theme.css").read_text()
+        self.assertIn("window-command", html, f"W08 应先展示窗口验收卡: {html[:600]}")
+        self.assertIn("W1验收", html, f"W08 应有验收标题: {html[:600]}")
+        self.assertIn("当前窗口", html, f"W08 应前置窗口状态: {html[:600]}")
+        self.assertIn("规则状态", html, f"W08 应前置规则状态: {html[:600]}")
+        self.assertIn("候选", html, f"W08 应前置候选数量: {html[:600]}")
+        self.assertLess(html.index("window-command"), html.index("情绪≥60%"),
+                        f"W08 验收卡应在细节信号前: {html[:900]}")
+        self.assertIn(".window-command-grid", theme)
+
 
 class W2TradeEntryGateTest(unittest.TestCase):
     """v3 Phase 4: W2 录入入口按 trade_entry_allowed 关闭"""
@@ -1594,6 +1625,37 @@ class W2TradeEntryGateTest(unittest.TestCase):
         result = _render_widget("w2-check.js", "W09", fixture)
         html = result.get("html", "")
         self.assertNotIn("关闭", html, f"trade_entry_allowed=true W2 不应说关闭: {html[:200]}")
+
+    def test_w2_shows_window_acceptance_command_first(self):
+        fixture = {
+            "rule_state": {
+                "version": "g1a-v1", "tradable": True,
+                "caps": {"base_total_pct": 40, "total_pct": 20},
+                "windows": {"w1": {"in_session": False, "buy_allowed": False},
+                            "w2": {"in_session": True, "buy_allowed": True}},
+                "blocks": [], "warnings": [],
+            },
+            "sentiment": {"情绪值": 65, "昨日涨停收益": "3.2%", "赚钱效应": "好"},
+            "live_index": {"上涨家数": 3000, "下跌家数": 1800, "上证指数涨幅": "+0.3%"},
+            "live_quotes": {
+                "000002": {"最新价": 10.1, "涨幅": "+1.2%", "量比": 0.7, "MA10_60m": 10, "MA10_60m_dir": "向上"}
+            },
+            "lianban_pool": [],
+            "trend_pool": [{"标的": "测试趋势", "代码": "000002", "板块": "科技",
+                             "角色": "持仓", "窗口": "W2", "涨幅": "+1.2", "MA5": 10.0}],
+            "trade_entry_allowed": True,
+        }
+        result = _render_widget("w2-check.js", "W09", fixture)
+        html = result.get("html", "")
+        theme = (ROOT / "css" / "theme.css").read_text()
+        self.assertIn("window-command", html, f"W09 应先展示窗口验收卡: {html[:600]}")
+        self.assertIn("W2验收", html, f"W09 应有验收标题: {html[:600]}")
+        self.assertIn("当前窗口", html, f"W09 应前置窗口状态: {html[:600]}")
+        self.assertIn("规则状态", html, f"W09 应前置规则状态: {html[:600]}")
+        self.assertIn("候选", html, f"W09 应前置候选数量: {html[:600]}")
+        self.assertLess(html.index("window-command"), html.index("趋势 W2"),
+                        f"W09 验收卡应在候选明细前: {html[:900]}")
+        self.assertIn(".window-command-grid", theme)
 
 class EvidenceBoardWidgetTest(unittest.TestCase):
     """W25 renders stable S0/E/A/R references for external AI workflows"""
