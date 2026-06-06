@@ -1,6 +1,22 @@
 // widgets/risk-panel.js — W14 账户风控 v3.0 (实时持仓联动)
 'use strict';
 
+function _w14Esc(v) {
+  return String(v == null ? '' : v).replace(/[&<>"']/g, function(ch) {
+    return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch];
+  });
+}
+
+function _w14Num(v, fallback) {
+  var n = parseFloat(v);
+  return isFinite(n) ? n : (fallback || 0);
+}
+
+function _w14PctText(v) {
+  var n = _w14Num(v, 0);
+  return Math.round(n * 100) / 100;
+}
+
 function _w14RuleText(code) {
   var map = {
     DATA_UNTRUSTED: '数据不可信',
@@ -23,7 +39,17 @@ function _w14RuleText(code) {
     WEEK_STOP: '周回撤停止',
     MONTH_STOP: '月回撤停止'
   };
-  return map[code] || code || '规则阻断';
+  return map[code] || '规则阻断';
+}
+
+function _w14SafeRuleLabel(code) {
+  var label = _w14RuleText(code);
+  return /[<>]/.test(String(label)) ? '规则阻断' : label;
+}
+
+function _w14SafeMessage(msg, code) {
+  if (msg == null || /[<>]/.test(String(msg))) return _w14SafeRuleLabel(code);
+  return msg;
 }
 
 function _w14BlockKind(block) {
@@ -35,10 +61,10 @@ function _w14BlockKind(block) {
 
 function _w14Chip(block) {
   var kind = _w14BlockKind(block);
-  var label = _w14RuleText(block && block.code);
+  var label = _w14SafeRuleLabel(block && block.code);
   if (block && block.code === 'DATA_UNTRUSTED') label = '收盘/行情状态';
   if (block && block.code === 'SENTIMENT_STALE') label = '情绪快照状态';
-  return '<span class="w14-chip w14-chip-' + kind + '">' + label + '</span>';
+  return '<span class="w14-chip w14-chip-' + kind + '">' + _w14Esc(label) + '</span>';
 }
 
 class RiskPanelWidget extends YiMuWidget {
@@ -119,15 +145,32 @@ class RiskPanelWidget extends YiMuWidget {
 
     // ===== rule_state 实时风控（Gate 1A）=====
     var RS = (data && data.rule_state) || null;
+    var rsBlocks = RS ? (RS.blocks || []) : [];
+    var rsWarnings = RS ? (RS.warnings || []) : [];
+    var rsCaps = RS ? (RS.caps || {}) : {};
+    var capTotal = RS && rsCaps.total_pct != null ? _w14PctText(rsCaps.total_pct) : null;
+    var baseTotal = RS && rsCaps.base_total_pct != null ? _w14PctText(rsCaps.base_total_pct) : null;
+    var sideLianban = RS && rsCaps.lianban_side_cap_pct != null ? _w14PctText(rsCaps.lianban_side_cap_pct) : null;
+    var sideTrend = RS && rsCaps.trend_side_cap_pct != null ? _w14PctText(rsCaps.trend_side_cap_pct) : null;
+    var firstEntry = RS && rsCaps.first_entry_pct != null ? _w14PctText(rsCaps.first_entry_pct) : null;
+
+    var gateState = !RS ? '不可确认' : (RS.tradable ? (rsBlocks.length || rsWarnings.length ? '提示' : '可交易') : '阻断');
+    var gateClass = !RS ? 'is-unknown' : (RS.tradable ? ((rsBlocks.length || rsWarnings.length) ? 'is-watch' : 'is-ready') : 'is-blocked');
+    html += '<div class="w14-command ' + gateClass + '">' +
+      '<div class="w14-command-head"><span><i>R0</i> 风控门禁</span><b>' + gateState + '</b></div>' +
+      '<div class="w14-command-grid">' +
+        '<div><span>交易状态</span><b>' + gateState + '</b><em>' + (!RS ? '等待 rule_state 返回' : (RS.tradable ? ((rsBlocks.length || rsWarnings.length) ? '局部受限，按窗口规则执行' : '可按窗口条件继续判断') : '禁止新开仓')) + '</em></div>' +
+        '<div><span>执行仓位</span><b>' + (capTotal != null ? capTotal + '%' : '—') + '</b><em>基线 ' + (baseTotal != null ? baseTotal + '%' : '—') + ' / 首笔 ' + (firstEntry != null ? firstEntry + '%' : '—') + '</em></div>' +
+        '<div><span>风险来源</span><b>' + rsBlocks.length + '</b><em>阻断 ' + rsBlocks.length + ' / 提示 ' + rsWarnings.length + '</em></div>' +
+      '</div>' +
+    '</div>';
+
     if (RS) {
-      var rsBlocks = RS.blocks || [];
-      var rsWarnings = RS.warnings || [];
-      var rsCaps = RS.caps || {};
       if (rsBlocks.length || rsWarnings.length) {
         var groups = {account: [], system: [], trade: []};
         rsBlocks.forEach(function(b){ groups[_w14BlockKind(b)].push(b); });
         html += '<div class="w14-gate">';
-        html += '<div class="w14-gate-head"><span>' + (RS.tradable ? '规则约束' : '禁止开仓') + '</span><b>执行仓位 ' + (rsCaps.total_pct != null ? rsCaps.total_pct + '%' : '—') + '</b></div>';
+        html += '<div class="w14-gate-head"><span>' + (RS.tradable ? '规则约束' : '禁止开仓') + '</span><b>执行仓位 ' + (capTotal != null ? capTotal + '%' : '—') + '</b></div>';
         if (groups.account.length) {
           html += '<div class="w14-gate-row"><span>账户风控</span><div>' + groups.account.map(_w14Chip).join('') + '</div></div>';
         }
@@ -138,26 +181,26 @@ class RiskPanelWidget extends YiMuWidget {
           html += '<div class="w14-gate-row"><span>交易条件</span><div>' + groups.trade.map(_w14Chip).join('') + '</div></div>';
         }
         if (rsWarnings.length) {
-          html += '<div class="w14-gate-row"><span>提示</span><div>' + rsWarnings.map(function(w){ return '<span class="w14-chip w14-chip-trade">'+w.message+'</span>'; }).join('') + '</div></div>';
+          html += '<div class="w14-gate-row"><span>提示</span><div>' + rsWarnings.map(function(w){ return '<span class="w14-chip w14-chip-trade">'+_w14Esc(_w14SafeMessage(w.message, w.code))+'</span>'; }).join('') + '</div></div>';
         }
         html += '</div>';
       }
-      html += '<div class="w14-cap-line">基线 '+(rsCaps.base_total_pct!=null?rsCaps.base_total_pct+'%':'—')+
-        ' | 连板侧 '+(rsCaps.lianban_side_cap_pct!=null?rsCaps.lianban_side_cap_pct+'%':'—')+
-        ' | 趋势侧 '+(rsCaps.trend_side_cap_pct!=null?rsCaps.trend_side_cap_pct+'%':'—')+
-        ' | 首笔 '+(rsCaps.first_entry_pct!=null?rsCaps.first_entry_pct+'%':'—')+'</div>';
+      html += '<div class="w14-cap-line">基线 '+(baseTotal!=null?baseTotal+'%':'—')+
+        ' | 连板侧 '+(sideLianban!=null?sideLianban+'%':'—')+
+        ' | 趋势侧 '+(sideTrend!=null?sideTrend+'%':'—')+
+        ' | 首笔 '+(firstEntry!=null?firstEntry+'%':'—')+'</div>';
     }
 
     // === 持仓累计浮盈（大字）===
     var pnlCls = realTimePnl > 0 ? 'up' : realTimePnl < 0 ? 'down' : '';
-    html += '<div style="text-align:center;padding:var(--sp-sm);margin-bottom:var(--sp-sm);background:var(--bg-base);border-radius:var(--radius-md)">'+
+    html += '<div class="w14-pnl-card">'+
       '<div style="font-size:var(--fs-label);color:var(--text-disabled)">持仓累计浮盈</div>'+
       '<div class="'+pnlCls+'" style="font-family:var(--font-mono);font-size:22px;font-weight:700">'+(realTimePnl>=0?'+':'')+money(realTimePnl)+'</div>'+
       '<div class="'+pnlCls+'" style="font-size:var(--fs-body)">'+pct(realTimePnlPct, true)+'</div>'+
       '</div>';
 
     // === 持仓概况 ===
-    html += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:var(--sp-xs) var(--sp-sm);margin-bottom:var(--sp-sm)">'+
+    html += '<div class="w14-kpi-grid">'+
       '<div class="kpi-card"><div class="kpi-label">持仓市值</div>'+
         '<div class="kpi-value" style="font-size:14px">'+money(totalMV)+'</div></div>'+
       '<div class="kpi-card"><div class="kpi-label">可用资金</div>'+
@@ -169,7 +212,7 @@ class RiskPanelWidget extends YiMuWidget {
       '</div>';
 
     // === 风控线（实时 rule_state 驱动，旧 daily risk 仅供数值引用）===
-    html += '<div style="font-size:var(--fs-label);font-weight:600;color:var(--text-primary);margin-bottom:var(--sp-xs)">风控线</div>';
+    html += '<div class="w14-section-title">风控线</div><div class="w14-risk-lines">';
 
     if (!RS) {
       html += '<div class="ui-degraded"><strong>规则状态不可用</strong><span>无法确认实时风控结论。</span></div>';
@@ -183,39 +226,40 @@ class RiskPanelWidget extends YiMuWidget {
       var streakWarn = !streakHit && lossStreakWarn.length > 0;
       var lossDaysDisplay = loseDays;
       if (streakHit && lossStreakBlock[0].evidence && lossStreakBlock[0].evidence.loss_streak != null) {
-        lossDaysDisplay = lossStreakBlock[0].evidence.loss_streak;
+        lossDaysDisplay = _w14Num(lossStreakBlock[0].evidence.loss_streak, loseDays);
       } else if (streakWarn && lossStreakWarn[0].evidence && lossStreakWarn[0].evidence.loss_streak != null) {
-        lossDaysDisplay = lossStreakWarn[0].evidence.loss_streak;
+        lossDaysDisplay = _w14Num(lossStreakWarn[0].evidence.loss_streak, loseDays);
       }
 
-      html += '<div style="display:flex;justify-content:space-between;padding:2px 0;font-size:var(--fs-body)">'+
-        '<span style="color:var(--text-secondary)">单日熔断</span>'+
-        '<span style="font-family:var(--font-mono)">阈值 -3%</span>'+
-        '<span style="color:'+(dayHit?'var(--danger)':'var(--info)')+'">'+(dayHit?'已触发':'未触发')+'</span></div>';
+      html += '<div class="w14-risk-line">'+
+        '<span>单日熔断</span>'+
+        '<b>阈值 -3%</b>'+
+        '<em class="' + (dayHit ? 'danger' : 'info') + '">'+(dayHit?'已触发':'未触发')+'</em></div>';
 
-      html += '<div style="display:flex;justify-content:space-between;padding:2px 0;font-size:var(--fs-body)">'+
-        '<span style="color:var(--text-secondary)">连亏天数</span>'+
-        '<span style="font-family:var(--font-mono)">'+lossDaysDisplay+'天</span>'+
-        '<span style="color:'+(streakHit?'var(--danger)':streakWarn?'var(--warn)':'var(--info)')+'">'+
+      html += '<div class="w14-risk-line">'+
+        '<span>连亏天数</span>'+
+        '<b>'+lossDaysDisplay+'天</b>'+
+        '<em class="' + (streakHit ? 'danger' : streakWarn ? 'warn' : 'info') + '">'+
           (streakHit?'强制空仓':streakWarn?'提示':'正常')+
-        '</span></div>';
+        '</em></div>';
     }
 
     // 周回撤（rule_state 不覆盖，保留 baseline 字段 + 数据引用）
     var weekAbs = Math.abs(weekDD);
     var wCls = weekAbs >= weekWarnLine ? 'danger' : weekAbs > 3 ? 'warn' : 'info';
-    html += '<div style="display:flex;justify-content:space-between;padding:2px 0;font-size:var(--fs-body)">'+
-      '<span style="color:var(--text-secondary)">周回撤</span>'+
-      '<span style="font-family:var(--font-mono)">'+pct(weekDD)+' / '+weekWarnLine+'%</span>'+
-      '<span class="'+wCls+'" style="font-weight:600">'+(weekAbs>=weekWarnLine?'已触发':'—')+'</span></div>';
+    html += '<div class="w14-risk-line">'+
+      '<span>周回撤</span>'+
+      '<b>'+pct(weekDD)+' / '+weekWarnLine+'%</b>'+
+      '<em class="'+wCls+'">'+(weekAbs>=weekWarnLine?'已触发':'—')+'</em></div>';
 
     // 月回撤
     var monthAbs = Math.abs(monthDD);
     var mCls = monthAbs >= monthWarnLine ? 'danger' : monthAbs > 5 ? 'warn' : 'info';
-    html += '<div style="display:flex;justify-content:space-between;padding:2px 0;font-size:var(--fs-body)">'+
-      '<span style="color:var(--text-secondary)">月回撤</span>'+
-      '<span style="font-family:var(--font-mono)">'+pct(monthDD)+' / '+monthWarnLine+'%</span>'+
-      '<span class="'+mCls+'" style="font-weight:600">'+(monthAbs>=monthWarnLine?'已触发':'—')+'</span></div>';
+    html += '<div class="w14-risk-line">'+
+      '<span>月回撤</span>'+
+      '<b>'+pct(monthDD)+' / '+monthWarnLine+'%</b>'+
+      '<em class="'+mCls+'">'+(monthAbs>=monthWarnLine?'已触发':'—')+'</em></div>';
+    html += '</div>';
 
     // ===== 止损提醒（只读，优先 SSOT 止损字段，规则兜底明确标记）=====
     var slAlerts = [];

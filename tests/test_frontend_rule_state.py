@@ -209,6 +209,97 @@ class RuleCodeDisplayTest(unittest.TestCase):
         self.assertIn("交易条件", html, f"W14 应把 W1/W2 条件单独分组: {html[:500]}")
         self.assertIn("收盘/行情状态", html, f"W14 数据不可信应避免吓人的红字主文案: {html[:500]}")
 
+    def test_w14_shows_command_summary_first(self):
+        fixture = _day_stop_fixture()
+        result = _render_widget("risk-panel.js", "W14", fixture)
+        html = result.get("html", "")
+        theme = (ROOT / "css" / "theme.css").read_text()
+        self.assertIn("w14-command", html, f"W14 应先展示风控指令摘要: {html[:500]}")
+        self.assertIn("风控门禁", html, f"W14 应有主结论标题: {html[:500]}")
+        self.assertIn("交易状态", html, f"W14 应前置交易状态: {html[:500]}")
+        self.assertIn("执行仓位", html, f"W14 应前置执行仓位: {html[:500]}")
+        self.assertLess(html.index("w14-command"), html.index("w14-gate"),
+                        f"W14 主结论应在风险分组前: {html[:700]}")
+        self.assertIn(".w14-command-grid", theme)
+        self.assertIn(".w14-risk-lines", theme)
+
+    def test_w14_sanitizes_rule_state_dynamic_text(self):
+        fixture = _missing_rs_fixture()
+        fixture["rule_state"] = {
+            "version": "g1a-v1",
+            "tradable": False,
+            "caps": {
+                "base_total_pct": "40<img src=x onerror=alert(1)>",
+                "total_pct": "0<img src=x onerror=alert(2)>",
+                "lianban_side_cap_pct": "20<img src=x onerror=alert(3)>",
+                "trend_side_cap_pct": "30<img src=x onerror=alert(4)>",
+                "first_entry_pct": "10<img src=x onerror=alert(5)>",
+            },
+            "windows": {"w1": {}, "w2": {}},
+            "blocks": [
+                {"code": "CUSTOM_ALERT_alert(6)", "scope": "all",
+                 "message": "<img src=x onerror=alert(7)>", "evidence": {}},
+            ],
+            "warnings": [
+                {"code": "LOSS_STREAK", "scope": "position",
+                 "message": "<img src=x onerror=alert(8)>",
+                 "evidence": {"loss_streak": 2}},
+            ],
+        }
+        result = _render_widget("risk-panel.js", "W14", fixture)
+        html = result.get("html", "")
+        self.assertNotIn("<img", html, f"W14 不应注入 HTML: {html[:900]}")
+        self.assertNotIn("alert(", html, f"W14 不应显示污染脚本文案: {html[:900]}")
+        self.assertIn("执行仓位 0%", html, f"W14 应保留合法 total_pct: {html[:600]}")
+
+    def test_w14_sanitizes_loss_streak_evidence_number(self):
+        fixture = _missing_rs_fixture()
+        fixture["risk"]["连亏天数"] = 1
+        fixture["rule_state"] = {
+            "version": "g1a-v1",
+            "tradable": True,
+            "caps": {
+                "base_total_pct": 60, "total_pct": 60,
+                "lianban_side_cap_pct": 60, "trend_side_cap_pct": 40,
+                "first_entry_pct": 10,
+            },
+            "windows": {"w1": {}, "w2": {}},
+            "blocks": [],
+            "warnings": [
+                {"code": "LOSS_STREAK", "scope": "position",
+                 "message": "连亏计数提示",
+                 "evidence": {"loss_streak": "2<img src=x onerror=alert(9)>"}},
+            ],
+        }
+        result = _render_widget("risk-panel.js", "W14", fixture)
+        html = result.get("html", "")
+        self.assertNotIn("<img", html, f"W14 evidence 数字不应注入 HTML: {html[:900]}")
+        self.assertNotIn("alert(", html, f"W14 evidence 数字不应显示污染脚本文案: {html[:900]}")
+        self.assertIn("2天", html, f"W14 应保留 evidence 中合法连亏天数: {html[:600]}")
+
+    def test_w14_scoped_block_uses_watch_visual_state(self):
+        fixture = _missing_rs_fixture()
+        fixture["rule_state"] = {
+            "version": "g1a-v1",
+            "tradable": True,
+            "caps": {
+                "base_total_pct": 60, "total_pct": 40,
+                "lianban_side_cap_pct": 0, "trend_side_cap_pct": 40,
+                "first_entry_pct": 10,
+            },
+            "windows": {"w1": {"buy_allowed": False}, "w2": {"buy_allowed": True}},
+            "blocks": [
+                {"code": "W1_EMOTION", "scope": "w1", "message": "W1 情绪不足", "evidence": {}},
+            ],
+            "warnings": [],
+        }
+        result = _render_widget("risk-panel.js", "W14", fixture)
+        html = result.get("html", "")
+        self.assertIn("w14-command is-watch", html,
+                      f"W14 局部 block 应使用 watch 态，避免显示 ready 绿态: {html[:500]}")
+        self.assertNotIn("w14-command is-ready", html)
+        self.assertIn("提示", html, f"W14 局部 block 应显示提示结论: {html[:500]}")
+
     def test_w14_loss_streak_warning_is_not_shown_as_normal(self):
         fixture = _missing_rs_fixture()
         fixture["risk"]["连亏天数"] = 2

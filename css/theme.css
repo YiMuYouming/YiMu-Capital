@@ -1114,6 +1114,69 @@ html,body{
 @media(max-width:760px){.w03-command-grid{grid-template-columns:1fr}.w03-command-grid b{font-size:18px}.w03-stack{grid-template-columns:1fr}}
 
 /* ===== W14 risk panel ===== */
+.w14-command{
+  margin-bottom:var(--sp-sm);
+  padding:var(--sp-sm);
+  border-radius:var(--radius-md);
+  border:1px solid var(--border-light);
+  background:linear-gradient(180deg,rgba(255,255,255,.94),rgba(250,249,247,.86));
+  box-shadow:0 6px 18px rgba(32,28,24,.05);
+}
+.w14-command.is-blocked{border-color:rgba(220,38,38,.2);background:linear-gradient(180deg,rgba(254,242,242,.86),rgba(255,255,255,.92))}
+.w14-command.is-watch{border-color:rgba(217,119,6,.22);background:linear-gradient(180deg,rgba(255,251,235,.9),rgba(255,255,255,.92))}
+.w14-command.is-ready{border-color:rgba(22,163,74,.2);background:linear-gradient(180deg,rgba(240,253,244,.86),rgba(255,255,255,.92))}
+.w14-command.is-unknown{border-color:rgba(111,104,99,.22);background:var(--bg-base)}
+.w14-command-head{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:var(--sp-sm);
+  margin-bottom:var(--sp-sm);
+}
+.w14-command-head span{display:inline-flex;align-items:center;gap:6px;font-size:var(--fs-body);font-weight:800;color:var(--text-primary)}
+.w14-command-head i{
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  min-width:24px;
+  height:18px;
+  padding:0 5px;
+  border-radius:var(--radius-sm);
+  background:var(--text-primary);
+  color:var(--bg-card);
+  font-style:normal;
+  font-family:var(--font-mono);
+  font-size:10px;
+  line-height:1;
+}
+.w14-command-head b{font-family:var(--font-mono);font-size:18px;color:var(--text-primary)}
+.w14-command.is-blocked .w14-command-head b{color:var(--danger)}
+.w14-command.is-watch .w14-command-head b{color:var(--warn)}
+.w14-command.is-ready .w14-command-head b{color:var(--up)}
+.w14-command-grid{
+  display:grid;
+  grid-template-columns:repeat(3,minmax(0,1fr));
+  gap:var(--sp-xs);
+}
+.w14-command-grid>div{
+  min-width:0;
+  padding:var(--sp-xs) var(--sp-sm);
+  border-radius:var(--radius-sm);
+  border:1px solid rgba(124,117,111,.12);
+  background:rgba(255,255,255,.62);
+}
+.w14-command-grid span{display:block;margin-bottom:2px;font-size:var(--fs-label);color:var(--text-secondary)}
+.w14-command-grid b{display:block;font-family:var(--font-mono);font-size:17px;line-height:1.25;color:var(--text-primary)}
+.w14-command-grid em{
+  display:block;
+  margin-top:2px;
+  font-style:normal;
+  font-size:var(--fs-label);
+  color:var(--text-disabled);
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
 .w14-gate{
   margin-bottom:var(--sp-sm);
   padding:var(--sp-sm);
@@ -1143,6 +1206,38 @@ html,body{
 .w14-chip-system{border-color:rgba(111,104,99,.22);background:rgba(111,104,99,.08);color:var(--text-secondary)}
 .w14-chip-trade{border-color:rgba(217,119,6,.18);background:var(--warn-bg);color:var(--warn)}
 .w14-cap-line{font-size:var(--fs-label);color:var(--text-secondary);margin-bottom:var(--sp-sm);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.w14-pnl-card{
+  text-align:center;
+  padding:var(--sp-sm);
+  margin-bottom:var(--sp-sm);
+  background:var(--bg-base);
+  border:1px solid var(--border-light);
+  border-radius:var(--radius-md);
+}
+.w14-kpi-grid{display:grid;grid-template-columns:1fr 1fr;gap:var(--sp-xs) var(--sp-sm);margin-bottom:var(--sp-sm)}
+.w14-section-title{font-size:var(--fs-label);font-weight:700;color:var(--text-primary);margin-bottom:var(--sp-xs)}
+.w14-risk-lines{
+  display:grid;
+  gap:2px;
+  margin-bottom:var(--sp-xs);
+}
+.w14-risk-line{
+  display:grid;
+  grid-template-columns:minmax(52px,.9fr) minmax(72px,1fr) minmax(44px,.7fr);
+  gap:var(--sp-xs);
+  align-items:center;
+  min-height:22px;
+  padding:2px 0;
+  font-size:var(--fs-body);
+}
+.w14-risk-line span{color:var(--text-secondary);white-space:nowrap}
+.w14-risk-line b{font-family:var(--font-mono);font-weight:600;color:var(--text-primary);white-space:nowrap}
+.w14-risk-line em{font-style:normal;font-weight:700;text-align:right;white-space:nowrap}
+@media(max-width:760px){
+  .w14-command-grid{grid-template-columns:1fr}
+  .w14-command-grid b{font-size:16px}
+  .w14-risk-line{grid-template-columns:minmax(52px,.8fr) minmax(70px,1fr) minmax(42px,.65fr)}
+}
 
 /* ===== W21 zt echelon ===== */
 .zt-source-row{
