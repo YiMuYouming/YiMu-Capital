@@ -2241,6 +2241,31 @@ body.compact-mode .grid-stack-item:not(.core-widget) { display: none !important;
 .ticket-command-strip span{display:block;font-size:10px;font-weight:800;color:var(--text-disabled);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .ticket-command-strip b{display:block;margin-top:2px;font-size:13px;line-height:1.25;color:var(--text-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .ticket-command-strip em{display:block;margin-top:2px;font-style:normal;font-size:10px;color:var(--text-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ticket-acceptance-rail{
+  display:grid;
+  grid-template-columns:repeat(4,minmax(0,1fr));
+  gap:6px;
+  margin-bottom:8px;
+}
+.ticket-acceptance-step{
+  min-width:0;
+  padding:6px 8px;
+  border:1px solid var(--border-light);
+  border-radius:var(--radius-sm);
+  background:var(--bg-card);
+  position:relative;
+}
+.ticket-acceptance-step::before{
+  content:'';
+  position:absolute;
+  left:0;top:0;bottom:0;width:3px;
+  background:var(--border-light);
+  border-radius:var(--radius-sm) 0 0 var(--radius-sm);
+}
+.ticket-acceptance-step.is-active::before{background:var(--accent)}
+.ticket-acceptance-step span{display:block;font-size:10px;font-weight:850;color:var(--text-disabled);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ticket-acceptance-step b{display:block;margin-top:2px;font-family:var(--font-mono);font-size:14px;line-height:1.15;color:var(--text-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ticket-acceptance-step em{display:block;margin-top:2px;font-style:normal;font-size:10px;color:var(--text-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .ticket-summary-grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:6px;margin-bottom:8px}
 .ticket-summary-pill{border:1px solid var(--border-light);border-radius:var(--radius-sm);padding:6px 8px;background:linear-gradient(180deg,#fff,var(--bg-base));min-width:0}
 .ticket-summary-label{font-size:10px;color:var(--text-disabled);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -2283,7 +2308,8 @@ body.compact-mode .grid-stack-item:not(.core-widget) { display: none !important;
 .ticket-card-note.danger{color:var(--danger)}
 .ticket-card-note.warn{color:var(--warn)}
 @media(max-width:760px){
-  .ticket-command-strip{grid-template-columns:1fr}
+  .ticket-command-strip{grid-template-columns:1.25fr 1fr .85fr}
+  .ticket-acceptance-rail{grid-template-columns:repeat(4,minmax(0,1fr))}
   .ticket-layout{grid-template-columns:1fr}
   .ticket-primary-sections{grid-template-columns:1fr}
 }
