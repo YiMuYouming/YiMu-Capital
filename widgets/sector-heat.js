@@ -157,8 +157,8 @@ class SectorHeatWidget extends YiMuWidget {
       return 'neutral';
     }
 
-    var html = '<div class="w10-board">';
-    html += '<div class="w10-header"><span>复盘板块</span><span>盘中校验</span></div>';
+    var summary = { total: sectors.length, main: 0, risk: 0, live: 0, matched: 0 };
+    var rowHtml = '';
 
     sectors.forEach(function(sec) {
       var name = sec['板块'] || '—';
@@ -184,42 +184,59 @@ class SectorHeatWidget extends YiMuWidget {
         pct = avgStockPct;
         source = '池均';
       }
+      if (tone === 'main') summary.main++;
+      if (tone === 'risk') summary.risk++;
+      if (source === '实时') summary.live++;
+      if (allStocks.length) summary.matched += allStocks.length;
 
-      html += '<article class="w10-row w10-' + tone + '">';
-      html += '<div class="w10-main">';
-      html += '<div class="w10-title"><b>' + cleanName + '</b><span>' + type + '</span></div>';
-      html += '<div class="w10-meta">' +
+      rowHtml += '<article class="w10-row w10-' + tone + '">';
+      rowHtml += '<div class="w10-main">';
+      rowHtml += '<div class="w10-title"><b>' + cleanName + '</b><span>' + type + '</span></div>';
+      rowHtml += '<div class="w10-meta">' +
         '<span>涨停 ' + _w10CleanText(sec['涨停数'] || '—') + '</span>' +
         '<span>梯队 ' + _w10CleanText(sec['梯队'] || '—') + '</span>' +
         (ma ? '<span>MA5 ' + ma + '</span>' : '') +
         '</div>';
-      html += '<div class="w10-note">' + (statusInfo.note || '复盘未写状态') + '</div>';
-      html += '</div>';
+      rowHtml += '<div class="w10-note">' + (statusInfo.note || '复盘未写状态') + '</div>';
+      rowHtml += '</div>';
 
-      html += '<div class="w10-live">';
-      html += '<div class="w10-live-top">' +
+      rowHtml += '<div class="w10-live">';
+      rowHtml += '<div class="w10-live-top">' +
         '<span class="' + _w10Class(pct) + '">' + _w10Pct(pct) + '</span>' +
         '<span class="' + _w10Class(flow) + '">' + _w10Yi(flow) + '</span>' +
         '<em>' + source + '</em>' +
         '</div>';
-      html += '<div class="w10-live-sub">' +
+      rowHtml += '<div class="w10-live-sub">' +
         (up != null || down != null ? '<span>涨跌 ' + (up != null ? up : '—') + ':' + (down != null ? down : '—') + '</span>' : '<span>涨跌 —</span>') +
         (leader ? '<span>领涨 ' + leader + (leaderChg != null ? ' ' + _w10Pct(leaderChg) : '') + '</span>' : '<span>龙头 ' + _w10CleanText(sec['龙头'] || '—') + '</span>') +
         '</div>';
       if (stocks.length) {
-        html += '<div class="w10-stocks">';
+        rowHtml += '<div class="w10-stocks">';
         stocks.forEach(function(s) {
           var chg = stockChange(s);
-          html += '<span><b>' + _w10CleanText(s['标的'] || '') + '</b><i class="' + _w10Class(chg) + '">' + _w10Pct(chg) + '</i></span>';
+          rowHtml += '<span><b>' + _w10CleanText(s['标的'] || '') + '</b><i class="' + _w10Class(chg) + '">' + _w10Pct(chg) + '</i></span>';
         });
-        html += '</div>';
+        rowHtml += '</div>';
       } else {
-        html += '<div class="w10-stocks muted">自选池暂无匹配标的</div>';
+        rowHtml += '<div class="w10-stocks muted">自选池暂无匹配标的</div>';
       }
-      html += '</div>';
-      html += '</article>';
+      rowHtml += '</div>';
+      rowHtml += '</article>';
     });
 
+    var html = '<div class="w10-board">';
+    html += '<div class="w10-acceptance">' +
+      '<div class="w10-acceptance-main"><span class="evidence-inline-ref">W10</span><b>板块验收</b><em>复盘主线与盘中校验合并。</em></div>' +
+      '<div class="w10-acceptance-grid">' +
+        '<div><span>板块</span><b>' + summary.total + '</b></div>' +
+        '<div><span>主线</span><b>' + summary.main + '</b></div>' +
+        '<div><span>风险</span><b>' + summary.risk + '</b></div>' +
+        '<div><span>候选</span><b>' + summary.matched + '</b></div>' +
+      '</div>' +
+      '<div class="w10-acceptance-foot">实时覆盖 ' + summary.live + '/' + summary.total + '</div>' +
+    '</div>';
+    html += '<div class="w10-header"><span>复盘板块</span><span>盘中校验</span></div>';
+    html += rowHtml;
     html += '</div>';
     body.innerHTML = html;
     this.updateTimestamp();

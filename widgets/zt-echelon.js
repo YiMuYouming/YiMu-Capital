@@ -206,6 +206,16 @@ class ZtEchelonWidget extends YiMuWidget {
 
     // === Render ===
     var html = '';
+    html += '<div class="zt-acceptance">' +
+      '<div class="zt-acceptance-main"><span class="evidence-inline-ref">W21</span><b>梯队验收</b><em>' + this._esc(sourceLabel) + '</em></div>' +
+      '<div class="zt-acceptance-grid">' +
+        '<div><span>最高</span><b>' + (stats.maxBoard > 0 ? stats.maxBoard + '板' : '—') + '</b></div>' +
+        '<div><span>连板</span><b>' + stats.linkedCount + '</b></div>' +
+        '<div><span>确认</span><b>' + displayStocks.length + '</b></div>' +
+        '<div><span>观察</span><b>' + hotObserve.length + '</b></div>' +
+      '</div>' +
+      '<div class="zt-acceptance-foot">' + (isToday && !hasFullZtSource ? '首板源未确认，只作观察' : '确认源可用') + '</div>' +
+    '</div>';
     html += '<div class="zt-source-row">';
     html += '<span class="zt-source-chip primary">' + this._esc(sourceLabel) + '</span>';
     html += '<span class="zt-source-chip">热榜实时 ' + (hotList.total || hotStocks.length || 0) + '只</span>';

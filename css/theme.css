@@ -945,6 +945,65 @@ html,body{
 
 /* ===== Sector heat (W10) ===== */
 .w10-board{display:flex;flex-direction:column;gap:6px}
+.w10-acceptance,.zt-acceptance{
+  display:grid;
+  grid-template-columns:minmax(150px,1.2fr) minmax(240px,1.4fr) auto;
+  align-items:center;
+  gap:8px;
+  padding:8px 10px;
+  border:1px solid var(--border-light);
+  border-radius:var(--radius-md);
+  background:linear-gradient(180deg,#fff,var(--bg-base));
+}
+.w10-acceptance-main,.zt-acceptance-main{min-width:0}
+.w10-acceptance-main b,.zt-acceptance-main b{
+  display:block;
+  margin-top:2px;
+  font-size:13px;
+  font-weight:850;
+  color:var(--text-primary);
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
+.w10-acceptance-main em,.zt-acceptance-main em{
+  display:block;
+  margin-top:2px;
+  font-style:normal;
+  font-size:var(--fs-label);
+  color:var(--text-secondary);
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
+.w10-acceptance-grid,.zt-acceptance-grid{
+  display:grid;
+  grid-template-columns:repeat(4,minmax(0,1fr));
+  gap:4px;
+}
+.w10-acceptance-grid>div,.zt-acceptance-grid>div{min-width:0}
+.w10-acceptance-grid span,.zt-acceptance-grid span{
+  display:block;
+  font-size:10px;
+  font-weight:800;
+  color:var(--text-disabled);
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis;
+}
+.w10-acceptance-grid b,.zt-acceptance-grid b{
+  display:block;
+  margin-top:1px;
+  font-family:var(--font-mono);
+  font-size:15px;
+  line-height:1.2;
+  color:var(--text-primary);
+}
+.w10-acceptance-foot,.zt-acceptance-foot{
+  font-size:var(--fs-label);
+  color:var(--text-secondary);
+  white-space:nowrap;
+}
 .w10-header{
   display:grid;grid-template-columns:minmax(0,1.15fr) minmax(240px,.85fr);
   gap:10px;padding:0 2px 4px;
@@ -1002,6 +1061,7 @@ html,body{
 .w10-stocks i{font-style:normal;font-family:var(--font-mono)}
 .w10-empty{padding:12px 10px;border:1px dashed var(--border-light);border-radius:var(--radius-md);background:var(--bg-soft);text-align:center;color:var(--text-disabled);font-size:var(--fs-small)}
 @media (max-width:760px){
+  .w10-acceptance,.zt-acceptance{grid-template-columns:1fr}
   .w10-header{display:none}
   .w10-row{grid-template-columns:1fr}
   .w10-live-top,.w10-stocks{justify-content:flex-start}
