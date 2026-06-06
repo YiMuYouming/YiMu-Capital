@@ -47,6 +47,27 @@ function _w15WriteGate() {
 }
 
 class PositionsWidget extends YiMuWidget {
+  _acceptanceStep(check, label, value, detail, active, tone) {
+    return '<div class="w15-acceptance-step' + (active ? ' is-active' : '') + (tone ? ' tone-' + _esc(tone) : '') + '" data-w15-check="' + _esc(check) + '">' +
+      '<span>' + _esc(label) + '</span>' +
+      '<b>' + _esc(value) + '</b>' +
+      '<em>' + _esc(detail) + '</em>' +
+    '</div>';
+  }
+
+  _acceptanceRail(state) {
+    state = state || {};
+    return '<div class="w15-acceptance">' +
+      '<div class="w15-acceptance-head"><span class="evidence-inline-ref">E1</span><b>账户验收</b><em>持仓、估值、流水与清仓追踪只读核对。</em></div>' +
+      '<div class="w15-acceptance-grid">' +
+        this._acceptanceStep('valuation', '估值状态', state.valuationValue, state.valuationDetail, true, state.valuationTone) +
+        this._acceptanceStep('positions', '持仓', state.activeCount, state.positionsDetail || (state.activeCount ? '活动持仓' : '当前空仓'), state.activeCount > 0, '') +
+        this._acceptanceStep('trades', '今日记录', state.tradeCount, state.tradeCount ? '成交流水' : '今日无操作', state.tradeCount > 0, '') +
+        this._acceptanceStep('closed', '清仓追踪', state.closedCount, state.closedCount ? '7个交易日' : '无追踪项', state.closedCount > 0, '') +
+      '</div>' +
+    '</div>';
+  }
+
   render(data) {
     var body = this.getBody();
     if (!body) return;
@@ -146,6 +167,15 @@ class PositionsWidget extends YiMuWidget {
     }
 
     html += '<div id="w15_sync_status" style="display:none;font-size:var(--fs-small);margin-bottom:var(--sp-xs);padding:2px 6px;border-radius:3px;background:var(--bg-base)"></div>' +
+      this._acceptanceRail({
+        valuationValue: isBlocked ? '阻断' : (isUnavailable ? '待确认' : (isPostClose ? '收盘快照' : (isLive ? '实时估值' : '账户快照'))),
+        valuationDetail: isBlocked ? (pnlLive.block_reason || '锚点被阻断') : (isUnavailable ? '行情缺失' : (isPostClose ? '非实时行情' : 'SSOT派生')),
+        valuationTone: isBlocked ? 'danger' : (isUnavailable ? 'warn' : ''),
+        activeCount: active.length,
+        positionsDetail: isBlocked ? '锚点阻断' : (active.length ? '活动持仓' : '当前空仓'),
+        tradeCount: Array.isArray(pnlLive.trades) ? pnlLive.trades.length : 0,
+        closedCount: Array.isArray(pnlLive.closed_positions) ? pnlLive.closed_positions.length : 0,
+      }) +
       '<div class="w15-kpi-grid">' +
       '<div class="w15-kpi-card"><div class="kpi-label">总资产</div><div class="w15-kpi-value">' + taDisplay + '</div></div>' +
       '<div class="w15-kpi-card"><div class="kpi-label">持仓市值</div><div class="w15-kpi-value">' + mvDisplay + '</div></div>' +

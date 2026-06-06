@@ -942,6 +942,39 @@ global.window = {
         self.assertNotIn("w15_add", html)
         self.assertNotIn("应急补录", html)
 
+    def test_w15_shows_account_acceptance_before_kpis(self):
+        result = _render_widget("positions.js", "W15", {
+            "pnl_live": {
+                "total_asset": 200000,
+                "cash": 100000,
+                "mv": 100000,
+                "pos_pct": 50,
+                "pnl_amount": 500,
+                "pnl_pct": 0.25,
+                "quote_status": "close_snapshot",
+                "valuation_complete": True,
+                "positions": [
+                    {"标的": "测试", "代码": "000001", "市值": 100000, "现价": 100, "成本": 98, "today_pnl": 500, "today_pnl_pct": 0.5, "状态": "持有"}
+                ],
+                "trades": [{"trade_time": "10:00", "action": "买入", "name": "测试", "code": "000001", "price": 100, "qty": 100}],
+                "closed_positions": [{"name": "旧仓", "code": "000002", "sell_price": 20, "realized_today_pnl": 100, "reason": "止盈"}],
+            },
+            "live_quotes": {"000002": {"最新价": 21}},
+        })
+        self.assertNotIn("_error", result)
+        html = result["html"]
+        self.assertIn("w15-acceptance", html)
+        self.assertIn('data-w15-check="valuation"', html)
+        self.assertIn('data-w15-check="positions"', html)
+        self.assertIn('data-w15-check="trades"', html)
+        self.assertIn('data-w15-check="closed"', html)
+        self.assertIn("账户验收", html)
+        self.assertIn("估值状态", html)
+        self.assertIn("持仓", html)
+        self.assertIn("今日记录", html)
+        self.assertIn("清仓追踪", html)
+        self.assertLess(html.index("w15-acceptance"), html.index("w15-kpi-grid"))
+
     def test_index_exposes_ticket_entry_and_default_workspace(self):
         src = (ROOT / "index.html").read_text(encoding="utf-8")
         self.assertIn('data-widget="W24"', src)
