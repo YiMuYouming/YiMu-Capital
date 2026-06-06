@@ -595,6 +595,44 @@ function _refreshEvidenceShelf() {
   showToast('证据副屏已刷新');
 }
 
+function _pulseEvidenceFocus(el) {
+  if (!el) return;
+  el.classList.remove('evidence-focus-pulse');
+  void el.offsetWidth;
+  el.classList.add('evidence-focus-pulse');
+  setTimeout(function() { el.classList.remove('evidence-focus-pulse'); }, 1400);
+}
+
+function _scrollEvidenceShelfTo(targetId) {
+  var target = document.getElementById('content_' + targetId);
+  var scroller = document.getElementById('evidenceShelfBody');
+  if (target && scroller && typeof scroller.scrollTo === 'function') {
+    scroller.scrollTo({ top: Math.max(0, target.offsetTop - scroller.offsetTop), behavior: 'smooth' });
+    _pulseEvidenceFocus(target);
+  }
+}
+
+function _openEvidenceTarget(target) {
+  if (!target) return;
+  if (target.indexOf('shelf:') === 0) {
+    _showEvidenceShelf();
+    setTimeout(function() { _scrollEvidenceShelfTo(target.slice(6)); }, 80);
+    return;
+  }
+  if (target.indexOf('widget:') === 0) {
+    var widgetId = target.slice(7);
+    _addWidgetToGrid(widgetId);
+    setTimeout(function() {
+      var el = document.querySelector('[gs-id="' + widgetId + '"]');
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        _pulseEvidenceFocus(el);
+      }
+    }, 80);
+  }
+}
+window._openEvidenceTarget = _openEvidenceTarget;
+
 function _closeEvidenceShelf() {
   var overlay = document.getElementById('evidenceShelfOverlay');
   if (overlay) overlay.classList.remove('show');

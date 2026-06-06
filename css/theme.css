@@ -2184,6 +2184,9 @@ body.compact-mode .grid-stack-item:not(.core-widget) { display: none !important;
 .evidence-section-title{display:flex;align-items:center;justify-content:space-between;margin-bottom:5px;font-size:11px;font-weight:800;color:var(--text-secondary);letter-spacing:0}
 .evidence-section-title span:last-child{font-family:var(--font-mono);font-size:10px;color:var(--text-disabled);font-weight:700}
 .evidence-card{border:1px solid var(--border-light);border-radius:var(--radius-md);background:var(--bg-card);padding:7px 8px;margin-bottom:6px;min-width:0}
+.evidence-card-trace{cursor:pointer;transition:background .14s,border-color .14s,box-shadow .14s}
+.evidence-card-trace:hover,
+.evidence-card-trace:focus{background:#fff;border-color:rgba(217,119,6,.34);box-shadow:0 0 0 2px rgba(217,119,6,.08);outline:none}
 .evidence-card-title{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:6px;font-size:12px;font-weight:700;color:var(--text-primary);min-width:0}
 .evidence-card-title span:nth-child(2){white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .evidence-card-value{font-family:var(--font-mono);font-size:16px;font-weight:850;margin-top:4px;letter-spacing:0}
@@ -2198,6 +2201,11 @@ body.compact-mode .grid-stack-item:not(.core-widget) { display: none !important;
 .evidence-tone-warn .evidence-ref{background:var(--warn-bg);color:var(--warn)}
 .evidence-section-alerts .evidence-card,.evidence-section-risks .evidence-card{padding:6px 8px}
 .evidence-section-alerts .evidence-card-value,.evidence-section-risks .evidence-card-value{display:none}
+.evidence-focus-pulse{animation:evidence-focus-pulse 1.35s ease-out}
+@keyframes evidence-focus-pulse{
+  0%{box-shadow:0 0 0 0 rgba(217,119,6,.42);outline:2px solid rgba(217,119,6,.42);outline-offset:-2px}
+  100%{box-shadow:0 0 0 10px rgba(217,119,6,0);outline:2px solid rgba(217,119,6,0);outline-offset:-2px}
+}
 @media (max-width:900px){.evidence-hero{grid-template-columns:1fr}.evidence-hero-metrics{grid-template-columns:repeat(4,minmax(0,1fr))}.s0-command-strip{grid-template-columns:repeat(3,minmax(0,1fr))}.evidence-section-grid{grid-template-columns:1fr}}
 
 /* ===== Evidence inline markers for core components ===== */

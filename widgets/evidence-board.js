@@ -32,11 +32,42 @@ class EvidenceBoardWidget extends YiMuWidget {
   }
 
   _card(item) {
-    return '<div class="evidence-card' + _evToneClass(item.tone) + '" data-evidence-id="' + _evEsc(item.id) + '">' +
+    var target = this._traceTarget(item);
+    var traceAttrs = target ?
+      ' evidence-card-trace" role="button" tabindex="0" data-evidence-target="' + _evEsc(target) + '" title="追溯到 ' + _evEsc(item.source || target) + '"' :
+      '"';
+    return '<div class="evidence-card' + _evToneClass(item.tone) + traceAttrs + ' data-evidence-id="' + _evEsc(item.id) + '">' +
       '<div class="evidence-card-title"><span class="evidence-ref">' + _evEsc(item.id) + '</span><span>' + _evEsc(item.title) + '</span><span class="evidence-source">' + _evEsc(item.source || '') + '</span></div>' +
       '<div class="evidence-card-value">' + _evEsc(item.value || '') + '</div>' +
       '<div class="evidence-card-detail">' + _evEsc(item.detail || '') + '</div>' +
     '</div>';
+  }
+
+  _traceTarget(item) {
+    var source = item && item.source ? String(item.source) : '';
+    var match = source.match(/W\d{2}/);
+    if (!match) return '';
+    var wid = match[0];
+    if (wid === 'W10' || wid === 'W12' || wid === 'W13' || wid === 'W21') return 'shelf:SHELF_' + wid;
+    return 'widget:' + wid;
+  }
+
+  _bindEvidenceTraceLinks() {
+    var body = this.getBody();
+    if (!body || body._evidenceTraceBound) return;
+    body._evidenceTraceBound = true;
+    var handler = function(e) {
+      var card = e.target && e.target.closest ? e.target.closest('.evidence-card[data-evidence-target]') : null;
+      if (!card) return;
+      if (e.type === 'keydown' && e.key !== 'Enter' && e.key !== ' ') return;
+      e.preventDefault();
+      var root = typeof window !== 'undefined' ? window : (typeof global !== 'undefined' ? global : {});
+      if (root && typeof root._openEvidenceTarget === 'function') {
+        root._openEvidenceTarget(card.getAttribute('data-evidence-target'));
+      }
+    };
+    body.addEventListener('click', handler);
+    body.addEventListener('keydown', handler);
   }
 
   _section(title, items, kind) {
@@ -116,6 +147,7 @@ class EvidenceBoardWidget extends YiMuWidget {
         this._section('规则/风控', snapshot.risks || [], 'risks') +
       '</div>' +
     '</div>';
+    this._bindEvidenceTraceLinks();
     this.updateTimestamp();
   }
 }

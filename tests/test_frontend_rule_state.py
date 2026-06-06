@@ -1743,6 +1743,16 @@ class EvidenceBoardWidgetTest(unittest.TestCase):
         self.assertIn("关键风险", html)
         self.assertIn("下一步", html)
         self.assertIn("复核收盘快照", html)
+        self.assertIn('data-evidence-target="widget:W15"', html)
+        self.assertIn('data-evidence-target="widget:W24"', html)
+        self.assertIn('data-evidence-target="widget:W04"', html)
+        self.assertIn('role="button"', html)
+        self.assertIn('tabindex="0"', html)
+
+        widget_src = (ROOT / "widgets" / "evidence-board.js").read_text(encoding="utf-8")
+        self.assertIn("_bindEvidenceTraceLinks", widget_src)
+        self.assertIn("_openEvidenceTarget", widget_src)
+        self.assertIn("keydown", widget_src)
 
 
 class ReadOnlyInsightUxTest(unittest.TestCase):
@@ -1932,6 +1942,17 @@ class WidgetPanelUxTest(unittest.TestCase):
         self.assertIn(".evidence-shelf-summary-grid", theme)
         self.assertIn(".evidence-shelf-grid", theme)
         self.assertIn(".evidence-shelf-card", theme)
+
+    def test_dashboard_exposes_evidence_trace_router(self):
+        index = (ROOT / "index.html").read_text(encoding="utf-8")
+        theme = (ROOT / "css" / "theme.css").read_text(encoding="utf-8")
+        self.assertIn("function _openEvidenceTarget", index)
+        self.assertIn("window._openEvidenceTarget = _openEvidenceTarget", index)
+        self.assertIn("target.indexOf('shelf:') === 0", index)
+        self.assertIn("_showEvidenceShelf()", index)
+        self.assertIn("_addWidgetToGrid(widgetId)", index)
+        self.assertIn("evidence-focus-pulse", index)
+        self.assertIn(".evidence-focus-pulse", theme)
 
     def test_widget_panel_uses_ref_priority_and_tier_pills(self):
         index = (ROOT / "index.html").read_text(encoding="utf-8")
