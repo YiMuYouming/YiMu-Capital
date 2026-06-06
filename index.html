@@ -133,6 +133,7 @@ body.ready{opacity:1}
       <button class="topbar-shortcut topbar-shortcut-data" data-widget="W04" title="W04 市场全景"><b>W04</b><span>全景</span></button>
       <button class="topbar-shortcut topbar-shortcut-trade" data-widget="W24" title="W24 交易票据"><b>W24</b><span>票据</span></button>
       <button class="topbar-shortcut topbar-shortcut-trade" data-widget="W15" title="W15 持仓操作清仓"><b>W15</b><span>持仓</span></button>
+      <button id="evidenceShelfBtn" class="topbar-shortcut topbar-shortcut-data" title="候选与市场证据副屏"><b>E</b><span>证据</span></button>
       <button class="topbar-shortcut topbar-shortcut-data" data-widget="W12" title="W12 连板池"><b>W12</b><span>连板</span></button>
       <button class="topbar-shortcut topbar-shortcut-data" data-widget="W13" title="W13 趋势池"><b>W13</b><span>趋势</span></button>
       <button id="inputPanelBtn" class="topbar-shortcut topbar-shortcut-tool" title="W16 报数面板"><b>W16</b><span>报数</span></button>
@@ -180,6 +181,26 @@ body.ready{opacity:1}
   </div>
 </div>
 
+<!-- 候选与市场证据副屏（只读验收区） -->
+<div class="evidence-shelf-overlay" id="evidenceShelfOverlay">
+  <div class="evidence-shelf" id="evidenceShelf">
+    <div class="evidence-shelf-header">
+      <div class="evidence-shelf-title">
+        <span>候选与市场证据</span>
+        <b>W10 / W12 / W13 / W21</b>
+      </div>
+      <div class="evidence-shelf-actions">
+        <button class="evidence-shelf-btn" id="evidenceShelfRefresh" title="刷新证据副屏">刷新</button>
+        <button class="widget-btn" id="evidenceShelfClose" title="关闭" style="font-size:18px">×</button>
+      </div>
+    </div>
+    <div class="evidence-shelf-note">
+      主屏保留作战态势；这里集中核对板块热度、候选池和涨停梯队，不发起写入。
+    </div>
+    <div class="evidence-shelf-grid" id="evidenceShelfBody"></div>
+  </div>
+</div>
+
 <!-- W16 报数面板浮窗 -->
 <div class="widget-panel-overlay" id="inputPanelOverlay">
   <div class="widget-panel" style="max-width:680px">
@@ -216,6 +237,7 @@ body.ready{opacity:1}
 var grid = null;
 var activePreset = null;
 var REQUIRED_LAYOUT_WIDGETS = ['W25', 'W15', 'W24'];
+var EVIDENCE_SHELF_WIDGETS = ['W10', 'W12', 'W13', 'W21'];
 
 function initGrid() {
   grid = GridStack.init({
@@ -356,10 +378,11 @@ function _closeTransientSurfaces() {
   _closeTopbarMenus();
   var contextMenu = document.getElementById('contextMenu');
   if (contextMenu) contextMenu.classList.remove('show');
-  ['widgetPanelOverlay', 'inputPanelOverlay', 'llmPanelOverlay'].forEach(function(id) {
+  ['widgetPanelOverlay', 'inputPanelOverlay', 'llmPanelOverlay', 'evidenceShelfOverlay'].forEach(function(id) {
     var el = document.getElementById(id);
     if (el) el.classList.remove('show');
   });
+  _clearEvidenceShelf();
 }
 
 // === Context Menu ===
@@ -451,8 +474,81 @@ document.getElementById('widgetPanelClose').addEventListener('click', function()
   document.getElementById('widgetPanelOverlay').classList.remove('show');
 });
 
+// === 候选与市场证据副屏 ===
+var evidenceShelfInstances = {};
+
+function _clearEvidenceShelf() {
+  Object.keys(evidenceShelfInstances).forEach(function(id) {
+    var inst = evidenceShelfInstances[id];
+    if (inst && typeof inst.unmount === 'function') inst.unmount();
+  });
+  evidenceShelfInstances = {};
+  var body = document.getElementById('evidenceShelfBody');
+  if (body) body.innerHTML = '';
+}
+
+function _mountEvidenceShelfWidget(widgetId) {
+  var body = document.getElementById('evidenceShelfBody');
+  if (!body) return;
+  var meta = WidgetRegistry.getMeta(widgetId);
+  var entry = WidgetRegistry.get(widgetId);
+  var shellId = 'SHELF_' + widgetId;
+  var card = document.createElement('section');
+  card.className = 'evidence-shelf-card evidence-shelf-card-' + widgetId.toLowerCase();
+  card.setAttribute('data-widget', widgetId);
+  card.id = 'content_' + shellId;
+  body.appendChild(card);
+
+  if (!meta || !entry || !entry.Class) {
+    card.innerHTML = '<div class="ui-empty"><div class="ui-empty-title">' + _uiEsc(widgetId) + ' 组件不可用</div><div class="ui-empty-detail">请确认脚本已加载。</div></div>';
+    return;
+  }
+
+  var inst = new entry.Class({
+    id: shellId,
+    type: meta.type,
+    title: widgetId + ' ' + meta.title,
+    category: meta.category,
+    tier: meta.tier,
+    dataPaths: meta.dataPaths,
+    defaultSize: meta.defaultSize,
+  });
+  evidenceShelfInstances[widgetId] = inst;
+  inst.mount(card);
+}
+
+function _showEvidenceShelf() {
+  _closeTopbarMenus();
+  _clearEvidenceShelf();
+  var overlay = document.getElementById('evidenceShelfOverlay');
+  if (!overlay) return;
+  overlay.classList.add('show');
+  EVIDENCE_SHELF_WIDGETS.forEach(_mountEvidenceShelfWidget);
+}
+
+function _refreshEvidenceShelf() {
+  Object.keys(evidenceShelfInstances).forEach(function(id) {
+    var inst = evidenceShelfInstances[id];
+    if (inst && typeof inst.refresh === 'function') inst.refresh();
+  });
+  showToast('证据副屏已刷新');
+}
+
+function _closeEvidenceShelf() {
+  var overlay = document.getElementById('evidenceShelfOverlay');
+  if (overlay) overlay.classList.remove('show');
+  _clearEvidenceShelf();
+}
+
+document.getElementById('evidenceShelfOverlay').addEventListener('click', function(e) {
+  if (e.target === this) _closeEvidenceShelf();
+});
+document.getElementById('evidenceShelfClose').addEventListener('click', _closeEvidenceShelf);
+document.getElementById('evidenceShelfRefresh').addEventListener('click', _refreshEvidenceShelf);
+
 // 顶栏按钮
 document.getElementById('addWidgetBtn').addEventListener('click', _showWidgetPanel);
+document.getElementById('evidenceShelfBtn').addEventListener('click', _showEvidenceShelf);
 document.getElementById('inputPanelBtn').addEventListener('click', function() { _closeTopbarMenus(); _showInputPanel(); });
 document.getElementById('pnlCurveBtn').addEventListener('click', function() { _closeTopbarMenus(); _addWidgetToGrid('W22'); });
 document.querySelectorAll('.topbar-shortcut[data-widget]').forEach(function(btn) {

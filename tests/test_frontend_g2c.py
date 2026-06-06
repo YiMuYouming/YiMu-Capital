@@ -195,6 +195,9 @@ class PrefillTest(unittest.TestCase):
         """生产 _prefillW15 → modal append + code/name 字段 + 零写 + 生产代码含 prefills"""
         script = _PROD_PREFILL_FN + r"""
 global._fetchCalls = [];
+window._healthConfirmed = true;
+window._healthCritical = false;
+window._tradeEntryAllowed = true;
 DataStore._prefill = null;
 DataStore.merged = { pnl_live: { positions: [{标的:'测试标的',代码:'000001',数量:100,成本:10,现价:12,状态:'持有'}],
     total_asset: 100000, cash: 90000, mv: 1000 }, positions: [] };

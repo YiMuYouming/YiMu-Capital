@@ -1892,6 +1892,21 @@ class CoreQuietStateUxTest(unittest.TestCase):
 class WidgetPanelUxTest(unittest.TestCase):
     """Widget picker uses cockpit-style metadata instead of the old dev panel."""
 
+    def test_market_evidence_shelf_is_secondary_overlay(self):
+        index = (ROOT / "index.html").read_text(encoding="utf-8")
+        theme = (ROOT / "css" / "theme.css").read_text(encoding="utf-8")
+        self.assertIn('id="evidenceShelfBtn"', index)
+        self.assertIn('id="evidenceShelfOverlay"', index)
+        self.assertIn("EVIDENCE_SHELF_WIDGETS", index)
+        for wid in ["W10", "W12", "W13", "W21"]:
+            self.assertIn("'" + wid + "'", index)
+        self.assertIn("REQUIRED_LAYOUT_WIDGETS = ['W25', 'W15', 'W24']", index)
+        self.assertIn("_showEvidenceShelf", index)
+        self.assertIn("SHELF_", index)
+        self.assertIn(".evidence-shelf-overlay", theme)
+        self.assertIn(".evidence-shelf-grid", theme)
+        self.assertIn(".evidence-shelf-card", theme)
+
     def test_widget_panel_uses_ref_priority_and_tier_pills(self):
         index = (ROOT / "index.html").read_text(encoding="utf-8")
         self.assertIn("widget-panel-title", index)
