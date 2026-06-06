@@ -162,6 +162,17 @@ class AccountReducerTests(unittest.TestCase):
         self.assertTrue(state["valuation_complete"])
         self.assertEqual(state.get("quote_status"), "live")
 
+    def test_non_trading_day_cached_prices_are_close_snapshot(self):
+        """非交易日缓存中仍有个股价格时，作为上一交易日收盘快照展示。"""
+        state = reduce_account_state(
+            self.anchor,
+            [],
+            {"688981": {"最新价": 146}, "_updated": "2026-06-06T09:45:00+08:00"},
+            now="2026-06-06T10:00:00+08:00",
+        )
+        self.assertTrue(state["valuation_complete"])
+        self.assertEqual(state.get("quote_status"), "close_snapshot")
+
     def test_1558_with_1557_quote_is_close_snapshot(self):
         """R2: 15:57 quote + 15:58 now → close_snapshot, val_complete=true"""
         state = reduce_account_state(
@@ -271,6 +282,17 @@ class SyncBoundaryTests(unittest.TestCase):
         self.assertEqual(row["pnl_pct"], -0.91)
         self.assertEqual(row["sh_pct"], -0.22)
 
+    def test_snapshot_row_skips_non_trading_day(self):
+        row = quotes._snapshot_from_account(
+            {
+                "valuation_complete": True, "total_asset": 720227.67, "mv": 136548,
+                "pnl_pct": -0.51, "pos_pct": 18.96, "total_deposit": 711059.2252961266,
+            },
+            {"上证指数涨幅": "-0.74", "深证指数涨幅": "-2.21"},
+            "2026-06-06T09:55:27",
+        )
+        self.assertIsNone(row, "非交易日不得写 intraday_snapshots")
+
     def test_bridge_binds_port_before_any_bootstrap_side_effect(self):
         source = Path("scripts/bridge.py").read_text(encoding="utf-8")
         main = source.index("if __name__ == '__main__':")
@@ -361,6 +383,39 @@ class AccountAnchorStorageTests(unittest.TestCase):
         self.assertEqual({p["代码"]: p["数量"] for p in state["positions"]}, {"688981": 100, "002463": 100})
         self.assertEqual([trade["id"] for trade in state["trades"]], [2, 1])
         self.assertEqual(state["_updated"], "2026-05-26T13:02:00")
+
+    def test_non_trading_day_uses_last_trading_close_snapshot(self):
+        """周末/非交易日无新行情时，账户停留在上个交易日收盘快照。"""
+        self.assertIsNotNone(load_current_account_state)
+        dashboard_path = Path(self.tmp.name) / "dashboard_data.json"
+        history_path = Path(self.tmp.name) / "pnl_history.json"
+        dashboard_path.write_text(json.dumps({
+            "pnl": {"可用资金": 0, "累计入金": 200000},
+            "positions": [{"标的": "光迅科技", "代码": "002281", "数量": 600, "成本": 219.49, "现价": 227.58, "状态": "持有"}],
+        }, ensure_ascii=False), encoding="utf-8")
+        history_path.write_text(json.dumps({
+            "meta": {"day_start_date": "2026-06-05", "day_start_asset": 723899.67}
+        }, ensure_ascii=False), encoding="utf-8")
+        db.insert_account_baseline({
+            "date": "2026-06-05", "effective_at": "2026-06-05T09:25:00",
+            "trade_id_cutoff": 0, "cash": 583679.67, "day_start_asset": 723899.67,
+            "total_deposit": 711059.2252961266,
+            "positions": [{"标的": "光迅科技", "代码": "002281", "数量": 600, "成本": 219.49, "现价": 227.58, "状态": "持有"}],
+            "source": "previous_close",
+            "_meta": {"day_start_prices": {"002281": 220.56}},
+        })
+        state = load_current_account_state(
+            {"002281": {"最新价": 227.58}, "_updated": "2026-06-05T16:07:58"},
+            now="2026-06-06T09:45:00",
+            data_file=dashboard_path,
+            history_file=history_path,
+        )
+        self.assertEqual(state["date"], "2026-06-05")
+        self.assertFalse(state.get("anchor_blocked"), state)
+        self.assertTrue(state.get("valuation_complete"), state)
+        self.assertEqual(state.get("quote_status"), "close_snapshot")
+        self.assertEqual(state["mv"], 136548.0)
+        self.assertAlmostEqual(state["total_asset"], 720227.67, places=2)
 
     @staticmethod
     def _positions(qty):

@@ -547,6 +547,14 @@ def is_trading_day(date_str):
     return day.weekday() < 5 and day.isoformat() not in _holiday_dates()
 
 
+def previous_trade_date(date_str):
+    day = datetime.strptime(str(date_str), "%Y-%m-%d").date() - timedelta(days=1)
+    holidays = _holiday_dates()
+    while day.weekday() >= 5 or day.isoformat() in holidays:
+        day -= timedelta(days=1)
+    return day.isoformat()
+
+
 def next_trade_date(date_str):
     day = datetime.strptime(str(date_str), "%Y-%m-%d").date() + timedelta(days=1)
     holidays = _holiday_dates()
@@ -904,16 +912,29 @@ def query_pnl(range='today', index='sh'):
     idx_map = {'sh': 'sh_pct', 'sz': 'sz_pct', 'cy': 'cy_pct'}
     idx_field = idx_map.get(index, 'sh_pct')
     today = datetime.now().strftime('%Y-%m-%d')
+    now_dt = datetime.now()
+    before_open = (now_dt.hour, now_dt.minute) < TRADING_HOUR_START
 
     # today: 走 intraday_snapshots（5分钟粒度），填充完整时段9:30-15:00
     if range == 'today':
         is_fallback = False
-        rows = _exec(
-            f"SELECT ts, pnl_pct, {idx_field} AS bm_pct, pos_pct, nav FROM intraday_snapshots WHERE date = ? ORDER BY ts",
-            (today,))
+        rows = []
+        if not is_trading_day(today) or before_open:
+            fallback_date = previous_trade_date(today)
+            rows = _exec(
+                f"SELECT ts, pnl_pct, {idx_field} AS bm_pct, pos_pct, nav FROM intraday_snapshots WHERE date = ? ORDER BY ts",
+                (fallback_date,))
+            if rows:
+                today = fallback_date
+                is_fallback = True
+        else:
+            rows = _exec(
+                f"SELECT ts, pnl_pct, {idx_field} AS bm_pct, pos_pct, nav FROM intraday_snapshots WHERE date = ? ORDER BY ts",
+                (today,))
         if not rows:
             last_date_row = _exec(
-                "SELECT date FROM intraday_snapshots ORDER BY date DESC LIMIT 1")
+                "SELECT date FROM intraday_snapshots WHERE date < ? ORDER BY date DESC LIMIT 1",
+                (today,))
             if last_date_row:
                 today = last_date_row[0]['date']
                 is_fallback = True
@@ -1102,13 +1123,33 @@ def query_pnl_summary():
     today_str = datetime.now().strftime('%Y-%m-%d')
     rows2 = _exec("SELECT COUNT(*) AS n FROM intraday_snapshots WHERE date = ?", (today_str,))
     intra_n = rows2[0]['n'] if rows2 else 0
+    snapshot_date = today_str
+    snapshot_n = intra_n
+    now_dt = datetime.now()
+    before_open = (now_dt.hour, now_dt.minute) < TRADING_HOUR_START
+    use_previous_snapshot = not is_trading_day(today_str) or before_open
+    if use_previous_snapshot:
+        prev_date = previous_trade_date(today_str)
+        prev_rows = _exec("SELECT COUNT(*) AS n FROM intraday_snapshots WHERE date = ?", (prev_date,))
+        prev_n = prev_rows[0]['n'] if prev_rows else 0
+        if prev_n > 0:
+            snapshot_date = prev_date
+            snapshot_n = prev_n
+    elif snapshot_n == 0:
+        prev_date = previous_trade_date(today_str)
+        prev_rows = _exec("SELECT COUNT(*) AS n FROM intraday_snapshots WHERE date = ?", (prev_date,))
+        prev_n = prev_rows[0]['n'] if prev_rows else 0
+        if prev_n > 0 and before_open:
+            snapshot_date = prev_date
+            snapshot_n = prev_n
+    effective_today_snapshots = intra_n if snapshot_date == today_str and not use_previous_snapshot else 0
     # 盘中有日内快照时，用最新的实时总资产
     today_asset = None
     today_mv = None
     today_pnl_pct = None
     updated = None
-    if intra_n > 0:
-        intra = _exec("SELECT ts, total_asset, mv, pnl_pct FROM intraday_snapshots WHERE date = ? ORDER BY ts DESC LIMIT 2", (today_str,))
+    if snapshot_n > 0:
+        intra = _exec("SELECT ts, total_asset, mv, pnl_pct FROM intraday_snapshots WHERE date = ? ORDER BY ts DESC LIMIT 2", (snapshot_date,))
         # 取最新一条，但如果 mv 突跳 >50%（如清仓后错误重算），用上一条
         if intra:
             latest = intra[0]
@@ -1132,7 +1173,7 @@ def query_pnl_summary():
         'last_nav': last['nav'] if last else 1.0,
         'last_date': last['date'] if last else None,
         'daily_count': daily_n,
-        'today_snapshots': intra_n,
+        'today_snapshots': effective_today_snapshots,
         'total_asset': today_asset if today_asset is not None else (round(last['nav'] * last['deposit'], 1) if last else None),
         'mv': today_mv if today_mv is not None else None,
         'pnl_amount': round(today_asset - day_start_asset, 1) if (today_asset is not None and day_start_asset is not None) else None,

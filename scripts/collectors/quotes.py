@@ -678,6 +678,12 @@ def _pct(raw):
 
 def _snapshot_from_account(account_state, live_index, timestamp):
     """Convert an authoritative valuation to one disposable chart snapshot."""
+    try:
+        from scripts.db import is_trading_day
+        if not is_trading_day(str(timestamp)[:10]):
+            return None
+    except Exception:
+        pass
     if not account_state.get("valuation_complete"):
         return None
     total_asset = float(account_state.get("total_asset", 0) or 0)

@@ -75,6 +75,46 @@ class PnlQueryZeroValueTests(unittest.TestCase):
         self.assertEqual(result.get("data_date"), "2026-05-26",
             f"data_date 应为回退日期: {result}")
 
+    def test_query_pnl_ignores_non_trading_day_intraday_rows(self):
+        """非交易日即使误写 intraday，也应回退上一交易日曲线。"""
+        self._insert_snapshot("2026-06-05T14:55:00", 720227.67, 136548.0, -0.51)
+        self._insert_snapshot("2026-06-06T09:55:27", 999999.0, 999999.0, 9.99)
+        class FrozenDatetime(datetime):
+            @classmethod
+            def now(cls):
+                return cls(2026, 6, 6, 10, 0, 0)
+        original_datetime = db.datetime
+        db.datetime = FrozenDatetime
+        try:
+            result = db.query_pnl("today", "sh")
+        finally:
+            db.datetime = original_datetime
+        self.assertTrue(result.get("is_fallback"), result)
+        self.assertEqual(result.get("data_date"), "2026-06-05", result)
+        self.assertNotIn(9.99, result.get("portfolio", []), result)
+
+    def test_summary_non_trading_day_uses_last_intraday_close_snapshot(self):
+        """周末/非交易日 summary 停留在上一交易日最后一条 intraday 快照。"""
+        self._insert_daily("2026-06-05", nav=1.012894, deposit=711059.2252961266)
+        self._insert_snapshot("2026-06-05T16:07:58", 720227.67, 136548.0, -0.51)
+        self._insert_snapshot("2026-06-06T09:55:27", 999999.0, 999999.0, 9.99)
+        class FrozenDatetime(datetime):
+            @classmethod
+            def now(cls):
+                return cls(2026, 6, 6, 9, 45, 0)
+        original_datetime = db.datetime
+        db.datetime = FrozenDatetime
+        try:
+            summary = db.query_pnl_summary()
+        finally:
+            db.datetime = original_datetime
+        self.assertEqual(summary["last_date"], "2026-06-05")
+        self.assertEqual(summary["today_snapshots"], 0)
+        self.assertEqual(summary["total_asset"], 720227.67)
+        self.assertEqual(summary["mv"], 136548.0)
+        self.assertEqual(summary["pnl_pct"], -0.51)
+        self.assertEqual(summary["_updated"], "2026-06-05T16:07:58")
+
     def test_query_pnl_future_null_slots(self):
         """未到时间的槽位为 null，不崩溃"""
         today = "2026-05-27"

@@ -17,6 +17,37 @@ def _number(value):
         return 0.0
 
 
+def _parse_time(value):
+    if isinstance(value, datetime):
+        return value
+    return datetime.fromisoformat(str(value))
+
+
+def _account_date_for_now(effective_at, get_anchor=None):
+    """Use the previous trading day on weekends/holidays so dashboards stay at close."""
+    date_str = str(effective_at)[:10]
+    try:
+        from scripts.db import is_trading_day, previous_trade_date
+        if not is_trading_day(date_str):
+            if get_anchor and get_anchor(date_str):
+                return date_str
+            prev_date = previous_trade_date(date_str)
+            if not get_anchor or get_anchor(prev_date):
+                return prev_date
+    except Exception:
+        pass
+    return date_str
+
+
+def _has_quote_prices(quotes):
+    for key, value in (quotes or {}).items():
+        if str(key).startswith("_") or not isinstance(value, dict):
+            continue
+        if _number(value.get("最新价")) > 0:
+            return True
+    return False
+
+
 def trade_cash_effect(trade):
     """Return settled cash movement for one executed trade event."""
     amount = round(_number(trade.get("price")) * _number(trade.get("qty")), 2)
@@ -74,7 +105,7 @@ def _quote_status(quotes, now=None):
         return False, "missing"
     try:
         quote_time = datetime.fromisoformat(updated)
-        ref_time = datetime.fromisoformat(now) if now else datetime.now(quote_time.tzinfo)
+        ref_time = _parse_time(now) if now else datetime.now(quote_time.tzinfo)
         if quote_time.tzinfo and not ref_time.tzinfo:
             ref_time = ref_time.replace(tzinfo=quote_time.tzinfo)
         elif ref_time.tzinfo and not quote_time.tzinfo:
@@ -89,8 +120,29 @@ def _quote_status(quotes, now=None):
         ref_hhmm = ref_time.hour * 60 + ref_time.minute
         PRE_MARKET = 9 * 60 + 15
         MARKET_CLOSE = 15 * 60  # 15:00
+        try:
+            from scripts.db import is_trading_day
+            if (
+                not is_trading_day(ref_date.isoformat())
+                and age <= 4 * 86400
+                and _has_quote_prices(quotes)
+            ):
+                return True, "close_snapshot"
+        except Exception:
+            pass
 
         if quote_date != ref_date:
+            try:
+                from scripts.db import is_trading_day
+                if (
+                    not is_trading_day(ref_date.isoformat())
+                    and quote_date < ref_date
+                    and quote_hhmm >= MARKET_CLOSE
+                    and age <= 4 * 86400
+                ):
+                    return True, "close_snapshot"
+            except Exception:
+                pass
             # 盘前看盘仍需要展示昨收账户快照；交易规则继续由 rule_state
             # 的 freshness 阻断控制，不把这类快照当作盘中实时行情。
             if (
@@ -1125,7 +1177,14 @@ def load_current_account_state(live_quotes, now=None, data_file=None, history_fi
     from scripts.db import insert_account_baseline, query_account_baseline, query_last_trade_id, query_trades, query_fund_events
 
     effective_at = now or datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
-    date_str = effective_at[:10]
+    date_str = _account_date_for_now(effective_at, get_anchor=query_account_baseline)
+    try:
+        ref_time = _parse_time(effective_at)
+        time_suffix = ref_time.strftime("T%H:%M:%S")
+    except Exception:
+        raw_time = str(effective_at)[10:].replace(" ", "T", 1)
+        time_suffix = raw_time if raw_time.startswith("T") else "T00:00:00"
+    anchor_effective_at = f"{date_str}{time_suffix}"
     dashboard_path = Path(data_file) if data_file else ROOT / "data" / "dashboard_data.json"
     history_path = Path(history_file) if history_file else ROOT / "data" / "pnl_history.json"
     with open(dashboard_path, encoding="utf-8") as handle:
@@ -1141,7 +1200,7 @@ def load_current_account_state(live_quotes, now=None, data_file=None, history_fi
     anchor = ensure_today_anchor(
         data,
         day_start_asset,
-        now=effective_at,
+        now=anchor_effective_at,
         get_anchor=query_account_baseline,
         insert_anchor=insert_account_baseline,
         get_last_trade_id=query_last_trade_id,
