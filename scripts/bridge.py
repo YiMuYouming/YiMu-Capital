@@ -780,17 +780,22 @@ def _build_rule_inputs(now=None, account_state=None):
         style_raw.get("脚本版本"),
     )
 
+    # ── freshness ──
+    quotes_fresh = _compute_freshness("live_quote", CACHE.get("live_quotes", {}), now=now)
+
     # ── sentiment ──
     iwencai = CACHE.get("iwencai", {})
+    sentiment_fresh = _compute_freshness("iwencai", iwencai, now=now)
+    sentiment_usable = sentiment_fresh in ("live", "delayed")
     base_sent = dash.get("sentiment", {})
     base_market = dash.get("market", {})
     # 晋级率 / 炸板率 在 CACHE 中可能是小数 (0.198)，转换为百分数
-    _promotion_raw = iwencai.get("晋级率")
+    _promotion_raw = iwencai.get("晋级率") if sentiment_usable else None
     if _promotion_raw is None:
-        _promotion_raw = base_sent.get("晋级率")
-    _broken_raw = iwencai.get("炸板率")
+        _promotion_raw = base_sent.get("晋级率") if sentiment_usable else None
+    _broken_raw = iwencai.get("炸板率") if sentiment_usable else None
     if _broken_raw is None:
-        _broken_raw = base_market.get("炸板率")
+        _broken_raw = base_market.get("炸板率") if sentiment_usable else None
     if _promotion_raw is not None and _promotion_raw <= 1:
         promotion_pct = float(_promotion_raw) * 100
     else:
@@ -800,13 +805,13 @@ def _build_rule_inputs(now=None, account_state=None):
     else:
         broken_board_pct = float(_broken_raw) if _broken_raw is not None else None
 
-    limit_up_profit_raw = iwencai.get("昨日涨停收益")
+    limit_up_profit_raw = iwencai.get("昨日涨停收益") if sentiment_usable else None
     if limit_up_profit_raw is None:
-        limit_up_profit_raw = base_sent.get("昨日涨停收益")
+        limit_up_profit_raw = base_sent.get("昨日涨停收益") if sentiment_usable else None
     limit_up_profit_pct = float(limit_up_profit_raw) if limit_up_profit_raw is not None else None
-    lianban_risk_raw = iwencai.get("连板风险值")
+    lianban_risk_raw = iwencai.get("连板风险值") if sentiment_usable else None
     if lianban_risk_raw is None:
-        lianban_risk_raw = base_sent.get("连板风险值")
+        lianban_risk_raw = base_sent.get("连板风险值") if sentiment_usable else None
     lianban_risk = None
     if lianban_risk_raw is not None:
         import re as _re
@@ -816,16 +821,18 @@ def _build_rule_inputs(now=None, account_state=None):
 
     # 情绪值优先级：breadth 计算 > iwencai > baseline
     breadth = CACHE.get("breadth", {})
+    breadth_fresh = _compute_freshness("breadth", breadth, now=now)
+    breadth_usable = breadth_fresh in ("live", "delayed")
     up_cnt = breadth.get("上涨家数")
     dn_cnt = breadth.get("下跌家数")
-    if up_cnt is not None and dn_cnt is not None and (up_cnt + dn_cnt) > 0:
+    if breadth_usable and up_cnt is not None and dn_cnt is not None and (up_cnt + dn_cnt) > 0:
         emotion_pct = round(up_cnt / (up_cnt + dn_cnt) * 100, 1)
     else:
-        em_raw = iwencai.get("情绪值")
+        em_raw = iwencai.get("情绪值") if sentiment_usable else None
         if em_raw is not None:
             emotion_pct = float(em_raw)
         else:
-            em_base = base_sent.get("情绪值")
+            em_base = base_sent.get("情绪值") if sentiment_usable else None
             emotion_pct = float(em_base) if em_base is not None else None
 
     # previous_emotion：从 sentiment_auto.json 日期分组中取前一日期最后节点
@@ -855,10 +862,6 @@ def _build_rule_inputs(now=None, account_state=None):
                             prev_emotion_pct = float(prev_em)
     except Exception:
         pass
-
-    # ── freshness ──
-    quotes_fresh = _compute_freshness("live_quote", CACHE.get("live_quotes", {}), now=now)
-    sentiment_fresh = _compute_freshness("iwencai", iwencai, now=now)
 
     plan_source = style_raw.get("_source")
     plan_overrides_loss_streak = (
@@ -1562,9 +1565,6 @@ def _kline_15m_payload(key, now=None):
 
 def _build_live_quotes_payload(rule_state=None):
     """Build the live payload shared by polling and SSE endpoints."""
-    iwencai = dict(CACHE.get('iwencai', {}) or {})
-    if iwencai:
-        _add_freshness(iwencai, 'iwencai', iwencai.get('_updated'))
     return {
         'live_index': _live_index_with_baseline(),
         'live_quotes': CACHE.get('live_quotes', {}),
@@ -1573,12 +1573,47 @@ def _build_live_quotes_payload(rule_state=None):
         'hot_list': CACHE.get('hot_list', {}),
         'sector_inflow': CACHE.get('sector_inflow', {}),
         'northbound': CACHE.get('northbound', {}),
-        'iwencai': iwencai,
+        'iwencai': _iwencai_live_payload(),
         '上证15min': _kline_15m_payload('上证15min'),
         '深证15min': _kline_15m_payload('深证15min'),
         '创业15min': _kline_15m_payload('创业15min'),
         'rule_state': rule_state if rule_state is not None else _build_rule_state(),
     }
+
+
+def _iwencai_live_payload():
+    """Return iwencai live payload; stale/dead data carries metadata only."""
+    iwencai = dict(CACHE.get('iwencai', {}) or {})
+    if not iwencai:
+        return iwencai
+    _add_freshness(iwencai, 'iwencai', iwencai.get('_updated'))
+    level = ((iwencai.get('_freshness') or {}).get('level') or '').lower()
+    if level not in ('stale', 'dead'):
+        return iwencai
+    masked = {k: v for k, v in iwencai.items() if str(k).startswith('_')}
+    masked['_stale'] = True
+    masked['_available'] = False
+    return masked
+
+
+def _trade_entry_gate(health, rule_state):
+    """Combine health gate with real-time rule_state gate."""
+    health_allowed = bool((health or {}).get("trade_entry_allowed", False))
+    if not health_allowed:
+        reasons = (health or {}).get("degraded_reasons") or []
+        return False, "; ".join(str(r) for r in reasons) if reasons else "系统健康检查未通过"
+
+    rule = rule_state or {}
+    if rule.get("tradable") is False:
+        codes = []
+        for item in (rule.get("blocks") or []):
+            code = item.get("code") if isinstance(item, dict) else None
+            if code:
+                codes.append(code)
+        suffix = " (" + ",".join(codes) + ")" if codes else ""
+        return False, "规则状态阻断" + suffix
+
+    return True, None
 
 
 def _build_full_snapshot():
@@ -2123,9 +2158,12 @@ class BridgeHandler(SimpleHTTPRequestHandler):
         super().__init__(*args, directory=str(ROOT), **kwargs)
 
     def _serve_cached(self, key, data_type):
-        result = CACHE.get(key, {})
-        fetched_at = result.get('_updated') if isinstance(result, dict) else None
-        result = _add_freshness(result, data_type, fetched_at)
+        if key == 'iwencai':
+            result = _iwencai_live_payload()
+        else:
+            result = CACHE.get(key, {})
+            fetched_at = result.get('_updated') if isinstance(result, dict) else None
+            result = _add_freshness(result, data_type, fetched_at)
         body = json.dumps(result, ensure_ascii=False).encode()
         self.send_response(200)
         self.send_header('Content-Type', 'application/json')
@@ -2334,14 +2372,9 @@ class BridgeHandler(SimpleHTTPRequestHandler):
                 # 直接复用 /api/health 的 critical 分层，避免两套逻辑不一致
                 try:
                     h = _build_health()
-                    result['trade_entry_allowed'] = h.get('trade_entry_allowed', False)
-                    result['trade_entry_reason'] = None
-                    if not result['trade_entry_allowed']:
-                        reasons = h.get('degraded_reasons') or []
-                        if reasons:
-                            result['trade_entry_reason'] = '; '.join(reasons)
-                        else:
-                            result['trade_entry_reason'] = '系统健康检查未通过'
+                    allowed, reason = _trade_entry_gate(h, result.get('rule_state'))
+                    result['trade_entry_allowed'] = allowed
+                    result['trade_entry_reason'] = reason
                 except Exception:
                     result['trade_entry_allowed'] = False
                     result['trade_entry_reason'] = '健康检查失败'

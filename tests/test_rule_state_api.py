@@ -316,6 +316,16 @@ class RuleStateBridgeContractTest(unittest.TestCase):
         self.assertIsNone(getattr(db._local, "conn", None),
                           "GET /api/live/quotes 后连接应释放")
 
+    def test_trade_entry_gate_combines_health_and_rule_state(self):
+        """live trade_entry_allowed 必须同时服从 health 与 rule_state"""
+        allowed, reason = bridge._trade_entry_gate(
+            {"trade_entry_allowed": True, "degraded_reasons": None},
+            {"tradable": False, "blocks": [{"code": "SENTIMENT_STALE"}]},
+        )
+
+        self.assertFalse(allowed)
+        self.assertIn("SENTIMENT_STALE", reason)
+
 
 class FreshnessBoundaryTest(unittest.TestCase):
     """验证 freshness stale/dead 在 rule_state 中正确传播"""
@@ -396,8 +406,8 @@ class FreshnessBoundaryTest(unittest.TestCase):
 
         self.assertEqual(fresh, "stale")
 
-    def test_stale_sentiment_with_baseline_fields_warns_not_blocks(self):
-        """情绪缓存延迟但 baseline 字段齐全时，不应把总仓位清零"""
+    def test_stale_sentiment_with_baseline_fields_blocks_realtime_rule_state(self):
+        """情绪缓存 stale 时不得用 baseline 伪装实时规则输入"""
         self.tmp_dashboard.write_text(
             '{"meta":{"date":"2026-05-29"},"market":{"炸板率":76.2},'
             '"sentiment":{"情绪值":54,"昨日涨停收益":0.84,"晋级率":19.15},'
@@ -425,11 +435,9 @@ class FreshnessBoundaryTest(unittest.TestCase):
 
         codes = [b["code"] for b in state["blocks"]]
         warnings = [w["code"] for w in state["warnings"]]
-        self.assertEqual(state["caps"]["base_total_pct"], 60)
-        self.assertEqual(state["caps"]["total_pct"], 60)
-        self.assertNotIn("SENTIMENT_STALE", codes)
+        self.assertEqual(state["caps"]["total_pct"], 0)
+        self.assertIn("SENTIMENT_STALE", codes)
         self.assertNotIn("FRIDAY_W1", codes)
-        self.assertIn("SENTIMENT_STALE", warnings)
         self.assertIn("LOSS_STREAK", warnings)
 
     def test_production_format_same_minute_is_live(self):
@@ -459,8 +467,8 @@ class FreshnessBoundaryTest(unittest.TestCase):
         self.assertTrue(state["tradable"],
                         "同分钟生产数据应为可交易")
 
-    def test_dead_sentiment_with_complete_fields_warns_not_blocks(self):
-        """情绪 dead 但字段齐全时提示，不阻断总仓位"""
+    def test_dead_sentiment_with_complete_fields_blocks_realtime_rule_state(self):
+        """情绪 dead 时即使字段齐全也不得参与实时规则"""
         bridge.CACHE["iwencai"] = {
             "情绪值": 65, "昨日涨停收益": 3.0,
             "晋级率": 0.22, "炸板率": 0.20,
@@ -478,9 +486,42 @@ class FreshnessBoundaryTest(unittest.TestCase):
         state = bridge._build_rule_state(now=now)
         codes = [b["code"] for b in state["blocks"]]
         warnings = [w["code"] for w in state["warnings"]]
-        self.assertNotIn("SENTIMENT_STALE", codes)
-        self.assertIn("SENTIMENT_STALE", warnings)
-        self.assertTrue(state["tradable"])
+        self.assertIn("SENTIMENT_STALE", codes)
+        self.assertEqual(state["caps"]["total_pct"], 0)
+        self.assertFalse(state["tradable"])
+
+    def test_stale_breadth_and_iwencai_do_not_emit_emotion_value(self):
+        """过期 breadth/iwencai 不得继续把旧情绪值作为实时规则输入"""
+        bridge.CACHE["breadth"] = {
+            "上涨家数": 590,
+            "下跌家数": 410,
+            "_updated": "2026-06-08T11:26:00+08:00",
+        }
+        bridge.CACHE["iwencai"] = {
+            "情绪值": 59,
+            "昨日涨停收益": 3.0,
+            "晋级率": 0.22,
+            "炸板率": 0.20,
+            "_updated": "2026-06-08T11:26:00+08:00",
+        }
+        bridge.CACHE["live_quotes"] = {
+            "_updated": "2026-06-08T14:30:00+08:00",
+        }
+        bridge.CACHE["live_index"] = {}
+        bridge.CACHE["hot_list"] = {}
+
+        from datetime import datetime as _dt
+        state = bridge._build_rule_state(
+            now=_dt(2026, 6, 8, 14, 30),
+            account_state={"pnl_pct": 0.0, "valuation_complete": True, "mv": 100000},
+        )
+
+        blocks = [b for b in state["blocks"] if b["code"] == "SENTIMENT_STALE"]
+        self.assertTrue(blocks, f"过期情绪应全局阻断: {state}")
+        self.assertIn("emotion_pct", blocks[0]["evidence"].get("missing", []))
+        self.assertEqual(state["market_regime"], "unknown")
+        self.assertEqual(state["caps"]["total_pct"], 0)
+        self.assertFalse(state["tradable"])
 
 
 class Kline15mPayloadFreshnessTest(unittest.TestCase):

@@ -311,6 +311,36 @@ DataStore.fetchAll().then(function() {
         self.assertEqual(result.get("freshness", {}).get("level"), "dead", f"result={result}")
         self.assertNotEqual(result.get("status"), "live", f"过期行情不应显示实时: {result}")
 
+    def test_stale_iwencai_payload_clears_baseline_values(self):
+        """stale iwencai 只保留元信息，不沿用旧情绪数值"""
+        script = BASE_MOCKS + r"""
+global._mockFetchResponses['/api/baseline'].iwencai = { '情绪值': 59, '涨停家数': 42 };
+global._mockFetchResponses['/api/live/quotes'] = {
+  live_index: {}, live_quotes: {},
+  iwencai: {
+    _updated: '2020-01-01T11:26:00+08:00',
+    _freshness: { level: 'stale', type: 'iwencai', age_seconds: 999999 },
+    _stale: true,
+    _available: false
+  },
+  _freshness: { level: 'live' }
+};
+DataStore.fetchAll().then(function() {
+  var iw = (DataStore.merged || {}).iwencai || {};
+  console.log(JSON.stringify({
+    emotion: iw['情绪值'],
+    limitUp: iw['涨停家数'],
+    level: iw._freshness && iw._freshness.level,
+    stale: iw._stale === true
+  }));
+}).catch(function(e) { console.log(JSON.stringify({ _error: String(e).slice(0,200) })); });
+"""
+        result = _run_node(script, files=["store.js"])
+        self.assertIsNone(result.get("emotion"), f"stale iwencai 不应保留旧情绪值: {result}")
+        self.assertIsNone(result.get("limitUp"), f"stale iwencai 不应保留旧涨停家数: {result}")
+        self.assertEqual(result.get("level"), "stale", f"stale 元信息应保留: {result}")
+        self.assertTrue(result.get("stale"), f"stale 标记应保留: {result}")
+
     def test_refresh_tick_preserves_domains(self):
         script = BASE_MOCKS + r"""
 global._mockFetchResponses['auction_snapshot.json'] = {
@@ -343,13 +373,22 @@ inst.getBody = function() { return _body; };
 inst.updateTimestamp = function() {};
 inst.render({ sentiment_nodes: {
   _available: true, _stale: true,
-  '2026-05-27': [{ node: '10:00', '情绪值': 65 }]
+  '2026-05-27': [{ node: '10:00', time: '2026-05-27T11:26:00+08:00', '情绪值': 65 }]
 } });
 var html = (_body.innerHTML || '').replace(/\s+/g, ' ');
-console.log(JSON.stringify({ hasStale: html.indexOf('数据过期') >= 0, hasTable: html.indexOf('<table') >= 0 }));
+console.log(JSON.stringify({
+  hasStale: html.indexOf('数据过期') >= 0,
+  hasTime: html.indexOf('11:26') >= 0,
+  hasDashed: html.indexOf('border-style:dashed') >= 0,
+  leaksOldEmotion: html.indexOf('65%') >= 0,
+  hasTable: html.indexOf('<table') >= 0
+}));
 """
         result = _run_node(script, files=["widgets/sentiment-dash.js"])
         self.assertTrue(result.get("hasStale"), "stale 横幅应在 HTML 中")
+        self.assertTrue(result.get("hasTime"), f"stale 横幅应显示数据时间: {result}")
+        self.assertTrue(result.get("hasDashed"), f"stale 态应有虚线视觉区分: {result}")
+        self.assertFalse(result.get("leaksOldEmotion"), f"stale 时不应展示旧情绪百分比: {result}")
         self.assertTrue(result.get("hasTable"), "表格应渲染")
 
     def test_w05_picks_latest_date_key(self):

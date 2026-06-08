@@ -220,7 +220,8 @@ const DataStore = (function() {
       }
       // iwencai 实时情绪数据（供 W04 等组件）
       if (liveData.iwencai) {
-        d.iwencai = d.iwencai || {};
+        var iwFreshLevel = liveData.iwencai._freshness && liveData.iwencai._freshness.level;
+        d.iwencai = (iwFreshLevel === 'stale' || iwFreshLevel === 'dead') ? {} : (d.iwencai || {});
         for (var k in liveData.iwencai) { d.iwencai[k] = liveData.iwencai[k]; }
       }
       // ym-stock-data 新增字段

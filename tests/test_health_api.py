@@ -156,6 +156,25 @@ class LiveIndexBaselineFallbackTests(unittest.TestCase):
         self.assertEqual(bridge.CACHE["iwencai"].get("_freshness"), None,
                          "payload freshness 不应反向污染 CACHE")
 
+    def test_live_payload_masks_stale_iwencai_values(self):
+        bridge.CACHE["iwencai"] = {
+            "情绪值": 59,
+            "涨停家数": 42,
+            "跌停家数": 8,
+            "_updated": "2020-01-01T11:26:00+08:00",
+        }
+
+        payload = bridge._build_live_quotes_payload(rule_state={"status": "test"})
+        iwencai = payload["iwencai"]
+
+        self.assertNotIn("情绪值", iwencai)
+        self.assertNotIn("涨停家数", iwencai)
+        self.assertNotIn("跌停家数", iwencai)
+        self.assertEqual(iwencai.get("_updated"), "2020-01-01T11:26:00+08:00")
+        self.assertTrue(iwencai.get("_stale"))
+        self.assertFalse(iwencai.get("_available"))
+        self.assertIn((iwencai.get("_freshness") or {}).get("level"), ("stale", "dead"))
+
 
 if __name__ == "__main__":
     unittest.main()

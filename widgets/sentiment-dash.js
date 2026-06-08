@@ -62,6 +62,20 @@ class SentimentDashWidget extends YiMuWidget {
       return num > 0 ? 'up' : num < 0 ? 'down' : '';
     }
 
+    function latestNodeTime() {
+      for (var i = allDay.length - 1; i >= 0; i--) {
+        var t = allDay[i] && (allDay[i].time || allDay[i].captured_at || allDay[i]._updated);
+        if (t) return String(t);
+      }
+      return nodes._updated || nodes._loaded || '';
+    }
+
+    function fmtTime(value) {
+      var text = String(value || '');
+      var m = text.match(/(\d{2}):(\d{2})/);
+      return m ? (m[1] + ':' + m[2]) : '未知';
+    }
+
     var rows = [
       {key:'上证指数', label:'上证', fmt:function(v){return v||'—';}},
       {key:'情绪值', label:'情绪值', fmt:function(v){return v!=null ? v+'%' : '—';}},
@@ -74,10 +88,10 @@ class SentimentDashWidget extends YiMuWidget {
 
     var html = '';
     if (isStale) {
-      html += '<div class="w05-stale" style="text-align:center;padding:2px 8px;margin-bottom:var(--sp-xs);background:var(--warn);color:#fff;font-size:var(--fs-label);border-radius:var(--radius-sm)">数据过期 — 最后更新超过30分钟</div>';
+      html += '<div class="w05-stale" style="text-align:center;padding:4px 8px;margin-bottom:var(--sp-xs);background:var(--bg-tertiary);color:var(--text-secondary);font-size:var(--fs-label);border:1px dashed var(--border);border-style:dashed;border-radius:var(--radius-sm)">数据过期 — 数据时间 ' + fmtTime(latestNodeTime()) + '</div>';
     }
 
-    html += '<table style="width:100%;border-collapse:collapse;font-size:var(--fs-body)">';
+    html += '<table style="width:100%;border-collapse:collapse;font-size:var(--fs-body)' + (isStale ? ';border:1px dashed var(--border);border-style:dashed;opacity:.72' : '') + '">';
 
     html += '<thead><tr style="border-bottom:2px solid var(--border)">' +
       '<th style="text-align:left;padding:3px var(--sp-sm);color:var(--text-disabled);font-weight:400;width:60px">指标</th>';
@@ -94,13 +108,15 @@ class SentimentDashWidget extends YiMuWidget {
       NODES.forEach(function(nd) {
         var snap = nodeSnaps[nd.id];
         var display, cls = '';
-        if (row.key === '涨跌比') {
+        if (isStale) {
+          display = '—';
+        } else if (row.key === '涨跌比') {
           display = row.fmt(null, snap);
         } else if (row.key === '涨跌停') {
           display = row.fmt(null, snap);
         } else {
           var val = snap[row.key];
-          display = row.fmt(val);
+          display = isStale ? '—' : row.fmt(val);
           if (val != null && val !== '') cls = cellCls(row.key, val);
         }
 
