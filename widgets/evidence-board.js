@@ -12,6 +12,18 @@ function _evToneClass(tone) {
   if (tone === 'danger') return ' evidence-tone-danger';
   return '';
 }
+function _evStateClass(state) {
+  if (state === '通过') return ' is-pass';
+  if (state === '提示') return ' is-warn';
+  if (state === '阻断') return ' is-blocked';
+  return ' is-neutral';
+}
+function _evCommandClass(tone) {
+  if (tone === 'ready') return ' is-ready';
+  if (tone === 'warn') return ' is-warn';
+  if (tone === 'blocked') return ' is-blocked';
+  return ' is-watch';
+}
 
 class EvidenceBoardWidget extends YiMuWidget {
   _runtime() {
@@ -43,6 +55,35 @@ class EvidenceBoardWidget extends YiMuWidget {
     '</div>';
   }
 
+  _gate(gate) {
+    gate = gate || {};
+    var target = gate.target ? ' data-evidence-target="widget:' + _evEsc(gate.target) + '"' : '';
+    return '<div class="evidence-gate' + _evStateClass(gate.state) + (gate.target ? ' evidence-gate-trace' : '') + '"' + target + ' role="' + (gate.target ? 'button' : 'group') + '" tabindex="' + (gate.target ? '0' : '-1') + '">' +
+      '<div class="evidence-gate-head"><span>' + _evEsc(gate.id || '') + '</span><b>' + _evEsc(gate.title || '') + '</b><em>' + _evEsc(gate.state || '—') + '</em></div>' +
+      '<div class="evidence-gate-value">' + _evEsc(gate.value || '—') + '</div>' +
+      '<div class="evidence-gate-detail">' + _evEsc(gate.detail || '') + '</div>' +
+    '</div>';
+  }
+
+  _queueItem(item) {
+    item = item || {};
+    var cls = item.tone === 'danger' ? ' is-danger' : item.tone === 'ready' ? ' is-ready' : item.tone === 'warn' ? ' is-warn' : '';
+    var target = item.target ? ' data-evidence-target="widget:' + _evEsc(item.target) + '"' : '';
+    return '<div class="evidence-queue-item evidence-card-trace' + cls + '"' + target + ' role="button" tabindex="0">' +
+      '<span>' + _evEsc(item.id || '') + '</span>' +
+      '<div><b>' + _evEsc(item.title || '') + '</b><em>' + _evEsc(item.reason || '') + '</em></div>' +
+      '<strong>' + _evEsc(item.target || '') + '</strong>' +
+    '</div>';
+  }
+
+  _miniRef(item) {
+    item = item || {};
+    var target = this._traceTarget(item);
+    var targetAttr = target ? ' data-evidence-target="' + _evEsc(target) + '"' : '';
+    return '<div class="evidence-mini-ref' + _evToneClass(item.tone) + '"' + targetAttr + '>' +
+      '<span>' + _evEsc(item.id || '') + '</span><b>' + _evEsc(item.title || '') + '</b><em>' + _evEsc(item.value || item.source || '') + '</em></div>';
+  }
+
   _traceTarget(item) {
     var source = item && item.source ? String(item.source) : '';
     var match = source.match(/W\d{2}/);
@@ -57,7 +98,7 @@ class EvidenceBoardWidget extends YiMuWidget {
     if (!body || body._evidenceTraceBound) return;
     body._evidenceTraceBound = true;
     var handler = function(e) {
-      var card = e.target && e.target.closest ? e.target.closest('.evidence-card[data-evidence-target]') : null;
+      var card = e.target && e.target.closest ? e.target.closest('[data-evidence-target]') : null;
       if (!card) return;
       if (e.type === 'keydown' && e.key !== 'Enter' && e.key !== ' ') return;
       e.preventDefault();
@@ -118,33 +159,46 @@ class EvidenceBoardWidget extends YiMuWidget {
     }
     var snapshot = EvidenceSummary.build(data || {}, this._runtime());
     var s = snapshot.situation || {};
+    var command = snapshot.command || {};
+    var phase = snapshot.phase || {};
+    var gates = Array.isArray(snapshot.gates) ? snapshot.gates : [];
+    var queue = Array.isArray(snapshot.action_queue) ? snapshot.action_queue : [];
     var pnl = s.pnl || {};
-    var health = s.health || {};
-    var trade = s.trade || {};
     var connection = s.connection || {};
     var sentiment = s.sentiment || {};
     var pnlCls = String(pnl.pnl_pct_text || '').charAt(0) === '+' ? 'up' : String(pnl.pnl_pct_text || '').charAt(0) === '-' ? 'down' : '';
-    var healthTone = trade.allowed ? 'ok' : 'blocked';
-    var headline = s.summary || (((health.confirmed && trade.allowed) ? '可交易' : '状态未确认') + ' · ' + (connection.label || connection.status || '—'));
+    var headline = command.label || s.summary || '状态未确认';
+    var evidence = snapshot.evidence || [];
+    var risk = this._firstPriority((snapshot.risks || []).concat(snapshot.alerts || []));
+    var sourceRefs = evidence.slice(0, 4)
+      .concat((snapshot.alerts || []).slice(0, 1))
+      .concat((snapshot.risks || []).slice(0, 1))
+      .map(this._miniRef, this).join('');
 
     body.innerHTML = '<div class="evidence-board">' +
-      '<div class="evidence-hero evidence-hero-' + healthTone + '">' +
-        '<div class="evidence-hero-main">' +
-          '<div class="evidence-hero-label"><span class="evidence-ref">S0</span>作战态势</div>' +
-          '<div class="evidence-hero-title">' + _evEsc(headline) + '</div>' +
+      '<div class="evidence-dashboard-hero' + _evCommandClass(command.tone) + '">' +
+        '<div class="evidence-command-main">' +
+          '<div class="evidence-hero-label"><span class="evidence-ref">S0</span><span>盘中裁决</span><em>' + _evEsc(phase.label || '—') + '</em></div>' +
+          '<div class="evidence-command-title">' + _evEsc(headline) + '</div>' +
+          '<div class="evidence-command-reason">' + _evEsc(command.reason || '') + '</div>' +
+          '<div class="evidence-command-next"><span>下一步</span><b>' + _evEsc(command.next || '保持观察') + '</b></div>' +
         '</div>' +
-        '<div class="evidence-hero-metrics">' +
+        '<div class="evidence-hero-metrics evidence-dashboard-metrics">' +
           '<div><span>情绪</span><strong>' + _evEsc(sentiment.text || '—') + '</strong></div>' +
           '<div><span>盈亏</span><strong class="' + pnlCls + '">' + _evEsc(pnl.pnl_pct_text || '—') + '</strong></div>' +
           '<div><span>仓位</span><strong>' + _evEsc(pnl.position_pct_text || '—') + '</strong></div>' +
           '<div><span>连接</span><strong>' + _evEsc(connection.label || connection.status || '—') + '</strong></div>' +
         '</div>' +
       '</div>' +
-      this._commandStrip(headline, snapshot) +
-      '<div class="evidence-section-grid">' +
-        this._section('关键证据', snapshot.evidence || [], 'evidence') +
-        this._section('注意事项', snapshot.alerts || [], 'alerts') +
-        this._section('规则/风控', snapshot.risks || [], 'risks') +
+      '<div class="evidence-gate-row">' + gates.map(this._gate, this).join('') + '</div>' +
+      '<div class="evidence-dashboard-grid">' +
+        '<section class="evidence-queue-panel"><div class="evidence-section-title"><span>优先处理</span><span>' + queue.length + '</span></div>' + queue.map(this._queueItem, this).join('') + '</section>' +
+        '<section class="evidence-phase-panel"><div class="evidence-section-title"><span>当前阶段</span><span>' + _evEsc(phase.id || '') + '</span></div>' +
+          '<div class="evidence-phase-title">' + _evEsc(phase.label || '—') + '</div>' +
+          '<div class="evidence-phase-detail">' + _evEsc(phase.detail || '') + '</div>' +
+          '<div class="evidence-risk-focus"><span>关键风险</span><b>' + _evEsc(risk ? ((risk.id ? risk.id + ' ' : '') + risk.title) : '暂无关键阻断') + '</b><em>' + _evEsc(risk ? (risk.detail || risk.source || '') : '保持只读核对') + '</em></div>' +
+        '</section>' +
+        '<section class="evidence-source-panel"><div class="evidence-section-title"><span>证据锚点</span><span>E/A/R</span></div>' + sourceRefs + '</section>' +
       '</div>' +
     '</div>';
     this._bindEvidenceTraceLinks();

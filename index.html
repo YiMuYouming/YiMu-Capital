@@ -8,15 +8,15 @@
 <!-- GridStack.js v12.x CDN (版本锁定) -->
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/gridstack@12.0.0/dist/gridstack.min.css">
 <!-- 内部样式 -->
-<link rel="stylesheet" href="css/theme.css?v=20260604-ticket-ui">
+<link rel="stylesheet" href="css/theme.css?v=20260609-w25-cockpit">
 <!-- 兜底数据 -->
 <script src="data/embedded-data.js"></script>
 <!-- 核心模块 -->
-<script src="store.js"></script>
+<script src="store.js?v=20260609-w25-cockpit"></script>
 <script src="widget-base.js"></script>
 <script src="widget-registry.js?v=20260604-ticket"></script>
 <!-- W25 Evidence Summary 共享模块（必须在组件前加载） -->
-<script src="evidence-summary.js?v=20260606-evidence"></script>
+<script src="evidence-summary.js?v=20260609-w25-cockpit"></script>
 <!-- 24 Widget 组件 -->
 <script src="widgets/timeline.js"></script>
 <script src="widgets/style-detect.js"></script>
@@ -43,7 +43,7 @@
 <script src="widgets/trade-review.js"></script>
 <script src="widgets/trade-tickets.js?v=20260605-ticket-ux"></script>
 <!-- W25 态势证据屏 -->
-<script src="widgets/evidence-board.js?v=20260606-evidence"></script>
+<script src="widgets/evidence-board.js?v=20260609-w25-cockpit"></script>
 <style>
 /* Inline critical styles for initial load */
 body{opacity:0;transition:opacity .3s}
@@ -147,6 +147,7 @@ body.ready{opacity:1}
     <summary title="布局操作">布局</summary>
     <div class="topbar-layout-popover">
       <button class="topbar-layout-btn" id="saveLayoutBtn" title="保存布局 (Ctrl+S)">保存</button>
+      <button class="topbar-layout-btn" id="cockpitLayoutBtn" title="切换到盘中驾驶舱布局">驾驶舱</button>
       <button class="topbar-layout-btn" id="exportLayoutBtn" title="导出布局 JSON">导出</button>
       <button class="topbar-layout-btn" id="importLayoutBtn" title="导入布局 JSON">导入</button>
     </div>
@@ -239,8 +240,19 @@ body.ready{opacity:1}
 // === GridStack Init ===
 var grid = null;
 var activePreset = null;
+var _suppressLayoutSave = false;
 var REQUIRED_LAYOUT_WIDGETS = ['W25', 'W15', 'W24'];
+var CORE_IDS = ['W25','W04','W07','W08','W09','W14','W24','W15','W22'];
 var EVIDENCE_SHELF_WIDGETS = ['W10', 'W12', 'W13', 'W21'];
+var COCKPIT_LAYOUT = [
+  { id:'W25', x:0, y:0, w:12, h:8 },
+  { id:'W15', x:0, y:8, w:5, h:6 },
+  { id:'W14', x:5, y:8, w:3, h:6 },
+  { id:'W24', x:8, y:8, w:4, h:6 },
+  { id:'W04', x:0, y:14, w:4, h:3 },
+  { id:'W09', x:4, y:14, w:4, h:5 },
+  { id:'W22', x:8, y:14, w:4, h:5 }
+];
 
 function initGrid() {
   grid = GridStack.init({
@@ -327,6 +339,69 @@ function _ensureRequiredLayoutWidgets() {
   REQUIRED_LAYOUT_WIDGETS.forEach(function(widgetId) {
     if (!widgetInstances[widgetId]) _addWidgetToGrid(widgetId);
   });
+}
+
+function _clearGridWidgets() {
+  Object.keys(widgetInstances).forEach(function(id) {
+    var inst = widgetInstances[id];
+    if (inst && typeof inst.unmount === 'function') inst.unmount();
+  });
+  widgetInstances = {};
+  if (!grid) return;
+  Array.prototype.slice.call(document.querySelectorAll('.grid-stack-item')).forEach(function(el) {
+    grid.removeWidget(el, true, false);
+  });
+}
+
+function _mountLayoutWidget(item) {
+  var id = item.id;
+  var meta = WidgetRegistry.getMeta(id);
+  if (!meta || widgetInstances[id]) return;
+  var entry = WidgetRegistry.get(id);
+  var gsItem = grid.addWidget({
+    x: item.x || 0,
+    y: item.y || 0,
+    w: item.w || meta.defaultSize.w,
+    h: item.h || meta.defaultSize.h,
+    id: id
+  });
+  if (CORE_IDS.indexOf(id) >= 0) gsItem.classList.add('core-widget');
+  var contentEl = gsItem.querySelector('.grid-stack-item-content');
+  if (contentEl) contentEl.id = 'content_' + id;
+  if (entry && entry.Class) {
+    var instance = new entry.Class({
+      id: meta.id, type: meta.type, title: meta.title,
+      category: meta.category, tier: meta.tier,
+      dataPaths: meta.dataPaths, defaultSize: meta.defaultSize,
+    });
+    widgetInstances[id] = instance;
+    instance.mount(contentEl);
+  } else {
+    var headerCls = meta.category==='decision'?'color-decision':meta.category==='data'?'color-data':meta.category==='risk'?'color-risk':'color-tool';
+    if (contentEl) {
+      contentEl.id = 'content_' + id;
+      contentEl.innerHTML = '<div class="widget-header ' + headerCls + '" style="cursor:default"><span class="widget-title">' + meta.title + '</span></div>' +
+        '<div class="widget-body" style="display:flex;align-items:center;justify-content:center;color:var(--text-secondary)">组件加载中...</div>';
+    }
+  }
+}
+
+function applyCockpitLayout(options) {
+  options = options || {};
+  _closeTransientSurfaces();
+  _suppressLayoutSave = true;
+  try {
+    _clearGridWidgets();
+    COCKPIT_LAYOUT.forEach(_mountLayoutWidget);
+  } finally {
+    _suppressLayoutSave = false;
+  }
+  document.body.classList.add('cockpit-mode');
+  if (options.persist !== false) {
+    try { localStorage.setItem(STORAGE_KEYS.layoutMode, 'cockpit'); } catch(e) {}
+    _autoSaveLayout();
+  }
+  if (options.toast !== false) showToast('已切换盘中驾驶舱：态势 + 持仓 + 风控 + 票据');
 }
 
 function _addPlaceholderWidget(widgetId, meta) {
@@ -885,6 +960,7 @@ document.addEventListener('contextmenu', function(e) {
 // === Presets (v3.0: 内联嵌入，避免 file:// CORS) ===
 // === Layout Persistence ===
 function _autoSaveLayout() {
+  if (_suppressLayoutSave) return;
   try {
     var layout = grid.save(false);
     localStorage.setItem(STORAGE_KEYS.layout, JSON.stringify({v:'2.1', items:layout}));
@@ -920,14 +996,19 @@ function _loadSavedLayout() {
           }
         });
         _ensureRequiredLayoutWidgets();
+        try {
+          if (localStorage.getItem(STORAGE_KEYS.layoutMode) === 'cockpit') {
+            document.body.classList.add('cockpit-mode');
+          }
+        } catch(e) {}
         return;
       }
     }
   } catch(e) {}
-  // 旧格式或不兼容 → 清除，并加载票据+态势优先的兜底工作台
+  // 旧格式或不兼容 → 清除，并加载盘中驾驶舱兜底工作台
   try { localStorage.removeItem(STORAGE_KEYS.layout); } catch(e) {}
-  _ensureRequiredLayoutWidgets();
-  showToast('已加载默认工作台：W25 作战态势 + W15 持仓 + W24 票据');
+  applyCockpitLayout({ persist:false, toast:false });
+  showToast('已加载默认盘中驾驶舱');
 }
 function exportLayout() {
   var layout = grid.save(false);
@@ -1133,7 +1214,6 @@ window._healthConfirmed = false;
 
 // === Compact Mode ===
 var _compactMode = false;
-var CORE_IDS = ['W25','W04','W07','W08','W09','W14','W24','W15','W22'];
 (function() {
   var btn = document.getElementById('compactBtn');
   if (!btn) return;
@@ -1194,6 +1274,7 @@ function showToast(msg) {
 
 // === Event bindings ===// v2.1: preset select removed
 document.getElementById('saveLayoutBtn').addEventListener('click', function() { _closeTopbarMenus(); _autoSaveLayout(); showToast('已保存'); });
+document.getElementById('cockpitLayoutBtn').addEventListener('click', function() { applyCockpitLayout({ persist:true, toast:true }); });
 document.getElementById('exportLayoutBtn').addEventListener('click', function() { _closeTopbarMenus(); exportLayout(); });
 document.getElementById('importLayoutBtn').addEventListener('click', function() {
   _closeTopbarMenus();
