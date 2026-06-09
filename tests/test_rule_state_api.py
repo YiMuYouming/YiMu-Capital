@@ -162,7 +162,13 @@ class RuleStateBridgeContractTest(unittest.TestCase):
             '"style":{"总分":57,"连板占比":57,"趋势占比":43,"dim3_趋势":16,'
             '"总仓位上限":60,"_source":"premarket_plan"}}'
         )
-        bridge.CACHE["iwencai"] = {"_updated": "2026-05-29T09:40:00+08:00"}
+        bridge.CACHE["iwencai"] = {
+            "情绪值": 65,
+            "昨日涨停收益": 3.0,
+            "晋级率": 0.25,
+            "炸板率": 0.20,
+            "_updated": "2026-05-29T09:40:00+08:00",
+        }
         bridge.CACHE["live_quotes"] = {"_updated": "2026-05-29T09:40:00+08:00"}
 
         state = bridge._build_rule_state(now=datetime(2026, 5, 29, 9, 40))
@@ -191,8 +197,8 @@ class RuleStateBridgeContractTest(unittest.TestCase):
         self.assertNotIn("LOSS_STREAK", [b["code"] for b in state["blocks"]])
         self.assertIn("LOSS_STREAK", [w["code"] for w in state["warnings"]])
 
-    def test_rule_inputs_fall_back_to_baseline_sentiment_fields(self):
-        """iwencai 缓存短暂缺字段时，用 baseline 情绪字段补齐规则输入"""
+    def test_live_iwencai_missing_emotion_does_not_fall_back_to_baseline_emotion(self):
+        """盘中 iwencai 缺情绪值时不得用昨日 baseline 情绪值伪装实时情绪"""
         self.tmp_dashboard.write_text(
             '{"meta":{"date":"2026-05-27"},"market":{"炸板率":86.36},"sentiment":{'
             '"情绪值":17.1,"昨日涨停收益":1.03,"晋级率":17.39},'
@@ -200,13 +206,75 @@ class RuleStateBridgeContractTest(unittest.TestCase):
             '"sectors":[],"risk":{"连亏天数":0},"pnl":{},'
             '"style":{"总分":42,"连板占比":12,"趋势占比":88,"dim3_趋势":9}}'
         )
-        bridge.CACHE["iwencai"] = {"情绪值": 17.1, "_updated": "2026-05-27T09:40:00+08:00"}
+        bridge.CACHE["iwencai"] = {
+            "昨日涨停收益": 1.03,
+            "晋级率": 0.1739,
+            "炸板率": 0.8636,
+            "_updated": "2026-05-27T09:40:00+08:00",
+        }
         bridge.CACHE["live_quotes"] = {"_updated": "2026-05-27T09:40:00+08:00"}
+        bridge.CACHE["breadth"] = {
+            "0~3%": 1957,
+            "-0~-3%": 3150,
+            "_total": 5107,
+            "_source": "live_index_fallback",
+            "_updated": "2026-05-27T09:40:00+08:00",
+        }
 
         state = bridge._build_rule_state(now=datetime(2026, 5, 27, 9, 40))
 
         stale = [b for b in state["blocks"] if b["code"] == "SENTIMENT_STALE"]
-        self.assertEqual(stale, [])
+        self.assertTrue(stale, f"缺实时情绪值应阻断而不是回退昨日 baseline: {state}")
+        self.assertIn("emotion_pct", stale[0]["evidence"].get("missing", []))
+        self.assertEqual(state["market_regime"], "unknown")
+        self.assertNotIn("DOUBLE_ICE", [b["code"] for b in state["blocks"]])
+
+    def test_live_iwencai_emotion_has_priority_over_live_index_fallback_breadth(self):
+        """实时 iwencai 情绪值优先于 live_index_fallback 涨跌家数回退"""
+        self.tmp_dashboard.write_text(
+            '{"meta":{"date":"2026-06-09"},"market":{"炸板率":0},"sentiment":{'
+            '"情绪值":12.2,"昨日涨停收益":1.84,"晋级率":19.18},'
+            '"lianban_pool":[],"trend_pool":[],"positions":[],"decision":{},'
+            '"sectors":[],"risk":{"连亏天数":0},"pnl":{},'
+            '"style":{"总分":41,"连板占比":51,"趋势占比":49,"dim3_趋势":10}}'
+        )
+        bridge.CACHE["iwencai"] = {
+            "情绪值": 38.0,
+            "昨日涨停收益": 2.4,
+            "晋级率": 0.20,
+            "炸板率": 0.10,
+            "_updated": "2026-06-09T09:40:00+08:00",
+        }
+        bridge.CACHE["live_quotes"] = {"_updated": "2026-06-09T09:40:00+08:00"}
+        bridge.CACHE["breadth"] = {
+            "上涨家数": 1957,
+            "下跌家数": 3150,
+            "_source": "live_index_fallback",
+            "_updated": "2026-06-09T09:40:00+08:00",
+        }
+
+        state = bridge._build_rule_state(now=datetime(2026, 6, 9, 9, 40))
+
+        self.assertNotIn("DOUBLE_ICE", [b["code"] for b in state["blocks"]])
+        self.assertEqual(state["market_regime"], "低迷")
+        w1_emotion = [b for b in state["blocks"] if b["code"] == "W1_EMOTION"]
+        self.assertTrue(w1_emotion, f"W1 情绪硬卡应保留: {state}")
+        self.assertEqual(w1_emotion[0]["evidence"].get("emotion_pct"), 38.0)
+
+    def test_invalid_iwencai_up_down_emotion_is_sanitized(self):
+        """iwencai 上涨侧/下跌侧任一为0时，派生情绪值不可用"""
+        dirty = {
+            "情绪值": 0.0,
+            "_emotion_source": "iwencai_up_down",
+            "_emotion_counts": {"up": 0, "down": 2907},
+            "_updated": "2026-06-09T09:49:06+08:00",
+        }
+
+        cleaned = bridge._sanitize_iwencai_cache_entry(dirty)
+
+        self.assertNotIn("情绪值", cleaned)
+        self.assertNotIn("_emotion_source", cleaned)
+        self.assertNotIn("_emotion_counts", cleaned)
 
     def test_weekly_and_monthly_drawdown_are_global_stops(self):
         """Vault 第一层：周回撤>6%、月回撤>10% 都是全局停止"""

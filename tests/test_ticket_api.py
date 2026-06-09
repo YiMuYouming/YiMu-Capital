@@ -292,6 +292,46 @@ class TicketApiTest(unittest.TestCase):
         self.assertNotIn("LOSS_STREAK", body["ticket"]["blocking_rule_ids"])
         self.assertEqual(body["ticket"]["sellable_quantity"], 900)
 
+    def test_clear_ticket_context_unavailable_is_audit_degraded_when_sellable(self):
+        bridge._build_trade_context = lambda: {
+            "rule_state": None,
+            "market_snapshot": None,
+            "account_snapshot": {"account_day_return_pct": 1.1, "lot_reconciliation_ok": True},
+            "context_captured_at": None,
+            "context_status": "unavailable",
+            "context_unavailable_reason": "行情数据不可信 (SENTIMENT_STALE)",
+            "rule_pack_version": None,
+            "rule_snapshot_hash": None,
+            "today_execution_card_id": None,
+        }
+        bridge.load_current_account_state = lambda live_quotes: {
+            "date": "2026-06-09",
+            "pnl_pct": 1.1,
+            "account_day_return_pct": 1.1,
+            "positions": [{
+                "代码": "002281",
+                "标的": "光迅科技",
+                "数量": 200,
+                "sellable_qty": 200,
+                "locked_qty": 0,
+                "lot_reconciliation_ok": True,
+            }],
+            "lot_reconciliation_ok": True,
+        }
+
+        status, body = _call("POST", "/api/trade/tickets/prepare", {
+            "intent_text": "清仓 光迅科技 200股",
+            "action_type": "clear",
+            "code": "002281",
+            "name": "光迅科技",
+            "qty": 200,
+        })
+
+        self.assertEqual(status, 200, body)
+        self.assertEqual(body["ticket"]["status"], "audit_degraded")
+        self.assertIn("context_status", body["ticket"]["blocking_rule_ids"])
+        self.assertEqual(body["ticket"]["sellable_quantity"], 200)
+
     def test_prepare_reduce_ticket_records_target_lot_and_realized_pnl_only_effect(self):
         bridge._build_trade_context = lambda: {
             "rule_state": {

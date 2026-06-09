@@ -41,6 +41,47 @@ function _ttStatusLabel(status) {
   return map[String(status || '').toLowerCase()] || (status || '未知状态');
 }
 
+function _ttIsExitAction(action) {
+  return ['sell', 'reduce', 'clear'].indexOf(String(action || '').toLowerCase()) >= 0;
+}
+
+function _ttEffectiveStatus(t) {
+  t = t || {};
+  var status = String(t.status || '').toLowerCase();
+  var blocks = _ttList(t.blocking_rule_ids || []);
+  var missing = _ttList(t.missing_required_data || t.missing_data || []);
+  var qty = t.max_qty != null ? Number(t.max_qty) : Number(t.qty);
+  var sellable = t.sellable_quantity != null ? Number(t.sellable_quantity) : NaN;
+  var contextOnly = blocks.length === 1 && blocks[0] === 'context_status';
+  var sellableOk = !Number.isFinite(qty) || (Number.isFinite(sellable) && qty <= sellable);
+  if (status === 'blocked' && _ttIsExitAction(t.action_type) && contextOnly && !missing.length && sellableOk) {
+    return 'audit_degraded';
+  }
+  return status;
+}
+
+function _ttCreatedAt(t) {
+  var raw = (t || {}).created_at || (t || {}).updated_at || '';
+  var ts = Date.parse(String(raw).replace(' ', 'T'));
+  return Number.isFinite(ts) ? ts : 0;
+}
+
+function _ttIsSupersededAuditTicket(t, tickets) {
+  if (_ttEffectiveStatus(t) !== 'audit_degraded' || !_ttIsExitAction((t || {}).action_type)) return false;
+  var blocks = _ttList((t || {}).blocking_rule_ids || []);
+  if (!(blocks.length === 1 && blocks[0] === 'context_status')) return false;
+  var code = String((t || {}).code || '');
+  if (!code) return false;
+  var created = _ttCreatedAt(t);
+  return (tickets || []).some(function(other) {
+    if (!other || other === t) return false;
+    if (String(other.code || '') !== code) return false;
+    if (!_ttIsExitAction(other.action_type)) return false;
+    if (['filled', 'partially_filled', 'closed', 'closed_with_conflict'].indexOf(String(other.status || '').toLowerCase()) < 0) return false;
+    return _ttCreatedAt(other) >= created;
+  });
+}
+
 function _ttFriendlyError(message) {
   var text = String(message || '');
   if (/ticket not found/i.test(text)) return '请先选择一张票据，或先出票据再预览成交。';
@@ -48,9 +89,10 @@ function _ttFriendlyError(message) {
   return text || '操作失败，请稍后重试。';
 }
 
-function _ttWriteGate() {
+function _ttWriteGate(action) {
   var w = (typeof window !== 'undefined') ? window : null;
   var loc = (typeof location !== 'undefined') ? location : null;
+  var exitAction = _ttIsExitAction(action);
   var readonly = false;
   if (w && typeof w._detectRuntimeMode === 'function') {
     try { readonly = !!(w._detectRuntimeMode() || {}).readonly; } catch (e) { readonly = false; }
@@ -60,8 +102,8 @@ function _ttWriteGate() {
   if (readonly) return { canWrite: false, reason: '本地预览只读，不发起写入' };
   if (w) {
     if (w._healthConfirmed !== true) return { canWrite: false, reason: '健康状态未确认' };
-    if (w._healthCritical === true) return { canWrite: false, reason: '健康门禁阻断' };
-    if (w._tradeEntryAllowed === false) return { canWrite: false, reason: '交易录入已关闭' };
+    if (w._healthCritical === true && !exitAction) return { canWrite: false, reason: '健康门禁阻断' };
+    if (w._tradeEntryAllowed === false && !exitAction) return { canWrite: false, reason: '交易录入已关闭' };
   }
   return { canWrite: true, reason: '' };
 }
@@ -124,8 +166,18 @@ class TradeTicketsWidget extends YiMuWidget {
       });
   }
 
-  _postJson(url, payload) {
-    var gate = _ttWriteGate();
+  _ticketAction(ticketId) {
+    var tickets = this._tickets || [];
+    for (var i = 0; i < tickets.length; i++) {
+      if (String(tickets[i].ticket_id || '') === String(ticketId || '')) {
+        return tickets[i].action_type || '';
+      }
+    }
+    return '';
+  }
+
+  _postJson(url, payload, actionType) {
+    var gate = _ttWriteGate(actionType || (payload && payload.action_type));
     if (!gate.canWrite) return Promise.reject(new Error(gate.reason));
     return fetch(url, {
       method: 'POST',
@@ -164,7 +216,7 @@ class TradeTicketsWidget extends YiMuWidget {
 
   _prepareTicket(payload) {
     var self = this;
-    return this._postJson('/api/trade/tickets/prepare', payload).then(function(d) {
+    return this._postJson('/api/trade/tickets/prepare', payload, payload && payload.action_type).then(function(d) {
       var ticket = d.ticket || {};
       self._selectedTicketId = ticket.ticket_id || '';
       self._statusMessage = self._selectedTicketId ? '票据已生成 ' + self._selectedTicketId : '票据已生成';
@@ -187,7 +239,7 @@ class TradeTicketsWidget extends YiMuWidget {
       if (this._lastBody) this._renderTicketBody(this._lastBody);
       return Promise.reject(new Error(msg));
     }
-    return this._postJson('/api/trade/fills/preview', payload).then(function(d) {
+    return this._postJson('/api/trade/fills/preview', payload, this._ticketAction(payload.ticket_id)).then(function(d) {
       self._pendingPreview = {
         confirmation_id: d.confirmation_id,
         preview_token: d.preview_token,
@@ -213,7 +265,7 @@ class TradeTicketsWidget extends YiMuWidget {
       preview_hash: pending.preview_hash,
       confirmed_by: 'yimu'
     }, payload || {});
-    return this._postJson('/api/trade/fills/confirm', payload).then(function(d) {
+    return this._postJson('/api/trade/fills/confirm', payload, this._ticketAction(this._selectedTicketId)).then(function(d) {
       self._pendingPreview = null;
       self._statusMessage = d.trade_id ? '成交已写入 trade ' + d.trade_id : '成交已写入';
       self._refreshTickets();
@@ -341,11 +393,14 @@ class TradeTicketsWidget extends YiMuWidget {
       }).join(' | ');
       var selected = self._selectedTicketId && self._selectedTicketId === t.ticket_id;
       var qty = t.max_qty != null ? t.max_qty : (t.qty != null ? t.qty : '');
+      var effectiveStatus = _ttEffectiveStatus(t);
+      var blockLabel = effectiveStatus === 'audit_degraded' ? '审计原因 ' : '阻断原因 ';
+      var blockTone = effectiveStatus === 'audit_degraded' ? 'warn' : 'danger';
       var titleText = (t.name || t.code || '未命名') + '｜' + _ttActionLabel(t.action_type) + (qty ? ' ' + qty + '股' : '');
       html += '<button class="ticket-card' + (selected ? ' is-selected' : '') + '" data-tt-select="' + _ttEsc(t.ticket_id) + '" style="--ticket-tone:var(--' + tone + ')">' +
         '<div class="ticket-card-head">' +
           '<span class="ticket-card-title">' + _ttEsc(titleText) + '</span>' +
-          '<span class="ticket-card-status">' + _ttEsc(_ttStatusLabel(t.status)) + '</span>' +
+          '<span class="ticket-card-status">' + _ttEsc(_ttStatusLabel(effectiveStatus)) + '</span>' +
         '</div>' +
         '<div class="ticket-card-meta">' +
           (t.window ? '<span>窗口 ' + _ttEsc(t.window) + '</span>' : '') +
@@ -354,7 +409,7 @@ class TradeTicketsWidget extends YiMuWidget {
         '</div>' +
         (trades.length ? '<div class="ticket-card-note trade-link">已关联成交 trade ' + _ttEsc(trades.join(',')) + '</div>' : '') +
         (t.ticket_id ? '<div class="ticket-card-note mono" title="' + _ttEsc(t.ticket_id) + '">' + _ttEsc(t.ticket_id) + '</div>' : '') +
-        (blockText ? '<div class="ticket-card-note danger" title="' + _ttEsc(blockText) + '">阻断原因 ' + _ttEsc(blockText) + '</div>' : '') +
+        (blockText ? '<div class="ticket-card-note ' + blockTone + '" title="' + _ttEsc(blockText) + '">' + blockLabel + _ttEsc(blockText) + '</div>' : '') +
         (missingText ? '<div class="ticket-card-note warn" title="' + _ttEsc(missingText) + '">缺数据 ' + _ttEsc(missingText) + '</div>' : '') +
         (conflictText ? '<div class="ticket-card-note danger" title="' + _ttEsc(conflictText) + '">冲突 ' + _ttEsc(conflictText) + '</div>' : '') +
       '</button>';
@@ -369,13 +424,14 @@ class TradeTicketsWidget extends YiMuWidget {
       this.updateTimestamp();
       return;
     }
-    var tickets = this._tickets || [];
-    var pending = tickets.filter(function(t){ return t.status === 'confirmed' || t.status === 'draft'; });
-    var exec = tickets.filter(function(t){ return t.status === 'executable'; });
-    var blocked = tickets.filter(function(t){ return t.status === 'blocked' || t.status === 'audit_degraded'; });
-    var done = tickets.filter(function(t){ return ['filled','partially_filled','closed','closed_with_conflict','cancelled'].indexOf(t.status) >= 0; });
-    var filled = done.filter(function(t){ return ['filled','partially_filled','closed','closed_with_conflict'].indexOf(t.status) >= 0; });
-    var cancelled = done.filter(function(t){ return t.status === 'cancelled'; });
+    var allTickets = this._tickets || [];
+    var tickets = allTickets.filter(function(t) { return !_ttIsSupersededAuditTicket(t, allTickets); });
+    var pending = tickets.filter(function(t){ var s = _ttEffectiveStatus(t); return s === 'confirmed' || s === 'draft'; });
+    var exec = tickets.filter(function(t){ var s = _ttEffectiveStatus(t); return s === 'audit_degraded' || s === 'executable'; });
+    var blocked = tickets.filter(function(t){ return _ttEffectiveStatus(t) === 'blocked'; });
+    var done = tickets.filter(function(t){ return ['filled','partially_filled','closed','closed_with_conflict','cancelled'].indexOf(_ttEffectiveStatus(t)) >= 0; });
+    var filled = done.filter(function(t){ return ['filled','partially_filled','closed','closed_with_conflict'].indexOf(_ttEffectiveStatus(t)) >= 0; });
+    var cancelled = done.filter(function(t){ return _ttEffectiveStatus(t) === 'cancelled'; });
     var linkedTrades = [];
     var conflictCount = 0;
     tickets.forEach(function(t) {
@@ -385,7 +441,11 @@ class TradeTicketsWidget extends YiMuWidget {
     var pendingText = this._pendingPreview ? ('待确认 ' + this._pendingPreview.confirmation_id) : '';
     var selectedText = this._selectedTicketId ? '当前票据 ' + this._selectedTicketId : '未选择票据';
     var activeAction = this._selectedAction || 'buy';
-    var writeGate = _ttWriteGate();
+    var writeGate = _ttWriteGate(activeAction);
+    if (!writeGate.canWrite && activeAction !== 'clear') {
+      var exitGate = _ttWriteGate('clear');
+      if (exitGate.canWrite) writeGate = exitGate;
+    }
     var counts = {
       pending: pending.length,
       exec: exec.length,

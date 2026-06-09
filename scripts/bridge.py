@@ -62,6 +62,26 @@ _llm_rate_lock = Lock()
 _llm_conv_lock = Lock()
 
 
+def _sanitize_iwencai_cache_entry(entry):
+    """Drop invalid derived emotion values before exposing or using iwencai cache."""
+    if not isinstance(entry, dict):
+        return entry
+    cleaned = dict(entry)
+    if cleaned.get("_emotion_source") == "iwencai_up_down":
+        counts = cleaned.get("_emotion_counts") or {}
+        up = counts.get("up")
+        down = counts.get("down")
+        try:
+            invalid = float(up or 0) <= 0 or float(down or 0) <= 0
+        except Exception:
+            invalid = True
+        if invalid:
+            cleaned.pop("情绪值", None)
+            cleaned.pop("_emotion_source", None)
+            cleaned.pop("_emotion_counts", None)
+    return cleaned
+
+
 def _load_cache():
     """冷启动：从磁盘恢复 CACHE，避免重启后短暂空白"""
     if CACHE_FILE.exists():
@@ -76,6 +96,8 @@ def _load_cache():
                         if isinstance(v['data'], dict):
                             v = v['data']
                             v['_updated'] = saved[k].get('_updated', '')
+                    if k == 'iwencai':
+                        v = _sanitize_iwencai_cache_entry(v)
                     CACHE[k] = v
             print(f'[bridge] Cache restored from disk ({len(saved)} keys)')
         except Exception:
@@ -104,6 +126,29 @@ def _collect_stock_codes(data):
         [a.get('代码') for a in data.get('decision', {}).get('锚定股状态', []) if a.get('代码')] +
         [p.get('代码') for p in data.get('positions', []) if p.get('代码')]
     ))
+
+
+def _collect_runtime_stock_codes(data, today=None):
+    """Collect baseline watchlist plus same-day traded codes for live quote subscription."""
+    codes = set(_collect_stock_codes(data or {}))
+    trade_date = today or datetime.now().strftime("%Y-%m-%d")
+    try:
+        for trade in query_trades(date_from=trade_date, date_to=trade_date, limit=10000):
+            code = str(trade.get("code") or "")
+            if len(code) == 6:
+                codes.add(code)
+    except Exception:
+        pass
+    return sorted(codes)
+
+
+def _refresh_stock_codes(data=None):
+    """Refresh collector subscription codes after startup or ticket-aware fills."""
+    if data is None:
+        data = _load_dashboard_data()
+    codes = _collect_runtime_stock_codes(data or {})
+    CACHE["_stock_codes"] = codes
+    return codes
 
 
 def _trade_cash_effect(op):
@@ -784,7 +829,7 @@ def _build_rule_inputs(now=None, account_state=None):
     quotes_fresh = _compute_freshness("live_quote", CACHE.get("live_quotes", {}), now=now)
 
     # ── sentiment ──
-    iwencai = CACHE.get("iwencai", {})
+    iwencai = _sanitize_iwencai_cache_entry(CACHE.get("iwencai", {}))
     sentiment_fresh = _compute_freshness("iwencai", iwencai, now=now)
     sentiment_usable = sentiment_fresh in ("live", "delayed")
     base_sent = dash.get("sentiment", {})
@@ -819,21 +864,23 @@ def _build_rule_inputs(now=None, account_state=None):
         if m:
             lianban_risk = float(m.group(0))
 
-    # 情绪值优先级：breadth 计算 > iwencai > baseline
+    # 情绪值优先级：iwencai 实时值 > 可信 breadth 备用；盘中不得用昨日 baseline 情绪伪装实时值。
     breadth = CACHE.get("breadth", {})
     breadth_fresh = _compute_freshness("breadth", breadth, now=now)
-    breadth_usable = breadth_fresh in ("live", "delayed")
+    breadth_source = str(breadth.get("_source") or "")
+    breadth_usable = (
+        breadth_fresh in ("live", "delayed")
+        and breadth_source != "live_index_fallback"
+    )
     up_cnt = breadth.get("上涨家数")
     dn_cnt = breadth.get("下跌家数")
-    if breadth_usable and up_cnt is not None and dn_cnt is not None and (up_cnt + dn_cnt) > 0:
+    em_raw = iwencai.get("情绪值") if sentiment_usable else None
+    if em_raw is not None:
+        emotion_pct = float(em_raw)
+    elif breadth_usable and up_cnt is not None and dn_cnt is not None and (up_cnt + dn_cnt) > 0:
         emotion_pct = round(up_cnt / (up_cnt + dn_cnt) * 100, 1)
     else:
-        em_raw = iwencai.get("情绪值") if sentiment_usable else None
-        if em_raw is not None:
-            emotion_pct = float(em_raw)
-        else:
-            em_base = base_sent.get("情绪值") if sentiment_usable else None
-            emotion_pct = float(em_base) if em_base is not None else None
+        emotion_pct = None
 
     # previous_emotion：从 sentiment_auto.json 日期分组中取前一日期最后节点
     prev_emotion_pct = None
@@ -1114,6 +1161,7 @@ def _prepare_trade_ticket(payload):
     from scripts.db import create_trade_ticket, query_trade_ticket, get_sellable_qty, get_sellable_lots
 
     allowed = {"buy", "sell", "add", "reduce", "do_t", "clear", "observe"}
+    exit_actions = {"sell", "reduce", "clear"}
     action_type = str((payload or {}).get("action_type") or "").strip()
     if action_type == "t":
         raise ValueError("action_type=t is not accepted; use do_t")
@@ -1206,8 +1254,10 @@ def _prepare_trade_ticket(payload):
     if action_type in ("buy", "add", "do_t") and account_state.get("lot_reconciliation_ok") is False:
         blocking_rule_ids.append("lot_reconciliation")
 
+    context_degraded = False
     if ctx.get("context_status") != "trusted":
         blocking_rule_ids.append("context_status")
+        context_degraded = action_type in exit_actions
     audit_degraded = False
     trade_time = str((payload or {}).get("trade_time") or "").strip()
     if trade_time and _snapshot_captured_after_trade(trade_date, trade_time, ctx.get("context_captured_at")):
@@ -1220,7 +1270,11 @@ def _prepare_trade_ticket(payload):
 
     blocking_rule_ids = list(dict.fromkeys(blocking_rule_ids))
     human_override_reason = str((payload or {}).get("human_override_reason") or "").strip()
-    hard_blocks = [code for code in blocking_rule_ids if code != "snapshot_captured_after_trade"]
+    hard_blocks = [
+        code for code in blocking_rule_ids
+        if code != "snapshot_captured_after_trade"
+        and not (context_degraded and code == "context_status")
+    ]
     non_overridable_blocks = {"context_status", "rule_snapshot_hash", "sellable_qty", "lot_reconciliation"}
     override_to_audit = (
         audit_degraded
@@ -1230,7 +1284,7 @@ def _prepare_trade_ticket(payload):
     )
     status = (
         "blocked" if hard_blocks and not override_to_audit
-        else ("audit_degraded" if audit_degraded or override_to_audit else ("draft" if action_type == "observe" else "executable"))
+        else ("audit_degraded" if audit_degraded or context_degraded or override_to_audit else ("draft" if action_type == "observe" else "executable"))
     )
 
     ticket_id = create_trade_ticket({
@@ -1583,7 +1637,7 @@ def _build_live_quotes_payload(rule_state=None):
 
 def _iwencai_live_payload():
     """Return iwencai live payload; stale/dead data carries metadata only."""
-    iwencai = dict(CACHE.get('iwencai', {}) or {})
+    iwencai = dict(_sanitize_iwencai_cache_entry(CACHE.get('iwencai', {}) or {}) or {})
     if not iwencai:
         return iwencai
     _add_freshness(iwencai, 'iwencai', iwencai.get('_updated'))
@@ -1820,20 +1874,11 @@ def _baseline_freshness():
         return "stale"
 
 
-def _quotes_coverage():
+def _quotes_coverage(today=None):
     """Return (covered, total, missing_pos_codes) for tracked stocks in live_quotes."""
     dd = _load_dashboard_data()
-    all_codes = set()
     pos_codes = set()
-    for pool_key in ['lianban_pool', 'trend_pool', 'positions']:
-        for s in dd.get(pool_key, []):
-            code = str(s.get('代码', ''))
-            if len(code) == 6:
-                all_codes.add(code)
-    for a in dd.get('decision', {}).get('锚定股状态', []):
-        code = str(a.get('代码', ''))
-        if len(code) == 6:
-            all_codes.add(code)
+    all_codes = set(_collect_runtime_stock_codes(dd, today=today))
     for p in dd.get('positions', []):
         code = str(p.get('代码', ''))
         if len(code) == 6:
@@ -2572,7 +2617,7 @@ class BridgeHandler(SimpleHTTPRequestHandler):
                     for p in payload['positions']:
                         existing[p.get('标的')] = p
                     data['positions'] = list(existing.values())
-                    CACHE['_stock_codes'] = _collect_stock_codes(data)
+                    _refresh_stock_codes(data)
                     positions_updated = True
 
                 if has_entry:
@@ -2744,6 +2789,7 @@ class BridgeHandler(SimpleHTTPRequestHandler):
                     self.wfile.write(json.dumps({
                         'ok': True, 'status': status, 'trade_id': trade_id, 'ticket_id': ticket_id,
                     }).encode())
+                    _refresh_stock_codes(data)
                     print(f"  [bridge] Synced {status} trade_id={trade_id} ticket_id={ticket_id} → {DATA_FILE}")
                 elif tlist:
                     self.send_response(409)
@@ -3186,7 +3232,7 @@ if __name__ == '__main__':
     try:
         with open(DATA_FILE) as f:
             dd = json.load(f)
-        codes = _collect_stock_codes(dd)
+        codes = _refresh_stock_codes(dd)
         quotes.set_stock_codes(codes)
         print(f'[bridge] Stock codes loaded: {len(codes)}')
     except Exception:

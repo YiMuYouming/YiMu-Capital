@@ -61,6 +61,51 @@ class BridgeGuardTests(unittest.TestCase):
         }
         self.assertIn("688981", bridge._collect_stock_codes(data))
 
+    def test_today_trade_codes_are_in_runtime_live_subscription(self):
+        data = {
+            "lianban_pool": [],
+            "trend_pool": [],
+            "decision": {"锚定股状态": []},
+            "positions": [{"代码": "002281", "状态": "持有"}],
+        }
+        with patch.object(bridge, "query_trades", return_value=[
+            {"trade_date": "2026-06-09", "code": "688017", "name": "绿的谐波"},
+        ]):
+            codes = bridge._collect_runtime_stock_codes(data, today="2026-06-09")
+
+        self.assertIn("002281", codes)
+        self.assertIn("688017", codes)
+
+    def test_quote_coverage_counts_runtime_trade_codes(self):
+        orig_data = bridge.DATA_FILE
+        orig_cache = dict(bridge.CACHE)
+        import json
+        import tempfile
+        from pathlib import Path
+        with tempfile.TemporaryDirectory() as tmp:
+            bridge.DATA_FILE = Path(tmp) / "dashboard_data.json"
+            bridge.DATA_FILE.write_text(json.dumps({
+                "lianban_pool": [],
+                "trend_pool": [],
+                "decision": {"锚定股状态": []},
+                "positions": [{"代码": "002281", "标的": "光迅科技"}],
+            }))
+            bridge.CACHE.clear()
+            bridge.CACHE["live_quotes"] = {
+                "002281": {"最新价": 203.2},
+                "688017": {"最新价": 422.0},
+                "_updated": "2026-06-09T10:30:00+08:00",
+            }
+            with patch.object(bridge, "query_trades", return_value=[
+                {"trade_date": "2026-06-09", "code": "688017", "name": "绿的谐波"},
+            ]):
+                covered, total, missing = bridge._quotes_coverage(today="2026-06-09")
+        bridge.DATA_FILE = orig_data
+        bridge.CACHE.clear()
+        bridge.CACHE.update(orig_cache)
+
+        self.assertEqual((covered, total, missing), (2, 2, []))
+
     def test_generator_script_is_directly_executable(self):
         result = subprocess.run(
             [sys.executable, "scripts/gen_dashboard_data.py", "--help"],

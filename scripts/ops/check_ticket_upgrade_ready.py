@@ -61,7 +61,7 @@ def check(base_url, opener=urllib.request.urlopen, timeout=5):
             "_prepareTicket",
             "data-tt-prepare",
             "/api/trade/fills/confirm",
-            "确认成交",
+            "data-tt-confirm",
         ]),
         "requires prepare/preview/confirm frontend flow",
     ))

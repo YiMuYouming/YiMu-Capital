@@ -1087,30 +1087,42 @@ def _fmt_pct(v):
         return s
 
 
-def _fmt_wanyi(v):
-    if v in (None, "", "—"):
+def _format_turnover_yi(yi):
+    if yi is None:
         return None
-    s = str(v).strip()
-    if "万亿" in s or "亿" in s:
-        return s
-    try:
-        return f"{float(s):.2f}万亿"
-    except ValueError:
-        return s
+    if abs(yi) >= 10000:
+        return f"{yi / 10000:.2f}万亿"
+    return f"{yi:.0f}亿"
 
 
-def _wanyi_number(v):
+def _turnover_to_yi(v):
     if v in (None, "", "—"):
         return None
     s = str(v).replace(",", "").strip()
     try:
         if "万亿" in s:
-            return float(s.replace("万亿", ""))
+            n = float(s.replace("万亿", ""))
+            return n / 100000000 if n > 1000 else n * 10000
         if "亿" in s:
-            return float(s.replace("亿", "")) / 10000
-        return float(s)
+            return float(s.replace("亿", ""))
+        n = float(s)
+        return n / 100000000 if abs(n) > 1000000 else n * 10000
     except ValueError:
         return None
+
+
+def _fmt_wanyi(v):
+    yi = _turnover_to_yi(v)
+    if yi is not None:
+        return _format_turnover_yi(yi)
+    if v in (None, "", "—"):
+        return None
+    return str(v).strip()
+
+
+def _wanyi_number(v):
+    yi = _turnover_to_yi(v)
+    return yi / 10000 if yi is not None else None
 
 
 def _first_present(mapping, keys):

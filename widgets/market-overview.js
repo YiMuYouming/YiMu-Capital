@@ -152,9 +152,9 @@ class MarketOverviewWidget extends YiMuWidget {
 
     // === 昨日收盘基线 (折叠式，点击展开) ===
     var yestIndexes = [
-      {name:'上证', chg:yb['上证昨涨幅']||'—', amt:yb['上证昨成交额']||'—', up:yb['上证昨上涨'], dn:yb['上证昨下跌']},
-      {name:'深证', chg:yb['深证昨涨幅']||'—', amt:yb['深证昨成交额']||'—', up:yb['深证昨上涨'], dn:yb['深证昨下跌']},
-      {name:'创业', chg:yb['创业昨涨幅']||'—', amt:yb['创业昨成交额']||'—', up:yb['创业昨上涨'], dn:yb['创业昨下跌']}
+      {name:'上证', chg:yb['上证昨涨幅']||'—', amt:formatW04AmountText(yb['上证昨成交额']), up:yb['上证昨上涨'], dn:yb['上证昨下跌']},
+      {name:'深证', chg:yb['深证昨涨幅']||'—', amt:formatW04AmountText(yb['深证昨成交额']), up:yb['深证昨上涨'], dn:yb['深证昨下跌']},
+      {name:'创业', chg:yb['创业昨涨幅']||'—', amt:formatW04AmountText(yb['创业昨成交额']), up:yb['创业昨上涨'], dn:yb['创业昨下跌']}
     ];
     var yestBody = '';
       yestIndexes.forEach(function(yi) {
@@ -204,9 +204,23 @@ class MarketOverviewWidget extends YiMuWidget {
 function parseAmountYi(v) {
   var s = String(v || '').replace(/,/g, '').trim();
   if (!s || s === '—') return 0;
-  if (s.indexOf('万亿') >= 0) return parseFloat(s.replace('万亿', '')) * 10000 || 0;
+  if (s.indexOf('万亿') >= 0) {
+    var w = parseFloat(s.replace('万亿', ''));
+    if (!isFinite(w)) return 0;
+    return w > 1000 ? w / 100000000 : w * 10000;
+  }
   if (s.indexOf('亿') >= 0) return parseFloat(s.replace('亿', '')) || 0;
   return (parseFloat(s) || 0) / 100000000;
+}
+
+function formatW04AmountText(v) {
+  if (v == null || v === '' || v === '—') return '—';
+  var yi = parseAmountYi(v);
+  if (yi <= 0) return String(v);
+  if (Math.abs(yi) >= 10000) {
+    return (yi / 10000).toFixed(2).replace(/\.00$/, '') + '万亿';
+  }
+  return yi.toFixed(0) + '亿';
 }
 
 function hasW04Own(obj, key) {

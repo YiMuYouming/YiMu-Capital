@@ -57,6 +57,110 @@ class QuotesCollectorTests(unittest.TestCase):
         self.assertEqual(iwencai_poll.CACHE["iwencai"]["跌停家数"], 12)
         self.assertEqual(iwencai_poll.CACHE["iwencai"]["_limit_source"], "eastmoney_zt_pool")
 
+    def test_iwencai_poll_writes_realtime_emotion_from_up_down_counts(self):
+        def fake_query(query, limit=100):
+            if query == "今日上涨 非st":
+                return {"datas": [{} for _ in range(38)]}
+            if query == "今日下跌 非st":
+                return {"datas": [{} for _ in range(62)]}
+            if query == "今日涨停 非st":
+                return {"datas": [{} for _ in range(12)]}
+            return {"datas": []}
+
+        with patch("scripts.collectors.iwencai_poll._iwencai_query", side_effect=fake_query), \
+             patch("scripts.collectors.iwencai_poll._eastmoney_limit_counts",
+                   return_value={}):
+            iwencai_poll.poll_iwencai_sentiment(force=True)
+
+        iw = iwencai_poll.CACHE["iwencai"]
+        self.assertEqual(iw["情绪值"], 38.0)
+        self.assertEqual(iw["_emotion_source"], "iwencai_up_down")
+
+    def test_iwencai_poll_does_not_write_zero_sided_emotion(self):
+        def fake_query(query, limit=100):
+            if query == "今日上涨 非st":
+                return {"datas": []}
+            if query == "今日下跌 非st":
+                return {"datas": [{} for _ in range(2907)]}
+            if query == "今日涨停 非st":
+                return {"datas": [{} for _ in range(32)]}
+            return {"datas": []}
+
+        with patch("scripts.collectors.iwencai_poll._iwencai_query", side_effect=fake_query), \
+             patch("scripts.collectors.iwencai_poll._eastmoney_limit_counts",
+                   return_value={}):
+            iwencai_poll.poll_iwencai_sentiment(force=True)
+
+        iw = iwencai_poll.CACHE["iwencai"]
+        self.assertNotIn("情绪值", iw)
+        self.assertNotIn("_emotion_source", iw)
+
+    def test_iwencai_partial_poll_preserves_same_day_realtime_return_fields(self):
+        iwencai_poll.CACHE["iwencai"] = {
+            "昨日涨停收益": 2.4,
+            "涨停溢价率": 61.5,
+            "赚钱效应": "好",
+            "连板收益": 3.6,
+            "情绪值": 38.0,
+            "_emotion_source": "iwencai_up_down",
+            "_emotion_counts": {"up": 1900, "down": 3100},
+            "_updated": "2026-06-09T14:50:00+08:00",
+        }
+
+        def fake_query(query, limit=100):
+            if query == "昨日炸板 今日涨跌幅 非st":
+                return {"datas": [{"涨跌幅": "-0.18%"}]}
+            if query == "今日涨停 非st":
+                return {"datas": [{} for _ in range(12)]}
+            if query == "今日跌停 非st":
+                return {"datas": [{} for _ in range(3)]}
+            return {"datas": []}
+
+        class FixedDateTime:
+            @classmethod
+            def now(cls):
+                return datetime(2026, 6, 9, 15, 5, 41)
+
+        from datetime import datetime
+        with patch("scripts.collectors.iwencai_poll._iwencai_query", side_effect=fake_query), \
+             patch("scripts.collectors.iwencai_poll._eastmoney_limit_counts",
+                   return_value={}), \
+             patch("scripts.collectors.iwencai_poll.datetime", FixedDateTime):
+            iwencai_poll.poll_iwencai_sentiment(force=True)
+
+        iw = iwencai_poll.CACHE["iwencai"]
+        self.assertEqual(iw["昨日涨停收益"], 2.4)
+        self.assertEqual(iw["涨停溢价率"], 61.5)
+        self.assertEqual(iw["赚钱效应"], "好")
+        self.assertEqual(iw["连板收益"], 3.6)
+        self.assertEqual(iw["情绪值"], 38.0)
+        self.assertEqual(iw["炸板收益"], -0.18)
+        self.assertIn("昨日涨停收益", iw["_preserved_fields"])
+        self.assertIn("连板收益", iw["_preserved_fields"])
+
+    def test_iwencai_lianban_profit_uses_semantic_fallback_when_primary_empty(self):
+        def fake_query(query, limit=100):
+            if query == "昨日连板 今日涨跌幅 非st":
+                return {"datas": [
+                    {"涨跌幅": "-3.32%"},
+                    {"涨跌幅": "2.52%"},
+                    {"涨跌幅": "-0.40%"},
+                ]}
+            if query == "今日涨停 非st":
+                return {"datas": [{} for _ in range(12)]}
+            if query == "今日跌停 非st":
+                return {"datas": [{} for _ in range(3)]}
+            return {"datas": []}
+
+        with patch("scripts.collectors.iwencai_poll._iwencai_query", side_effect=fake_query), \
+             patch("scripts.collectors.iwencai_poll._eastmoney_limit_counts",
+                   return_value={}):
+            iwencai_poll.poll_iwencai_sentiment(force=True)
+
+        iw = iwencai_poll.CACHE["iwencai"]
+        self.assertEqual(iw["连板收益"], -0.4)
+        self.assertEqual(iw["_lianban_profit_query"], "昨日连板 今日涨跌幅 非st")
+
     def test_iwencai_empty_limit_sources_do_not_write_zero_zero(self):
         def fake_query(query, limit=100):
             return {"datas": []}

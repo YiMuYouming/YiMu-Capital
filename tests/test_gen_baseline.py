@@ -308,6 +308,42 @@ weekday: 周三
         self.assertEqual(yb.get("上证昨上涨"), 1260)
         self.assertEqual(yb.get("上证昨下跌"), 3890)
 
+    def test_dashboard_normalizes_yuan_turnover_frontmatter(self):
+        self.assertIsNotNone(build_dashboard_data)
+        current_note = """---
+date: 2026-06-09
+weekday: 周二
+---
+# 今日盘中笔记
+"""
+        previous_note = """---
+date: 2026-06-08
+weekday: 周一
+上证涨幅: -1.70
+深证涨幅: -3.22
+深证成交额: 1525460900000
+创业涨幅: -3.69
+创业成交额: 727291600000
+市场量能: 2792757000000
+涨跌比: 1200 / 4100
+---
+# 昨日复盘
+"""
+        with tempfile.TemporaryDirectory() as td:
+            review_root = Path(td) / "复盘笔记" / "W24_第24周"
+            review_root.mkdir(parents=True)
+            current = review_root / "2026_6_9_Tuesday_ReviewNote.md"
+            previous = review_root / "2026_6_8_Monday_ReviewNote.md"
+            current.write_text(current_note)
+            previous.write_text(previous_note)
+
+            data = build_dashboard_data(str(current))
+
+        yb = data.get("yesterday_baseline") or {}
+        self.assertEqual(yb.get("深证昨成交额"), "1.53万亿")
+        self.assertEqual(yb.get("创业昨成交额"), "7273亿")
+        self.assertEqual(yb.get("昨日全天成交额"), "2.79万亿")
+
     def test_find_latest_review_accepts_premarket_plan_note(self):
         self.assertIsNotNone(find_latest_review)
         current_note = """---

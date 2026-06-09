@@ -223,6 +223,104 @@ class RuleCodeDisplayTest(unittest.TestCase):
         self.assertIn(".w14-command-grid", theme)
         self.assertIn(".w14-risk-lines", theme)
 
+
+class TradeTicketsStatusGroupingTest(unittest.TestCase):
+    """W24 票据分组不应把可确认的审计降级票据显示成已阻断"""
+
+    def test_audit_degraded_is_not_grouped_as_blocked(self):
+        src = (ROOT / "widgets" / "trade-tickets.js").read_text(encoding="utf-8")
+
+        self.assertNotIn(
+            "t.status === 'blocked' || t.status === 'audit_degraded'",
+            src,
+            "audit_degraded 可继续成交确认，不应归入已阻断列",
+        )
+        self.assertIn(
+            "return s === 'audit_degraded' || s === 'executable'",
+            src,
+            "audit_degraded 应与可执行票据同列展示",
+        )
+
+    def test_legacy_context_blocked_exit_ticket_is_displayed_as_audit_degraded(self):
+        fixture = {
+            "trade_tickets": [
+                {
+                    "ticket_id": "TICKET-20260609-002281-0007",
+                    "status": "blocked",
+                    "action_type": "clear",
+                    "code": "002281",
+                    "name": "光迅科技",
+                    "max_qty": 200,
+                    "sellable_quantity": 200,
+                    "blocking_rule_ids": ["context_status"],
+                },
+                {
+                    "ticket_id": "TICKET-20260609-301488-0002",
+                    "status": "blocked",
+                    "action_type": "buy",
+                    "code": "301488",
+                    "name": "豪恩汽电",
+                    "max_qty": 500,
+                    "blocking_rule_ids": ["DOUBLE_ICE"],
+                },
+            ],
+        }
+
+        result = _render_widget("trade-tickets.js", "W24", fixture)
+        html = result.get("html", "")
+
+        self.assertIn("审计降级", html, f"旧 context_status 清仓票应显示审计降级: {html[:900]}")
+        self.assertIn("审计原因 context_status", html, f"旧 context_status 清仓票应显示审计原因: {html[:900]}")
+        self.assertIn("阻断原因 DOUBLE_ICE", html, f"买入硬阻断仍应显示阻断原因: {html[:900]}")
+        self.assertIn(
+            "已阻断</span><span class=\"ticket-section-count\">1</span>",
+            html,
+            f"已阻断分组应只包含真实硬阻断: {html[:900]}",
+        )
+
+    def test_superseded_legacy_context_exit_tickets_are_hidden(self):
+        fixture = {
+            "trade_tickets": [
+                {
+                    "ticket_id": "TICKET-20260609-002281-0007",
+                    "created_at": "2026-06-09 10:08:37",
+                    "status": "blocked",
+                    "action_type": "clear",
+                    "code": "002281",
+                    "name": "光迅科技",
+                    "max_qty": 200,
+                    "sellable_quantity": 200,
+                    "blocking_rule_ids": ["context_status"],
+                },
+                {
+                    "ticket_id": "TICKET-20260609-002281-0008",
+                    "created_at": "2026-06-09 10:09:56",
+                    "status": "filled",
+                    "action_type": "sell",
+                    "code": "002281",
+                    "name": "光迅科技",
+                },
+                {
+                    "ticket_id": "TICKET-20260609-301488-0002",
+                    "created_at": "2026-06-09 09:38:04",
+                    "status": "blocked",
+                    "action_type": "buy",
+                    "code": "301488",
+                    "name": "豪恩汽电",
+                    "max_qty": 500,
+                    "blocking_rule_ids": ["DOUBLE_ICE"],
+                },
+            ],
+        }
+
+        result = _render_widget("trade-tickets.js", "W24", fixture)
+        html = result.get("html", "")
+
+        self.assertNotIn("TICKET-20260609-002281-0007", html, f"已被后续成交覆盖的旧清仓审计票不应占可执行列: {html[:1200]}")
+        self.assertIn("TICKET-20260609-002281-0008", html, f"后续真实成交票应保留: {html[:1200]}")
+        self.assertIn("TICKET-20260609-301488-0002", html, f"买入硬阻断票应保留: {html[:1200]}")
+        self.assertNotIn("审计降级", html, f"被成交覆盖后不应再显示审计降级待执行: {html[:1200]}")
+
     def test_w14_sanitizes_rule_state_dynamic_text(self):
         fixture = _missing_rs_fixture()
         fixture["rule_state"] = {
@@ -524,6 +622,14 @@ class CandidatePoolWidgetTest(unittest.TestCase):
 
 
 class TradeTicketsWidgetRenderTest(unittest.TestCase):
+    def test_index_keeps_health_confirmed_when_trade_entry_is_blocked(self):
+        src = (ROOT / "index.html").read_text(encoding="utf-8")
+        self.assertIn(
+            "window._healthCritical = true; window._healthConfirmed = true;",
+            src,
+            "健康接口已响应但 trade_entry_allowed=false 时，应标记为已确认的风控阻断",
+        )
+
     def test_w24_renders_ticket_sections_and_blocking_rules(self):
         result = _render_widget("trade-tickets.js", "W24", {
             "trade_tickets": [
@@ -708,6 +814,51 @@ console.log(JSON.stringify({calls:calls, err:err, status:inst._statusMessage}));
         self.assertEqual([], resp["calls"])
         self.assertIn("只读", resp["err"])
         self.assertIn("只读", resp["status"])
+
+    def test_w24_health_gate_blocks_buy_but_allows_clear_prepare(self):
+        widget_src = (ROOT / "widgets" / "trade-tickets.js").read_text(encoding="utf-8")
+        script = PREAMBLE + "\n" + r"""
+global.window = {
+  _detectRuntimeMode: function(){ return {readonly:false}; },
+  _healthConfirmed: true,
+  _healthCritical: true,
+  _tradeEntryAllowed: false
+};
+""" + widget_src + r"""
+(async function() {
+var calls = [];
+global.fetch = function(url, opts) {
+  calls.push({url:String(url), method:(opts && opts.method) || 'GET', body:opts && opts.body ? JSON.parse(opts.body) : null});
+  return Promise.resolve({ok:true, json:function(){ return Promise.resolve({ok:true, ticket:{ticket_id:'TICKET-EXIT', status:'audit_degraded', action_type:'clear'}}); }});
+};
+var cls = WidgetRegistry._map["W24"];
+var inst = new cls({id:"W24"});
+var body = { innerHTML:'', querySelector:function(){ return null; }, querySelectorAll:function(){ return []; } };
+inst.getBody = function(){ return body; };
+inst.render({trade_tickets: [{ticket_id:'TICKET-OLD', status:'executable', action_type:'clear', code:'002281', name:'光迅科技'}]});
+var initialHtml = body.innerHTML.replace(/\s+/g, ' ');
+var buyErr = '';
+try {
+  await inst._prepareTicket({intent_text:'准备买', action_type:'buy', code:'002281', name:'光迅科技', qty:100});
+} catch (e) {
+  buyErr = e && e.message || String(e);
+}
+await inst._prepareTicket({intent_text:'清仓', action_type:'clear', code:'002281', name:'光迅科技', qty:200});
+console.log(JSON.stringify({calls:calls, buyErr:buyErr, initialHtml:initialHtml}));
+})();
+"""
+        result = subprocess.run(
+            ["node", "--no-warnings", "-e", script],
+            capture_output=True, text=True, timeout=10,
+            cwd=str(ROOT),
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        resp = json.loads(result.stdout.strip().split("\n")[-1])
+        prepare_calls = [c for c in resp["calls"] if c["url"] == "/api/trade/tickets/prepare"]
+        self.assertEqual(1, len(prepare_calls), resp)
+        self.assertEqual("clear", prepare_calls[0]["body"]["action_type"])
+        self.assertIn("健康门禁", resp["buyErr"])
+        self.assertIn("data-tt-prepare", resp["initialHtml"])
 
     def test_w24_mount_uses_base_render_lifecycle(self):
         base_src = (ROOT / "widget-base.js").read_text(encoding="utf-8")
@@ -1004,6 +1155,7 @@ global.window = {
 
     def test_index_exposes_ticket_entry_and_default_workspace(self):
         src = (ROOT / "index.html").read_text(encoding="utf-8")
+        self.assertIn('data-widget="W25"', src)
         self.assertIn('data-widget="W24"', src)
         self.assertIn("_ensureRequiredLayoutWidgets()", src)
         self.assertIn("本地预览 · 只读", src)
@@ -1298,6 +1450,22 @@ global.Date = class extends RealDate {
         self.assertNotIn("待研判", html)
         self.assertNotIn("🤖", html)
 
+    def test_w04_sanitizes_malformed_yesterday_baseline_turnover(self):
+        result = _render_widget("market-overview.js", "W04", {
+            "live_index": {},
+            "yesterday_baseline": {
+                "深证昨涨幅": "-3.22%",
+                "深证昨成交额": "1525460900000.00万亿",
+                "创业昨涨幅": "-3.69%",
+                "创业昨成交额": "727291600000.00万亿",
+            },
+        })
+        html = result.get("html", "")
+        self.assertIn("1.53万亿", html, f"W04 应把误标为万亿的深证原始元值净化: {html[:900]}")
+        self.assertIn("7273亿", html, f"W04 应把误标为万亿的创业原始元值净化: {html[:900]}")
+        self.assertNotIn("1525460900000.00万亿", html)
+        self.assertNotIn("727291600000.00万亿", html)
+
     def test_w04_uses_iwencai_zero_limit_counts_not_baseline(self):
         result = _render_widget("market-overview.js", "W04", {
             "live_index": {},
@@ -1399,7 +1567,7 @@ class W06Auction5DTest(unittest.TestCase):
 
 
 class W10SectorHeatTest(unittest.TestCase):
-    """W10 应以复盘板块为主线，实时数据只做校验"""
+    """W10 只展示今日实时匹配板块，避免复盘数据误导"""
 
     def test_w10_uses_sector_inflow_and_removes_noise(self):
         result = _render_widget("sector-heat.js", "W10", {
@@ -1424,17 +1592,19 @@ class W10SectorHeatTest(unittest.TestCase):
             "live_quotes": {"002049": {"涨幅": -5.12}},
         })
         html = result.get("html", "")
-        self.assertIn("复盘板块", html, f"W10 应展示新版表头: {html[:600]}")
+        self.assertIn("候选板块", html, f"W10 应展示新版表头: {html[:600]}")
         self.assertIn("w10-acceptance", html, f"W10 应前置板块验收摘要: {html[:800]}")
         self.assertIn("主线", html, f"W10 摘要应突出主线数量: {html[:800]}")
         self.assertIn("风险", html, f"W10 摘要应突出风险/分歧数量: {html[:800]}")
         self.assertIn("候选", html, f"W10 摘要应突出候选匹配: {html[:800]}")
+        self.assertIn("隐藏复盘 1/2", html, f"W10 应标明未匹配实时数据的复盘板块被隐藏: {html[:800]}")
         self.assertIn("+3.09%", html, f"W10 应读取 sector_inflow 涨跌幅: {html[:800]}")
         self.assertIn("+76.3亿", html, f"W10 应读取 sector_inflow 净流入: {html[:800]}")
         self.assertIn("涨跌 100:9", html, f"W10 应展示涨跌家数: {html[:800]}")
-        self.assertIn("紫光国微", html, f"W10 应保留关键标的: {html[:800]}")
-        self.assertIn("-5.12%", html, f"W10 无官方板块涨跌时应回退到自选池实时涨幅: {html[:800]}")
-        self.assertIn("池均", html, f"W10 自选池涨幅回退应标注池均口径: {html[:800]}")
+        self.assertNotIn("半导体", html, f"W10 无实时匹配时不应展示复盘板块: {html[:800]}")
+        self.assertNotIn("紫光国微", html, f"W10 无实时匹配时不应展示该板块候选: {html[:800]}")
+        self.assertNotIn("-5.12%", html, f"W10 不应回退到自选池均值伪装板块热度: {html[:800]}")
+        self.assertNotIn("池均", html, f"W10 不再使用池均回退口径: {html[:800]}")
         self.assertNotIn("待分析", html)
         self.assertNotIn("🔥", html)
         self.assertNotIn("⭐", html)
@@ -1446,7 +1616,7 @@ class W10SectorHeatTest(unittest.TestCase):
         self.assertIn("w10-empty", html)
         self.assertIn("板块状态未录入", html)
 
-    def test_w10_falls_back_to_review_status_metrics(self):
+    def test_w10_hides_review_status_metrics_without_live_match(self):
         result = _render_widget("sector-heat.js", "W10", {
             "sectors": [
                 {"板块": "元件/PCB🚨", "类型": "趋势分歧", "涨停数": "~5",
@@ -1459,9 +1629,28 @@ class W10SectorHeatTest(unittest.TestCase):
             "live_quotes": {},
         })
         html = result.get("html", "")
-        self.assertIn("+3.72%", html, f"W10 无实时数据时应从复盘状态抽涨幅: {html[:700]}")
-        self.assertIn("-39.5亿", html, f"W10 无实时数据时应从复盘状态抽资金: {html[:700]}")
-        self.assertIn("复盘", html, f"W10 应标注复盘口径: {html[:700]}")
+        self.assertIn("暂无实时板块热度", html, f"W10 无实时数据时应显示空态: {html[:700]}")
+        self.assertIn("已隐藏复盘回退项", html, f"W10 应解释隐藏原因: {html[:700]}")
+        self.assertNotIn("+3.72%", html, f"W10 不应从复盘状态抽涨幅: {html[:700]}")
+        self.assertNotIn("-39.5亿", html, f"W10 不应从复盘状态抽资金: {html[:700]}")
+
+    def test_w10_ignores_stale_live_sectors(self):
+        result = _render_widget("sector-heat.js", "W10", {
+            "sectors": [
+                {"板块": "电力", "类型": "风险", "涨停数": "1+", "状态": "复盘大跌"},
+            ],
+            "live_sectors": {
+                "电力": {"涨跌幅": 1.32, "MA5方向": "向下"},
+                "_updated": "2026-05-19T17:03:13+08:00",
+            },
+            "sector_inflow": {"data": []},
+            "trend_pool": [],
+            "lianban_pool": [],
+            "live_quotes": {},
+        })
+        html = result.get("html", "")
+        self.assertIn("暂无实时板块热度", html, f"W10 不应展示过期 live_sectors: {html[:700]}")
+        self.assertNotIn("+1.32%", html, f"W10 不应使用旧 live_sectors 涨跌幅: {html[:700]}")
 
 
 class W21ZtEchelonTest(unittest.TestCase):

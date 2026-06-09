@@ -44,6 +44,23 @@ function _w10Class(n) {
   return n == null ? 'muted' : n > 0 ? 'up' : n < 0 ? 'down' : 'muted';
 }
 
+function _w10IsToday(value) {
+  if (!value) return false;
+  var m = String(value).match(/\d{4}-\d{2}-\d{2}/);
+  if (!m) return false;
+  var now = new Date();
+  var y = now.getFullYear();
+  var mo = String(now.getMonth() + 1).padStart(2, '0');
+  var d = String(now.getDate()).padStart(2, '0');
+  return m[0] === y + '-' + mo + '-' + d;
+}
+
+function _w10FreshMap(map) {
+  if (!map || !Object.keys(map).length) return {};
+  if (map._updated && !_w10IsToday(map._updated)) return {};
+  return map;
+}
+
 function _w10ExtractStatus(sec) {
   var status = String(sec && sec['状态'] || '');
   var pct = sec && (sec['涨跌幅'] != null ? sec['涨跌幅'] : sec['板块涨跌幅']);
@@ -86,7 +103,7 @@ class SectorHeatWidget extends YiMuWidget {
     var liveQ = (data && data.live_quotes) || {};
     var lbPool = (data && data.lianban_pool) || [];
     var trPool = (data && data.trend_pool) || [];
-    var liveSectors = (data && data.live_sectors) || {};
+    var liveSectors = _w10FreshMap((data && data.live_sectors) || {});
     var inflowRaw = (data && data.sector_inflow) || this._sectorInflow || [];
     var inflow = Array.isArray(inflowRaw) ? inflowRaw : (inflowRaw.data || []);
     if (!inflow.length) this._loadSectorInflow();
@@ -99,16 +116,17 @@ class SectorHeatWidget extends YiMuWidget {
 
     function liveBySector(name) {
       var target = _w10Norm(name);
-      if (liveSectors[name]) return liveSectors[name];
+      if (liveSectors[name]) return { row: liveSectors[name], source: '实时' };
       for (var k in liveSectors) {
-        if (_w10Norm(k) === target) return liveSectors[k];
+        if (k.charAt(0) === '_') continue;
+        if (_w10Norm(k) === target) return { row: liveSectors[k], source: '实时' };
       }
       for (var i = 0; i < inflow.length; i++) {
-        if (_w10Norm(inflow[i].name) === target) return inflow[i];
+        if (_w10Norm(inflow[i].name) === target) return { row: inflow[i], source: '实时' };
       }
       for (var j = 0; j < inflow.length; j++) {
         var n = _w10Norm(inflow[j].name);
-        if (target && n && (target.indexOf(n) >= 0 || n.indexOf(target) >= 0)) return inflow[j];
+        if (target && n && (target.indexOf(n) >= 0 || n.indexOf(target) >= 0)) return { row: inflow[j], source: '实时' };
       }
       return null;
     }
@@ -157,7 +175,7 @@ class SectorHeatWidget extends YiMuWidget {
       return 'neutral';
     }
 
-    var summary = { total: sectors.length, main: 0, risk: 0, live: 0, matched: 0 };
+    var summary = { total: sectors.length, shown: 0, hidden: 0, main: 0, risk: 0, matched: 0 };
     var rowHtml = '';
 
     sectors.forEach(function(sec) {
@@ -165,28 +183,30 @@ class SectorHeatWidget extends YiMuWidget {
       var cleanName = _w10CleanText(name) || '—';
       var type = _w10CleanText(sec['类型'] || '未分类');
       var tone = typeTone(type + ' ' + (sec['状态'] || ''));
-      var live = liveBySector(name) || {};
+      var liveMatch = liveBySector(name);
+      if (!liveMatch || !liveMatch.row || !Object.keys(liveMatch.row).length) {
+        summary.hidden++;
+        return;
+      }
+      var live = liveMatch.row;
       var statusInfo = _w10ExtractStatus(sec);
       var pct = _w10Num(live.change_pct != null ? live.change_pct : live['涨跌幅']);
-      if (pct == null) pct = statusInfo.pct;
       var flow = _w10Num(live.net_inflow_yi != null ? live.net_inflow_yi : live['主力净流入']);
-      if (flow == null) flow = statusInfo.flow;
       var up = live.up_count;
       var down = live.down_count;
       var leader = _w10CleanText(live.leader || sec['龙头'] || '');
       var leaderChg = _w10Num(live.leader_change_pct);
       var ma = statusInfo.ma || _w10CleanText(live['MA5方向'] || live['5日线位置'] || '');
-      var source = live && Object.keys(live).length ? '实时' : '复盘';
+      var source = liveMatch.source || '实时';
       var allStocks = sectorStocks(name);
       var stocks = allStocks.slice(0, 3);
-      var avgStockPct = averageStockChange(allStocks);
-      if (pct == null && avgStockPct != null) {
-        pct = avgStockPct;
-        source = '池均';
+      if (pct == null && flow == null && up == null && down == null && !leader) {
+        summary.hidden++;
+        return;
       }
       if (tone === 'main') summary.main++;
       if (tone === 'risk') summary.risk++;
-      if (source === '实时') summary.live++;
+      summary.shown++;
       if (allStocks.length) summary.matched += allStocks.length;
 
       rowHtml += '<article class="w10-row w10-' + tone + '">';
@@ -224,18 +244,24 @@ class SectorHeatWidget extends YiMuWidget {
       rowHtml += '</article>';
     });
 
+    if (!rowHtml) {
+      body.innerHTML = '<div class="ui-empty w10-empty"><div class="ui-empty-title">暂无实时板块热度</div><div class="ui-empty-desc">未匹配到今日实时行业数据，已隐藏复盘回退项。</div></div>';
+      this.updateTimestamp();
+      return;
+    }
+
     var html = '<div class="w10-board">';
     html += '<div class="w10-acceptance">' +
-      '<div class="w10-acceptance-main"><span class="evidence-inline-ref">W10</span><b>板块验收</b><em>复盘主线与盘中校验合并。</em></div>' +
+      '<div class="w10-acceptance-main"><span class="evidence-inline-ref">W10</span><b>实时板块验收</b><em>只显示今日实时匹配项。</em></div>' +
       '<div class="w10-acceptance-grid">' +
-        '<div><span>板块</span><b>' + summary.total + '</b></div>' +
+        '<div><span>实时</span><b>' + summary.shown + '</b></div>' +
         '<div><span>主线</span><b>' + summary.main + '</b></div>' +
         '<div><span>风险</span><b>' + summary.risk + '</b></div>' +
         '<div><span>候选</span><b>' + summary.matched + '</b></div>' +
       '</div>' +
-      '<div class="w10-acceptance-foot">实时覆盖 ' + summary.live + '/' + summary.total + '</div>' +
+      '<div class="w10-acceptance-foot">隐藏复盘 ' + summary.hidden + '/' + summary.total + '</div>' +
     '</div>';
-    html += '<div class="w10-header"><span>复盘板块</span><span>盘中校验</span></div>';
+    html += '<div class="w10-header"><span>候选板块</span><span>实时校验</span></div>';
     html += rowHtml;
     html += '</div>';
     body.innerHTML = html;

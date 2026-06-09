@@ -208,7 +208,7 @@ class TicketUpgradeReadinessTests(unittest.TestCase):
             if url.endswith("/"):
                 return Resp('<script src="widgets/trade-tickets.js?v=1"></script><button>W24</button>')
             if url.endswith("/widgets/trade-tickets.js"):
-                return Resp("function _prepareTicket(){} data-tt-prepare /api/trade/fills/confirm 确认成交")
+                return Resp("function _prepareTicket(){} data-tt-prepare data-tt-confirm /api/trade/fills/confirm")
             if url.endswith("/api/trade/tickets"):
                 return Resp('{"tickets":[]}', content_type="application/json")
             raise AssertionError(url)

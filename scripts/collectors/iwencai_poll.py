@@ -132,6 +132,32 @@ def _eastmoney_limit_counts(date_str=None):
         return {}
 
 
+def _is_same_local_date(updated, now=None):
+    if not updated:
+        return False
+    now = now or datetime.now()
+    return str(updated)[:10] == now.strftime("%Y-%m-%d")
+
+
+def _preserve_same_day_iwencai_fields(results):
+    prev = CACHE.get("iwencai", {})
+    if not isinstance(prev, dict) or not _is_same_local_date(prev.get("_updated")):
+        return results
+    preserved = []
+    for key in [
+        "昨日涨停收益", "涨停溢价率", "赚钱效应",
+        "连板收益", "炸板收益",
+        "情绪值", "_emotion_source", "_emotion_counts",
+    ]:
+        if key not in results and key in prev:
+            results[key] = prev[key]
+            if not key.startswith("_"):
+                preserved.append(key)
+    if preserved:
+        results["_preserved_fields"] = sorted(preserved)
+    return results
+
+
 def poll_iwencai_sentiment(force=False):
     if not force and not is_trading_time():
         return
@@ -154,16 +180,35 @@ def poll_iwencai_sentiment(force=False):
                 results["赚钱效应"] = "好" if avg > 2 else ("差" if avg < 0 else "一般")
 
         # === 连板收益 ===
-        r = _iwencai_query("昨日连续涨停天数>=2 今日涨跌幅 非st", limit=30)
-        avg = _avg_pct(r.get("datas", []), "涨跌幅")
-        if avg is not None:
-            results["连板收益"] = avg
+        for q in [
+            "昨日连续涨停天数>=2 今日涨跌幅 非st",
+            "昨日连板 今日涨跌幅 非st",
+            "昨日涨停 连续涨停天数>=2 今日涨跌幅 非st",
+        ]:
+            r = _iwencai_query(q, limit=30)
+            avg = _avg_pct(r.get("datas", []), "涨跌幅")
+            if avg is not None:
+                results["连板收益"] = avg
+                results["_lianban_profit_query"] = q
+                break
 
         # === 炸板收益 ===
         r = _iwencai_query("昨日炸板 今日涨跌幅 非st", limit=30)
         avg = _avg_pct(r.get("datas", []), "涨跌幅")
         if avg is not None:
             results["炸板收益"] = avg
+
+        # === 实时情绪值：iwencai 上涨/下跌家数，不使用 live_index_fallback ===
+        try:
+            up_cnt = len(_iwencai_query("今日上涨 非st", limit=6000).get("datas", []))
+            down_cnt = len(_iwencai_query("今日下跌 非st", limit=6000).get("datas", []))
+            total_cnt = up_cnt + down_cnt
+            if up_cnt > 0 and down_cnt > 0 and total_cnt > 0:
+                results["情绪值"] = round(up_cnt / total_cnt * 100, 1)
+                results["_emotion_source"] = "iwencai_up_down"
+                results["_emotion_counts"] = {"up": up_cnt, "down": down_cnt}
+        except Exception:
+            pass
 
         # === 最高板 + 次高板 + 连板股列表 ===
         r = _iwencai_query("连续涨停天数>=2 非st 连续涨停天数 所属行业 封板时间 换手率", limit=50)
@@ -256,6 +301,7 @@ def poll_iwencai_sentiment(force=False):
             results["连板风险值"] = round(max(0, min(1, 1.0 - jj * 1.8)), 2)
 
         if results:
+            results = _preserve_same_day_iwencai_fields(results)
             results["_updated"] = datetime.now().strftime("%Y-%m-%dT%H:%M:%S+08:00")
             CACHE["iwencai"] = results
     except Exception as e:

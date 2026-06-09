@@ -130,6 +130,7 @@ body.ready{opacity:1}
   <details class="topbar-action-menu">
     <summary title="操作入口">操作</summary>
     <div class="topbar-shortcuts" aria-label="操作入口">
+      <button class="topbar-shortcut topbar-shortcut-pnl" data-widget="W25" title="W25 作战态势"><b>W25</b><span>态势</span></button>
       <button class="topbar-shortcut topbar-shortcut-data" data-widget="W04" title="W04 市场全景"><b>W04</b><span>全景</span></button>
       <button class="topbar-shortcut topbar-shortcut-trade" data-widget="W24" title="W24 交易票据"><b>W24</b><span>票据</span></button>
       <button class="topbar-shortcut topbar-shortcut-trade" data-widget="W15" title="W15 持仓操作清仓"><b>W15</b><span>持仓</span></button>
@@ -1092,7 +1093,7 @@ window._healthConfirmed = false;
       window._tradeEntryAllowed = te !== false;
       if (te === false) {
         hDot.className = 'health-dot dead'; hLabel.textContent = '阻断'; hLabel.style.color = 'var(--danger)';
-        window._healthCritical = true; window._healthConfirmed = false;
+        window._healthCritical = true; window._healthConfirmed = true;
       } else if (degraded) {
         hDot.className = 'health-dot delayed'; hLabel.textContent = '降级'; hLabel.style.color = 'var(--warn)';
         window._healthCritical = false; window._healthConfirmed = true;
