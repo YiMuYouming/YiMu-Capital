@@ -261,6 +261,38 @@ class RuleStateBridgeContractTest(unittest.TestCase):
         self.assertTrue(w1_emotion, f"W1 情绪硬卡应保留: {state}")
         self.assertEqual(w1_emotion[0]["evidence"].get("emotion_pct"), 38.0)
 
+    def test_live_index_breadth_derives_emotion_when_iwencai_emotion_missing(self):
+        """云端无 PyTDX 时，fresh live_index 上涨/下跌家数可作为实时情绪主源兜底"""
+        self.tmp_dashboard.write_text(
+            '{"meta":{"date":"2026-06-10"},"market":{},"sentiment":{},'
+            '"lianban_pool":[],"trend_pool":[],"positions":[],"decision":{},'
+            '"sectors":[],"risk":{"连亏天数":0},"pnl":{},'
+            '"style":{"总分":59,"连板占比":0,"趋势占比":100,"dim3_趋势":16}}'
+        )
+        bridge.CACHE["iwencai"] = {
+            "昨日涨停收益": 3.0,
+            "晋级率": 0.22,
+            "炸板率": 0.20,
+            "_updated": "2026-06-10T09:40:00+08:00",
+        }
+        bridge.CACHE["live_quotes"] = {"_updated": "2026-06-10T09:40:00+08:00"}
+        bridge.CACHE["live_index"] = {
+            "上涨家数": 1293,
+            "下跌家数": 3724,
+            "_updated": "2026-06-10T09:40:00+08:00",
+            "_source": "eastmoney_fallback",
+        }
+        bridge.CACHE["breadth"] = {}
+
+        state = bridge._build_rule_state(now=datetime(2026, 6, 10, 9, 40))
+
+        codes = [b["code"] for b in state["blocks"]]
+        self.assertNotIn("SENTIMENT_STALE", codes)
+        self.assertEqual(state["market_regime"], "低迷")
+        w1_emotion = [b for b in state["blocks"] if b["code"] == "W1_EMOTION"]
+        self.assertTrue(w1_emotion, f"低迷应继续阻断 W1，而不是数据缺失: {state}")
+        self.assertAlmostEqual(w1_emotion[0]["evidence"].get("emotion_pct"), 25.8, places=1)
+
     def test_invalid_iwencai_up_down_emotion_is_sanitized(self):
         """iwencai 上涨侧/下跌侧任一为0时，派生情绪值不可用"""
         dirty = {

@@ -899,7 +899,8 @@ def _build_rule_inputs(now=None, account_state=None):
         if m:
             lianban_risk = float(m.group(0))
 
-    # 情绪值优先级：iwencai 实时值 > 可信 breadth 备用；盘中不得用昨日 baseline 情绪伪装实时值。
+    # 情绪值优先级：iwencai 实时值 > 可信 breadth 备用 > fresh live_index 广度。
+    # 盘中不得用昨日 baseline 情绪伪装实时值；云端 PyTDX 禁用时 live_index 是可用实时广度源。
     breadth = CACHE.get("breadth", {})
     breadth_fresh = _compute_freshness("breadth", breadth, now=now)
     breadth_source = str(breadth.get("_source") or "")
@@ -909,11 +910,19 @@ def _build_rule_inputs(now=None, account_state=None):
     )
     up_cnt = breadth.get("上涨家数")
     dn_cnt = breadth.get("下跌家数")
+    live_index = CACHE.get("live_index", {})
+    live_index_fresh = _compute_freshness("live_index", live_index, now=now)
+    live_index_up = live_index.get("上涨家数")
+    live_index_dn = live_index.get("下跌家数")
     em_raw = iwencai.get("情绪值") if sentiment_usable else None
     if em_raw is not None:
         emotion_pct = float(em_raw)
     elif breadth_usable and up_cnt is not None and dn_cnt is not None and (up_cnt + dn_cnt) > 0:
         emotion_pct = round(up_cnt / (up_cnt + dn_cnt) * 100, 1)
+    elif live_index_fresh in ("live", "delayed") and live_index_up is not None and live_index_dn is not None:
+        live_index_up = float(live_index_up)
+        live_index_dn = float(live_index_dn)
+        emotion_pct = round(live_index_up / (live_index_up + live_index_dn) * 100, 1) if (live_index_up + live_index_dn) > 0 else None
     else:
         emotion_pct = None
 
