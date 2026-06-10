@@ -141,6 +141,21 @@ class LiveIndexBaselineFallbackTests(unittest.TestCase):
         self.assertEqual(payload["live_index"]["成交额"], "3.24万亿")
         self.assertEqual(payload["rule_state"], {"status": "test"})
 
+    def test_live_payload_includes_independent_limit_counts(self):
+        bridge.CACHE["limit_counts"] = {
+            "涨停家数": 43,
+            "跌停家数": 12,
+            "_source": "eastmoney_zt_pool",
+            "_updated": "2026-06-10T13:05:00+08:00",
+        }
+
+        payload = bridge._build_live_quotes_payload(rule_state={"status": "test"})
+
+        self.assertEqual(payload["limit_counts"]["涨停家数"], 43)
+        self.assertEqual(payload["limit_counts"]["跌停家数"], 12)
+        self.assertEqual(payload["limit_counts"]["_source"], "eastmoney_zt_pool")
+        self.assertIn("limit_counts", bridge._PERSIST_KEYS)
+
     def test_live_payload_marks_iwencai_freshness(self):
         bridge.CACHE["iwencai"] = {
             "涨停家数": 0,

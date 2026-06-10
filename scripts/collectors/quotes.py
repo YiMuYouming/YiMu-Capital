@@ -498,6 +498,38 @@ def collect_breadth(force=False):
         print(f"  [quotes] collect_breadth error: {e}", file=sys.stderr)
 
 
+def collect_limit_counts(force=False):
+    """60s: 独立涨跌停池计数（东方财富），避免问财 dead 时 W04 回退昨日基线。"""
+    if not force and not is_trading_time():
+        return
+    try:
+        from scripts.collectors.iwencai_poll import _eastmoney_limit_counts
+        r = _eastmoney_limit_counts()
+        if not isinstance(r, dict):
+            return
+        has_limit = "涨停家数" in r or "跌停家数" in r
+        if not has_limit:
+            return
+        updated = datetime.now().strftime("%Y-%m-%dT%H:%M:%S+08:00")
+        payload = {
+            "涨停家数": r.get("涨停家数"),
+            "跌停家数": r.get("跌停家数"),
+            "_source": "eastmoney_zt_pool",
+            "_updated": updated,
+        }
+        CACHE["limit_counts"] = payload
+
+        hot = CACHE.setdefault("hot_list", {})
+        if payload["涨停家数"] is not None:
+            hot["zt_count"] = payload["涨停家数"]
+        if payload["跌停家数"] is not None:
+            hot["dt_count"] = payload["跌停家数"]
+        hot["_limit_source"] = payload["_source"]
+        hot["_limit_updated"] = updated
+    except Exception as e:
+        print(f"  [quotes] collect_limit_counts error: {e}", file=sys.stderr)
+
+
 def collect_sectors(force=False):
     """30s: 板块涨跌幅/MA5/20/方向"""
     if not force and not is_trading_time():

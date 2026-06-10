@@ -57,6 +57,22 @@ class QuotesCollectorTests(unittest.TestCase):
         self.assertEqual(iwencai_poll.CACHE["iwencai"]["跌停家数"], 12)
         self.assertEqual(iwencai_poll.CACHE["iwencai"]["_limit_source"], "eastmoney_zt_pool")
 
+    def test_collect_limit_counts_writes_independent_cache_and_hot_metadata(self):
+        quotes.CACHE["hot_list"] = {"zt_count": 0, "zt_stocks": []}
+
+        with patch("scripts.collectors.iwencai_poll._eastmoney_limit_counts",
+                   return_value={"涨停家数": 43, "跌停家数": 12}):
+            quotes.collect_limit_counts(force=True)
+
+        limit_counts = quotes.CACHE["limit_counts"]
+        self.assertEqual(limit_counts["涨停家数"], 43)
+        self.assertEqual(limit_counts["跌停家数"], 12)
+        self.assertEqual(limit_counts["_source"], "eastmoney_zt_pool")
+        self.assertIn("_updated", limit_counts)
+        self.assertEqual(quotes.CACHE["hot_list"]["zt_count"], 43)
+        self.assertEqual(quotes.CACHE["hot_list"]["dt_count"], 12)
+        self.assertEqual(quotes.CACHE["hot_list"]["_limit_source"], "eastmoney_zt_pool")
+
     def test_iwencai_poll_writes_realtime_emotion_from_up_down_counts(self):
         def fake_query(query, limit=100):
             if query == "今日上涨 非st":

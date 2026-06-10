@@ -1478,6 +1478,25 @@ global.Date = class extends RealDate {
                       f"W04 应采用问财实时 0/0，不应回退昨日基线: {html[:800]}")
         self.assertNotIn(">100</span>/<span class=\"down\">8<", html)
 
+    def test_w04_uses_independent_limit_counts_before_dead_iwencai_and_hot_zero(self):
+        result = _render_widget("market-overview.js", "W04", {
+            "live_index": {},
+            "market": {"涨停家数": 128, "跌停家数": 5},
+            "limit_counts": {"涨停家数": 43, "跌停家数": 12, "_source": "eastmoney_zt_pool"},
+            "live_breadth": {"_source": "live_index_fallback", "_total": 5211, "涨停": 0, "跌停": 0},
+            "iwencai": {
+                "_updated": "2026-06-10T11:32:21+08:00",
+                "_freshness": {"level": "dead", "type": "iwencai", "age_seconds": 2040},
+            },
+            "hot_list": {"zt_count": 0, "zt_stocks": [], "_updated": "2026-06-10T12:57:11+08:00"},
+            "sentiment": {},
+        })
+        html = result.get("html", "")
+        self.assertIn(">43</span>/<span class=\"down\">12<", html,
+                      f"W04 应优先采用独立涨跌停池计数: {html[:900]}")
+        self.assertNotIn(">128</span>/<span class=\"down\">5<", html)
+        self.assertNotIn(">0</span>/<span class=\"down\">0<", html)
+
     def test_w04_uses_hot_list_limit_up_and_masks_missing_limit_down_when_iwencai_dead(self):
         result = _render_widget("market-overview.js", "W04", {
             "live_index": {},
@@ -1497,6 +1516,28 @@ global.Date = class extends RealDate {
                       f"W04 应忽略 dead 问财和粗略 breadth，用热榜涨停并隐藏缺失跌停: {html[:900]}")
         self.assertNotIn(">128</span>/<span class=\"down\">5<", html)
         self.assertNotIn(">0</span>/<span class=\"down\">0<", html)
+
+    def test_w04_uses_hot_list_eastmoney_limit_metadata_after_restart(self):
+        result = _render_widget("market-overview.js", "W04", {
+            "live_index": {},
+            "market": {"涨停家数": 128, "跌停家数": 5},
+            "live_breadth": {"_source": "live_index_fallback", "_total": 5211, "涨停": 0, "跌停": 0},
+            "iwencai": {
+                "_updated": "2026-06-10T11:32:21+08:00",
+                "_freshness": {"level": "dead", "type": "iwencai", "age_seconds": 2040},
+            },
+            "hot_list": {
+                "zt_count": 55,
+                "dt_count": 13,
+                "_limit_source": "eastmoney_zt_pool",
+                "_limit_updated": "2026-06-10T13:05:45+08:00",
+            },
+            "sentiment": {},
+        })
+        html = result.get("html", "")
+        self.assertIn(">55</span>/<span class=\"down\">13<", html,
+                      f"W04 重启初期应使用 hot_list 中已落盘的东方财富涨跌停元信息: {html[:900]}")
+        self.assertNotIn(">128</span>/<span class=\"down\">5<", html)
 
     def test_w04_masks_limit_counts_when_only_stale_baseline_exists(self):
         result = _render_widget("market-overview.js", "W04", {

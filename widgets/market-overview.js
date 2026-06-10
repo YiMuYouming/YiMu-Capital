@@ -57,7 +57,7 @@ class MarketOverviewWidget extends YiMuWidget {
     var iwUsable = isW04IwencaiUsable(iw);
     var sent = d.sentiment || {};
     var br = d.live_breadth || d.breadth || {};
-    var limitCounts = buildW04LimitCounts(iw, iwUsable, d.hot_list || {}, br);
+    var limitCounts = buildW04LimitCounts(iw, iwUsable, d.limit_counts || {}, d.hot_list || {}, br);
     var zt = limitCounts.zt;
     var dt = limitCounts.dt;
 
@@ -243,9 +243,21 @@ function parseW04Count(v) {
 function pickW04HotLimitUp(hotList) {
   hotList = hotList || {};
   var count = parseW04Count(hotList.zt_count);
-  if (count != null) return count;
-  if (Array.isArray(hotList.zt_stocks)) return hotList.zt_stocks.length;
+  if (count != null && count > 0) return count;
+  if (Array.isArray(hotList.zt_stocks) && hotList.zt_stocks.length > 0) return hotList.zt_stocks.length;
   return null;
+}
+
+function pickW04HotLimitDown(hotList) {
+  hotList = hotList || {};
+  if (hotList._limit_source !== 'eastmoney_zt_pool') return null;
+  return parseW04Count(hotList.dt_count);
+}
+
+function pickW04LimitCount(limitCounts, key) {
+  limitCounts = limitCounts || {};
+  if (!hasW04Own(limitCounts, key)) return null;
+  return parseW04Count(limitCounts[key]);
 }
 
 function pickW04BreadthLimitCount(br, key) {
@@ -255,14 +267,15 @@ function pickW04BreadthLimitCount(br, key) {
   return parseW04Count(br[key]);
 }
 
-function buildW04LimitCounts(iw, iwUsable, hotList, br) {
-  var zt = null;
-  var dt = null;
+function buildW04LimitCounts(iw, iwUsable, limitCounts, hotList, br) {
+  var zt = pickW04LimitCount(limitCounts, '涨停家数');
+  var dt = pickW04LimitCount(limitCounts, '跌停家数');
   if (iwUsable !== false) {
-    if (hasW04Own(iw, '涨停家数')) zt = parseW04Count(iw['涨停家数']);
-    if (hasW04Own(iw, '跌停家数')) dt = parseW04Count(iw['跌停家数']);
+    if (zt == null && hasW04Own(iw, '涨停家数')) zt = parseW04Count(iw['涨停家数']);
+    if (dt == null && hasW04Own(iw, '跌停家数')) dt = parseW04Count(iw['跌停家数']);
   }
   if (zt == null) zt = pickW04HotLimitUp(hotList);
+  if (dt == null) dt = pickW04HotLimitDown(hotList);
   if (zt == null) zt = pickW04BreadthLimitCount(br, '涨停');
   if (dt == null) dt = pickW04BreadthLimitCount(br, '跌停');
   return { zt: zt, dt: dt };

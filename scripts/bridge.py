@@ -54,7 +54,7 @@ DATA_FILE = ROOT / "data/dashboard_data.json"
 LLM_INSIGHTS_FILE = ROOT / "data/llm_insights.json"
 _PERSIST_KEYS = [
     "live_index", "live_quotes", "breadth", "live_sectors", "iwencai",
-    "northbound", "hot_list", "sector_inflow",
+    "northbound", "hot_list", "limit_counts", "sector_inflow",
     "上证15min", "深证15min", "创业15min", "kline_15m_date",
 ]
 
@@ -1667,6 +1667,7 @@ def _build_live_quotes_payload(rule_state=None):
         'live_index': _live_index_with_baseline(),
         'live_quotes': CACHE.get('live_quotes', {}),
         'breadth': CACHE.get('breadth', {}),
+        'limit_counts': CACHE.get('limit_counts', {}),
         'live_sectors': CACHE.get('live_sectors', {}),
         'hot_list': CACHE.get('hot_list', {}),
         'sector_inflow': CACHE.get('sector_inflow', {}),
@@ -3293,6 +3294,8 @@ if __name__ == '__main__':
     # T1 半实时（30s）
     scheduler.add_job(quotes.collect_breadth, 'interval', seconds=30, id='breadth_30s',
                       max_instances=1, misfire_grace_time=60, coalesce=True)
+    scheduler.add_job(quotes.collect_limit_counts, 'interval', seconds=60, id='limit_counts_60s',
+                      max_instances=1, misfire_grace_time=120, coalesce=True)
     scheduler.add_job(quotes.collect_sectors, 'interval', seconds=30, id='sectors_30s',
                       max_instances=1, misfire_grace_time=60, coalesce=True)
     # 缓存落盘（30s，防重启丢数据）
@@ -3401,6 +3404,7 @@ if __name__ == '__main__':
     # 冷启动：强制执行一次初始采集填充缓存（不受 is_trading_time 限制）
     # 云端数据源可能慢或限流，不能阻塞 HTTP ready。
     start_cold_bootstrap([
+        quotes.collect_limit_counts,
         market_data.poll_sector_inflow,
         iwencai_poll.poll_iwencai_sentiment,
         quotes.collect_quotes,
