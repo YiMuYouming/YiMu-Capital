@@ -1478,22 +1478,40 @@ global.Date = class extends RealDate {
                       f"W04 应采用问财实时 0/0，不应回退昨日基线: {html[:800]}")
         self.assertNotIn(">100</span>/<span class=\"down\">8<", html)
 
-    def test_w04_ignores_dead_iwencai_zero_limit_counts(self):
+    def test_w04_uses_hot_list_limit_up_and_masks_missing_limit_down_when_iwencai_dead(self):
+        result = _render_widget("market-overview.js", "W04", {
+            "live_index": {},
+            "market": {"涨停家数": 128, "跌停家数": 5},
+            "live_breadth": {"_source": "live_index_fallback", "_total": 5211, "涨停": 0, "跌停": 0},
+            "iwencai": {
+                "涨停家数": 0,
+                "跌停家数": 0,
+                "_updated": "2026-06-10T11:32:21+08:00",
+                "_freshness": {"level": "dead", "type": "iwencai", "age_seconds": 2040},
+            },
+            "hot_list": {"zt_count": 55, "zt_stocks": [{"code": "300001"}], "_updated": "2026-06-10T12:52:09+08:00"},
+            "sentiment": {},
+        })
+        html = result.get("html", "")
+        self.assertIn(">55</span>/<span class=\"down\">—<", html,
+                      f"W04 应忽略 dead 问财和粗略 breadth，用热榜涨停并隐藏缺失跌停: {html[:900]}")
+        self.assertNotIn(">128</span>/<span class=\"down\">5<", html)
+        self.assertNotIn(">0</span>/<span class=\"down\">0<", html)
+
+    def test_w04_masks_limit_counts_when_only_stale_baseline_exists(self):
         result = _render_widget("market-overview.js", "W04", {
             "live_index": {},
             "market": {"涨停家数": 73, "跌停家数": 11},
             "iwencai": {
-                "涨停家数": 0,
-                "跌停家数": 0,
                 "_updated": "2026-06-05T15:07:01+08:00",
                 "_freshness": {"level": "dead", "type": "iwencai", "age_seconds": 2040},
             },
             "sentiment": {},
         })
         html = result.get("html", "")
-        self.assertIn(">73</span>/<span class=\"down\">11<", html,
-                      f"W04 应忽略 dead 的问财 0/0，回退有效口径: {html[:900]}")
-        self.assertNotIn(">0</span>/<span class=\"down\">0<", html)
+        self.assertIn(">—</span>/<span class=\"down\">—<", html,
+                      f"W04 盘中涨跌停缺实时源时不应显示昨日基线: {html[:900]}")
+        self.assertNotIn(">73</span>/<span class=\"down\">11<", html)
 
     def test_w04_uses_baseline_returns_when_iwencai_dead(self):
         result = _render_widget("market-overview.js", "W04", {

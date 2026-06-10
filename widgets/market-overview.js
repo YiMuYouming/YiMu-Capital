@@ -56,8 +56,10 @@ class MarketOverviewWidget extends YiMuWidget {
     var iw = d.iwencai || {};
     var iwUsable = isW04IwencaiUsable(iw);
     var sent = d.sentiment || {};
-    var zt = pickW04LiveFirst(iw, '涨停家数', m['涨停家数'], iwUsable);
-    var dt = pickW04LiveFirst(iw, '跌停家数', m['跌停家数'], iwUsable);
+    var br = d.live_breadth || d.breadth || {};
+    var limitCounts = buildW04LimitCounts(iw, iwUsable, d.hot_list || {}, br);
+    var zt = limitCounts.zt;
+    var dt = limitCounts.dt;
 
     html += '<div class="w04-metric-grid">';
     html += '<div class="kpi-card w04-metric-card"><div class="kpi-label">成交额</div><div class="kpi-value">'+_w04Esc(li['成交额']||'—')+'</div>'+(amtCompareText?'<div class="kpi-verdict ' + amtDir + '">' + _w04Esc(amtCompareText) + '</div>':'')+'</div>';
@@ -67,7 +69,6 @@ class MarketOverviewWidget extends YiMuWidget {
     html += '</div>';
 
     // === 涨跌分布条 (更宽，更醒目) ===
-    var br = d.live_breadth || d.breadth || {};
     var bt = br['_total'] || 0;
     if (bt > 0) {
       var isCoarseBreadth = br['_source'] === 'live_index_fallback';
@@ -232,9 +233,39 @@ function isW04IwencaiUsable(iw) {
   return level !== 'dead';
 }
 
-function pickW04LiveFirst(liveObj, key, fallback, liveUsable) {
-  if (liveUsable !== false && hasW04Own(liveObj, key)) return liveObj[key];
-  return fallback != null ? fallback : null;
+function parseW04Count(v) {
+  if (v == null || v === '') return null;
+  if (typeof v === 'number') return isFinite(v) ? v : null;
+  var n = parseInt(String(v).replace(/[^\d-]/g, ''), 10);
+  return isNaN(n) ? null : n;
+}
+
+function pickW04HotLimitUp(hotList) {
+  hotList = hotList || {};
+  var count = parseW04Count(hotList.zt_count);
+  if (count != null) return count;
+  if (Array.isArray(hotList.zt_stocks)) return hotList.zt_stocks.length;
+  return null;
+}
+
+function pickW04BreadthLimitCount(br, key) {
+  br = br || {};
+  if (br._source === 'live_index_fallback') return null;
+  if (!hasW04Own(br, key)) return null;
+  return parseW04Count(br[key]);
+}
+
+function buildW04LimitCounts(iw, iwUsable, hotList, br) {
+  var zt = null;
+  var dt = null;
+  if (iwUsable !== false) {
+    if (hasW04Own(iw, '涨停家数')) zt = parseW04Count(iw['涨停家数']);
+    if (hasW04Own(iw, '跌停家数')) dt = parseW04Count(iw['跌停家数']);
+  }
+  if (zt == null) zt = pickW04HotLimitUp(hotList);
+  if (zt == null) zt = pickW04BreadthLimitCount(br, '涨停');
+  if (dt == null) dt = pickW04BreadthLimitCount(br, '跌停');
+  return { zt: zt, dt: dt };
 }
 
 function pickW04Return(liveObj, key, fallback, hasLiveIwencai) {

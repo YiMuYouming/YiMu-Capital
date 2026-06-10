@@ -1387,11 +1387,12 @@ class G5DegradeDisplayTest(unittest.TestCase):
         src = (ROOT / "widgets/market-overview.js").read_text(encoding="utf-8")
         self.assertIn("'—'", src, "涨跌停缺值应显示 —")
 
-    def test_w04_uses_baseline_when_iwencai_missing(self):
-        """W04 收盘/重启后 iwencai 缺失时应回退 baseline market/sentiment"""
+    def test_w04_uses_live_limit_sources_when_iwencai_missing(self):
+        """W04 涨跌停不应在 iwencai 缺失时回退昨日 market 基线"""
         src = (ROOT / "widgets/market-overview.js").read_text(encoding="utf-8")
-        self.assertIn("m['涨停家数']", src)
-        self.assertIn("m['跌停家数']", src)
+        self.assertIn("buildW04LimitCounts", src)
+        self.assertIn("pickW04HotLimitUp", src)
+        self.assertIn("br._source === 'live_index_fallback'", src)
         self.assertIn("sent['情绪值']", src)
         self.assertIn("sent['昨日涨停收益']", src)
         self.assertIn("sent['昨日炸板收益']", src)
