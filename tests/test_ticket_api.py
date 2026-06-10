@@ -494,6 +494,73 @@ class TicketApiTest(unittest.TestCase):
         self.assertEqual(inputs["risk"]["losing_account_days"], 0)
         self.assertNotIn("loss_streak", inputs["risk"])
 
+    def test_rule_inputs_use_closed_daily_summary_for_premarket_loss_streak(self):
+        db.insert_daily_summary({
+            "date": "2026-06-05",
+            "nav": 0.9949,
+            "pnl_pct": -0.51,
+        })
+        db.insert_daily_summary({
+            "date": "2026-06-08",
+            "nav": 0.9814,
+            "pnl_pct": -1.36,
+        })
+        db.insert_daily_summary({
+            "date": "2026-06-09",
+            "nav": 0.9868,
+            "pnl_pct": 0.55,
+        })
+        with mock.patch.object(bridge, "_load_dashboard_data", return_value={
+            "risk": {"连亏天数": 2},
+            "style": {"总分": 80, "连板占比": 0, "趋势占比": 100},
+            "sentiment": {},
+            "market": {},
+        }):
+            inputs = bridge._build_rule_inputs(
+                datetime(2026, 6, 10, 9, 10),
+                account_state={
+                    "pnl_pct": 0.0,
+                    "account_day_return_pct": 0.0,
+                    "valuation_complete": True,
+                    "mv": 100000,
+                },
+            )
+
+        self.assertEqual(inputs["risk"]["losing_account_days"], 0)
+
+    def test_full_snapshot_uses_rule_loss_streak_not_stale_baseline(self):
+        db.insert_daily_summary({
+            "date": "2026-06-08",
+            "nav": 0.9814,
+            "pnl_pct": -1.36,
+        })
+        db.insert_daily_summary({
+            "date": "2026-06-09",
+            "nav": 0.9868,
+            "pnl_pct": 0.55,
+        })
+        dashboard = {
+            "risk": {"连亏天数": 2, "周累计回撤": 0, "月累计回撤": 0},
+            "style": {"总分": 80, "连板占比": 0, "趋势占比": 100},
+            "sentiment": {},
+            "market": {},
+            "lianban_pool": [],
+            "trend_pool": [],
+            "sectors": [],
+        }
+        with mock.patch.object(bridge, "_load_dashboard_data", return_value=dashboard):
+            with mock.patch.object(bridge, "_current_pnl_summary", return_value={
+                "pnl_pct": 0.0,
+                "account_day_return_pct": 0.0,
+                "valuation_complete": True,
+                "total_asset": 100000,
+                "mv": 0,
+                "positions": [],
+            }):
+                snapshot = bridge._build_full_snapshot()
+
+        self.assertEqual(snapshot["风控"]["连亏天数"], 0)
+
     def test_reduce_is_sell_alias_and_uses_sellable_gate(self):
         status, body = _call("POST", "/api/trade/tickets/prepare", {
             "intent_text": "准备减仓 立讯精密 500股",

@@ -385,6 +385,45 @@ weekday: 周四
 
         self.assertEqual(Path(selected).name, "2026_5_29_Friday_ReviewNote.md")
 
+    def test_dashboard_does_not_backfill_close_emotion_from_previous_or_auction(self):
+        self.assertIsNotNone(build_dashboard_data)
+        current_note = """---
+date: 2026-06-10
+weekday: 周三
+情绪值:
+竞价情绪值:
+---
+# 2026-06-10 周三 盘前笔记
+
+## 情绪节点
+
+### 表1 大盘全景
+| 节点 | 情绪 | 上证(%) | 涨/跌停 | 量能 | 涨跌比 | 总竞价涨幅 | 关键异动 |
+|------|------|---------|---------|------|--------|------------|----------|
+| 竞价 | 12.2% | -0.4 | — | — | 600/4400 | — | 地缘冲击 |
+"""
+        previous_note = """---
+date: 2026-06-09
+weekday: 周二
+情绪值: 64
+---
+# 2026-06-09 周二 复盘笔记
+"""
+        with tempfile.TemporaryDirectory() as td:
+            review_root = Path(td) / "复盘笔记" / "W24_第24周"
+            review_root.mkdir(parents=True)
+            current = review_root / "2026_6_10_Wednesday_ReviewNote.md"
+            previous = review_root / "2026_6_9_Tuesday_ReviewNote.md"
+            current.write_text(current_note)
+            previous.write_text(previous_note)
+
+            with mock.patch.object(_gen, "get_style_data", return_value={}):
+                data = build_dashboard_data(str(current))
+
+        sentiment = data.get("sentiment") or {}
+        self.assertIsNone(sentiment.get("情绪值"))
+        self.assertEqual(sentiment.get("竞价情绪值"), 12.2)
+
     def test_dashboard_style_uses_premarket_plan_when_today_fm_empty(self):
         self.assertIsNotNone(build_dashboard_data)
         self.assertIsNotNone(_parse_premarket_plan)

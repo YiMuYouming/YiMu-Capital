@@ -1261,6 +1261,12 @@ def build_dashboard_data(review_path):
             return v
         return clean_value(prev_fm.get(key)) if prev_fm else default
 
+    def fm_current_val(key):
+        v = clean_value(fm.get(key))
+        if v is not None and v != "" and v != "待收盘":
+            return v
+        return None
+
     raw_date = fm.get("date", datetime.now().strftime("%Y-%m-%d"))
     date_str = str(raw_date) if not isinstance(raw_date, str) else raw_date
 
@@ -1277,6 +1283,7 @@ def build_dashboard_data(review_path):
 
     # 问财实时值兜底（笔记frontmatter有值优先，无值用问财）
     iw = {k.replace('_iwencai_', ''): v for k, v in style.items() if k.startswith('_iwencai_')}
+    iw_current = iw if Path(style_review_path).resolve() == Path(review_path).resolve() else {}
 
     data = {
         "meta": {
@@ -1304,10 +1311,10 @@ def build_dashboard_data(review_path):
         # === sentiment 域：T3(实时计算)/T2(校验) 优先，frontmatter 仅做回退 ===
         "sentiment": {
             # T3 主源: store.js merge() 涨跌家数比 → frontmatter 仅做人工校验
-            "情绪值": fm_val("情绪值") or iw.get("情绪值"),
-            "情绪区间": fm_val("情绪区间"),
-            "昨日情绪": fm_val("昨日情绪"),
-            "情绪变化": fm_val("情绪变化"),
+            "情绪值": fm_current_val("情绪值") or iw_current.get("情绪值"),
+            "情绪区间": fm_current_val("情绪区间"),
+            "昨日情绪": fm_current_val("昨日情绪"),
+            "情绪变化": fm_current_val("情绪变化"),
             # T2: iwencai 2min → frontmatter 回退
             "赚钱效应": fm_val("赚钱效应") or iw.get("赚钱效应"),
             "昨日涨停收益": fm_val("昨日涨停收益") or iw.get("涨停收益"),
@@ -1322,7 +1329,7 @@ def build_dashboard_data(review_path):
             "次高板": fm_val("次高板"),
             "连板梯队": fm_val("连板梯队"),
             # T2: auction snapshot (9:25) → frontmatter 回退
-            "竞价情绪值": fm_val("竞价情绪值") or _bidding_emotion(parse_sentiment_nodes(review_path)) or fm_val("情绪值") or iw.get("情绪值"),
+            "竞价情绪值": fm_current_val("竞价情绪值") or _bidding_emotion(parse_sentiment_nodes(review_path)),
         },
         "style": style if style else {
             "总分": None, "风格": None, "连板占比": None, "趋势占比": None,

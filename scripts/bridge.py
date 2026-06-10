@@ -214,6 +214,31 @@ def _current_pnl_summary():
     state = load_current_account_state(CACHE.get('live_quotes', {}))
     return _merge_pnl_summary(legacy, state)
 
+
+def _closed_daily_loss_streak(now=None):
+    """Count consecutive losing closed days from daily_summary, excluding today."""
+    from datetime import datetime as _dt
+    from scripts.db import get_conn
+
+    today = (now or _dt.now()).strftime("%Y-%m-%d")
+    rows = get_conn().execute(
+        "SELECT date, pnl_pct FROM daily_summary WHERE date < ? ORDER BY date DESC LIMIT 60",
+        (today,),
+    ).fetchall()
+    if not rows:
+        return None
+    streak = 0
+    for row in rows:
+        try:
+            pnl = float(row["pnl_pct"])
+        except (TypeError, ValueError, KeyError):
+            break
+        if pnl < 0:
+            streak += 1
+        else:
+            break
+    return streak
+
 # === LLM System Prompt ===
 SYSTEM_PROMPT_HEADER = """你是弈沐盯盘助手，严格遵循弈沐交易规则做研判。
 每次研判你会收到: ①交易规则(LLM_RULES) ②项目约定(CLAUDE) ③全盘实时数据。
@@ -783,7 +808,17 @@ def _build_rule_inputs(now=None, account_state=None):
     funds_raw = dash.get("funds", {}) or dash.get("资金", {}) or {}
     time_window = dash.get("time_window", {})
     legacy_loss_streak = int(risk.get("连亏天数", 0) or 0)
-    losing_account_days = 0 if pnl_pct is not None and pnl_pct > 0 else legacy_loss_streak
+    closed_loss_streak = None
+    try:
+        closed_loss_streak = _closed_daily_loss_streak(now=now)
+    except Exception:
+        closed_loss_streak = None
+    if pnl_pct is not None and pnl_pct > 0:
+        losing_account_days = 0
+    elif closed_loss_streak is not None:
+        losing_account_days = closed_loss_streak
+    else:
+        losing_account_days = legacy_loss_streak
     weekly_drawdown = risk.get("周累计回撤")
     monthly_drawdown = risk.get("月累计回撤")
 
@@ -1818,16 +1853,18 @@ def _build_full_snapshot():
         pnl_live = {}
     total_asset = pnl_live.get('total_asset') or dd.get('pnl', {}).get('总资产', 0)
     total_mv = pnl_live.get('mv') or 0
+    # 复用已获取的 pnl_live 避免重复 SSOT 查询，并确保 LLM 风控快照与 rule_state 同源。
+    rule_inputs = _build_rule_inputs(account_state=pnl_live)
+    from scripts.rule_engine import evaluate_rule_state as _eval_rule_state
+    rule_state = _eval_rule_state(rule_inputs)
+    rule_risk = rule_inputs.get('risk', {}) or {}
     risk_snap = {
-        '连亏天数':    risk.get('连亏天数', 0),
-        '周累计回撤':  risk.get('周累计回撤', 0),
-        '月累计回撤':  risk.get('月累计回撤', 0),
+        '连亏天数':    rule_risk.get('losing_account_days', risk.get('连亏天数', 0)),
+        '周累计回撤':  rule_risk.get('weekly_drawdown_pct', risk.get('周累计回撤', 0)),
+        '月累计回撤':  rule_risk.get('monthly_drawdown_pct', risk.get('月累计回撤', 0)),
         '仓位':        round(total_mv / total_asset * 100, 2) if total_asset else 0,
         '总资产':      total_asset,
     }
-
-    # 复用已获取的 pnl_live 避免重复 SSOT 查询
-    rule_state = _build_rule_state(account_state=pnl_live)
     # 顶层可信标记
     vc = pnl_live.get('valuation_complete', True) if pnl_live else True
     ab = pnl_live.get('anchor_blocked', False) if pnl_live else False
