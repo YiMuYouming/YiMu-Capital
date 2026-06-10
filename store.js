@@ -438,6 +438,11 @@ const DataStore = (function() {
       if (_sseClient && _sseClient.readyState === EventSource.OPEN) {
         chain.then(function(base) {
           if (reloadBase && base) baseData = base;
+          return Promise.all([_fetchPnlSummary(), _fetchTradeTickets()]).then(function(results) {
+            var pnlLive = results[0];
+            if (pnlLive) _pnlLive = pnlLive;
+          });
+        }).then(function() {
           merge();
           notifyAll();
           notifyConnListeners();

@@ -341,6 +341,59 @@ DataStore.fetchAll().then(function() {
         self.assertEqual(result.get("level"), "stale", f"stale 元信息应保留: {result}")
         self.assertTrue(result.get("stale"), f"stale 标记应保留: {result}")
 
+    def test_sse_tick_refreshes_account_and_trade_tickets(self):
+        """SSE 打开时 tick 仍应刷新 W15/W24 的账户与票据数据"""
+        script = BASE_MOCKS + r"""
+var pnlAsset = 100000;
+var ticketId = 'T-OLD';
+var calls = [];
+global.fetch = function(url) {
+  var u = String(url);
+  calls.push(u);
+  if (u.indexOf('/api/baseline') >= 0) {
+    return Promise.resolve({ ok: true, json: function() { return Promise.resolve({
+      meta: {}, market: {}, sentiment: {}, lianban_pool: [], trend_pool: [],
+      positions: [], sectors: [], risk: {}, style: { '总分': 85 }
+    }); } });
+  }
+  if (u.indexOf('/api/live/quotes') >= 0) {
+    return Promise.resolve({ ok: true, json: function() { return Promise.resolve({
+      live_index: {}, live_quotes: {}, iwencai: {}, _freshness: { level: 'live' }
+    }); } });
+  }
+  if (u.indexOf('/api/pnl/summary') >= 0) {
+    return Promise.resolve({ ok: true, json: function() { return Promise.resolve({ total_asset: pnlAsset }); } });
+  }
+  if (u.indexOf('/api/trade/tickets') >= 0) {
+    return Promise.resolve({ ok: true, json: function() { return Promise.resolve({ tickets: [{ ticket_id: ticketId, status: 'filled' }] }); } });
+  }
+  return Promise.resolve({ ok: false, json: function() { return Promise.resolve(null); } });
+};
+global.EventSource = function(url) { this.url = url; this.readyState = EventSource.OPEN; };
+EventSource.CONNECTING = 0; EventSource.OPEN = 1; EventSource.CLOSED = 2;
+
+DataStore.fetchAll().then(function() {
+  DataStore.init();
+  pnlAsset = 712022.47;
+  ticketId = 'TICKET-20260610-301488-0001';
+  DataStore.refresh('tick');
+  setTimeout(function() {
+    var m = DataStore.merged || {};
+    console.log(JSON.stringify({
+      totalAsset: m.pnl_live && m.pnl_live.total_asset,
+      ticketId: m.trade_tickets && m.trade_tickets[0] && m.trade_tickets[0].ticket_id,
+      pnlCalls: calls.filter(function(u){ return u.indexOf('/api/pnl/summary') >= 0; }).length,
+      ticketCalls: calls.filter(function(u){ return u.indexOf('/api/trade/tickets') >= 0; }).length
+    }));
+  }, 30);
+}).catch(function(e) { console.log(JSON.stringify({ _error: String(e).slice(0,200) })); });
+"""
+        result = _run_node(script, files=["store.js"])
+        self.assertEqual(result.get("totalAsset"), 712022.47, f"SSE tick 应刷新账户摘要: {result}")
+        self.assertEqual(result.get("ticketId"), "TICKET-20260610-301488-0001", f"SSE tick 应刷新票据: {result}")
+        self.assertGreaterEqual(result.get("pnlCalls", 0), 2, f"fetchAll + tick 都应拉 pnl: {result}")
+        self.assertGreaterEqual(result.get("ticketCalls", 0), 2, f"fetchAll + tick 都应拉 tickets: {result}")
+
     def test_refresh_tick_preserves_domains(self):
         script = BASE_MOCKS + r"""
 global._mockFetchResponses['auction_snapshot.json'] = {
