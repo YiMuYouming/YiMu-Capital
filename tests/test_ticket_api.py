@@ -561,6 +561,30 @@ class TicketApiTest(unittest.TestCase):
 
         self.assertEqual(snapshot["风控"]["连亏天数"], 0)
 
+    def test_baseline_payload_overlays_stale_loss_streak_from_rule_inputs(self):
+        stale_dashboard = {
+            "meta": {"date": "2026-06-09", "updated": "2026-06-10T09:17:01+08:00"},
+            "risk": {"连亏天数": 2, "周累计回撤": 0, "月累计回撤": 0},
+            "style": {},
+            "sentiment": {},
+            "market": {},
+        }
+        with mock.patch.object(bridge, "_load_dashboard_data", return_value=stale_dashboard):
+            with mock.patch.object(bridge, "_build_rule_inputs", return_value={
+                "risk": {
+                    "losing_account_days": 1,
+                    "weekly_drawdown_pct": 0,
+                    "monthly_drawdown_pct": 0,
+                }
+            }):
+                payload = bridge._baseline_payload(now=datetime(2026, 6, 11, 9, 0))
+
+        self.assertEqual(payload["risk"]["连亏天数"], 1)
+        self.assertEqual(payload["risk"]["_legacy_连亏天数"], 2)
+        self.assertEqual(payload["risk"]["_source"], "rule_inputs_live_overlay")
+        self.assertTrue(payload["meta"]["_baseline_stale"])
+        self.assertEqual(payload["meta"]["_served_date"], "2026-06-11")
+
     def test_reduce_is_sell_alias_and_uses_sellable_gate(self):
         status, body = _call("POST", "/api/trade/tickets/prepare", {
             "intent_text": "准备减仓 立讯精密 500股",

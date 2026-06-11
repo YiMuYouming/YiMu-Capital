@@ -1559,6 +1559,46 @@ def _load_dashboard_data():
     return {}
 
 
+def _baseline_payload(now=None):
+    """Return baseline data with live risk overlays for fields known to go stale.
+
+    dashboard_data.json is a D-1 baseline and can miss close/open refreshes.
+    Keep the baseline content, but never expose stale account-risk gates such as
+    loss streak when pnl.db can derive a fresher value.
+    """
+    from datetime import datetime as _dt
+
+    now = now or _dt.now()
+    raw = _load_dashboard_data()
+    result = json.loads(json.dumps(raw, ensure_ascii=False)) if isinstance(raw, dict) else {}
+    meta = result.setdefault('meta', {})
+    risk = result.setdefault('risk', {})
+
+    base_date = str(meta.get('date') or '')[:10]
+    today = now.strftime("%Y-%m-%d")
+    meta['_served_date'] = today
+    meta['_baseline_stale'] = bool(base_date and base_date != today)
+
+    try:
+        rule_inputs = _build_rule_inputs(now=now)
+        rule_risk = (rule_inputs.get('risk') or {})
+        live_loss_streak = rule_risk.get('losing_account_days')
+        if live_loss_streak is not None:
+            legacy = risk.get('连亏天数')
+            risk['连亏天数'] = int(live_loss_streak)
+            risk['_source'] = 'rule_inputs_live_overlay'
+            if legacy is not None and int(legacy or 0) != int(live_loss_streak):
+                risk['_legacy_连亏天数'] = legacy
+        if rule_risk.get('weekly_drawdown_pct') is not None:
+            risk['周累计回撤'] = rule_risk.get('weekly_drawdown_pct')
+        if rule_risk.get('monthly_drawdown_pct') is not None:
+            risk['月累计回撤'] = rule_risk.get('monthly_drawdown_pct')
+    except Exception as e:
+        risk['_overlay_error'] = str(e)[:120]
+
+    return _add_freshness(result, 'baseline', meta.get('updated') or meta.get('date'))
+
+
 def _format_pct_for_live_index(value):
     if value in (None, '', '—'):
         return None
@@ -2313,14 +2353,9 @@ class BridgeHandler(SimpleHTTPRequestHandler):
                 self._db_close()
             return
         elif parsed.path == '/api/baseline':
+            _ensure_db()
             try:
-                if DATA_FILE.exists():
-                    with open(DATA_FILE) as f:
-                        result = json.load(f)
-                else:
-                    result = {}
-                meta = result.get('meta', {}) if isinstance(result, dict) else {}
-                result = _add_freshness(result, 'baseline', meta.get('updated') or meta.get('date'))
+                result = _baseline_payload()
                 body = json.dumps(result, ensure_ascii=False).encode()
                 self.send_response(200)
                 self.send_header('Content-Type', 'application/json')
@@ -2330,6 +2365,8 @@ class BridgeHandler(SimpleHTTPRequestHandler):
                 self.send_response(500)
                 self.end_headers()
                 self.wfile.write(json.dumps({'error': str(e)}).encode())
+            finally:
+                self._db_close()
             return
         elif parsed.path == '/api/pnl':
             _ensure_db()
