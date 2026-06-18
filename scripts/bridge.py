@@ -6,7 +6,7 @@ W15 记流水时自动 POST 到 /api/sync，实时写入 JSON
 LLM Hook: POST /api/llm → Anthropic API → 研判文本
 """
 
-import atexit, hashlib, json, os, sys, time
+import atexit, hashlib, json, os, re, sys, time
 from http.server import HTTPServer, SimpleHTTPRequestHandler
 from socketserver import ThreadingMixIn
 
@@ -47,6 +47,13 @@ except ImportError:
     if _s not in sys.path: sys.path.insert(0, _s)
     from scripts.file_utils import atomic_write_json
 
+try:
+    from scripts.attack_direction import build_attack_direction
+except ImportError:
+    _s = str(ROOT)
+    if _s not in sys.path: sys.path.insert(0, _s)
+    from scripts.attack_direction import build_attack_direction
+
 # 内存缓存（APScheduler 采集线程写入，HTTP handler 读取）
 CACHE = {}
 CACHE_FILE = ROOT / "data" / "cache_dump.json"
@@ -54,7 +61,7 @@ DATA_FILE = ROOT / "data/dashboard_data.json"
 LLM_INSIGHTS_FILE = ROOT / "data/llm_insights.json"
 _PERSIST_KEYS = [
     "live_index", "live_quotes", "breadth", "live_sectors", "iwencai",
-    "northbound", "hot_list", "limit_counts", "sector_inflow",
+    "northbound", "hot_list", "limit_counts", "limit_up_detail", "sector_inflow",
     "上证15min", "深证15min", "创业15min", "kline_15m_date",
 ]
 
@@ -133,8 +140,29 @@ def _collect_runtime_stock_codes(data, today=None):
     codes = set(_collect_stock_codes(data or {}))
     trade_date = today or datetime.now().strftime("%Y-%m-%d")
     try:
+        from scripts.db import query_account_baseline
+        anchor = query_account_baseline(trade_date)
+        for position in (anchor or {}).get("positions") or []:
+            code = str(position.get("代码") or "")
+            qty_raw = str(position.get("数量") or 0).replace("股", "")
+            try:
+                qty = int(float(qty_raw))
+            except (TypeError, ValueError):
+                qty = 0
+            if len(code) == 6 and qty > 0:
+                codes.add(code)
+    except Exception:
+        pass
+    try:
         for trade in query_trades(date_from=trade_date, date_to=trade_date, limit=10000):
             code = str(trade.get("code") or "")
+            if len(code) == 6:
+                codes.add(code)
+    except Exception:
+        pass
+    try:
+        for closed in query_7day_closed_positions(trade_date):
+            code = str(closed.get("code") or "")
             if len(code) == 6:
                 codes.add(code)
     except Exception:
@@ -187,12 +215,12 @@ def _payload_overwrites_account(payload):
 # SQLite db — deferred init (lazy, avoids module-level connection leak at shutdown)
 try:
     from scripts.db import init_db, query_pnl, query_trades, query_pnl_summary
-    from scripts.account_ssot import load_current_account_state
+    from scripts.account_ssot import load_current_account_state, query_7day_closed_positions
 except ImportError:
     _s = str(ROOT)
     if _s not in sys.path: sys.path.insert(0, _s)
     from scripts.db import init_db, query_pnl, query_trades, query_pnl_summary
-    from scripts.account_ssot import load_current_account_state
+    from scripts.account_ssot import load_current_account_state, query_7day_closed_positions
 
 
 def _merge_pnl_summary(snapshot_summary, account_state):
@@ -964,6 +992,7 @@ def _build_rule_inputs(now=None, account_state=None):
         "account": {
             "pnl_pct": pnl_pct,
             "account_day_return_pct": pnl_pct,
+            "current_position_market_value": pnl_live.get("mv"),
             "valuation_complete": valuation_complete,
         },
         "risk": {
@@ -1540,11 +1569,25 @@ def _confirm_fill(payload, headers):
     except ValueError as e:
         return 409, {"ok": False, "error": str(e)}
     conn = get_conn()
+    now_str = datetime.now().strftime("%Y-%m-%dT%H:%M:%S")
     conn.execute(
         "UPDATE pending_fill_confirmations SET status = 'confirmed', confirmed_at = ?, confirmed_by = ? WHERE confirmation_id = ?",
-        (datetime.now().strftime("%Y-%m-%dT%H:%M:%S"), confirmed_by, confirmation_id),
+        (now_str, confirmed_by, confirmation_id),
     )
+    # Auto-cancel other pending confirmations for the same ticket
+    cancelled = conn.execute(
+        "UPDATE pending_fill_confirmations SET status = 'cancelled_superseded' "
+        "WHERE ticket_id = ? AND status = 'pending' AND confirmation_id != ?",
+        (pending["ticket_id"], confirmation_id),
+    ).rowcount
+    if cancelled:
+        conn.execute(
+            "UPDATE pending_fill_confirmations SET confirmed_at = ? WHERE "
+            "ticket_id = ? AND status = 'cancelled_superseded' AND confirmed_at IS NULL",
+            (now_str, pending["ticket_id"]),
+        )
     conn.commit()
+    _refresh_stock_codes()
     return 200, {"ok": True, **result}
 
 
@@ -1574,10 +1617,14 @@ def _baseline_payload(now=None):
     meta = result.setdefault('meta', {})
     risk = result.setdefault('risk', {})
 
-    base_date = str(meta.get('date') or '')[:10]
     today = now.strftime("%Y-%m-%d")
     meta['_served_date'] = today
-    meta['_baseline_stale'] = bool(base_date and base_date != today)
+    meta['_baseline_stale'] = not _baseline_generated_today(meta, today)
+
+    try:
+        _refresh_stock_codes(result)
+    except Exception:
+        pass
 
     try:
         rule_inputs = _build_rule_inputs(now=now)
@@ -1703,14 +1750,20 @@ def _kline_15m_payload(key, now=None):
 
 def _build_live_quotes_payload(rule_state=None):
     """Build the live payload shared by polling and SSE endpoints."""
+    hot_list = CACHE.get('hot_list', {})
+    limit_up_detail = CACHE.get('limit_up_detail', {})
+    sector_inflow = CACHE.get('sector_inflow', {})
+    live_sectors = CACHE.get('live_sectors', {})
     return {
         'live_index': _live_index_with_baseline(),
         'live_quotes': CACHE.get('live_quotes', {}),
         'breadth': CACHE.get('breadth', {}),
         'limit_counts': CACHE.get('limit_counts', {}),
-        'live_sectors': CACHE.get('live_sectors', {}),
-        'hot_list': CACHE.get('hot_list', {}),
-        'sector_inflow': CACHE.get('sector_inflow', {}),
+        'live_sectors': live_sectors,
+        'hot_list': hot_list,
+        'limit_up_detail': limit_up_detail,
+        'sector_inflow': sector_inflow,
+        'attack_direction': build_attack_direction(hot_list, sector_inflow, live_sectors, limit_up_detail=limit_up_detail),
         'northbound': CACHE.get('northbound', {}),
         'iwencai': _iwencai_live_payload(),
         '上证15min': _kline_15m_payload('上证15min'),
@@ -1946,7 +1999,7 @@ def _baseline_freshness():
     try:
         dd = _load_dashboard_data()
         meta = dd.get("meta", {}) if isinstance(dd, dict) else {}
-        date_str = meta.get("date", "")
+        date_str = _baseline_generated_date(meta)
         if not date_str:
             return "stale"
         today = datetime.now().strftime("%Y-%m-%d")
@@ -1959,6 +2012,27 @@ def _baseline_freshness():
         return "stale"
     except Exception:
         return "stale"
+
+
+def _date_part(value):
+    m = re.match(r"^(\d{4}-\d{2}-\d{2})", str(value or "").strip())
+    return m.group(1) if m else ""
+
+
+def _baseline_generated_date(meta):
+    """Date when the baseline file was generated, not the source review date."""
+    if not isinstance(meta, dict):
+        return ""
+    return (
+        _date_part(meta.get("updated")) or
+        _date_part(meta.get("generated_at")) or
+        _date_part(meta.get("date"))
+    )
+
+
+def _baseline_generated_today(meta, today=None):
+    today = today or datetime.now().strftime("%Y-%m-%d")
+    return _baseline_generated_date(meta) == today
 
 
 def _quotes_coverage(today=None):
@@ -2231,11 +2305,8 @@ def _build_health():
     if bf_s in ("stale", "delayed"):
         degraded_list.append(f"baseline: {bf_s}")
 
-    # llm_config missing → degraded only (not critical)
-    llm_s = result.get("llm_config", {}).get("status", "")
-    if llm_s != "ok":
-        degraded_list.append(f"llm_config: {llm_s}")
-
+    # llm_config is optional. Missing config should not make the dashboard
+    # look degraded; it only disables LLM-specific actions/history.
     # account_basis — 集成账户基准审计
     try:
         audit = _build_account_audit()
@@ -2264,7 +2335,7 @@ def _build_health():
     result["degraded_reasons"] = degraded_list if degraded_list else None
 
     # overall status — 在 Phase 4 收集完成后最后计算（跳过非 dict 字段）
-    _STATUS_EXEMPT = {"llm_config", "auction"}
+    _STATUS_EXEMPT = {"llm_config", "auction", "iwencai"}
     statuses = []
     for k, v in result.items():
         if not isinstance(v, dict):
@@ -2273,7 +2344,10 @@ def _build_health():
         statuses.append((k, s))
 
     dead_or_missing = [k for k, s in statuses if s in ("dead", "missing", "error") and k not in _STATUS_EXEMPT]
-    stale_or_delayed = [k for k, s in statuses if s in ("stale", "delayed", "incomplete")]
+    stale_or_delayed = [
+        k for k, s in statuses
+        if s in ("stale", "delayed", "incomplete") and k not in _STATUS_EXEMPT
+    ]
 
     if dead_or_missing:
         result["status"] = "unhealthy"
@@ -3174,7 +3248,9 @@ def run_closing_anchor(quotes=None, pnl_history_path=None):
     from scripts.account_ssot import generate_closing_anchor
     from scripts.db import close_conn
     try:
-        result = generate_closing_anchor(quotes or CACHE.get('live_quotes', {}),
+        closing_quotes = dict(quotes or CACHE.get('live_quotes', {}) or {})
+        closing_quotes.update(CACHE.get('live_index', {}) or {})
+        result = generate_closing_anchor(closing_quotes,
                                          pnl_history_path=pnl_history_path)
         if result:
             print(f"  [bridge] Closing anchor: {result}")
@@ -3357,6 +3433,8 @@ if __name__ == '__main__':
                       max_instances=1, misfire_grace_time=120)
     scheduler.add_job(quotes.collect_hot_list, 'interval', minutes=5, id='hot_list_5min',
                       max_instances=1, misfire_grace_time=600)
+    scheduler.add_job(iwencai_poll.poll_limit_up_detail, 'interval', minutes=5, id='limit_up_detail_5min',
+                      max_instances=1, misfire_grace_time=600)
     # T2 定时快照
     # 8个关键节点快照（竞价+30s等iwencai，其余整点）
     for node_h, node_m, node_s, node_id in [
@@ -3425,7 +3503,7 @@ if __name__ == '__main__':
         if DATA_FILE.exists():
             with open(DATA_FILE) as f:
                 dd = json.load(f)
-            if dd.get('meta', {}).get('date') == today_str:
+            if _baseline_generated_today(dd.get('meta', {}), today_str):
                 need_gen = False
                 print(f'[bridge] Gen already ran today, skipping cold-start to preserve live positions')
     except Exception:
@@ -3443,6 +3521,7 @@ if __name__ == '__main__':
     start_cold_bootstrap([
         quotes.collect_limit_counts,
         market_data.poll_sector_inflow,
+        iwencai_poll.poll_limit_up_detail,
         iwencai_poll.poll_iwencai_sentiment,
         quotes.collect_quotes,
         quotes.collect_yesterday_compare,
