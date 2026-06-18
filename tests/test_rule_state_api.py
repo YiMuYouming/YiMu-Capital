@@ -130,6 +130,88 @@ class RuleStateBridgeContractTest(unittest.TestCase):
         self.assertEqual(state["caps"]["lianban_pct"], 0)
         self.assertEqual(state["caps"]["trend_pct"], 100)
 
+    def test_rule_state_builds_earned_cap_from_account_positions(self):
+        """_build_rule_state 应从账户 SSOT 持仓浮盈推导盈利解锁仓位"""
+        self.tmp_dashboard.write_text(
+            '{"meta":{"date":"2026-05-27"},"market":{},"sentiment":{},'
+            '"lianban_pool":[],"trend_pool":[{"代码":"000001","标的":"主线A"}],"positions":[],"decision":{},'
+            '"sectors":[],"risk":{"连亏天数":0},"pnl":{},'
+            '"style":{"总分":62,"连板占比":0,"趋势占比":100,"dim3_趋势":18}}'
+        )
+        bridge.CACHE["breadth"] = {
+            "上涨家数": 1500,
+            "下跌家数": 3500,
+            "_source": "iwencai",
+            "_updated": "2026-05-27T09:40:00+08:00",
+        }
+        account_state = {
+            "pnl_pct": 0.5,
+            "valuation_complete": True,
+            "mv": 30000,
+            "total_asset": 100000,
+            "positions": [
+                {
+                    "代码": "000001", "标的": "主线A", "数量": 1000,
+                    "成本": 10, "现价": 12, "市值": 12000,
+                    "total_pnl_pct": 20.0,
+                },
+                {
+                    "代码": "000002", "标的": "主线B", "数量": 1000,
+                    "成本": 10, "现价": 9.8, "市值": 9800,
+                    "total_pnl_pct": -2.0,
+                },
+            ],
+        }
+
+        state = bridge._build_rule_state(
+            now=datetime(2026, 5, 27, 9, 40),
+            account_state=account_state,
+        )
+
+        caps = state["caps"]
+        self.assertEqual(caps["position_control_mode"], "earned_mainline")
+        self.assertEqual(caps["current_position_pct"], 30)
+        self.assertEqual(caps["profitable_mainline_positions"], 1)
+        self.assertEqual(caps["earned_cap_pct"], 40)
+        self.assertEqual(caps["opportunity_cap_pct"], 60)
+        self.assertEqual(caps["total_pct"], 40)
+        self.assertEqual(caps["available_add_pct"], 10)
+        self.assertTrue(caps["market_breadth_polarization"])
+
+    def test_rule_state_does_not_count_unmatched_profit_as_mainline_profit(self):
+        """强主线环境下，未匹配主线池/锚定股的盈利持仓不得解锁主线仓位"""
+        self.tmp_dashboard.write_text(
+            '{"meta":{"date":"2026-05-27"},"market":{},"sentiment":{},'
+            '"lianban_pool":[],"trend_pool":[{"代码":"000777","标的":"真正主线"}],"positions":[],"decision":{},'
+            '"sectors":[],"risk":{"连亏天数":0},"pnl":{},'
+            '"style":{"总分":62,"连板占比":0,"趋势占比":100,"dim3_趋势":18}}'
+        )
+        account_state = {
+            "pnl_pct": 0.5,
+            "valuation_complete": True,
+            "mv": 12000,
+            "total_asset": 100000,
+            "positions": [
+                {
+                    "代码": "000001", "标的": "非主线盈利", "数量": 1000,
+                    "成本": 10, "现价": 12, "市值": 12000,
+                    "total_pnl_pct": 20.0, "is_mainline": "false",
+                },
+            ],
+        }
+
+        state = bridge._build_rule_state(
+            now=datetime(2026, 5, 27, 9, 40),
+            account_state=account_state,
+        )
+
+        caps = state["caps"]
+        self.assertEqual(caps["position_control_mode"], "earned_mainline")
+        self.assertTrue(caps["mainline_confirmed"])
+        self.assertEqual(caps["profitable_mainline_positions"], 0)
+        self.assertEqual(caps["earned_cap_pct"], 20)
+        self.assertEqual(caps["total_pct"], 20)
+
     def test_vault_loss_streak_overrides_base_cap_to_zero(self):
         """Vault 第一层：连亏 >=2 天最终总仓位归零"""
         self.tmp_dashboard.write_text(
@@ -174,7 +256,9 @@ class RuleStateBridgeContractTest(unittest.TestCase):
         state = bridge._build_rule_state(now=datetime(2026, 5, 29, 9, 40))
 
         self.assertEqual(state["caps"]["base_total_pct"], 60)
-        self.assertEqual(state["caps"]["total_pct"], 60)
+        self.assertEqual(state["caps"]["opportunity_cap_pct"], 60)
+        self.assertEqual(state["caps"]["earned_cap_pct"], 20)
+        self.assertEqual(state["caps"]["total_pct"], 20)
         self.assertNotIn("LOSS_STREAK", [b["code"] for b in state["blocks"]])
         self.assertIn("LOSS_STREAK", [w["code"] for w in state["warnings"]])
 

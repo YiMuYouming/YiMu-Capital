@@ -222,6 +222,133 @@ class LiveRuleEngineTest(unittest.TestCase):
             datetime(2026, 5, 27, 14, 10))
         self.assertEqual(state["caps"]["base_total_pct"], 60)
 
+    # ── 主线盈利解锁仓位 ──
+
+    def test_position_control_legacy_mode_preserves_existing_total_cap(self):
+        state = evaluate_rule_state(valid_inputs(),
+                                    datetime(2026, 5, 27, 14, 10))
+        self.assertEqual(state["caps"]["total_pct"], 60)
+        self.assertEqual(state["caps"]["position_control_mode"], "legacy")
+        self.assertEqual(state["caps"]["single_stock_cap_pct"], 0)
+
+    def test_mainline_without_profit_is_trial_cap_only(self):
+        state = evaluate_rule_state(
+            valid_inputs(
+                style={"trend_score": 18, "lianban_pct": 0, "trend_pct": 100},
+                sentiment={"emotion_pct": 32, "previous_emotion_pct": 45},
+                position_control={
+                    "enabled": True,
+                    "account_cap_pct": 80,
+                    "mainline_confirmed": True,
+                    "current_position_pct": 0,
+                },
+            ),
+            datetime(2026, 5, 27, 14, 10))
+        self.assertEqual(state["caps"]["base_total_pct"], 60)
+        self.assertEqual(state["caps"]["opportunity_cap_pct"], 60)
+        self.assertEqual(state["caps"]["earned_cap_pct"], 20)
+        self.assertEqual(state["caps"]["total_pct"], 20)
+        self.assertEqual(state["caps"]["available_add_pct"], 20)
+        self.assertEqual(state["caps"]["position_control_mode"], "earned_mainline")
+
+    def test_polarized_market_without_mainline_limits_opportunity(self):
+        state = evaluate_rule_state(
+            valid_inputs(position_control={
+                "enabled": True,
+                "account_cap_pct": 80,
+                "mainline_confirmed": False,
+                "market_breadth_polarization": True,
+            }),
+            datetime(2026, 5, 27, 14, 10))
+        self.assertEqual(state["caps"]["opportunity_cap_pct"], 10)
+        self.assertEqual(state["caps"]["earned_cap_pct"], 10)
+        self.assertEqual(state["caps"]["total_pct"], 10)
+
+    def test_one_profitable_mainline_position_unlocks_forty_percent(self):
+        state = evaluate_rule_state(
+            valid_inputs(position_control={
+                "enabled": True,
+                "account_cap_pct": 80,
+                "mainline_confirmed": True,
+                "current_position_pct": 30,
+                "positions": [
+                    {"code": "000001", "floating_pnl_pct": 2.4, "is_mainline": True},
+                    {"code": "000002", "floating_pnl_pct": -1.0, "is_mainline": True},
+                ],
+            }),
+            datetime(2026, 5, 27, 14, 10))
+        self.assertEqual(state["caps"]["profitable_mainline_positions"], 1)
+        self.assertEqual(state["caps"]["earned_cap_pct"], 40)
+        self.assertEqual(state["caps"]["total_pct"], 40)
+        self.assertEqual(state["caps"]["available_add_pct"], 10)
+
+    def test_floating_loss_position_blocks_available_add_until_profit(self):
+        state = evaluate_rule_state(
+            valid_inputs(position_control={
+                "enabled": True,
+                "account_cap_pct": 80,
+                "mainline_confirmed": True,
+                "current_position_pct": 10,
+                "positions": [
+                    {"code": "000001", "floating_pnl_pct": -1.2, "is_mainline": True},
+                ],
+            }),
+            datetime(2026, 5, 27, 14, 10))
+        self.assertEqual(state["caps"]["earned_cap_pct"], 20)
+        self.assertEqual(state["caps"]["total_pct"], 20)
+        self.assertEqual(state["caps"]["available_add_pct"], 0)
+        self.assertFalse(state["caps"]["add_allowed"])
+        self.assertEqual(state["caps"]["add_block_reason"], "floating_loss")
+
+    def test_two_profitable_mainline_positions_unlock_sixty_percent(self):
+        state = evaluate_rule_state(
+            valid_inputs(position_control={
+                "enabled": True,
+                "account_cap_pct": 80,
+                "mainline_confirmed": True,
+                "current_position_pct": 45,
+                "positions": [
+                    {"code": "000001", "floating_pnl_pct": 2.4, "is_mainline": True},
+                    {"code": "000002", "floating_pnl_pct": 0.8, "is_mainline": True},
+                ],
+            }),
+            datetime(2026, 5, 27, 14, 10))
+        self.assertEqual(state["caps"]["profitable_mainline_positions"], 2)
+        self.assertEqual(state["caps"]["earned_cap_pct"], 60)
+        self.assertEqual(state["caps"]["total_pct"], 60)
+        self.assertEqual(state["caps"]["available_add_pct"], 15)
+
+    def test_account_cap_still_limits_earned_position(self):
+        state = evaluate_rule_state(
+            valid_inputs(position_control={
+                "enabled": True,
+                "account_cap_pct": 40,
+                "mainline_confirmed": True,
+                "positions": [
+                    {"code": "000001", "floating_pnl_pct": 2.4, "is_mainline": True},
+                    {"code": "000002", "floating_pnl_pct": 0.8, "is_mainline": True},
+                ],
+            }),
+            datetime(2026, 5, 27, 14, 10))
+        self.assertEqual(state["caps"]["account_cap_pct"], 40)
+        self.assertEqual(state["caps"]["earned_cap_pct"], 60)
+        self.assertEqual(state["caps"]["total_pct"], 40)
+
+    def test_target_role_sets_single_stock_cap_and_add_step(self):
+        state = evaluate_rule_state(
+            valid_inputs(position_control={
+                "enabled": True,
+                "account_cap_pct": 80,
+                "mainline_confirmed": True,
+                "target_role": "capacity_core",
+                "target_is_mainline": True,
+                "positions": [{"code": "000001", "floating_pnl_pct": 2.4, "is_mainline": True}],
+            }),
+            datetime(2026, 5, 27, 14, 10))
+        self.assertEqual(state["caps"]["single_stock_cap_pct"], 25)
+        self.assertEqual(state["caps"]["add_step_pct"], 10)
+        self.assertEqual(state["caps"]["max_positions"], 3)
+
     # ── base_total_cap 分档 ──
 
     def test_base_total_cap_brackets(self):

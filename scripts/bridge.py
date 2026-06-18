@@ -52,7 +52,11 @@ try:
 except ImportError:
     _s = str(ROOT)
     if _s not in sys.path: sys.path.insert(0, _s)
-    from scripts.attack_direction import build_attack_direction
+    try:
+        from scripts.attack_direction import build_attack_direction
+    except ImportError:
+        def build_attack_direction(*_args, **_kwargs):
+            return {}
 
 # 内存缓存（APScheduler 采集线程写入，HTTP handler 读取）
 CACHE = {}
@@ -799,6 +803,135 @@ def _add_freshness(data, data_type, fetched_at=None):
 
 # ===== 实时规则引擎适配 =====
 
+def _rule_num(value):
+    try:
+        if value in (None, "", "—"):
+            return None
+        return float(str(value).replace("%", "").replace(",", ""))
+    except (TypeError, ValueError):
+        return None
+
+
+def _rule_bool(value):
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return False
+    return str(value).strip().lower() in ("1", "true", "yes", "y", "on", "是", "确认", "已确认")
+
+
+def _pool_identity_set(dash):
+    ids = set()
+    for key in ("lianban_pool", "trend_pool"):
+        for item in (dash.get(key) or []):
+            if not isinstance(item, dict):
+                continue
+            for field in ("代码", "code"):
+                value = str(item.get(field) or "").strip()
+                if value:
+                    ids.add(value)
+            for field in ("标的", "名称", "name"):
+                value = str(item.get(field) or "").strip()
+                if value:
+                    ids.add(value)
+    for item in ((dash.get("decision") or {}).get("锚定股状态") or []):
+        if not isinstance(item, dict):
+            continue
+        for field in ("代码", "code", "标的", "名称", "name"):
+            value = str(item.get(field) or "").strip()
+            if value:
+                ids.add(value)
+    return ids
+
+
+def _market_breadth_polarized(breadth, breadth_fresh):
+    if breadth_fresh not in ("live", "delayed"):
+        return False
+    up = _rule_num((breadth or {}).get("上涨家数"))
+    down = _rule_num((breadth or {}).get("下跌家数"))
+    if up is None:
+        up = _rule_num((breadth or {}).get("0~3%"))
+    if down is None:
+        down = _rule_num((breadth or {}).get("-0~-3%"))
+    if up is None or down is None or up + down <= 0:
+        return False
+    minor_ratio = min(up, down) / (up + down) * 100
+    return minor_ratio <= 35
+
+
+def _position_control_input(pnl_live, dash, score, lianban_pct, trend_pct, trend_score,
+                            breadth, breadth_fresh):
+    positions_raw = list((pnl_live or {}).get("positions") or [])
+    total_asset = _rule_num((pnl_live or {}).get("total_asset"))
+    mv = _rule_num((pnl_live or {}).get("mv"))
+    if mv is None:
+        mv = sum(_rule_num(p.get("市值")) or 0 for p in positions_raw if isinstance(p, dict))
+    current_position_pct = _rule_num((pnl_live or {}).get("pos_pct"))
+    if current_position_pct is None:
+        current_position_pct = round(mv / total_asset * 100, 2) if total_asset and total_asset > 0 else 0
+
+    pool_ids = _pool_identity_set(dash or {})
+    style_mainline = (
+        (trend_score is not None and trend_score >= 10)
+        or trend_pct >= 60
+        or lianban_pct >= 60
+        or score >= 60
+    )
+    normalized_positions = []
+    matched_mainline = False
+    for position in positions_raw:
+        if not isinstance(position, dict):
+            continue
+        code = str(position.get("代码") or position.get("code") or "").strip()
+        name = str(position.get("标的") or position.get("名称") or position.get("name") or "").strip()
+        explicit_mainline = position.get("is_mainline")
+        is_mainline = _rule_bool(explicit_mainline) if explicit_mainline is not None else (
+            code in pool_ids or name in pool_ids
+        )
+        matched_mainline = matched_mainline or is_mainline
+        pnl_pct = _rule_num(position.get("floating_pnl_pct"))
+        if pnl_pct is None:
+            pnl_pct = _rule_num(position.get("total_pnl_pct"))
+        if pnl_pct is None:
+            pnl_pct = _rule_num(position.get("today_pnl_pct"))
+        if pnl_pct is None:
+            price = _rule_num(position.get("现价"))
+            cost = _rule_num(position.get("成本")) or _rule_num(position.get("成本价"))
+            if price is not None and cost and cost > 0:
+                pnl_pct = round((price - cost) / cost * 100, 2)
+        position_mv = _rule_num(position.get("市值"))
+        normalized_positions.append({
+            "code": code,
+            "name": name,
+            "target_role": position.get("target_role") or position.get("今日定位") or position.get("角色"),
+            "is_mainline": is_mainline,
+            "floating_pnl_pct": pnl_pct,
+            "market_value_pct": round(position_mv / total_asset * 100, 2) if position_mv and total_asset else None,
+        })
+
+    account_cap = _rule_num((dash.get("style") or {}).get("account_hard_cap_pct"))
+    if account_cap is None:
+        account_cap = _rule_num((dash.get("style") or {}).get("账户硬上限"))
+    opportunity_cap = _rule_num((dash.get("style") or {}).get("opportunity_cap_pct"))
+    if opportunity_cap is None:
+        opportunity_cap = _rule_num((dash.get("style") or {}).get("主线机会上限"))
+
+    result = {
+        "enabled": True,
+        "account_cap_pct": account_cap if account_cap is not None else 80,
+        "mainline_confirmed": bool(matched_mainline or style_mainline),
+        "current_position_pct": current_position_pct,
+        "positions": normalized_positions,
+        "market_breadth_polarization": _market_breadth_polarized(breadth, breadth_fresh),
+        "add_step_pct": 10,
+        "max_positions": 3,
+        "max_mixed_positions": 5,
+    }
+    if opportunity_cap is not None:
+        result["opportunity_cap_pct"] = opportunity_cap
+    return result
+
+
 def _build_rule_inputs(now=None, account_state=None):
     """从 CACHE / baseline / SSOT 构建符合 rule_engine v1 契约的输入 dict。
     纯适配函数：不对值做业务判断，只做单位转换和缺省填充。
@@ -987,6 +1120,9 @@ def _build_rule_inputs(now=None, account_state=None):
         plan_source in ("premarket_plan", "appendix_a_plan")
         and (style_raw.get("总仓位上限") or 0) > 0
     )
+    position_control = _position_control_input(
+        pnl_live, dash, score, lianban_pct, trend_pct, trend_score, breadth, breadth_fresh
+    )
 
     return {
         "account": {
@@ -1035,6 +1171,7 @@ def _build_rule_inputs(now=None, account_state=None):
             "w1_status": time_window.get("W1状态"),
             "w2_status": time_window.get("W2状态"),
         },
+        "position_control": position_control,
     }
 
 

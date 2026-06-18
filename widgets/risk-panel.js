@@ -153,6 +153,13 @@ class RiskPanelWidget extends YiMuWidget {
     var sideLianban = RS && rsCaps.lianban_side_cap_pct != null ? _w14PctText(rsCaps.lianban_side_cap_pct) : null;
     var sideTrend = RS && rsCaps.trend_side_cap_pct != null ? _w14PctText(rsCaps.trend_side_cap_pct) : null;
     var firstEntry = RS && rsCaps.first_entry_pct != null ? _w14PctText(rsCaps.first_entry_pct) : null;
+    var accountCap = RS && rsCaps.account_cap_pct != null ? _w14PctText(rsCaps.account_cap_pct) : null;
+    var opportunityCap = RS && rsCaps.opportunity_cap_pct != null ? _w14PctText(rsCaps.opportunity_cap_pct) : null;
+    var earnedCap = RS && rsCaps.earned_cap_pct != null ? _w14PctText(rsCaps.earned_cap_pct) : null;
+    var singleStockCap = RS && rsCaps.single_stock_cap_pct != null ? _w14PctText(rsCaps.single_stock_cap_pct) : null;
+    var availableAdd = RS && rsCaps.available_add_pct != null ? _w14PctText(rsCaps.available_add_pct) : null;
+    var positionMode = String(rsCaps.position_control_mode || 'legacy');
+    var addBlockReason = String(rsCaps.add_block_reason || '');
 
     var gateState = !RS ? '不可确认' : (RS.tradable ? (rsBlocks.length || rsWarnings.length ? '提示' : '可交易') : '阻断');
     var gateClass = !RS ? 'is-unknown' : (RS.tradable ? ((rsBlocks.length || rsWarnings.length) ? 'is-watch' : 'is-ready') : 'is-blocked');
@@ -160,7 +167,7 @@ class RiskPanelWidget extends YiMuWidget {
       '<div class="w14-command-head"><span><i>R0</i> 风控门禁</span><b>' + gateState + '</b></div>' +
       '<div class="w14-command-grid">' +
         '<div><span>交易状态</span><b>' + gateState + '</b><em>' + (!RS ? '等待 rule_state 返回' : (RS.tradable ? ((rsBlocks.length || rsWarnings.length) ? '局部受限，按窗口规则执行' : '可按窗口条件继续判断') : '禁止新开仓')) + '</em></div>' +
-        '<div><span>执行仓位</span><b>' + (capTotal != null ? capTotal + '%' : '—') + '</b><em>基线 ' + (baseTotal != null ? baseTotal + '%' : '—') + ' / 首笔 ' + (firstEntry != null ? firstEntry + '%' : '—') + '</em></div>' +
+        '<div><span>执行仓位</span><b>' + (capTotal != null ? capTotal + '%' : '—') + '</b><em>' + (positionMode === 'earned_mainline' ? ('盈利 ' + (earnedCap != null ? earnedCap + '%' : '—') + ' / 可加 ' + (availableAdd != null ? availableAdd + '%' : '—') + (addBlockReason === 'floating_loss' ? ' / 浮亏不加' : '')) : ('基线 ' + (baseTotal != null ? baseTotal + '%' : '—') + ' / 首笔 ' + (firstEntry != null ? firstEntry + '%' : '—'))) + '</em></div>' +
         '<div><span>风险来源</span><b>' + rsBlocks.length + '</b><em>阻断 ' + rsBlocks.length + ' / 提示 ' + rsWarnings.length + '</em></div>' +
       '</div>' +
     '</div>';
@@ -188,7 +195,13 @@ class RiskPanelWidget extends YiMuWidget {
       html += '<div class="w14-cap-line">基线 '+(baseTotal!=null?baseTotal+'%':'—')+
         ' | 连板侧 '+(sideLianban!=null?sideLianban+'%':'—')+
         ' | 趋势侧 '+(sideTrend!=null?sideTrend+'%':'—')+
-        ' | 首笔 '+(firstEntry!=null?firstEntry+'%':'—')+'</div>';
+        ' | 首笔 '+(firstEntry!=null?firstEntry+'%':'—')+
+        (positionMode === 'earned_mainline' ?
+          ' | 账户 '+(accountCap!=null?accountCap+'%':'—')+
+          ' | 主线 '+(opportunityCap!=null?opportunityCap+'%':'—')+
+          ' | 盈利 '+(earnedCap!=null?earnedCap+'%':'—')+
+          ' | 单票 '+(singleStockCap!=null?singleStockCap+'%':'—') : '')+
+        '</div>';
     }
 
     // === 持仓累计浮盈（大字）===

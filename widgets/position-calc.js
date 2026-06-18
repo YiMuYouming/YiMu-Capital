@@ -90,6 +90,13 @@ class PositionCalcWidget extends YiMuWidget {
 
     var totalCap = _w03Num(rsCaps.total_pct != null ? rsCaps.total_pct : ST['总仓位上限'], 0);
     var baseCap = _w03Num(rsCaps.base_total_pct != null ? rsCaps.base_total_pct : ST['总仓位上限'], 0);
+    var accountCap = _w03Num(rsCaps.account_cap_pct != null ? rsCaps.account_cap_pct : totalCap, totalCap);
+    var opportunityCap = _w03Num(rsCaps.opportunity_cap_pct != null ? rsCaps.opportunity_cap_pct : totalCap, totalCap);
+    var earnedCap = _w03Num(rsCaps.earned_cap_pct != null ? rsCaps.earned_cap_pct : totalCap, totalCap);
+    var singleStockCap = _w03Num(rsCaps.single_stock_cap_pct != null ? rsCaps.single_stock_cap_pct : 0, 0);
+    var availableAddPct = _w03Num(rsCaps.available_add_pct != null ? rsCaps.available_add_pct : totalCap, totalCap);
+    var positionMode = String(rsCaps.position_control_mode || 'legacy');
+    var addBlockReason = String(rsCaps.add_block_reason || '');
     var lbPct = _w03Num(rsCaps.lianban_pct != null ? rsCaps.lianban_pct : ST['连板占比'], 0);
     var trPct = _w03Num(rsCaps.trend_pct != null ? rsCaps.trend_pct : ST['趋势占比'], 0);
     var baseLbPct = _w03Num(ST['连板占比'] != null ? ST['连板占比'] : lbPct, 0);
@@ -141,8 +148,8 @@ class PositionCalcWidget extends YiMuWidget {
     var currentPosPct = totalCapital > 0 ? Math.round(currentPosVal / totalCapital * 100) : 0;
     var maxPosition = Math.round(totalCapital * (totalCap||0) / 100);
     var planMaxPosition = Math.round(totalCapital * (planTotalCap||0) / 100);
-    var availPct = Math.max(0, totalCap - currentPosPct);
-    var newCap = Math.max(0, maxPosition - currentPosVal);
+    var availPct = rsCaps.available_add_pct != null ? availableAddPct : Math.max(0, totalCap - currentPosPct);
+    var newCap = Math.max(0, Math.round(totalCapital * availPct / 100));
     var planNewCap = Math.max(0, planMaxPosition - currentPosVal);
     var lbMoney = globallyBlocked ? 0 : Math.round(newCap * lbPct / 100);
     var trMoney = globallyBlocked ? 0 : Math.round(newCap * trPct / 100);
@@ -186,11 +193,15 @@ class PositionCalcWidget extends YiMuWidget {
         '<div><div class="w03-kpi ' + (globallyBlocked ? 'danger' : 'info') + '">' + _w03PctText(totalCap) + '%</div><div class="w03-caption">执行上限</div></div>' +
         '<div class="w03-metrics">' +
           '<span>基础 <b>' + _w03PctText(baseCap) + '%</b></span>' +
+          (positionMode === 'earned_mainline' ? '<span>账户 <b>' + _w03PctText(accountCap) + '%</b></span>' : '') +
+          (positionMode === 'earned_mainline' ? '<span>主线 <b>' + _w03PctText(opportunityCap) + '%</b></span>' : '') +
+          (positionMode === 'earned_mainline' ? '<span>盈利 <b>' + _w03PctText(earnedCap) + '%</b></span>' : '') +
+          (singleStockCap ? '<span>单票 <b>' + _w03PctText(singleStockCap) + '%</b></span>' : '') +
           (planTotalCap !== baseCap ? '<span>计划 <b>' + _w03PctText(planTotalCap) + '%</b></span>' : '') +
           '<span>首笔 <b>' + _w03PctText(firstEntryPct) + '%</b></span>' +
         '</div>' +
       '</div>' +
-      (globallyBlocked ? '<div class="w03-note">全局阻断后执行上限归零</div>' : '<div class="w03-note">按实时规则引擎输出执行仓位</div>') +
+      (globallyBlocked ? '<div class="w03-note">全局阻断后执行上限归零</div>' : '<div class="w03-note">' + (positionMode === 'earned_mainline' ? '按账户硬上限 / 主线机会 / 盈利解锁取最小值' : '按实时规则引擎输出执行仓位') + '</div>') +
       '</section>';
 
     // ===== Layer 2: 风格分配 =====
@@ -238,6 +249,7 @@ class PositionCalcWidget extends YiMuWidget {
         '<b class="' + (globallyBlocked ? 'danger' : 'info') + '">' + _w03Money(sumMoney) + '</b>' +
       '</div>' +
       '<div class="w03-money-meta">执行上限 ' + _w03PctText(totalCap) + '% = ' + _w03Money(maxPosition) + ' / 已持仓 ' + _w03Money(currentPosVal) + ' / 当前可新开 ' + _w03Money(newCap) + '</div>' +
+      (positionMode === 'earned_mainline' ? '<div class="w03-money-meta">盈利解锁 ' + _w03PctText(earnedCap) + '% / 主线机会 ' + _w03PctText(opportunityCap) + '% / 可加 ' + _w03PctText(availPct) + '%' + (addBlockReason === 'floating_loss' ? ' / 浮亏不加仓' : '') + '</div>' : '') +
       '<div class="w03-money-meta">计划上限 ' + _w03PctText(planTotalCap) + '% = ' + _w03Money(planMaxPosition) + ' / 计划可新开 ' + _w03Money(planNewCap) + (w2RangeMoney ? ' / W2趋势上限 ' + w2RangeMoney : '') + '</div>' +
       '<div class="w03-money-grid">' +
         '<div><span>连板计划可新开</span><b class="up">' + _w03Money(planLbMoney) + '</b><em>' + _w03Money(planNewCap) + ' × ' + _w03PctText(baseLbPct) + '%</em></div>' +

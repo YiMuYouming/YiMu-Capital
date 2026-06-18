@@ -70,6 +70,160 @@ def _opposite_sign(a, b):
     return (a > 0) != (b > 0)
 
 
+def _boolish(value):
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return False
+    text = str(value).strip().lower()
+    return text in ("1", "true", "yes", "y", "on", "是", "确认", "已确认")
+
+
+def _pct(value, default=0, low=0, high=100):
+    number = _number(value)
+    if number is None:
+        number = default
+    number = max(low, min(high, number))
+    return int(number) if float(number).is_integer() else round(number, 2)
+
+
+def _position_pnl_pct(position):
+    for key in ("floating_pnl_pct", "total_pnl_pct", "today_pnl_pct", "浮盈%", "浮盈pct", "pnl_pct"):
+        number = _number((position or {}).get(key))
+        if number is not None:
+            return number
+    price = _number((position or {}).get("price")) or _number((position or {}).get("现价"))
+    cost = _number((position or {}).get("cost")) or _number((position or {}).get("成本"))
+    if price is not None and cost and cost > 0:
+        return (price - cost) / cost * 100
+    return None
+
+
+def _target_single_cap(target_role=None, target_is_mainline=False):
+    role = str(target_role or "").lower()
+    if not _boolish(target_is_mainline):
+        return 10
+    if any(key in role for key in ("leader", "unique", "dragon", "龙头", "唯一", "高度")):
+        return 30
+    if any(key in role for key in ("capacity", "core", "strong_trend", "trend_core", "容量", "中军", "强趋势", "核心")):
+        return 25
+    return 20
+
+
+def _profitable_mainline_count(position_control, mainline_confirmed):
+    explicit = _number((position_control or {}).get("profitable_mainline_positions"))
+    if explicit is not None:
+        return max(0, int(explicit))
+    count = 0
+    for position in (position_control or {}).get("positions") or []:
+        is_mainline = position.get("is_mainline")
+        if is_mainline is False:
+            continue
+        if is_mainline is None and not mainline_confirmed:
+            continue
+        pnl_pct = _position_pnl_pct(position)
+        if pnl_pct is not None and pnl_pct > 0:
+            count += 1
+    return count
+
+
+def _earned_cap(position_control, mainline_confirmed, profitable_count):
+    explicit = _number((position_control or {}).get("earned_cap_pct"))
+    if explicit is not None:
+        return _pct(explicit)
+    if not mainline_confirmed:
+        return 10
+    if profitable_count <= 0:
+        return 20
+    if profitable_count == 1:
+        return 40
+    if profitable_count == 2:
+        return 60
+    return 80 if _boolish((position_control or {}).get("protection_raised")) else 60
+
+
+def _opportunity_cap(position_control, base_cap, mainline_confirmed):
+    pc = position_control or {}
+    explicit = _number(pc.get("opportunity_cap_pct"))
+    cap = explicit if explicit is not None else base_cap
+    if _boolish(pc.get("market_breadth_polarization")) and not mainline_confirmed:
+        cap = min(cap, 10)
+    return _pct(cap)
+
+
+def _floating_loss_add_blocked(position_control, mainline_confirmed, profitable_count):
+    pc = position_control or {}
+    target_pnl = _number(pc.get("target_floating_pnl_pct"))
+    if target_pnl is None:
+        target_pnl = _number(pc.get("target_pnl_pct"))
+    if target_pnl is not None and target_pnl < 0:
+        return True
+    if profitable_count > 0:
+        return False
+    for position in pc.get("positions") or []:
+        is_mainline = position.get("is_mainline")
+        if is_mainline is False:
+            continue
+        if is_mainline is None and not mainline_confirmed:
+            continue
+        pnl_pct = _position_pnl_pct(position)
+        if pnl_pct is not None and pnl_pct < 0:
+            return True
+    return False
+
+
+def _position_control_caps(position_control, base_cap, current_total_cap, globally_blocked):
+    pc = position_control or {}
+    enabled = _boolish(pc.get("enabled"))
+    current_position_pct = _pct(pc.get("current_position_pct"), 0)
+    target_is_mainline = _boolish(pc.get("target_is_mainline", pc.get("mainline_confirmed")))
+    single_cap = _target_single_cap(pc.get("target_role"), target_is_mainline)
+    common = {
+        "account_cap_pct": 0 if globally_blocked else _pct(pc.get("account_cap_pct"), current_total_cap),
+        "opportunity_cap_pct": 0 if globally_blocked else _pct(pc.get("opportunity_cap_pct"), current_total_cap),
+        "earned_cap_pct": 0 if globally_blocked else current_total_cap,
+        "current_position_pct": current_position_pct,
+        "available_add_pct": 0 if globally_blocked else max(0, _pct(current_total_cap) - current_position_pct),
+        "single_stock_cap_pct": 0,
+        "add_step_pct": 0 if globally_blocked else _pct(pc.get("add_step_pct"), 10),
+        "max_positions": int(_number(pc.get("max_positions")) or 3),
+        "max_mixed_positions": int(_number(pc.get("max_mixed_positions")) or 5),
+        "profitable_mainline_positions": 0,
+        "mainline_confirmed": False,
+        "market_breadth_polarization": _boolish(pc.get("market_breadth_polarization")),
+        "add_allowed": False if globally_blocked else current_total_cap > current_position_pct,
+        "add_block_reason": "",
+        "position_control_mode": "legacy",
+    }
+    if not enabled:
+        return current_total_cap, common
+
+    mainline_confirmed = _boolish(pc.get("mainline_confirmed"))
+    profitable_count = _profitable_mainline_count(pc, mainline_confirmed)
+    earned_cap = 0 if globally_blocked else _earned_cap(pc, mainline_confirmed, profitable_count)
+    account_cap = 0 if globally_blocked else _pct(pc.get("account_cap_pct"), 80)
+    opportunity_cap = 0 if globally_blocked else _opportunity_cap(pc, base_cap, mainline_confirmed)
+    final_cap = 0 if globally_blocked else min(account_cap, opportunity_cap, earned_cap)
+    floating_loss_blocked = not globally_blocked and _floating_loss_add_blocked(pc, mainline_confirmed, profitable_count)
+    available_add = max(0, final_cap - current_position_pct)
+    if floating_loss_blocked:
+        available_add = 0
+
+    common.update({
+        "account_cap_pct": account_cap,
+        "opportunity_cap_pct": opportunity_cap,
+        "earned_cap_pct": earned_cap,
+        "available_add_pct": available_add,
+        "single_stock_cap_pct": single_cap,
+        "profitable_mainline_positions": profitable_count,
+        "mainline_confirmed": mainline_confirmed,
+        "add_allowed": available_add > 0,
+        "add_block_reason": "floating_loss" if floating_loss_blocked else "",
+        "position_control_mode": "earned_mainline",
+    })
+    return final_cap, common
+
+
 def evaluate_rule_state(inputs, now=None):
     now = now or datetime.now()
     account = inputs.get("account") or {}
@@ -79,6 +233,7 @@ def evaluate_rule_state(inputs, now=None):
     funds = inputs.get("funds") or {}
     freshness = inputs.get("freshness") or {}
     time_window = inputs.get("time_window") or {}
+    position_control = inputs.get("position_control") or {}
 
     legacy_pnl_pct = _number(account.get("pnl_pct"))
     account_day_return_pct = _number(account.get("account_day_return_pct"))
@@ -264,6 +419,7 @@ def evaluate_rule_state(inputs, now=None):
         total_cap = 0
         lianban_pct = 0
         trend_pct = 0
+    total_cap, position_caps = _position_control_caps(position_control, base_cap, total_cap, globally_blocked)
 
     w1_blocks = [item["code"] for item in blocks if item["scope"] in ("all", "w1")]
     w2_blocks = [item["code"] for item in blocks if item["scope"] in ("all", "w2")]
@@ -291,6 +447,7 @@ def evaluate_rule_state(inputs, now=None):
             "lianban_pct": lianban_pct,
             "trend_pct": trend_pct,
             "first_entry_pct": 0 if globally_blocked else 10,
+            **position_caps,
         },
         "windows": {
             "w1": {"in_session": in_w1, "buy_allowed": in_w1 and not w1_blocks, "blocks": w1_blocks},
