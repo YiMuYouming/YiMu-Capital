@@ -2195,6 +2195,56 @@ class EvidenceBoardWidgetTest(unittest.TestCase):
         self.assertIn("_openEvidenceTarget", widget_src)
         self.assertIn("keydown", widget_src)
 
+    def test_w25_routes_secondary_evidence_refs_to_shelf(self):
+        script = r"""
+const assert = require('assert');
+const fs = require('fs');
+const vm = require('vm');
+const src = fs.readFileSync('widgets/evidence-board.js', 'utf8');
+const context = {
+  console: console,
+  document: {
+    createElement: function() {
+      return {
+        innerHTML: '',
+        style: {},
+        getAttribute: function() { return null; },
+        setAttribute: function() {},
+        querySelector: function() { return null; },
+        querySelectorAll: function() { return []; },
+        addEventListener: function() {},
+      };
+    },
+  },
+  YiMuWidget: function() {},
+  WidgetRegistry: {
+    _map: {},
+    register: function(id, cls) { this._map[id] = cls; },
+  },
+  DataStore: { merged: {} },
+};
+context.YiMuWidget.prototype.getBody = function() { return context.document.createElement('div'); };
+context.YiMuWidget.prototype.updateTimestamp = function() {};
+vm.runInNewContext(src, context, { filename: 'widgets/evidence-board.js' });
+const inst = new context.WidgetRegistry._map.W25({ id: 'W25' });
+
+['W08', 'W09', 'W06', 'W10', 'W12', 'W13', 'W21'].forEach(function(wid) {
+  assert.strictEqual(
+    inst._traceTarget({ source: wid + ' secondary evidence' }),
+    'shelf:SHELF_' + wid,
+    wid + ' should route to evidence shelf'
+  );
+});
+
+assert.strictEqual(inst._traceTarget({ source: 'W15 account state' }), 'widget:W15');
+"""
+        result = subprocess.run(
+            ["node", "--no-warnings", "-e", script],
+            capture_output=True, text=True, timeout=10,
+            cwd=str(ROOT),
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
 
 class ReadOnlyInsightUxTest(unittest.TestCase):
     """Dashboard keeps AI interaction outside the cockpit surface."""
@@ -2470,7 +2520,10 @@ assert.notStrictEqual(registry.getMeta(groups.first_screen[0].id).title, '污染
         self.assertIn('id="evidenceShelfSummary"', index)
         self.assertIn('id="evidenceShelfNav"', index)
         self.assertIn("EVIDENCE_SHELF_WIDGETS", index)
-        for wid in ["W10", "W12", "W13", "W21"]:
+        self.assertIn("<b>W08 / W09 / W10 / W12 / W13 / W21 / W06</b>", index)
+        self.assertIn("SECONDARY_EVIDENCE_WIDGETS = ['W08','W09','W10','W12','W13','W21','W06']", index)
+        self.assertIn("EVIDENCE_SHELF_WIDGETS = SECONDARY_EVIDENCE_WIDGETS", index)
+        for wid in ["W08", "W09", "W10", "W12", "W13", "W21", "W06"]:
             self.assertIn("'" + wid + "'", index)
             self.assertIn("{ id: '" + wid + "'", index)
         self.assertIn('data-target="SHELF_\' + item.id + \'"', index)
@@ -2490,6 +2543,17 @@ assert.notStrictEqual(registry.getMeta(groups.first_screen[0].id).title, '污染
         self.assertIn(".evidence-shelf-summary-grid", theme)
         self.assertIn(".evidence-shelf-grid", theme)
         self.assertIn(".evidence-shelf-card", theme)
+        self.assertIn("EVIDENCE_SHELF_WIDGETS.forEach(_mountEvidenceShelfWidget)", index)
+
+    def test_cockpit_mode_border_top_does_not_include_w09(self):
+        theme = (ROOT / "css" / "theme.css").read_text(encoding="utf-8")
+        blue_rule = theme[
+            theme.index('body.cockpit-mode .grid-stack-item[gs-id="W04"] .grid-stack-item-content,'):
+            theme.index("body.cockpit-mode .widget-header{")
+        ]
+        self.assertIn('grid-stack-item[gs-id="W04"]', blue_rule)
+        self.assertIn('grid-stack-item[gs-id="W22"]', blue_rule)
+        self.assertNotIn('grid-stack-item[gs-id="W09"]', blue_rule)
 
     def test_dashboard_exposes_evidence_trace_router(self):
         index = (ROOT / "index.html").read_text(encoding="utf-8")

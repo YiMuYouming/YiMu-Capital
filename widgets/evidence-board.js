@@ -89,7 +89,7 @@ class EvidenceBoardWidget extends YiMuWidget {
     var match = source.match(/W\d{2}/);
     if (!match) return '';
     var wid = match[0];
-    if (wid === 'W10' || wid === 'W12' || wid === 'W13' || wid === 'W21') return 'shelf:SHELF_' + wid;
+    if (wid === 'W08' || wid === 'W09' || wid === 'W06' || wid === 'W10' || wid === 'W12' || wid === 'W13' || wid === 'W21') return 'shelf:SHELF_' + wid;
     return 'widget:' + wid;
   }
 

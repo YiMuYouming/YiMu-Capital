@@ -189,7 +189,7 @@ body.ready{opacity:1}
     <div class="evidence-shelf-header">
       <div class="evidence-shelf-title">
         <span>候选与市场证据</span>
-        <b>W10 / W12 / W13 / W21</b>
+        <b>W08 / W09 / W10 / W12 / W13 / W21 / W06</b>
       </div>
       <div class="evidence-shelf-actions">
         <button class="evidence-shelf-btn" id="evidenceShelfRefresh" title="刷新证据副屏">刷新</button>
@@ -628,11 +628,15 @@ function _renderEvidenceShelfNav() {
   var data = DataStore.merged || {};
   var hotList = data.hot_list || {};
   var iwc = data.iwencai || {};
+  var auctionSnapshot = data.auction_snapshot || data.auction || null;
   var items = [
+    { id: 'W08', label: 'W1', value: Array.isArray(data.lianban_pool) ? data.lianban_pool.length : 0 },
+    { id: 'W09', label: 'W2', value: Array.isArray(data.trend_pool) ? data.trend_pool.length : 0 },
     { id: 'W10', label: '板块', value: Array.isArray(data.sectors) ? data.sectors.length : 0 },
     { id: 'W12', label: '连板', value: Array.isArray(data.lianban_pool) ? data.lianban_pool.length : 0 },
     { id: 'W13', label: '趋势', value: Array.isArray(data.trend_pool) ? data.trend_pool.length : 0 },
     { id: 'W21', label: '梯队', value: (Array.isArray(hotList.zt_stocks) ? hotList.zt_stocks.length : 0) + '/' + (Array.isArray(iwc['连板股列表']) ? iwc['连板股列表'].length : 0) },
+    { id: 'W06', label: '竞价', value: auctionSnapshot ? '5D' : '—' },
   ];
   nav.innerHTML = items.map(function(item) {
     return '<button class="evidence-shelf-nav-btn" data-target="SHELF_' + item.id + '" title="跳转到 ' + item.id + '">' +

@@ -2132,7 +2132,6 @@ body.cockpit-mode .grid-stack-item[gs-id="W24"] .grid-stack-item-content{
   border-top:2px solid rgba(185,28,28,.55);
 }
 body.cockpit-mode .grid-stack-item[gs-id="W04"] .grid-stack-item-content,
-body.cockpit-mode .grid-stack-item[gs-id="W09"] .grid-stack-item-content,
 body.cockpit-mode .grid-stack-item[gs-id="W22"] .grid-stack-item-content{
   border-top:2px solid rgba(37,99,235,.38);
 }
