@@ -2355,6 +2355,42 @@ class CoreQuietStateUxTest(unittest.TestCase):
 class WidgetPanelUxTest(unittest.TestCase):
     """Widget picker uses cockpit-style metadata instead of the old dev panel."""
 
+    def test_widget_registry_declares_dashboard_3_usage_roles(self):
+        registry = (ROOT / "widget-registry.js").read_text(encoding="utf-8")
+        for role in ["first_screen", "secondary_evidence", "review_low", "hidden_eval"]:
+            self.assertIn("usageRole:'" + role + "'", registry)
+        for wid in ["W25", "W15", "W24", "W14", "W04", "W22"]:
+            self.assertRegex(
+                registry,
+                r"id:'" + wid + r"'.+usageRole:'first_screen'",
+                "first-screen widget missing usageRole: " + wid,
+            )
+        for wid in ["W08", "W09", "W10", "W12", "W13", "W21", "W06"]:
+            self.assertRegex(
+                registry,
+                r"id:'" + wid + r"'.+usageRole:'secondary_evidence'",
+                "secondary evidence widget missing usageRole: " + wid,
+            )
+        for wid in ["W20", "W23", "W05", "W11", "W17", "W18", "W19"]:
+            self.assertRegex(
+                registry,
+                r"id:'" + wid + r"'.+usageRole:'review_low'",
+                "review/low-frequency widget missing usageRole: " + wid,
+            )
+        for wid in ["W01", "W02", "W03", "W07", "W16"]:
+            self.assertRegex(
+                registry,
+                r"id:'" + wid + r"'.+usageRole:'hidden_eval'",
+                "hidden/evaluation widget missing usageRole: " + wid,
+            )
+
+    def test_widget_registry_exposes_usage_helpers(self):
+        registry = (ROOT / "widget-registry.js").read_text(encoding="utf-8")
+        self.assertIn("function listByUsageRole()", registry)
+        self.assertIn("function isFirstScreen(id)", registry)
+        self.assertIn("listByUsageRole: listByUsageRole", registry)
+        self.assertIn("isFirstScreen: isFirstScreen", registry)
+
     def test_market_evidence_shelf_is_secondary_overlay(self):
         index = (ROOT / "index.html").read_text(encoding="utf-8")
         theme = (ROOT / "css" / "theme.css").read_text(encoding="utf-8")
