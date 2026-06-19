@@ -266,3 +266,13 @@
 先执行 Phase 1。理由是它风险最低、反馈最快，能马上减少盘中认知负担；同时它会暴露哪些字段和组件真正需要进入 `/api/ai/context`，避免 Phase 2 设计过宽。
 
 Phase 1 完成并验证后，再进入 Phase 2，把仪表盘事实协议正式开放给 AI agent 使用。
+
+## Phase 1 Implementation Note
+
+Phase 1 implemented the cockpit slimming layer:
+
+- Widgets now declare `usageRole` metadata.
+- Intraday cockpit defaults to six first-screen modules: W25, W15, W24, W14, W04, W22.
+- W08/W09/W10/W12/W13/W21/W06 remain available through the evidence shelf or component panel.
+- Topbar direct shortcuts are limited to high-frequency modules plus evidence shelf and full component panel.
+- No account SSOT, ticket API, health gate, data source, or POST behavior changed.
