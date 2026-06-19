@@ -2611,8 +2611,10 @@ assert.notStrictEqual(registry.getMeta(groups.first_screen[0].id).title, '污染
         self.assertIn("_addWidgetToGrid('W22')", index)
         for wid in ["W25", "W04", "W24", "W15", "W22"]:
             self.assertIn(wid, shortcuts)
-        for label in ["证据", "报数", "组件", "核心"]:
+        for label in ["证据", "组件", "核心"]:
             self.assertIn(label, shortcuts)
+        self.assertNotIn('id="inputPanelBtn"', shortcuts)
+        self.assertNotIn("报数", shortcuts)
         for wid in ["W12", "W13"]:
             self.assertNotIn(wid, shortcuts)
             self.assertNotIn('data-widget="' + wid + '"', shortcuts)

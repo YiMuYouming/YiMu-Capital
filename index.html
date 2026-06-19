@@ -135,7 +135,6 @@ body.ready{opacity:1}
       <button class="topbar-shortcut topbar-shortcut-trade" data-widget="W24" title="W24 交易票据"><b>W24</b><span>票据</span></button>
       <button class="topbar-shortcut topbar-shortcut-trade" data-widget="W15" title="W15 持仓操作清仓"><b>W15</b><span>持仓</span></button>
       <button id="evidenceShelfBtn" class="topbar-shortcut topbar-shortcut-data" title="候选与市场证据副屏"><b>E</b><span>证据</span></button>
-      <button id="inputPanelBtn" class="topbar-shortcut topbar-shortcut-tool" title="W16 报数面板"><b>W16</b><span>报数</span></button>
       <button id="pnlCurveBtn" class="topbar-shortcut topbar-shortcut-pnl" title="W22 收益曲线"><b>W22</b><span>曲线</span></button>
       <button id="addWidgetBtn" class="topbar-shortcut topbar-shortcut-add" title="添加组件"><b>+</b><span>组件</span></button>
       <button id="compactBtn" class="topbar-shortcut topbar-shortcut-quiet" title="隐藏非核心组件"><b>核心</b><span>视图</span></button>
@@ -730,7 +729,6 @@ document.getElementById('evidenceShelfRefresh').addEventListener('click', _refre
 // 顶栏按钮
 document.getElementById('addWidgetBtn').addEventListener('click', _showWidgetPanel);
 document.getElementById('evidenceShelfBtn').addEventListener('click', _showEvidenceShelf);
-document.getElementById('inputPanelBtn').addEventListener('click', function() { _closeTopbarMenus(); _showInputPanel(); });
 document.getElementById('pnlCurveBtn').addEventListener('click', function() { _closeTopbarMenus(); _addWidgetToGrid('W22'); });
 document.querySelectorAll('.topbar-shortcut[data-widget]').forEach(function(btn) {
   btn.addEventListener('click', function() { _closeTopbarMenus(); _addWidgetToGrid(btn.dataset.widget); });
