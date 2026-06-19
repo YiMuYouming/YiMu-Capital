@@ -2679,6 +2679,13 @@ class TransientSurfaceUxTest(unittest.TestCase):
         self.assertIn('" data-category="', index)
         self.assertIn("w.category", index)
 
+    def test_report_shortcut_opens_floating_panel_without_topbar_button(self):
+        index = (ROOT / "index.html").read_text(encoding="utf-8")
+        theme = (ROOT / "css" / "theme.css").read_text(encoding="utf-8")
+        self.assertNotIn("#inputPanelBtn", theme)
+        self.assertNotIn("content_W16", index)
+        self.assertIn("_showInputPanel();", index)
+
 
 if __name__ == "__main__":
     unittest.main()

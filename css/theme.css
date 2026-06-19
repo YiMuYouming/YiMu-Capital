@@ -280,7 +280,6 @@ html,body{
 .topbar-shortcut b{font-family:var(--font-mono);font-size:10px;color:inherit}
 .topbar-shortcut span{font-size:12px;color:inherit}
 .topbar-shortcut[data-widget] b,
-#inputPanelBtn b,
 #pnlCurveBtn b{display:none}
 .topbar-shortcut:hover{background:var(--bg-hover);border-color:var(--border)}
 .topbar-shortcut-data{border-color:rgba(37,99,235,.16);color:var(--info)}

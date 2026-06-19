@@ -1055,8 +1055,7 @@ document.addEventListener('keydown', function(e) {
   }
   if (e.key === 'p' || e.key === 'P') {
     e.preventDefault();
-    var w16 = document.getElementById('content_W16');
-    if (w16) w16.scrollIntoView({ behavior: 'smooth' });
+    _showInputPanel();
   }
   if ((e.ctrlKey || e.metaKey) && e.key === 's') { e.preventDefault(); _autoSaveLayout(); showToast('已保存'); }
   if ((e.ctrlKey || e.metaKey) && e.key === 'z') { e.preventDefault(); _undoRemoveWidget(); }
