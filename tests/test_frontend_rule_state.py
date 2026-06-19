@@ -273,9 +273,14 @@ class TradeTicketsStatusGroupingTest(unittest.TestCase):
         self.assertIn("审计原因 context_status", html, f"旧 context_status 清仓票应显示审计原因: {html[:900]}")
         self.assertIn("阻断原因 DOUBLE_ICE", html, f"买入硬阻断仍应显示阻断原因: {html[:900]}")
         self.assertIn(
-            "已阻断</span><span class=\"ticket-section-count\">1</span>",
+            "审计记录 1",
             html,
-            f"已阻断分组应只包含真实硬阻断: {html[:900]}",
+            f"硬阻断应折叠进审计记录: {html[:900]}",
+        )
+        self.assertIn(
+            "阻断/审计明细</span><span class=\"ticket-section-count\">1</span>",
+            html,
+            f"审计明细应只包含真实硬阻断: {html[:900]}",
         )
 
     def test_superseded_legacy_context_exit_tickets_are_hidden(self):
@@ -440,6 +445,42 @@ class TradeTicketsStatusGroupingTest(unittest.TestCase):
         self.assertIn(".w03-command-grid", theme)
         self.assertIn(".w03-track-lb{background:var(--up)}", theme)
         self.assertIn(".w03-track-trend{background:var(--info)}", theme)
+
+    def test_w03_w14_show_earned_position_caps(self):
+        fixture = _missing_rs_fixture()
+        fixture["rule_state"] = {
+            "version": "g1a-v1",
+            "tradable": True,
+            "market_regime": "低迷",
+            "caps": {
+                "base_total_pct": 60,
+                "total_pct": 20,
+                "account_cap_pct": 80,
+                "opportunity_cap_pct": 60,
+                "earned_cap_pct": 20,
+                "current_position_pct": 10,
+                "available_add_pct": 0,
+                "single_stock_cap_pct": 25,
+                "position_control_mode": "earned_mainline",
+                "add_block_reason": "floating_loss",
+                "lianban_pct": 0,
+                "trend_pct": 100,
+                "first_entry_pct": 10,
+            },
+            "windows": {"w1": {"blocks": []}, "w2": {"blocks": []}},
+            "blocks": [],
+            "warnings": [],
+        }
+
+        w03 = _render_widget("position-calc.js", "W03", fixture).get("html", "")
+        self.assertIn("盈利解锁 20%", w03, f"W03 应展示盈利解锁仓位: {w03[:900]}")
+        self.assertIn("主线机会 60%", w03, f"W03 应展示主线机会仓位: {w03[:900]}")
+        self.assertIn("浮亏不加仓", w03, f"W03 应展示浮亏不可加提示: {w03[:900]}")
+
+        w14 = _render_widget("risk-panel.js", "W14", fixture).get("html", "")
+        self.assertIn("盈利 20%", w14, f"W14 应展示盈利解锁仓位: {w14[:900]}")
+        self.assertIn("浮亏不加", w14, f"W14 应展示浮亏不可加提示: {w14[:900]}")
+        self.assertIn("单票 25%", w14, f"W14 应展示单票上限: {w14[:1200]}")
 
     def test_w03_escapes_warning_messages(self):
         fixture = _missing_rs_fixture()
@@ -640,21 +681,14 @@ class TradeTicketsWidgetRenderTest(unittest.TestCase):
         })
         self.assertNotIn("_error", result)
         html = result["html"]
-        self.assertIn("待确认", html)
+        self.assertIn("待处理", html)
         self.assertIn("可执行", html)
         self.assertIn("已阻断", html)
-        self.assertIn("已成交/关闭", html)
-        self.assertIn("ticket-summary-grid", html)
-        self.assertIn("ticket-summary-pill", html)
-        self.assertIn("ticket-acceptance-rail", html)
-        self.assertIn('data-ticket-stage="handoff"', html)
-        self.assertIn('data-ticket-stage="execute"', html)
-        self.assertIn('data-ticket-stage="review"', html)
-        self.assertIn('data-ticket-stage="closed"', html)
-        self.assertIn("AI交付", html)
-        self.assertIn("终端执行", html)
-        self.assertIn("规则复核", html)
-        self.assertIn("闭环对账", html)
+        self.assertIn("ticket-inbox-shell", html)
+        self.assertIn("ticket-board-columns", html)
+        self.assertIn("ticket-board-history", html)
+        self.assertIn("待处理", html)
+        self.assertIn("已完成", html)
         self.assertIn("ticket-card", html)
         self.assertIn("ticket-section-title", html)
         self.assertIn("sellable_qty", html)
@@ -662,8 +696,99 @@ class TradeTicketsWidgetRenderTest(unittest.TestCase):
         self.assertIn("可执行", html)
         self.assertIn("阻断原因", html)
         self.assertIn("已成交", html)
+        self.assertLess(html.index("ticket-board-columns"), html.index("ticket-board-history"))
+        self.assertNotIn("ticket-command-strip", html)
+        self.assertNotIn("ticket-execution-chain", html)
+        self.assertNotIn("ticket-acceptance-rail", html)
+        self.assertNotIn("ticket-detail-panel", html)
+        self.assertNotIn("AI验收台", html)
         self.assertNotIn(">buy<", html)
         self.assertNotIn(">filled<", html)
+
+    def test_w24_labels_cancelled_tickets_as_no_execute(self):
+        result = _render_widget("trade-tickets.js", "W24", {
+            "trade_tickets": [
+                {"ticket_id": "TICKET-FILLED", "code": "300037", "name": "新宙邦", "action_type": "clear", "status": "filled", "max_qty": 1200},
+                {"ticket_id": "TICKET-CANCELLED", "code": "300037", "name": "新宙邦", "action_type": "add", "status": "cancelled", "max_qty": 400},
+            ]
+        })
+        self.assertNotIn("_error", result)
+        html = result["html"]
+        self.assertIn("已成交 1 / 不执行 1", html)
+        self.assertIn("不执行 1", html)
+        self.assertIn("已完成", html)
+        self.assertIn("新宙邦｜加仓 400股", html)
+        self.assertNotIn("已取消", html)
+        self.assertNotIn("取消记录", html)
+
+    def test_w24_keeps_no_execute_and_emergency_details_open_across_rerender(self):
+        wpath = ROOT / "widgets" / "trade-tickets.js"
+        widget_src = wpath.read_text(encoding="utf-8")
+        script = PREAMBLE + "\n" + widget_src + r"""
+var cls = WidgetRegistry._map["W24"];
+var body = document.createElement('div');
+var inst = new cls({id: "W24"});
+inst.getBody = function() { return body; };
+inst._cancelledDetailsOpen = true;
+inst._emergencyDetailsOpen = true;
+inst.render({
+  trade_tickets: [
+    {ticket_id: "TICKET-CANCELLED", code: "300037", name: "新宙邦", action_type: "add", status: "cancelled", max_qty: 400}
+  ]
+});
+var html = body.innerHTML.replace(/\s+/g, ' ');
+console.log(JSON.stringify({
+  cancelledOpen: html.indexOf('class="ticket-cancelled-details" open') >= 0,
+  emergencyOpen: html.indexOf('class="ticket-emergency-entry" open') >= 0,
+  html: html
+}));
+"""
+        result = subprocess.run(
+            ["node", "--no-warnings", "-e", script],
+            capture_output=True, text=True, timeout=10,
+            cwd=str(ROOT),
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        resp = json.loads(result.stdout.strip().split("\n")[-1])
+        self.assertTrue(resp["cancelledOpen"], resp["html"])
+        self.assertTrue(resp["emergencyOpen"], resp["html"])
+
+    def test_w24_board_columns_can_collapse_across_rerender(self):
+        wpath = ROOT / "widgets" / "trade-tickets.js"
+        widget_src = wpath.read_text(encoding="utf-8")
+        script = PREAMBLE + "\n" + widget_src + r"""
+var cls = WidgetRegistry._map["W24"];
+var body = document.createElement('div');
+var inst = new cls({id: "W24"});
+inst.getBody = function() { return body; };
+inst._boardCollapsed = { pending: true, executable: false, completed: true };
+inst.render({
+  trade_tickets: [
+    {ticket_id: "TICKET-DRAFT", code: "002281", name: "光迅科技", action_type: "buy", status: "draft", max_qty: 100},
+    {ticket_id: "TICKET-EXEC", code: "000001", name: "测试A", action_type: "add", status: "executable", max_qty: 200},
+    {ticket_id: "TICKET-FILLED", code: "000003", name: "测试C", action_type: "sell", status: "filled"}
+  ]
+});
+var html = body.innerHTML.replace(/\s+/g, ' ');
+console.log(JSON.stringify({
+  pendingCollapsed: html.indexOf('data-ticket-column="pending"') >= 0 && html.indexOf('data-ticket-column="pending" class="ticket-board-column is-collapsed"') >= 0,
+  executableOpen: html.indexOf('data-ticket-column="executable" class="ticket-board-column is-collapsed"') < 0,
+  completedCollapsed: html.indexOf('data-ticket-column="completed" class="ticket-board-column is-collapsed"') >= 0,
+  hasToggle: html.indexOf('data-tt-column-toggle="pending"') >= 0,
+  html: html
+}));
+"""
+        result = subprocess.run(
+            ["node", "--no-warnings", "-e", script],
+            capture_output=True, text=True, timeout=10,
+            cwd=str(ROOT),
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        resp = json.loads(result.stdout.strip().split("\n")[-1])
+        self.assertTrue(resp["pendingCollapsed"], resp["html"])
+        self.assertTrue(resp["executableOpen"], resp["html"])
+        self.assertTrue(resp["completedCollapsed"], resp["html"])
+        self.assertTrue(resp["hasToggle"], resp["html"])
 
     def test_w24_displays_linked_trades_and_conflict_summary(self):
         result = _render_widget("trade-tickets.js", "W24", {
@@ -692,7 +817,7 @@ class TradeTicketsWidgetRenderTest(unittest.TestCase):
         self.assertIn("7000", html)
         self.assertIn("10000", html)
 
-    def test_w24_shows_execution_chain_from_ticket_to_account(self):
+    def test_w24_shows_ticket_board_from_ticket_to_account(self):
         result = _render_widget("trade-tickets.js", "W24", {
             "trade_tickets": [
                 {"ticket_id": "TICKET-PENDING", "code": "002281", "name": "光迅科技", "action_type": "buy", "status": "executable"},
@@ -702,22 +827,13 @@ class TradeTicketsWidgetRenderTest(unittest.TestCase):
         })
         self.assertNotIn("_error", result)
         html = result["html"]
-        self.assertIn("ticket-execution-chain", html)
-        self.assertIn('data-ticket-chain="ticket"', html)
-        self.assertIn('data-ticket-chain="trade"', html)
-        self.assertIn('data-ticket-chain="account"', html)
-        self.assertIn('data-ticket-chain="risk"', html)
-        self.assertIn("执行链", html)
-        self.assertIn("E2票据", html)
-        self.assertIn("W23成交", html)
-        self.assertIn("E1账户", html)
-        self.assertIn("异常", html)
-        self.assertIn("3张票据", html)
-        self.assertIn("3笔成交", html)
-        self.assertIn("2张待核", html)
-        self.assertIn("1项冲突", html)
-        self.assertLess(html.index("ticket-command-strip"), html.index("ticket-execution-chain"))
-        self.assertLess(html.index("ticket-execution-chain"), html.index("ticket-acceptance-rail"))
+        self.assertIn("ticket-inbox-shell", html)
+        self.assertIn("ticket-board-columns", html)
+        self.assertIn("可执行", html)
+        self.assertIn("已完成", html)
+        self.assertIn("trade 42", html)
+        self.assertIn("T1_SELLABLE_QTY", html)
+        self.assertLess(html.index("ticket-board-columns"), html.index("ticket-board-history"))
 
     def test_w24_empty_sections_use_shared_quiet_state(self):
         result = _render_widget("trade-tickets.js", "W24", {"trade_tickets": []})
@@ -727,7 +843,7 @@ class TradeTicketsWidgetRenderTest(unittest.TestCase):
         self.assertIn("暂无", html)
         self.assertNotIn("border:1px dashed var(--border-light)", html)
 
-    def test_w24_prioritizes_acceptance_view_and_keeps_emergency_entry(self):
+    def test_w24_prioritizes_inbox_view_and_keeps_emergency_entry(self):
         result = _render_widget("trade-tickets.js", "W24", {
             "trade_tickets": [
                 {"ticket_id": "TICKET-DRAFT", "code": "002281", "name": "光迅科技", "action_type": "buy", "status": "draft", "window": "W2", "max_qty": 100},
@@ -738,19 +854,17 @@ class TradeTicketsWidgetRenderTest(unittest.TestCase):
         })
         self.assertNotIn("_error", result)
         html = result["html"]
-        self.assertIn("ticket-command-strip", html)
-        self.assertIn("AI验收台", html)
+        self.assertIn("ticket-inbox-head", html)
+        self.assertIn("票据 Inbox", html)
         self.assertIn("下一步", html)
         self.assertIn("ticket-emergency-dock", html)
         self.assertIn("ticket-emergency-entry", html)
-        self.assertIn("ticket-acceptance-rail", html)
-        self.assertLess(html.index("ticket-command-strip"), html.index("ticket-acceptance-rail"))
-        self.assertLess(html.index("ticket-acceptance-rail"), html.index("ticket-summary-grid"))
+        self.assertIn("ticket-board-columns", html)
+        self.assertLess(html.index("ticket-inbox-head"), html.index("ticket-board-columns"))
         self.assertIn("data-tt-prepare", html, "应急出票据入口必须保留")
         self.assertIn("data-tt-preview", html, "应急预览成交入口必须保留")
         self.assertIn("data-tt-confirm", html, "应急确认入账入口必须保留")
-        self.assertLess(html.index("ticket-command-strip"), html.index("ticket-layout"))
-        self.assertLess(html.index("ticket-layout"), html.index("ticket-emergency-entry"),
+        self.assertLess(html.index("ticket-board-history"), html.index("ticket-emergency-entry"),
                         f"应急入口应收在主验收视图之后: {html[:1000]}")
 
     def test_w24_readonly_mode_hides_mutating_controls(self):
@@ -923,7 +1037,7 @@ console.log(JSON.stringify({html: bodyEl.innerHTML.replace(/\s+/g, ' ')}));
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         html = json.loads(result.stdout.strip().split("\n")[-1])["html"]
-        self.assertIn("待确认", html)
+        self.assertIn("待处理", html)
         self.assertNotIn("widget-skeleton", html)
 
     def test_w24_prepare_preview_confirm_frontend_flow(self):

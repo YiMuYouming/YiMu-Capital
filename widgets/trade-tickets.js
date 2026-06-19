@@ -29,6 +29,7 @@ function _ttStatusLabel(status) {
   var map = {
     draft: '待确认',
     confirmed: '待确认',
+    conditional_pending: '待确认',
     executable: '可执行',
     blocked: '已阻断',
     audit_degraded: '审计降级',
@@ -36,13 +37,42 @@ function _ttStatusLabel(status) {
     partially_filled: '部分成交',
     closed: '已关闭',
     closed_with_conflict: '冲突关闭',
-    cancelled: '已取消'
+    cancelled: '不执行'
   };
   return map[String(status || '').toLowerCase()] || (status || '未知状态');
 }
 
 function _ttIsExitAction(action) {
   return ['sell', 'reduce', 'clear'].indexOf(String(action || '').toLowerCase()) >= 0;
+}
+
+function _ttContextOnlyBlocks(blocks) {
+  blocks = _ttList(blocks || []);
+  if (!blocks.length) return false;
+  return blocks.every(function(code) {
+    return code === 'context_status' || code === 'rule_snapshot_hash';
+  });
+}
+
+function _ttDatePart(value) {
+  var m = String(value || '').match(/(\d{4})-?(\d{2})-?(\d{2})/);
+  return m ? (m[1] + '-' + m[2] + '-' + m[3]) : '';
+}
+
+function _ttTodayDate() {
+  var d = new Date();
+  var m = String(d.getMonth() + 1).padStart(2, '0');
+  var day = String(d.getDate()).padStart(2, '0');
+  return d.getFullYear() + '-' + m + '-' + day;
+}
+
+function _ttTicketDate(t) {
+  t = t || {};
+  return _ttDatePart(t.trade_date || t.created_at || t.ticket_id);
+}
+
+function _ttIsTodayTicket(t) {
+  return _ttTicketDate(t) === _ttTodayDate();
 }
 
 function _ttEffectiveStatus(t) {
@@ -56,6 +86,9 @@ function _ttEffectiveStatus(t) {
   var sellableOk = !Number.isFinite(qty) || (Number.isFinite(sellable) && qty <= sellable);
   if (status === 'blocked' && _ttIsExitAction(t.action_type) && contextOnly && !missing.length && sellableOk) {
     return 'audit_degraded';
+  }
+  if (status === 'blocked' && !_ttIsExitAction(t.action_type) && _ttContextOnlyBlocks(blocks) && !missing.length && _ttIsTodayTicket(t)) {
+    return 'conditional_pending';
   }
   return status;
 }
@@ -120,6 +153,10 @@ class TradeTicketsWidget extends YiMuWidget {
     this._pendingPreview = null;
     this._lastBody = null;
     this._apiLoaded = false;
+    this._auditDetailsOpen = false;
+    this._cancelledDetailsOpen = false;
+    this._emergencyDetailsOpen = false;
+    this._boardCollapsed = { pending: false, executable: false, completed: false };
   }
 
   render(data) {
@@ -323,6 +360,33 @@ class TradeTicketsWidget extends YiMuWidget {
         self._renderTicketBody(body);
       });
     });
+    var auditDetails = body.querySelector ? body.querySelector('.ticket-audit-details') : null;
+    if (auditDetails) {
+      auditDetails.addEventListener('toggle', function() {
+        self._auditDetailsOpen = !!auditDetails.open;
+      });
+    }
+    var cancelledDetails = body.querySelector ? body.querySelector('.ticket-cancelled-details') : null;
+    if (cancelledDetails) {
+      cancelledDetails.addEventListener('toggle', function() {
+        self._cancelledDetailsOpen = !!cancelledDetails.open;
+      });
+    }
+    var emergencyDetails = body.querySelector ? body.querySelector('.ticket-emergency-entry') : null;
+    if (emergencyDetails) {
+      emergencyDetails.addEventListener('toggle', function() {
+        self._emergencyDetailsOpen = !!emergencyDetails.open;
+      });
+    }
+    var columnBtns = body.querySelectorAll ? body.querySelectorAll('[data-tt-column-toggle]') : [];
+    Array.prototype.forEach.call(columnBtns, function(btn) {
+      btn.addEventListener('click', function() {
+        var key = btn.getAttribute('data-tt-column-toggle') || '';
+        if (!key) return;
+        self._boardCollapsed[key] = !self._boardCollapsed[key];
+        self._renderTicketBody(body);
+      });
+    });
   }
 
   _summaryPill(label, count, tone) {
@@ -345,7 +409,7 @@ class TradeTicketsWidget extends YiMuWidget {
     return '<div class="ticket-acceptance-rail" aria-label="票据验收路径">' +
       this._acceptanceStep('handoff', 'AI交付', counts.pending, counts.pending ? '待确认票据' : '无待确认', counts.pending > 0) +
       this._acceptanceStep('execute', '终端执行', counts.exec, counts.exec ? '等待成交回填' : '无可执行', counts.exec > 0) +
-      this._acceptanceStep('review', '规则复核', counts.blocked, counts.blocked ? '存在阻断' : '无阻断', counts.blocked > 0) +
+      this._acceptanceStep('review', '审计留痕', counts.blocked, counts.blocked ? '折叠保存' : '无审计项', false) +
       this._acceptanceStep('closed', '闭环对账', counts.filled + '/' + counts.total, counts.total ? '已闭环/总票据' : '无票据', counts.filled > 0 || counts.total === 0) +
     '</div>';
   }
@@ -394,8 +458,8 @@ class TradeTicketsWidget extends YiMuWidget {
       var selected = self._selectedTicketId && self._selectedTicketId === t.ticket_id;
       var qty = t.max_qty != null ? t.max_qty : (t.qty != null ? t.qty : '');
       var effectiveStatus = _ttEffectiveStatus(t);
-      var blockLabel = effectiveStatus === 'audit_degraded' ? '审计原因 ' : '阻断原因 ';
-      var blockTone = effectiveStatus === 'audit_degraded' ? 'warn' : 'danger';
+      var blockLabel = effectiveStatus === 'audit_degraded' ? '审计原因 ' : (effectiveStatus === 'conditional_pending' ? '待确认 ' : '阻断原因 ');
+      var blockTone = (effectiveStatus === 'audit_degraded' || effectiveStatus === 'conditional_pending') ? 'warn' : 'danger';
       var titleText = (t.name || t.code || '未命名') + '｜' + _ttActionLabel(t.action_type) + (qty ? ' ' + qty + '股' : '');
       html += '<button class="ticket-card' + (selected ? ' is-selected' : '') + '" data-tt-select="' + _ttEsc(t.ticket_id) + '" style="--ticket-tone:var(--' + tone + ')">' +
         '<div class="ticket-card-head">' +
@@ -417,6 +481,132 @@ class TradeTicketsWidget extends YiMuWidget {
     return html + '</div>';
   }
 
+  _auditHint(tickets) {
+    var blocks = [];
+    (tickets || []).forEach(function(t) {
+      blocks = blocks.concat(_ttList(t.blocking_rule_ids || []));
+    });
+    if (blocks.indexOf('context_status') >= 0 || blocks.indexOf('rule_snapshot_hash') >= 0) {
+      return '交易前快照缺失，仅作事后审计';
+    }
+    return '规则阻断已留痕，复盘时展开核对';
+  }
+
+  _auditDetails(tickets) {
+    if (!tickets || !tickets.length) return '';
+    return '<details class="ticket-audit-details"' + (this._auditDetailsOpen ? ' open' : '') + '>' +
+      '<summary><span>审计记录 ' + tickets.length + '</span><em>' + _ttEsc(this._auditHint(tickets)) + '</em></summary>' +
+      this._section('阻断/审计明细', tickets, 'danger', true) +
+    '</details>';
+  }
+
+  _ticketTitle(t) {
+    t = t || {};
+    var qty = t.max_qty != null ? t.max_qty : (t.qty != null ? t.qty : '');
+    return (t.name || t.code || '未命名') + '｜' + _ttActionLabel(t.action_type) + (qty ? ' ' + qty + '股' : '');
+  }
+
+  _statusTone(status) {
+    var map = {
+      draft: 'info',
+      confirmed: 'info',
+      conditional_pending: 'info',
+      executable: 'up',
+      audit_degraded: 'warn',
+      blocked: 'danger',
+      filled: 'text-secondary',
+      partially_filled: 'text-secondary',
+      closed: 'text-secondary',
+      closed_with_conflict: 'warn',
+      cancelled: 'text-disabled'
+    };
+    return map[String(status || '').toLowerCase()] || 'text-secondary';
+  }
+
+  _queueRow(t, selected) {
+    t = t || {};
+    var status = _ttEffectiveStatus(t);
+    var tone = this._statusTone(status);
+    var blocks = _ttList(t.blocking_rule_ids || []);
+    var missing = _ttList(t.missing_required_data || t.missing_data || []);
+    var trades = _ttList(t.linked_trade_ids || t.trade_ids);
+    var conflicts = _ttList(t.conflicts || t.ticket_conflict_log || t.conflict_log);
+    var reasonLabel = status === 'audit_degraded' ? '审计原因 ' : (status === 'conditional_pending' ? '待确认 ' : '阻断原因 ');
+    var reason = blocks.length ? reasonLabel + blocks.join(', ') : (missing.length ? ('缺数据 ' + missing.join(', ')) : (conflicts.length ? conflicts.length + '项冲突' : ''));
+    var windowText = t.window ? t.window : (_ttTicketDate(t) || '-');
+    return '<button class="ticket-row' + (selected ? ' is-selected' : '') + '" data-tt-select="' + _ttEsc(t.ticket_id) + '" data-ticket-status="' + _ttEsc(status) + '">' +
+      '<span class="ticket-row-status tone-' + _ttEsc(tone) + '">' + _ttEsc(_ttStatusLabel(status)) + '</span>' +
+      '<span class="ticket-row-main"><b>' + _ttEsc(this._ticketTitle(t)) + '</b><em>' + _ttEsc(t.code || '') + (trades.length ? ' · trade ' + _ttEsc(trades.join(',')) : '') + '</em></span>' +
+      '<span class="ticket-row-window">' + _ttEsc(windowText) + '</span>' +
+      '<span class="ticket-row-reason">' + _ttEsc(reason || '规则通过') + '</span>' +
+    '</button>';
+  }
+
+  _queueList(title, tickets, emptyText) {
+    var self = this;
+    var html = '<div class="ticket-queue-group"><div class="ticket-queue-title"><span>' + _ttEsc(title) + '</span><b>' + tickets.length + '</b></div>';
+    if (!tickets.length) {
+      return html + '<div class="ui-empty ui-empty-inline"><div class="ui-empty-title">' + _ttEsc(emptyText || '暂无') + '</div></div></div>';
+    }
+    html += '<div class="ticket-queue-list">';
+    tickets.forEach(function(t) {
+      html += self._queueRow(t, self._selectedTicketId && self._selectedTicketId === t.ticket_id);
+    });
+    return html + '</div></div>';
+  }
+
+  _detailLine(label, value) {
+    if (value === null || value === undefined || value === '') return '';
+    return '<div><span>' + _ttEsc(label) + '</span><b>' + _ttEsc(value) + '</b></div>';
+  }
+
+  _ticketDetail(t) {
+    if (!t) {
+      return '<aside class="ticket-detail-panel"><div class="ui-empty ui-empty-inline"><div class="ui-empty-title">暂无票据</div></div></aside>';
+    }
+    var status = _ttEffectiveStatus(t);
+    var blocks = _ttList(t.blocking_rule_ids || []);
+    var missing = _ttList(t.missing_required_data || t.missing_data || []);
+    var trades = _ttList(t.linked_trade_ids || t.trade_ids);
+    var conflicts = _ttList(t.conflicts || t.ticket_conflict_log || t.conflict_log);
+    var conflictText = conflicts.map(function(c) {
+      if (typeof c === 'string') return c;
+      var typ = c.conflict_type || c.type || 'conflict';
+      var exp = c.expected_value != null ? c.expected_value : c.expected;
+      var act = c.actual_value != null ? c.actual_value : c.actual;
+      var tail = (exp != null || act != null) ? ' ' + (exp == null ? '?' : exp) + ' vs ' + (act == null ? '?' : act) : '';
+      return typ + tail;
+    }).join(', ');
+    var reasonLabel = status === 'audit_degraded' ? '审计原因 ' : (status === 'conditional_pending' ? '待确认 ' : '阻断原因 ');
+    var reason = blocks.length ? reasonLabel + blocks.join(', ') : (missing.length ? '缺数据 ' + missing.join(', ') : '');
+    return '<aside class="ticket-detail-panel">' +
+      '<div class="ticket-detail-title"><span class="ticket-row-status tone-' + _ttEsc(this._statusTone(status)) + '">' + _ttEsc(_ttStatusLabel(status)) + '</span><b>' + _ttEsc(this._ticketTitle(t)) + '</b></div>' +
+      '<div class="ticket-detail-grid">' +
+        this._detailLine('票据', t.ticket_id || '-') +
+        this._detailLine('窗口', t.window || '-') +
+        this._detailLine('代码', t.code || '-') +
+        this._detailLine('关联成交', trades.length ? 'trade ' + trades.join(',') : '无') +
+        this._detailLine('规则', reason || '规则通过') +
+        this._detailLine('冲突', conflictText || (conflicts.length ? conflicts.length + '项冲突' : '无')) +
+      '</div>' +
+    '</aside>';
+  }
+
+  _inboxTab(label, count, active) {
+    return '<button class="ticket-inbox-tab' + (active ? ' is-active' : '') + '" type="button"><span>' + _ttEsc(label) + '</span><b>' + _ttEsc(count) + '</b></button>';
+  }
+
+  _boardColumn(key, title, tickets, tone, emptyText) {
+    var collapsed = !!(this._boardCollapsed && this._boardCollapsed[key]);
+    var body = collapsed ? '' : this._section(title, tickets, tone, true);
+    return '<div data-ticket-column="' + _ttEsc(key) + '" class="ticket-board-column' + (collapsed ? ' is-collapsed' : '') + '">' +
+      '<button class="ticket-board-toggle" type="button" data-tt-column-toggle="' + _ttEsc(key) + '" aria-expanded="' + (collapsed ? 'false' : 'true') + '">' +
+        '<span>' + _ttEsc(title) + '</span><b>' + tickets.length + '</b>' +
+      '</button>' +
+      body +
+    '</div>';
+  }
+
   _renderTicketBody(body) {
     if (this._error) {
       body.innerHTML = '<div class="ticket-brief-head"><span><span class="evidence-inline-ref">E2</span>票据闭环</span><span>降级</span></div>' +
@@ -426,7 +616,7 @@ class TradeTicketsWidget extends YiMuWidget {
     }
     var allTickets = this._tickets || [];
     var tickets = allTickets.filter(function(t) { return !_ttIsSupersededAuditTicket(t, allTickets); });
-    var pending = tickets.filter(function(t){ var s = _ttEffectiveStatus(t); return s === 'confirmed' || s === 'draft'; });
+    var pending = tickets.filter(function(t){ var s = _ttEffectiveStatus(t); return s === 'confirmed' || s === 'draft' || s === 'conditional_pending'; });
     var exec = tickets.filter(function(t){ var s = _ttEffectiveStatus(t); return s === 'audit_degraded' || s === 'executable'; });
     var blocked = tickets.filter(function(t){ return _ttEffectiveStatus(t) === 'blocked'; });
     var done = tickets.filter(function(t){ return ['filled','partially_filled','closed','closed_with_conflict','cancelled'].indexOf(_ttEffectiveStatus(t)) >= 0; });
@@ -458,7 +648,6 @@ class TradeTicketsWidget extends YiMuWidget {
     };
     var nextAction = pending.length ? '复核待确认票据' :
       exec.length ? '等待终端执行回填' :
-      blocked.length ? '复核阻断原因' :
       filled.length ? '核对已成交闭环' : '暂无票据动作';
     function actionButton(action, label) {
       var active = activeAction === action;
@@ -466,7 +655,7 @@ class TradeTicketsWidget extends YiMuWidget {
     }
     var emergencyHtml = writeGate.canWrite ?
       '<div class="ticket-emergency-dock">' +
-      '<details class="ticket-emergency-entry">' +
+      '<details class="ticket-emergency-entry"' + (this._emergencyDetailsOpen ? ' open' : '') + '>' +
       '<summary><span>应急</span><em>手工出票 / 成交确认</em></summary>' +
       '<div class="ticket-entry-grid">' +
       '<div class="ticket-entry-main">' +
@@ -496,33 +685,27 @@ class TradeTicketsWidget extends YiMuWidget {
       ((this._statusMessage || pendingText || selectedText) ? '<div class="ticket-status-line' + (this._statusMessage ? ' has-message' : '') + '">' + _ttEsc(this._statusMessage || pendingText || selectedText) + '</div>' : '') +
     '</div></details></div>' :
       '<div class="ticket-readonly-lock ui-empty ui-empty-inline"><div class="ui-empty-title">只读闭环</div><div class="ui-empty-detail">' + _ttEsc(writeGate.reason) + '，票据状态仅用于核对。</div></div>';
-    body.innerHTML = '<div class="ticket-brief-head"><span><span class="evidence-inline-ref">E2</span>票据闭环</span><span>已成交 ' + filled.length + ' / 已取消 ' + cancelled.length + '</span></div>' +
-    '<div class="ticket-command-strip">' +
-      '<div><span class="evidence-inline-ref">E2</span><b>AI验收台</b><em>票据由 AI/终端生成与执行，本面板只做状态核对。</em></div>' +
-      '<div><span>下一步</span><b>' + _ttEsc(nextAction) + '</b><em>' + _ttEsc(selectedText) + '</em></div>' +
-      '<div><span>闭环</span><b>' + filled.length + '/' + tickets.length + '</b><em>成交 ' + filled.length + ' · 取消 ' + cancelled.length + '</em></div>' +
-    '</div>' +
-    this._executionChain(counts) +
-    this._acceptanceRail(counts) +
-    '<div class="ticket-summary-grid">' +
-      this._summaryPill('待确认', pending.length, 'info') +
-      this._summaryPill('可执行', exec.length, 'up') +
-      this._summaryPill('已阻断', blocked.length, 'danger') +
-      this._summaryPill('已成交', filled.length, 'text-secondary') +
-      this._summaryPill('已取消', cancelled.length, 'text-disabled') +
+    var completed = filled.concat(cancelled);
+    var queue = pending.concat(exec);
+    var currentSelectedId = this._selectedTicketId;
+    var selected = tickets.filter(function(t) { return currentSelectedId && currentSelectedId === t.ticket_id; })[0] || queue[0] || completed[0] || blocked[0] || tickets[0] || null;
+    if (selected && !this._selectedTicketId) this._selectedTicketId = selected.ticket_id || '';
+    body.innerHTML = '<div class="ticket-inbox-shell">' +
+      '<div class="ticket-inbox-head">' +
+        '<div><span class="evidence-inline-ref">E2</span><b>票据 Inbox</b><em>下一步：' + _ttEsc(nextAction) + '</em></div>' +
+        '<div class="ticket-inbox-counts">已成交 ' + filled.length + ' / 不执行 ' + cancelled.length + '</div>' +
       '</div>' +
-      '<div class="ticket-layout">' +
-      '<div class="ticket-primary-sections">' +
-      this._section('待确认', pending, 'info') +
-      this._section('可执行', exec, 'up') +
-      this._section('已阻断', blocked, 'danger') +
+      '<div class="ticket-board-columns">' +
+        this._boardColumn('pending', '待处理', pending, 'info') +
+        this._boardColumn('executable', '可执行', exec, 'up') +
+        this._boardColumn('completed', '已完成', completed, 'text-secondary') +
       '</div>' +
-      '<div class="ticket-history-section">' +
-      this._section('已成交/关闭', filled, 'text-secondary', true) +
-      (cancelled.length ? '<details style="margin-top:6px"><summary style="font-size:var(--fs-label);color:var(--text-disabled);cursor:pointer">已取消 ' + cancelled.length + '</summary>' + this._section('取消记录', cancelled, 'text-disabled', true) + '</details>' : '') +
+      '<div class="ticket-board-history">' +
+        this._auditDetails(blocked) +
+        (cancelled.length ? '<details class="ticket-cancelled-details"' + (this._cancelledDetailsOpen ? ' open' : '') + '><summary>不执行记录 ' + cancelled.length + '</summary>' + this._section('不执行明细', cancelled, 'text-disabled', true) + '</details>' : '') +
       '</div>' +
-      '</div>' +
-      emergencyHtml;
+      emergencyHtml +
+    '</div>';
     this._bindActions(body);
     this.updateTimestamp();
   }
