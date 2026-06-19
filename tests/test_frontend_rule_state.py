@@ -2391,6 +2391,50 @@ class WidgetPanelUxTest(unittest.TestCase):
         self.assertIn("listByUsageRole: listByUsageRole", registry)
         self.assertIn("isFirstScreen: isFirstScreen", registry)
 
+    def test_widget_registry_usage_helpers_runtime_contract(self):
+        script = r"""
+const assert = require('assert');
+const fs = require('fs');
+const vm = require('vm');
+const src = fs.readFileSync('widget-registry.js', 'utf8');
+const context = { console: console };
+vm.runInNewContext(src + '\nthis.WidgetRegistry = WidgetRegistry;', context, { filename: 'widget-registry.js' });
+const registry = context.WidgetRegistry;
+
+const expected = {
+  first_screen: ['W04', 'W14', 'W15', 'W22', 'W24', 'W25'],
+  secondary_evidence: ['W06', 'W08', 'W09', 'W10', 'W12', 'W13', 'W21'],
+  review_low: ['W05', 'W11', 'W17', 'W18', 'W19', 'W20', 'W23'],
+  hidden_eval: ['W01', 'W02', 'W03', 'W07', 'W16'],
+};
+const groups = registry.listByUsageRole();
+Object.keys(expected).forEach(function(role) {
+  assert.strictEqual(
+    JSON.stringify(groups[role].map(function(w) { return w.id; }).sort()),
+    JSON.stringify(expected[role])
+  );
+});
+
+registry.list().forEach(function(w) {
+  assert.ok(w.usageRole, w.id + ' missing usageRole');
+  assert.ok(w.usageLabel, w.id + ' missing usageLabel');
+  assert.ok(w.usageLabel.length <= 4, w.id + ' usageLabel too long: ' + w.usageLabel);
+});
+
+assert.strictEqual(registry.isFirstScreen('W25'), true);
+assert.strictEqual(registry.isFirstScreen('W09'), false);
+assert.strictEqual(registry.isFirstScreen('W99'), false);
+
+groups.first_screen[0].title = '污染测试';
+assert.notStrictEqual(registry.getMeta(groups.first_screen[0].id).title, '污染测试');
+"""
+        result = subprocess.run(
+            ["node", "--no-warnings", "-e", script],
+            capture_output=True, text=True, timeout=10,
+            cwd=str(ROOT),
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_market_evidence_shelf_is_secondary_overlay(self):
         index = (ROOT / "index.html").read_text(encoding="utf-8")
         theme = (ROOT / "css" / "theme.css").read_text(encoding="utf-8")

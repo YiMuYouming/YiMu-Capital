@@ -65,10 +65,10 @@ const WidgetRegistry = (function() {
   // 按 Dashboard 3.0 使用位置分组
   function listByUsageRole() {
     return {
-      first_screen: widgets.filter(function(w) { return w.usageRole === 'first_screen'; }),
-      secondary_evidence: widgets.filter(function(w) { return w.usageRole === 'secondary_evidence'; }),
-      review_low: widgets.filter(function(w) { return w.usageRole === 'review_low'; }),
-      hidden_eval: widgets.filter(function(w) { return w.usageRole === 'hidden_eval'; }),
+      first_screen: widgets.filter(function(w) { return w.usageRole === 'first_screen'; }).map(function(w) { return Object.assign({}, w); }),
+      secondary_evidence: widgets.filter(function(w) { return w.usageRole === 'secondary_evidence'; }).map(function(w) { return Object.assign({}, w); }),
+      review_low: widgets.filter(function(w) { return w.usageRole === 'review_low'; }).map(function(w) { return Object.assign({}, w); }),
+      hidden_eval: widgets.filter(function(w) { return w.usageRole === 'hidden_eval'; }).map(function(w) { return Object.assign({}, w); }),
     };
   }
 
