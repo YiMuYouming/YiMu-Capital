@@ -2605,6 +2605,10 @@ assert.notStrictEqual(registry.getMeta(groups.first_screen[0].id).title, '污染
         shortcuts_end = index.index("</div>\n  </details>", shortcuts_start) + len("</div>")
         shortcuts = index[shortcuts_start:shortcuts_end]
 
+        for wid in ["W25", "W04", "W24", "W15"]:
+            self.assertIn('data-widget="' + wid + '"', shortcuts)
+        self.assertIn('id="pnlCurveBtn"', shortcuts)
+        self.assertIn("_addWidgetToGrid('W22')", index)
         for wid in ["W25", "W04", "W24", "W15", "W22"]:
             self.assertIn(wid, shortcuts)
         for label in ["证据", "报数", "组件", "核心"]:
