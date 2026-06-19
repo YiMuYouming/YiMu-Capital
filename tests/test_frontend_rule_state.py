@@ -2245,6 +2245,39 @@ assert.strictEqual(inst._traceTarget({ source: 'W15 account state' }), 'widget:W
         )
         self.assertEqual(result.returncode, 0, result.stderr)
 
+    def test_w25_rendered_gate_and_queue_secondary_targets_use_shelf(self):
+        fixture = {
+            "pnl_live": {
+                "total_asset": 720000,
+                "cash": 520000,
+                "mv": 200000,
+                "pos_pct": 27.7,
+                "pnl_pct": 0.21,
+                "quote_status": "live",
+                "valuation_complete": True,
+                "positions": [],
+            },
+            "trade_tickets": [],
+            "sentiment": {"情绪值": 62},
+            "iwencai": {"涨停家数": 46, "跌停家数": 2},
+            "rule_state": {
+                "tradable": True,
+                "caps": {"total_pct": 40},
+                "windows": {
+                    "w1": {"in_session": True, "buy_allowed": True, "blocks": []},
+                    "w2": {"in_session": False, "buy_allowed": False, "blocks": []},
+                },
+                "blocks": [],
+                "warnings": [],
+            },
+        }
+        extra_js = (ROOT / "evidence-summary.js").read_text(encoding="utf-8")
+        result = _render_widget("evidence-board.js", "W25", fixture, extra_js=extra_js)
+        html = result.get("html", "")
+        self.assertNotIn("_error", html)
+        self.assertIn('data-evidence-target="shelf:SHELF_W08"', html)
+        self.assertNotIn('data-evidence-target="widget:W08"', html)
+
 
 class ReadOnlyInsightUxTest(unittest.TestCase):
     """Dashboard keeps AI interaction outside the cockpit surface."""

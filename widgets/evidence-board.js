@@ -57,8 +57,9 @@ class EvidenceBoardWidget extends YiMuWidget {
 
   _gate(gate) {
     gate = gate || {};
-    var target = gate.target ? ' data-evidence-target="widget:' + _evEsc(gate.target) + '"' : '';
-    return '<div class="evidence-gate' + _evStateClass(gate.state) + (gate.target ? ' evidence-gate-trace' : '') + '"' + target + ' role="' + (gate.target ? 'button' : 'group') + '" tabindex="' + (gate.target ? '0' : '-1') + '">' +
+    var traceTarget = gate.target ? this._traceTarget({ source: gate.target }) : '';
+    var target = traceTarget ? ' data-evidence-target="' + _evEsc(traceTarget) + '"' : '';
+    return '<div class="evidence-gate' + _evStateClass(gate.state) + (traceTarget ? ' evidence-gate-trace' : '') + '"' + target + ' role="' + (traceTarget ? 'button' : 'group') + '" tabindex="' + (traceTarget ? '0' : '-1') + '">' +
       '<div class="evidence-gate-head"><span>' + _evEsc(gate.id || '') + '</span><b>' + _evEsc(gate.title || '') + '</b><em>' + _evEsc(gate.state || '—') + '</em></div>' +
       '<div class="evidence-gate-value">' + _evEsc(gate.value || '—') + '</div>' +
       '<div class="evidence-gate-detail">' + _evEsc(gate.detail || '') + '</div>' +
@@ -68,7 +69,8 @@ class EvidenceBoardWidget extends YiMuWidget {
   _queueItem(item) {
     item = item || {};
     var cls = item.tone === 'danger' ? ' is-danger' : item.tone === 'ready' ? ' is-ready' : item.tone === 'warn' ? ' is-warn' : '';
-    var target = item.target ? ' data-evidence-target="widget:' + _evEsc(item.target) + '"' : '';
+    var traceTarget = item.target ? this._traceTarget({ source: item.target }) : '';
+    var target = traceTarget ? ' data-evidence-target="' + _evEsc(traceTarget) + '"' : '';
     return '<div class="evidence-queue-item evidence-card-trace' + cls + '"' + target + ' role="button" tabindex="0">' +
       '<span>' + _evEsc(item.id || '') + '</span>' +
       '<div><b>' + _evEsc(item.title || '') + '</b><em>' + _evEsc(item.reason || '') + '</em></div>' +
