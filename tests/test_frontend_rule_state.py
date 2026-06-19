@@ -2435,6 +2435,33 @@ assert.notStrictEqual(registry.getMeta(groups.first_screen[0].id).title, '污染
         )
         self.assertEqual(result.returncode, 0, result.stderr)
 
+    def test_intraday_cockpit_layout_uses_first_screen_widgets_only(self):
+        index = (ROOT / "index.html").read_text(encoding="utf-8")
+        self.assertIn("FIRST_SCREEN_WIDGETS = ['W25','W15','W24','W14','W04','W22']", index)
+        self.assertIn("SECONDARY_EVIDENCE_WIDGETS = ['W08','W09','W10','W12','W13','W21','W06']", index)
+        self.assertIn("CORE_IDS = FIRST_SCREEN_WIDGETS.slice()", index)
+        self.assertIn("EVIDENCE_SHELF_WIDGETS = SECONDARY_EVIDENCE_WIDGETS", index)
+
+        layout_start = index.index("var COCKPIT_LAYOUT = [")
+        layout_end = index.index("];", layout_start) + 2
+        layout = index[layout_start:layout_end]
+        expected_layout = [
+            "{ id:'W25', x:0, y:0, w:12, h:7 }",
+            "{ id:'W15', x:0, y:7, w:5, h:6 }",
+            "{ id:'W24', x:5, y:7, w:4, h:6 }",
+            "{ id:'W14', x:9, y:7, w:3, h:6 }",
+            "{ id:'W04', x:0, y:13, w:4, h:3 }",
+            "{ id:'W22', x:4, y:13, w:8, h:6 }",
+        ]
+        for item in expected_layout:
+            self.assertIn(item, layout)
+        for wid in ["W08", "W09", "W10", "W12", "W13", "W21", "W06"]:
+            self.assertNotIn("id:'" + wid + "'", layout)
+
+        self.assertIn("WidgetRegistry.isFirstScreen(id)", index)
+        self.assertIn("WidgetRegistry.isFirstScreen(widgetId)", index)
+        self.assertIn("FIRST_SCREEN_WIDGETS.forEach", index)
+
     def test_market_evidence_shelf_is_secondary_overlay(self):
         index = (ROOT / "index.html").read_text(encoding="utf-8")
         theme = (ROOT / "css" / "theme.css").read_text(encoding="utf-8")

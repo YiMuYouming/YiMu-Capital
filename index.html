@@ -241,17 +241,18 @@ body.ready{opacity:1}
 var grid = null;
 var activePreset = null;
 var _suppressLayoutSave = false;
+var FIRST_SCREEN_WIDGETS = ['W25','W15','W24','W14','W04','W22'];
+var SECONDARY_EVIDENCE_WIDGETS = ['W08','W09','W10','W12','W13','W21','W06'];
 var REQUIRED_LAYOUT_WIDGETS = ['W25', 'W15', 'W24'];
-var CORE_IDS = ['W25','W04','W07','W08','W09','W14','W24','W15','W22'];
-var EVIDENCE_SHELF_WIDGETS = ['W10', 'W12', 'W13', 'W21'];
+var CORE_IDS = FIRST_SCREEN_WIDGETS.slice();
+var EVIDENCE_SHELF_WIDGETS = SECONDARY_EVIDENCE_WIDGETS;
 var COCKPIT_LAYOUT = [
-  { id:'W25', x:0, y:0, w:12, h:8 },
-  { id:'W15', x:0, y:8, w:5, h:6 },
-  { id:'W14', x:5, y:8, w:3, h:6 },
-  { id:'W24', x:8, y:8, w:4, h:6 },
-  { id:'W04', x:0, y:14, w:4, h:3 },
-  { id:'W09', x:4, y:14, w:4, h:5 },
-  { id:'W22', x:8, y:14, w:4, h:5 }
+  { id:'W25', x:0, y:0, w:12, h:7 },
+  { id:'W15', x:0, y:7, w:5, h:6 },
+  { id:'W24', x:5, y:7, w:4, h:6 },
+  { id:'W14', x:9, y:7, w:3, h:6 },
+  { id:'W04', x:0, y:13, w:4, h:3 },
+  { id:'W22', x:4, y:13, w:8, h:6 }
 ];
 
 function initGrid() {
@@ -365,7 +366,7 @@ function _mountLayoutWidget(item) {
     h: item.h || meta.defaultSize.h,
     id: id
   });
-  if (CORE_IDS.indexOf(id) >= 0) gsItem.classList.add('core-widget');
+  if (WidgetRegistry.isFirstScreen && WidgetRegistry.isFirstScreen(id)) gsItem.classList.add('core-widget');
   var contentEl = gsItem.querySelector('.grid-stack-item-content');
   if (contentEl) contentEl.id = 'content_' + id;
   if (entry && entry.Class) {
@@ -1222,10 +1223,10 @@ var _compactMode = false;
     origAdd(widgetId);
     setTimeout(function() {
       var el = document.querySelector('[gs-id="' + widgetId + '"]');
-      if (el && CORE_IDS.indexOf(widgetId) >= 0) el.classList.add('core-widget');
+      if (el && WidgetRegistry.isFirstScreen && WidgetRegistry.isFirstScreen(widgetId)) el.classList.add('core-widget');
     }, 100);
   };
-  CORE_IDS.forEach(function(id) {
+  FIRST_SCREEN_WIDGETS.forEach(function(id) {
     var el = document.querySelector('[gs-id="' + id + '"]');
     if (el) el.classList.add('core-widget');
   });
