@@ -135,8 +135,6 @@ body.ready{opacity:1}
       <button class="topbar-shortcut topbar-shortcut-trade" data-widget="W24" title="W24 交易票据"><b>W24</b><span>票据</span></button>
       <button class="topbar-shortcut topbar-shortcut-trade" data-widget="W15" title="W15 持仓操作清仓"><b>W15</b><span>持仓</span></button>
       <button id="evidenceShelfBtn" class="topbar-shortcut topbar-shortcut-data" title="候选与市场证据副屏"><b>E</b><span>证据</span></button>
-      <button class="topbar-shortcut topbar-shortcut-data" data-widget="W12" title="W12 连板池"><b>W12</b><span>连板</span></button>
-      <button class="topbar-shortcut topbar-shortcut-data" data-widget="W13" title="W13 趋势池"><b>W13</b><span>趋势</span></button>
       <button id="inputPanelBtn" class="topbar-shortcut topbar-shortcut-tool" title="W16 报数面板"><b>W16</b><span>报数</span></button>
       <button id="pnlCurveBtn" class="topbar-shortcut topbar-shortcut-pnl" title="W22 收益曲线"><b>W22</b><span>曲线</span></button>
       <button id="addWidgetBtn" class="topbar-shortcut topbar-shortcut-add" title="添加组件"><b>+</b><span>组件</span></button>
@@ -469,13 +467,14 @@ function _showContextMenu(x, y) {
   var menu = document.getElementById('contextMenu');
   var cats = WidgetRegistry.listByCategory();
   var catLabels = { decision: '决策类', data: '数据类', risk: '风控类', tool: '工具类' };
+  var usageRoleLabels = { first_screen: '首屏', secondary_evidence: '侧屏', review_low: '复盘', hidden_eval: '隐藏' };
 
   var html = '';
   ['decision', 'risk', 'data', 'tool'].forEach(function(cat) {
     html += '<div class="context-menu-section">' + catLabels[cat] + '</div>';
     (cats[cat] || []).forEach(function(w) {
-      html += '<div class="context-menu-item" data-widget="' + w.id + '" data-category="' + w.category + '">' +
-        '<span>' + w.title + '</span><b>' + w.id + '</b></div>';
+      html += '<div class="context-menu-item" data-widget="' + w.id + '" data-category="' + w.category + '" data-usage-role="' + (w.usageRole || '') + '">' +
+        '<span>' + w.title + '</span><b>' + (usageRoleLabels[w.usageRole] || w.usageLabel || w.usageRole || '未分') + ' · ' + w.id + '</b></div>';
     });
   });
 
@@ -512,6 +511,7 @@ function _showWidgetPanel() {
   var cats = WidgetRegistry.listByCategory();
   var catLabels = { decision: '决策类', data: '数据类', risk: '风控类', tool: '工具类' };
   var tierLabels = { tick: '实时', fast: '快速', slow: '慢速', manual: '手动', daily: '日线' };
+  var usageRoleLabels = { first_screen: '首屏', secondary_evidence: '侧屏', review_low: '复盘', hidden_eval: '隐藏' };
 
   var html = '';
   ['decision', 'risk', 'data', 'tool'].forEach(function(cat) {
@@ -520,9 +520,10 @@ function _showWidgetPanel() {
     html += '<div class="widget-panel-section-title"><span>' + catLabels[cat] + '</span><span>' + list.length + '</span></div>';
     html += '<div class="widget-panel-grid">';
     list.forEach(function(w) {
-      html += '<div class="widget-panel-item" data-widget="' + w.id + '" data-category="' + w.category + '">' +
+      html += '<div class="widget-panel-item" data-widget="' + w.id + '" data-category="' + w.category + '" data-usage-role="' + (w.usageRole || '') + '">' +
         '<div class="item-head"><div class="item-title">' + w.title + '</div><div class="item-ref">' + w.id + '</div></div>' +
         '<div class="item-desc">' +
+          '<span class="item-pill item-pill-role">' + (usageRoleLabels[w.usageRole] || w.usageLabel || w.usageRole || '未分') + '</span>' +
           '<span class="item-pill item-pill-priority">' + w.priority + '</span>' +
           '<span class="item-pill">' + (tierLabels[w.tier] || w.tier) + '</span>' +
           '<span class="item-pill">' + w.defaultSize.w + '×' + w.defaultSize.h + '</span>' +

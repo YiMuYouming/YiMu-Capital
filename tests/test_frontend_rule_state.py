@@ -2599,6 +2599,22 @@ assert.notStrictEqual(registry.getMeta(groups.first_screen[0].id).title, '污染
         self.assertIn("evidence-focus-pulse", index)
         self.assertIn(".evidence-focus-pulse", theme)
 
+    def test_topbar_direct_shortcuts_keep_cockpit_core_only(self):
+        index = (ROOT / "index.html").read_text(encoding="utf-8")
+        shortcuts_start = index.index('<div class="topbar-shortcuts" aria-label="操作入口">')
+        shortcuts_end = index.index("</div>\n  </details>", shortcuts_start) + len("</div>")
+        shortcuts = index[shortcuts_start:shortcuts_end]
+
+        for wid in ["W25", "W04", "W24", "W15", "W22"]:
+            self.assertIn(wid, shortcuts)
+        for label in ["证据", "报数", "组件", "核心"]:
+            self.assertIn(label, shortcuts)
+        for wid in ["W12", "W13"]:
+            self.assertNotIn(wid, shortcuts)
+            self.assertNotIn('data-widget="' + wid + '"', shortcuts)
+        for label in ["连板", "趋势"]:
+            self.assertNotIn(label, shortcuts)
+
     def test_widget_panel_uses_ref_priority_and_tier_pills(self):
         index = (ROOT / "index.html").read_text(encoding="utf-8")
         self.assertIn("widget-panel-title", index)
@@ -2612,6 +2628,20 @@ assert.notStrictEqual(registry.getMeta(groups.first_screen[0].id).title, '污染
         self.assertNotIn("💰", index)
         self.assertNotIn("🔧", index)
         self.assertNotIn(" + w.defaultSize.w + '×' + w.defaultSize.h + ' · ' + w.id", index)
+
+    def test_widget_picker_surfaces_dashboard_usage_roles(self):
+        index = (ROOT / "index.html").read_text(encoding="utf-8")
+        theme = (ROOT / "css" / "theme.css").read_text(encoding="utf-8")
+
+        self.assertIn("usageRoleLabels = { first_screen: '首屏', secondary_evidence: '侧屏', review_low: '复盘', hidden_eval: '隐藏' }", index)
+        self.assertIn('data-usage-role="\' + (w.usageRole || \'\') + \'"', index)
+        self.assertIn("'<span class=\"item-pill item-pill-role\">' + (usageRoleLabels[w.usageRole] || w.usageLabel || w.usageRole || '未分') + '</span>'", index)
+        self.assertIn("'<span>' + w.title + '</span><b>' + (usageRoleLabels[w.usageRole] || w.usageLabel || w.usageRole || '未分') + ' · ' + w.id + '</b></div>'", index)
+        self.assertIn(".widget-panel-item .item-pill-role", theme)
+        self.assertIn('.widget-panel-item[data-usage-role="first_screen"] .item-pill-role', theme)
+        self.assertIn('.widget-panel-item[data-usage-role="secondary_evidence"] .item-pill-role', theme)
+        self.assertIn('.context-menu-item[data-usage-role="first_screen"] b', theme)
+        self.assertIn('.context-menu-item[data-usage-role="secondary_evidence"] b', theme)
 
     def test_w03_default_size_matches_command_card_density(self):
         registry = (ROOT / "widget-registry.js").read_text(encoding="utf-8")
