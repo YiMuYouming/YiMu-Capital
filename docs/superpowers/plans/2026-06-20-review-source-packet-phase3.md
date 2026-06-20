@@ -22,8 +22,10 @@ Hard rule: `review_source_packet.json` must never become the source for W12/W13 
 
 ```text
 close_day.py --apply
-  -> backup data
+  -> pull cloud data and verify local integrity
+  -> generate ticket review summary
   -> generate review_source_packet.json
+  -> archive live-dashboard specialized data package
   -> Wenmi daily-review reads packet in Stage A
   -> Wenmi writes Vault review note by output protocol
   -> gen_dashboard_data.py reads Vault review note for next-day dashboard baseline
@@ -79,7 +81,7 @@ If the packet is missing, Wenmi continues the old daily-review path and marks "D
 
 1. Add `scripts/ops/generate_review_source_packet.py`.
 2. Add unit tests for packet contract, stale fail-closed behavior, and no DB/file mutation except the target output path.
-3. Wire `scripts/ops/close_day.py --apply` to generate the packet after data backup.
+3. Wire `scripts/ops/close_day.py --apply` to generate the packet after cloud data pull, local integrity check, and ticket review summary, before the specialized data package backup.
 4. Update WorkBuddy `daily-review` and `auto-review-fill` instructions to consume the packet.
 5. Run a read-only subagent audit for SSOT boundaries, data safety, and Wenmi workflow clarity.
 

@@ -18,11 +18,13 @@ from pathlib import Path
 try:
     from scripts.ops.common import run, sqlite_integrity
     from scripts.ops import backup_live_dashboard_data
+    from scripts.ops import generate_review_source_packet as review_source_packet
     from scripts.account_ssot import build_daily_ticket_review
 except ModuleNotFoundError:
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
     from scripts.ops.common import run, sqlite_integrity
     from scripts.ops import backup_live_dashboard_data
+    from scripts.ops import generate_review_source_packet as review_source_packet
     from scripts.account_ssot import build_daily_ticket_review
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -85,6 +87,21 @@ def run_project_data_backup(local_data, date_str):
         "--output-dir", str(output_dir),
         "--stamp", stamp,
     ])
+
+
+def run_review_source_packet(local_data, date_str, dry_run):
+    packet = review_source_packet.generate_review_source_packet(date_str, data_dir=Path(local_data))
+    result = review_source_packet.write_review_source_packet(
+        packet,
+        Path(local_data),
+        apply=not dry_run,
+    )
+    print(f"  输出路径: {result['path']}")
+    print(f"  ai_context: {packet.get('source_status', {}).get('ai_context')}")
+    print(f"  tickets: {packet.get('source_status', {}).get('tickets')}")
+    print(f"  manual_required: {len(packet.get('manual_required') or [])}")
+    print("  ✅ review_source_packet 已写入" if result["written"] else "  [DRY-RUN] 未写入")
+    return result
 
 
 def rsync_remote_arg(remote, path):
@@ -224,13 +241,18 @@ def main():
         out_path.write_text(summary.get("review_markdown", ""), encoding="utf-8")
         print(f"  ✅ Markdown 已写入: {out_path}")
 
-    # 6. 项目专用数据包备份
+    # 6. 生成 WorkBuddy 复盘事实包
     print()
-    print("[STEP 6] 项目专用数据包备份")
+    print("[STEP 6] 生成 WorkBuddy review_source_packet")
+    run_review_source_packet(local_data, date_str, dry_run)
+
+    # 7. 项目专用数据包备份
+    print()
+    print("[STEP 7] 项目专用数据包备份")
     if dry_run:
         print("  [DRY-RUN] 跳过专用数据包备份")
         preview_output_dir = local_data / "backups" / "live-dashboard-data"
-        print("  close_day.py --apply 会在数据拉回和完整性检查后自动执行专用备份")
+        print("  close_day.py --apply 会在数据拉回、完整性检查和 review_source_packet 生成后自动执行专用备份")
         print(f"  备份参数: --data-dir {local_data} --output-dir {preview_output_dir} --upload-oss")
     elif getattr(args, "skip_data_backup", False):
         print("  跳过：--skip-data-backup")

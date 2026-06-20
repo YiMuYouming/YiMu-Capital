@@ -368,6 +368,38 @@ class BackupLiveDashboardDataTests(unittest.TestCase):
         self.assertFalse((out_dir / "live-dashboard-data-20260620-120000.tar.gz").exists())
 
 
+class CloseDayReviewSourcePacketTests(unittest.TestCase):
+
+    def test_review_source_packet_dry_run_builds_but_does_not_write(self):
+        from scripts.ops import close_day
+        data_dir = Path(tempfile.mkdtemp())
+        packet = {"schema_version": "review_source_packet.v1", "date": "2026-06-19"}
+        with patch("scripts.ops.close_day.review_source_packet.generate_review_source_packet",
+                   return_value=packet) as mock_generate, \
+             patch("scripts.ops.close_day.review_source_packet.write_review_source_packet",
+                   return_value={"path": str(data_dir / "review_packets/2026-06-19/review_source_packet.json"),
+                                 "written": False}) as mock_write:
+            result = close_day.run_review_source_packet(data_dir, "2026-06-19", dry_run=True)
+
+        mock_generate.assert_called_once_with("2026-06-19", data_dir=data_dir)
+        mock_write.assert_called_once_with(packet, data_dir, apply=False)
+        self.assertFalse(result["written"])
+
+    def test_review_source_packet_apply_writes_packet(self):
+        from scripts.ops import close_day
+        data_dir = Path(tempfile.mkdtemp())
+        packet = {"schema_version": "review_source_packet.v1", "date": "2026-06-19"}
+        with patch("scripts.ops.close_day.review_source_packet.generate_review_source_packet",
+                   return_value=packet), \
+             patch("scripts.ops.close_day.review_source_packet.write_review_source_packet",
+                   return_value={"path": str(data_dir / "review_packets/2026-06-19/review_source_packet.json"),
+                                 "written": True}) as mock_write:
+            result = close_day.run_review_source_packet(data_dir, "2026-06-19", dry_run=False)
+
+        mock_write.assert_called_once_with(packet, data_dir, apply=True)
+        self.assertTrue(result["written"])
+
+
 class TicketUpgradeReadinessTests(unittest.TestCase):
 
     def test_ticket_upgrade_readiness_passes_with_widget_and_ticket_api(self):
@@ -538,14 +570,80 @@ class CloseDayDryRunTests(unittest.TestCase):
         """close_day.py --dry-run 不应调用 ssh/rsync 写入"""
         from scripts.ops import close_day
         with patch("scripts.ops.common.subprocess.run") as mock_run:
-            with patch("scripts.ops.close_day.argparse.ArgumentParser.parse_args") as mock_args:
-                mock_args.return_value = MagicMock(
-                    dry_run=True, apply=False,
-                    remote_data_dir="/home/agentuser/YiMu-Capital/data",
-                    local_data_dir="/tmp",
-                )
-                close_day.main()
+            with patch("scripts.ops.close_day.run_review_source_packet") as mock_packet:
+                with patch("scripts.ops.close_day.argparse.ArgumentParser.parse_args") as mock_args:
+                    mock_args.return_value = MagicMock(
+                        dry_run=True, apply=False,
+                        remote_data_dir="/home/agentuser/YiMu-Capital/data",
+                        local_data_dir="/tmp",
+                    )
+                    close_day.main()
+        mock_packet.assert_called_once()
         mock_run.assert_not_called()
+
+    def test_main_orders_ticket_review_packet_then_project_backup(self):
+        from scripts.ops import close_day
+        tmpdir = Path(tempfile.mkdtemp())
+        real_db = tmpdir / "pnl.db"
+        import sqlite3
+        con = sqlite3.connect(str(real_db))
+        con.execute("CREATE TABLE t (x)")
+        con.close()
+        events = []
+
+        def fake_run(cmd, **kw):
+            cmd_str = str(cmd)
+            if "for f in dashboard_data.json" in cmd_str:
+                return subprocess.CompletedProcess(cmd, 0, "", "")
+            if "ls -t" in cmd_str:
+                return subprocess.CompletedProcess(cmd, 0, "data/pnl.db.backup-close-20260603-150530\n", "")
+            if "ssh" in cmd_str and "integrity_check" in cmd_str:
+                return subprocess.CompletedProcess(cmd, 0, "pnl.db.backup-close-20260603-150530\nintegrity_check: ok\n", "")
+            if "PRAGMA integrity_check" in cmd_str:
+                return subprocess.CompletedProcess(cmd, 0, "ok\n", "")
+            return subprocess.CompletedProcess(cmd, 0, "", "")
+
+        def fake_ticket_review(date_str):
+            events.append("ticket")
+            return {"review_markdown": "# ticket review"}
+
+        def fake_packet(local_data, date_str, dry_run):
+            events.append("packet")
+            return {"path": str(Path(local_data) / "review_packets" / date_str / "review_source_packet.json"),
+                    "written": True}
+
+        def fake_backup(local_data, date_str):
+            events.append("backup")
+
+        with patch("scripts.ops.common.subprocess.run", side_effect=fake_run):
+            with patch("scripts.ops.close_day.build_daily_ticket_review", side_effect=fake_ticket_review):
+                with patch("scripts.ops.close_day.run_review_source_packet", side_effect=fake_packet):
+                    with patch("scripts.ops.close_day.run_project_data_backup", side_effect=fake_backup):
+                        with patch("scripts.ops.close_day.argparse.ArgumentParser.parse_args") as mock_args:
+                            mock_args.return_value = MagicMock(
+                                dry_run=False, apply=True, date="2026-06-03",
+                                remote_data_dir="/home/agentuser/YiMu-Capital/data",
+                                local_data_dir=str(tmpdir),
+                                skip_data_backup=False,
+                            )
+                            close_day.main()
+
+        self.assertEqual(events, ["ticket", "packet", "backup"])
+
+    def test_main_does_not_hit_real_ai_context_in_close_day_tests(self):
+        from scripts.ops import close_day
+        with patch("scripts.ops.common.subprocess.run"):
+            with patch("scripts.ops.close_day.run_review_source_packet") as mock_packet:
+                with patch("scripts.ops.close_day.fetch_ai_context", create=True) as mock_fetch:
+                    with patch("scripts.ops.close_day.argparse.ArgumentParser.parse_args") as mock_args:
+                        mock_args.return_value = MagicMock(
+                            dry_run=True, apply=False,
+                            remote_data_dir="/home/agentuser/YiMu-Capital/data",
+                            local_data_dir="/tmp",
+                        )
+                        close_day.main()
+        mock_packet.assert_called_once()
+        mock_fetch.assert_not_called()
 
     def test_dry_run_prints_ticket_review_summary(self):
         from scripts.ops import close_day
@@ -553,16 +651,17 @@ class CloseDayDryRunTests(unittest.TestCase):
             with patch("scripts.ops.close_day.build_daily_ticket_review", create=True) as mock_review:
                 mock_review.return_value = {"review_markdown": "# review"}
                 with patch("scripts.ops.close_day.backup_live_dashboard_data.main") as mock_backup:
-                    with patch("scripts.ops.close_day.argparse.ArgumentParser.parse_args") as mock_args:
-                        mock_args.return_value = MagicMock(
-                            dry_run=True, apply=False, date="2026-06-03",
-                            remote_data_dir="/home/agentuser/YiMu-Capital/data",
-                            local_data_dir="/tmp",
-                            skip_data_backup=False,
-                        )
-                        out = io.StringIO()
-                        with redirect_stdout(out):
-                            close_day.main()
+                    with patch("scripts.ops.close_day.run_review_source_packet"):
+                        with patch("scripts.ops.close_day.argparse.ArgumentParser.parse_args") as mock_args:
+                            mock_args.return_value = MagicMock(
+                                dry_run=True, apply=False, date="2026-06-03",
+                                remote_data_dir="/home/agentuser/YiMu-Capital/data",
+                                local_data_dir="/tmp",
+                                skip_data_backup=False,
+                            )
+                            out = io.StringIO()
+                            with redirect_stdout(out):
+                                close_day.main()
         self.assertIn("Ticket review summary generated for 2026-06-03", out.getvalue())
         mock_backup.assert_not_called()
 
@@ -591,14 +690,15 @@ class CloseDayDryRunTests(unittest.TestCase):
             with patch("scripts.ops.close_day.build_daily_ticket_review", create=True) as mock_review:
                 mock_review.return_value = {"review_markdown": "# ticket review"}
                 with patch("scripts.ops.close_day.backup_live_dashboard_data.main") as mock_backup:
-                    with patch("scripts.ops.close_day.argparse.ArgumentParser.parse_args") as mock_args:
-                        mock_args.return_value = MagicMock(
-                            dry_run=False, apply=True, date="2026-06-03",
-                            remote_data_dir="/home/agentuser/YiMu-Capital/data",
-                            local_data_dir=str(tmpdir),
-                            skip_data_backup=False,
-                        )
-                        close_day.main()
+                    with patch("scripts.ops.close_day.run_review_source_packet"):
+                        with patch("scripts.ops.close_day.argparse.ArgumentParser.parse_args") as mock_args:
+                            mock_args.return_value = MagicMock(
+                                dry_run=False, apply=True, date="2026-06-03",
+                                remote_data_dir="/home/agentuser/YiMu-Capital/data",
+                                local_data_dir=str(tmpdir),
+                                skip_data_backup=False,
+                            )
+                            close_day.main()
 
         mock_backup.assert_called_once()
         backup_args = mock_backup.call_args.args[0]
@@ -635,14 +735,15 @@ class CloseDayDryRunTests(unittest.TestCase):
             with patch("scripts.ops.close_day.build_daily_ticket_review", create=True) as mock_review:
                 mock_review.return_value = {"review_markdown": "# ticket review"}
                 with patch("scripts.ops.close_day.backup_live_dashboard_data.main") as mock_backup:
-                    with patch("scripts.ops.close_day.argparse.ArgumentParser.parse_args") as mock_args:
-                        mock_args.return_value = MagicMock(
-                            dry_run=False, apply=True, date="2026-06-03",
-                            remote_data_dir="/home/agentuser/YiMu-Capital/data",
-                            local_data_dir=str(tmpdir),
-                            skip_data_backup=True,
-                        )
-                        close_day.main()
+                    with patch("scripts.ops.close_day.run_review_source_packet"):
+                        with patch("scripts.ops.close_day.argparse.ArgumentParser.parse_args") as mock_args:
+                            mock_args.return_value = MagicMock(
+                                dry_run=False, apply=True, date="2026-06-03",
+                                remote_data_dir="/home/agentuser/YiMu-Capital/data",
+                                local_data_dir=str(tmpdir),
+                                skip_data_backup=True,
+                            )
+                            close_day.main()
 
         mock_backup.assert_not_called()
 
@@ -673,16 +774,17 @@ class CloseDayDryRunTests(unittest.TestCase):
         with patch("scripts.ops.common.subprocess.run", side_effect=fake_run):
             with patch("scripts.ops.close_day.build_daily_ticket_review", create=True) as mock_review:
                 mock_review.return_value = {"review_markdown": "# ticket review"}
-                with patch("scripts.ops.close_day.argparse.ArgumentParser.parse_args") as mock_args:
-                    mock_args.return_value = MagicMock(
-                        dry_run=False, apply=True, date="2026-06-03",
-                        remote_data_dir="/home/agentuser/YiMu-Capital/data",
-                        local_data_dir=str(tmpdir),
-                        skip_data_backup=True,
-                    )
-                    out = io.StringIO()
-                    with redirect_stdout(out):
-                        close_day.main()
+                with patch("scripts.ops.close_day.run_review_source_packet"):
+                    with patch("scripts.ops.close_day.argparse.ArgumentParser.parse_args") as mock_args:
+                        mock_args.return_value = MagicMock(
+                            dry_run=False, apply=True, date="2026-06-03",
+                            remote_data_dir="/home/agentuser/YiMu-Capital/data",
+                            local_data_dir=str(tmpdir),
+                            skip_data_backup=True,
+                        )
+                        out = io.StringIO()
+                        with redirect_stdout(out):
+                            close_day.main()
 
         self.assertIn("云端未找到可同步的辅助 JSON", out.getvalue())
         all_cmds = " ".join(commands_seen)
@@ -729,7 +831,8 @@ class CloseDayDryRunTests(unittest.TestCase):
                     local_data_dir=str(tmpdir),
                     skip_data_backup=True,
                 )
-                close_day.main()
+                with patch("scripts.ops.close_day.run_review_source_packet"):
+                    close_day.main()
         self.assertGreaterEqual(call_count, 1)
         all_cmds = " ".join(commands_seen)
         self.assertIn("ssh", all_cmds, "应调 ssh backup")
@@ -761,14 +864,15 @@ class CloseDayDryRunTests(unittest.TestCase):
         with patch("scripts.ops.common.subprocess.run", side_effect=fake_run):
             with patch("scripts.ops.close_day.build_daily_ticket_review", create=True) as mock_review:
                 mock_review.return_value = {"review_markdown": "# ticket review\n\n3 tickets"}
-                with patch("scripts.ops.close_day.argparse.ArgumentParser.parse_args") as mock_args:
-                    mock_args.return_value = MagicMock(
-                        dry_run=False, apply=True, date="2026-06-03",
-                        remote_data_dir="/home/agentuser/YiMu-Capital/data",
-                        local_data_dir=str(tmpdir),
-                        skip_data_backup=True,
-                    )
-                    close_day.main()
+                with patch("scripts.ops.close_day.run_review_source_packet"):
+                    with patch("scripts.ops.close_day.argparse.ArgumentParser.parse_args") as mock_args:
+                        mock_args.return_value = MagicMock(
+                            dry_run=False, apply=True, date="2026-06-03",
+                            remote_data_dir="/home/agentuser/YiMu-Capital/data",
+                            local_data_dir=str(tmpdir),
+                            skip_data_backup=True,
+                        )
+                        close_day.main()
 
         out = tmpdir / "reviews" / "ticket_review_2026-06-03.md"
         self.assertTrue(out.exists())
