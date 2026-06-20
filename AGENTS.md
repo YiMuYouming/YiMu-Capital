@@ -4,6 +4,53 @@
 > 预览：`http://localhost:18088`（只读代理）。
 > 诊断：`http://localhost:18089`（可选完整服务）。
 
+## 最重要工作流：代码和数据分流
+
+任何新窗口、新 agent、盘中排障或部署前，先按这个判断：
+
+### 代码流程（本地 → GitHub → Hermes）
+
+代码的 SSOT 是 Git。生产端只运行已提交、已推送的代码。
+
+```bash
+# 1. 本地改代码并验证
+git status --short
+PYTHONDONTWRITEBYTECODE=1 python3 -m unittest <相关测试> -v
+PYTHONDONTWRITEBYTECODE=1 python3 -m compileall -q scripts tests
+git diff --check
+
+# 2. 本地提交并推送
+git add <本次代码文件>
+git commit -m "<说明>"
+git push
+
+# 3. Hermes 生产端拉代码并重启
+ssh agentuser@43.132.146.234 'cd /home/agentuser/YiMu-Capital && git pull --ff-only'
+ssh agentuser@43.132.146.234 'sudo systemctl restart yimu-live-dashboard.service'
+```
+
+验收：本地、GitHub、Hermes 三端 commit 一致，Hermes `git status --short` 干净，`8088` API 可用。
+
+### 数据流程（Hermes → 本地 → 备份/复盘）
+
+盘中数据的 SSOT 是 Hermes 生产端，不走 Git。成交、收益曲线、快照、运行 JSON 都不要 `git add`。
+
+```bash
+# 收盘后把生产数据拉回本地，并生成复盘事实包和项目专用备份
+python3 scripts/ops/close_day.py --dry-run
+python3 scripts/ops/close_day.py --apply
+```
+
+这个脚本会在 Hermes 创建 SQLite 一致性备份，拉回本地 `pnl.db` 和关键 JSON，生成
+`data/review_packets/YYYY-MM-DD/review_source_packet.json`，再生成项目专用数据包并上传 OSS。
+
+### 绝对不要混用
+
+- 不用 Git 同步 `data/*`。
+- 不用 `close_day.py` 同步代码。
+- 不在 Hermes 生产目录直接热改代码；紧急热修也必须回补本地 commit/push。
+- 本地预览 `18088` 只看效果，不录真实交易；真实交易只在 `8088`。
+
 ## 生产拓扑
 
 ```
