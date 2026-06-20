@@ -2663,6 +2663,31 @@ body.cockpit-mode .grid-stack-item[gs-id="W24"] .ticket-row{
   min-height:50px;
   padding:6px 8px;
 }
+body.cockpit-mode .grid-stack-item[gs-id="W04"] .w04-board{
+  gap:4px;
+}
+body.cockpit-mode .grid-stack-item[gs-id="W04"] .w04-index-grid,
+body.cockpit-mode .grid-stack-item[gs-id="W04"] .w04-metric-grid{
+  gap:4px;
+}
+body.cockpit-mode .grid-stack-item[gs-id="W04"] .w04-index-card{
+  padding:5px 6px;
+}
+body.cockpit-mode .grid-stack-item[gs-id="W04"] .w04-index-card .kpi-value{
+  font-size:17px;
+}
+body.cockpit-mode .grid-stack-item[gs-id="W04"] .w04-metric-card{
+  padding:4px 6px;
+}
+body.cockpit-mode .grid-stack-item[gs-id="W04"] .w04-metric-card .kpi-value{
+  font-size:12px;
+}
+body.cockpit-mode .grid-stack-item[gs-id="W04"] .w04-breadth-bar{
+  height:12px;
+}
+body.cockpit-mode .grid-stack-item[gs-id="W04"] .w04-baseline{
+  display:none;
+}
 body.cockpit-mode .grid-stack-item[gs-id="W22"] .pnl-kpi{
   margin-bottom:1px;
 }
