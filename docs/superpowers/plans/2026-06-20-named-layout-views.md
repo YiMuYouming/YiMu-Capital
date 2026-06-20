@@ -196,6 +196,16 @@ def test_named_layout_refresh_prefers_active_then_default(self):
     self.assertIn("localStorage.getItem(STORAGE_KEYS.activeLayoutId)", index)
     self.assertIn("localStorage.getItem(STORAGE_KEYS.defaultLayoutId)", index)
     self.assertIn("_loadActiveNamedLayoutOrFallback()", index)
+
+def test_named_layout_autosave_only_updates_user_layouts(self):
+    index = (ROOT / "index.html").read_text(encoding="utf-8")
+    start = index.index("function _autoSaveLayout()")
+    end = index.index("function _layoutSignature(items)", start)
+    block = index[start:end]
+    self.assertIn("STORAGE_KEYS.activeLayoutId", block)
+    self.assertIn("_readNamedLayouts()", block)
+    self.assertIn("layout.kind === 'user'", block)
+    self.assertNotIn("STORAGE_KEYS.layoutMode, 'cockpit'", block)
 ```
 
 - [ ] **Step 2: Run tests**
@@ -219,6 +229,8 @@ Implement:
 - `_refreshLayoutViewSelector()`
 
 Use `prompt()` for naming and `confirm()` for deletion in this phase to keep scope small.
+
+Replace `_autoSaveLayout()` so drag/resize updates only the active saved user layout. It must not save blank unsaved canvases, overwrite the built-in cockpit, or set `layoutMode` to `cockpit`.
 
 - [ ] **Step 4: Replace initial load path**
 
