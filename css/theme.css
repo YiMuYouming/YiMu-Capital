@@ -2511,8 +2511,7 @@ body.compact-mode .grid-stack-item:not(.core-widget) { display: none !important;
 body.cockpit-mode .grid-stack-item[gs-id="W25"] .widget-body,
 body.cockpit-mode .grid-stack-item[gs-id="W15"] .widget-body,
 body.cockpit-mode .grid-stack-item[gs-id="W24"] .widget-body,
-body.cockpit-mode .grid-stack-item[gs-id="W04"] .widget-body,
-body.cockpit-mode .grid-stack-item[gs-id="W22"] .widget-body{
+body.cockpit-mode .grid-stack-item[gs-id="W04"] .widget-body{
   padding:6px;
 }
 body.cockpit-mode .grid-stack-item[gs-id="W25"] .evidence-board{

@@ -2559,6 +2559,11 @@ assert.notStrictEqual(registry.getMeta(groups.first_screen[0].id).title, '污染
         self.assertNotIn('body.cockpit-mode .grid-stack-item[gs-id="W22"] .pnl-chart-wrap', theme)
         self.assertNotIn('body.cockpit-mode .grid-stack-item[gs-id="W22"] .pnl-legend', theme)
         self.assertNotIn('body.cockpit-mode .grid-stack-item[gs-id="W22"] .pnl-drawer', theme)
+        compressed_body = theme[
+            theme.index('body.cockpit-mode .grid-stack-item[gs-id="W25"] .widget-body,'):
+            theme.index('body.cockpit-mode .grid-stack-item[gs-id="W25"] .evidence-board{')
+        ]
+        self.assertNotIn('grid-stack-item[gs-id="W22"]', compressed_body)
 
     def test_cockpit_layout_version_replaces_stale_saved_cockpit(self):
         index = (ROOT / "index.html").read_text(encoding="utf-8")
