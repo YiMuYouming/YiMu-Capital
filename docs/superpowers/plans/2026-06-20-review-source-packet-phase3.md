@@ -1,6 +1,6 @@
 # Dashboard 3.0 Phase 3 Review Source Packet Plan
 
-> Status: planned. This replaces the broader "review packet" idea with a narrower source packet that feeds WorkBuddy daily-review without replacing it.
+> Status: completed on 2026-06-20. This replaces the broader "review packet" idea with a narrower source packet that feeds WorkBuddy daily-review without replacing it.
 
 ## Goal
 
@@ -79,11 +79,11 @@ If the packet is missing, Wenmi continues the old daily-review path and marks "D
 
 ## Implementation Tasks
 
-1. Add `scripts/ops/generate_review_source_packet.py`.
-2. Add unit tests for packet contract, stale fail-closed behavior, and no DB/file mutation except the target output path.
-3. Wire `scripts/ops/close_day.py --apply` to generate the packet after cloud data pull, local integrity check, and ticket review summary, before the specialized data package backup.
-4. Update WorkBuddy `daily-review` and `auto-review-fill` instructions to consume the packet.
-5. Run a read-only subagent audit for SSOT boundaries, data safety, and Wenmi workflow clarity.
+1. Done: Add `scripts/ops/generate_review_source_packet.py`.
+2. Done: Add unit tests for packet contract, stale fail-closed behavior, and no DB/file mutation except the target output path.
+3. Done: Wire `scripts/ops/close_day.py --apply` to generate the packet after cloud data pull, local integrity check, and ticket review summary, before the specialized data package backup.
+4. Done: Update WorkBuddy `daily-review` and `auto-review-fill` instructions to consume the packet.
+5. Done: Run a read-only subagent audit for SSOT boundaries, data safety, and Wenmi workflow clarity.
 
 ## Acceptance
 
@@ -92,3 +92,17 @@ If the packet is missing, Wenmi continues the old daily-review path and marks "D
 - Packet generation does not call POST endpoints and does not create account anchors.
 - Wenmi skill states that Vault review note remains the final daily review SSOT.
 - Existing dashboard tests still pass.
+
+## Completion Evidence
+
+- Commit: `e59fc3b Add review source packet generation`
+- Branch: `codex/dashboard-3-phase1`
+- Verification:
+  - `PYTHONDONTWRITEBYTECODE=1 python3 -m unittest tests.test_review_source_packet tests.test_ops_scripts tests.test_health_api.AIContextApiTest -v`
+  - `PYTHONDONTWRITEBYTECODE=1 python3 -m compileall -q scripts tests && git diff --check`
+  - `python3 scripts/ops/close_day.py --dry-run --date 2026-06-20`
+- Subagent audit: no blockers, no medium-risk issues.
+
+## V3 Boundary
+
+Dashboard 3.0 closes at Phase 3. Phase 4 sidecar-agent watch service is deferred to the next version and should not be treated as a remaining V3 task.

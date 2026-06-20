@@ -29,7 +29,7 @@ python3 scripts/ops/open_day.py --apply --restart-cloud  # 同步后重启云端
 ```bash
 cd ~/Documents/YM_Capital/live-dashboard
 python3 scripts/ops/close_day.py --dry-run   # 预览步骤
-python3 scripts/ops/close_day.py --apply     # 云端备份 + 拉回本地 + 项目专用数据包备份
+python3 scripts/ops/close_day.py --apply     # 云端备份 + 拉回本地 + review_source_packet + 项目专用数据包备份
 ```
 
 ## 盘中
@@ -62,10 +62,21 @@ python3 scripts/ops/close_day.py --apply     # 云端备份 + 拉回本地 + 项
 - **live-dashboard 专用数据包**：适合快速恢复收益曲线、成交记录和关键运行 JSON，是日常优先使用的数据恢复入口。
 
 日常收盘只需要执行 `python3 scripts/ops/close_day.py --apply`。脚本会先在 hermes 创建 SQLite
-一致性备份并拉回本地，再同步存在的运行 JSON，最后自动调用项目专用数据包备份。
+一致性备份并拉回本地，再同步存在的运行 JSON，生成 WorkBuddy 复盘事实包，
+最后自动调用项目专用数据包备份。
 备份包会写到 `data/backups/live-dashboard-data/live-dashboard-data-<stamp>.tar.gz`，
 同一个压缩包会上传到
 `oss://ym-mac/yimu-capital/live-dashboard-data/`。
+
+### 复盘事实包
+
+Dashboard 3.0 到 Phase 3 收口后，收盘流程会生成：
+
+```text
+data/review_packets/YYYY-MM-DD/review_source_packet.json
+```
+
+这个文件给 WorkBuddy `daily-review` / `auto-review-fill` 读取，用于账户、PnL、持仓、成交、票据闭环、健康/新鲜度和 AI context 风险事实。它不进 git，也不是最终复盘 SSOT；最终日复盘与次日计划仍以 Vault 复盘笔记为准，W12/W13 仍读 Vault 复盘附录。
 
 紧急情况下可用 `python3 scripts/ops/close_day.py --apply --skip-data-backup` 跳过最后的数据包备份。
 需要临时补一份当前生产数据包时，再手动运行：
@@ -116,6 +127,7 @@ live-dashboard/
 
 - `docs/ops/2026-05-28-cloud-data-sync-runbook.md` — 完整运维手册
 - `docs/audit/2026-05-28-v3.1-completion-baseline.md` — V3.1 完成基线
+- `docs/audit/2026-06-20-dashboard-3-closeout.md` — Dashboard 3.0 Phase 3 收口基线
 - `AGENTS.md` — 团队协作与任务派发
 
 ## 快捷键

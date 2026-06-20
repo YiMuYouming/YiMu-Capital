@@ -28,7 +28,7 @@ iwencai pywencai → CACHE["iwencai"] → 情绪指标
 account_baselines + trade_records + live quote → /api/account/state (账户 SSOT)
 dashboard facts + health + tickets + freshness → /api/ai/context (Agent 只读事实包)
 snapshot_auction 9:28 → auction_snapshot.json (竞价5维)
-open_day.py/close_day.py → 开盘生成基线+rsync上云 / 收盘SQLite备份+拉回+项目数据包备份
+open_day.py/close_day.py → 开盘生成基线+rsync上云 / 收盘SQLite备份+拉回+review_source_packet+项目数据包备份
 git commit → 代码留痕；需要部署云端时按确认后的 git/rsync 代码同步流程执行；data/* 不走 git
 ```
 
@@ -39,6 +39,7 @@ git commit → 代码留痕；需要部署云端时按确认后的 git/rsync 代
 - **全量 OSS 是灾备层**：WorkBuddy 的全量备份适合整机/目录级恢复，但 live-dashboard 的日常专用数据包不挂入 WorkBuddy 全量流程，避免通用备份和交易恢复包混在一起。
 - **专用数据备份是快速恢复层**：需要恢复收益曲线/成交数据时，优先使用 `backup_live_dashboard_data.py` 生成的 tar.gz，里面包含一致性 `pnl.db`、关键 JSON 和 `manifest.json`。
 - **收盘自动备份**：`python3 scripts/ops/close_day.py --apply` 在收盘同步和本地完整性检查后，自动生成本项目专用数据包并上传 OSS；紧急跳过用 `--skip-data-backup`。
+- **复盘事实包**：同一次 `close_day.py --apply` 会先生成 `data/review_packets/YYYY-MM-DD/review_source_packet.json`，供稳米 `daily-review` / `auto-review-fill` 读取。它是证据输入，不是 Vault 复盘 SSOT，不进 git。
 
 ```bash
 python3 scripts/ops/close_day.py --dry-run
@@ -70,6 +71,7 @@ python3 scripts/ops/close_day.py --apply
 
 - 代码任务优先交洋米实现、欧米审查。
 - 洋米盯盘/排障回答前，先按 `ai-rule-system/RULE_GATE.md` 和 `docs/trade-ticket-workflow.md` 确认规则/票据边界，再 `GET /api/ai/context` 读取统一事实包；字段解释见 `docs/ops/yangmi-ai-context-runbook.md`。
+- 稳米复盘前优先读取 `data/review_packets/YYYY-MM-DD/review_source_packet.json`；若缺失或 stale/dead/untrusted，写入缺失/复核清单，继续按 daily-review + auto-review-fill 旧路径补数据。
 - 文档/流程任务可交稳米。
 - agent-board 是跨 agent 派单和验收入口。
 - 遇到 8088/18088 混淆、交易录入、数据同步问题先看 runbook。
@@ -130,6 +132,9 @@ python3 scripts/ops/open_day.py --apply --restart-cloud
 # 收盘
 python3 scripts/ops/close_day.py --dry-run
 python3 scripts/ops/close_day.py --apply
+
+# 收盘事实包检查
+python3 -m json.tool data/review_packets/$(date +%F)/review_source_packet.json | head -80
 
 # 本地预览（18088）
 python3 scripts/ops/local_dev_proxy.py --port 18088

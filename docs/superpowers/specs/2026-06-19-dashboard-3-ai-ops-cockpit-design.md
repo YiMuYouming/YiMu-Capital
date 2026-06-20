@@ -69,7 +69,7 @@
 - W22 收益曲线。
 - W25 当日态势摘要。
 - LLM 历史摘要。
-- 自动生成的复盘包和稳米交接材料。
+- 自动生成的复盘事实包和稳米交接材料。
 
 ## 组件分层
 
@@ -158,7 +158,7 @@
 ### 稳米
 
 - 负责复盘、沉淀、记录和低成本整理。
-- 使用收盘复盘包、票据闭环和 AI 历史判断生成日度材料。
+- 使用收盘复盘事实包、票据闭环和 AI 历史判断生成日度材料。
 
 ### 用户
 
@@ -213,23 +213,27 @@
 - 生产 8088 不做 POST 测试。
 - 相关 Python 测试通过。
 
-### Phase 3：复盘包自动化
+### Phase 3：复盘事实包自动化
 
 目标是让稳米可直接拿到一天的材料。
 
 工作：
 
-- 收盘后生成 `review_packet`：态势摘要、票据闭环、逐笔结果、AI 判断历史、异常和规则建议。
+- 收盘后生成 `review_source_packet.json`：账户、PnL、持仓、成交、票据闭环、健康/新鲜度、AI context 风险和人审动作。
 - 保持运行数据不进 git。
-- 输出 Markdown/JSON 两种形态，方便人读和 agent 读。
+- 输出 JSON 事实包给 WorkBuddy `daily-review` / `auto-review-fill` 使用；Vault 复盘笔记仍是最终 Markdown/次日计划 SSOT。
+- 稳米 skill 必须优先尝试读取事实包，但 packet 缺失或 stale 不阻断复盘，只进入缺失/复核清单。
 
 验收：
 
 - 收盘脚本 dry-run 可预览产物。
 - 真实 apply 不覆盖生产数据。
-- 复盘包能说明每笔交易为什么做、结果如何、规则是否需修正。
+- 事实包不调用 POST，不创建账户锚点，不把 stale/dead/untrusted 数据包装成确定结论。
+- 稳米规则明确：packet 是证据输入，不是最终复盘 SSOT，W12/W13 仍读 Vault 复盘附录。
 
-### Phase 4：盯盘 Sidecar Agent
+### Phase 4：盯盘 Sidecar Agent（下一版本）
+
+Phase 4 从 Dashboard 3.0 中拆出，作为下一版本的主题。V3 收口后不继续在本版实现 sidecar 代码。
 
 目标是把 90% 的盯盘整理工作交给 AI，但不越过人审边界。
 
@@ -256,16 +260,16 @@
 ## 风险与约束
 
 - 当前仓库有生产和预览边界，禁止对真实 8088 发 POST 测试。
-- `data/*` 不走 git，复盘包和运行快照要遵守数据边界。
+- `data/*` 不走 git，复盘事实包和运行快照要遵守数据边界。
 - hermes PyTDX 不稳定是已知限制，3.0 不以恢复 PyTDX 为前提。
 - AI 建议必须携带证据编号和数据新鲜度，否则不进入行动队列。
 - 默认布局瘦身可能短期改变用户习惯，必须保留一键展开和回退。
 
 ## 推荐下一步
 
-先执行 Phase 1。理由是它风险最低、反馈最快，能马上减少盘中认知负担；同时它会暴露哪些字段和组件真正需要进入 `/api/ai/context`，避免 Phase 2 设计过宽。
+Dashboard 3.0 到 Phase 3 收口。下一步不是继续扩本版功能，而是进入 V3 closeout：确认文档、WorkBuddy skill、AGENTS/README、开收盘 SOP、SSOT 边界和测试证据一致。
 
-Phase 1 完成并验证后，再进入 Phase 2，把仪表盘事实协议正式开放给 AI agent 使用。
+Sidecar Agent 作为下一版本启动，先写新的 spec/plan，再实现。
 
 ## Phase 1 Implementation Note
 
@@ -276,3 +280,13 @@ Phase 1 implemented the cockpit slimming layer:
 - W08/W09/W10/W12/W13/W21/W06 remain available through the evidence shelf or component panel.
 - Topbar direct shortcuts are limited to high-frequency modules plus evidence shelf and full component panel.
 - No account SSOT, ticket API, health gate, data source, or POST behavior changed.
+
+## Phase 3 Closeout Note
+
+Phase 3 implemented the review source packet layer:
+
+- `scripts/ops/generate_review_source_packet.py` builds `review_source_packet.v1`.
+- `scripts/ops/close_day.py --apply` generates the packet after close sync, local integrity check, and ticket review summary, before the project data backup.
+- Packet files live under `data/review_packets/YYYY-MM-DD/review_source_packet.json` and remain out of git.
+- WorkBuddy `daily-review` and `auto-review-fill` are the consumers; Vault review notes remain the final daily review and next-day-plan SSOT.
+- Phase 4 sidecar-agent watch service is deferred to the next version.
