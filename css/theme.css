@@ -332,12 +332,31 @@ html,body{
   top:28px;
   z-index:var(--z-dropdown);
   display:flex;
-  gap:2px;
-  padding:4px;
+  flex-direction:column;
+  gap:6px;
+  width:260px;
+  padding:7px;
   border:1px solid var(--border-light);
   border-radius:var(--radius-md);
   background:var(--bg-card);
   box-shadow:var(--shadow-popover);
+}
+.layout-view-select{
+  width:100%;
+  height:28px;
+  border:1px solid var(--border-light);
+  border-radius:var(--radius-sm);
+  background:#fff;
+  color:var(--text-primary);
+  font-size:12px;
+  font-weight:700;
+  padding:0 8px;
+}
+.layout-view-select:focus{outline:1px solid var(--info)}
+.layout-menu-grid{
+  display:grid;
+  grid-template-columns:repeat(3,minmax(0,1fr));
+  gap:4px;
 }
 .topbar-layout-btn{
   height:24px;
@@ -767,6 +786,79 @@ html,body{
   font-size:var(--fs-body);
   min-height:60px;
 }
+
+/* ===== Layout Dialog ===== */
+.layout-dialog-overlay{
+  position:fixed;
+  inset:0;
+  z-index:var(--z-modal);
+  display:none;
+  align-items:flex-start;
+  justify-content:center;
+  padding-top:96px;
+  background:rgba(15,23,42,.18);
+}
+.layout-dialog-overlay.show{display:flex}
+.layout-dialog{
+  width:min(360px,calc(100vw - 32px));
+  border:1px solid var(--border-light);
+  border-radius:var(--radius-md);
+  background:var(--bg-card);
+  box-shadow:var(--shadow-elevated);
+  padding:14px;
+}
+.layout-dialog-title{
+  font-size:15px;
+  font-weight:850;
+  color:var(--text-primary);
+  margin-bottom:6px;
+}
+.layout-dialog-message{
+  font-size:12px;
+  line-height:1.5;
+  color:var(--text-secondary);
+  margin-bottom:10px;
+}
+.layout-dialog-input{
+  width:100%;
+  height:34px;
+  border:1px solid var(--border);
+  border-radius:var(--radius-sm);
+  padding:0 10px;
+  font-size:13px;
+  font-weight:700;
+  color:var(--text-primary);
+  background:#fff;
+}
+.layout-dialog-input:focus{outline:1px solid var(--info);border-color:var(--info)}
+.layout-dialog-actions{
+  display:flex;
+  justify-content:flex-end;
+  gap:6px;
+  margin-top:12px;
+}
+.layout-dialog-btn{
+  height:28px;
+  min-width:62px;
+  border-radius:var(--radius-sm);
+  border:1px solid var(--border);
+  background:#fff;
+  color:var(--text-primary);
+  font-size:12px;
+  font-weight:750;
+  cursor:pointer;
+}
+.layout-dialog-btn.primary{
+  background:var(--accent);
+  border-color:var(--accent);
+  color:#fff;
+}
+.layout-dialog-btn.primary.danger{
+  background:var(--danger);
+  border-color:var(--danger);
+}
+.layout-dialog-btn.ghost:hover{background:var(--interactive-hover)}
+.layout-dialog-btn.primary:hover{filter:brightness(.96)}
 
 /* ===== Toast ===== */
 .toast{
@@ -2123,7 +2215,7 @@ body.cockpit-mode .topbar-conn{
 body.cockpit-mode .topbar-metric{
   font-weight:850;
 }
-body.cockpit-mode .topbar-layout-btn#cockpitLayoutBtn{
+body.cockpit-mode .topbar-layout-btn#builtInCockpitBtn{
   background:var(--accent);
   color:#fff;
   border-color:var(--accent);

@@ -2565,21 +2565,131 @@ assert.notStrictEqual(registry.getMeta(groups.first_screen[0].id).title, '污染
         ]
         self.assertNotIn('grid-stack-item[gs-id="W22"]', compressed_body)
 
-    def test_cockpit_layout_version_replaces_stale_saved_cockpit(self):
+    def test_cockpit_layout_version_keeps_builtin_template_without_forcing_user_views(self):
         index = (ROOT / "index.html").read_text(encoding="utf-8")
         store = (ROOT / "store.js").read_text(encoding="utf-8")
         self.assertIn("cockpitLayoutVersion: 'dash_cockpit_layout_version'", store)
         self.assertIn("var COCKPIT_LAYOUT_VERSION = '3.0-density-20260620-4'", index)
-        self.assertIn("var COCKPIT_MIGRATABLE_SIGNATURES = [", index)
-        self.assertIn("W04:0,10,4,5|W14:9,0,3,5|W15:6,0,3,5|W22:4,10,8,5|W24:6,5,6,5|W25:0,0,6,10", index)
-        self.assertIn("function _layoutSignature(items)", index)
-        self.assertIn("function _isMigratableSavedCockpitLayout(data)", index)
-        self.assertIn("function _isStaleSavedCockpitLayout(data)", index)
-        self.assertIn("COCKPIT_MIGRATABLE_SIGNATURES.indexOf(_layoutSignature(data.items)) >= 0", index)
-        self.assertIn("localStorage.removeItem(STORAGE_KEYS.layout)", index)
-        self.assertIn("applyCockpitLayout({ persist:true, toast:false })", index)
-        self.assertIn("data.cockpitLayoutVersion = COCKPIT_LAYOUT_VERSION", index)
+        self.assertIn("function _loadActiveNamedLayoutOrFallback()", index)
+        self.assertIn("function _migrateLegacySavedLayoutToNamedView()", index)
+        self.assertIn("function _loadSavedLayout()", index)
+        self.assertIn("applyCockpitLayout({ persist:false, toast:false })", index)
         self.assertIn("STORAGE_KEYS.cockpitLayoutVersion", index)
+        self.assertNotIn("COCKPIT_MIGRATABLE_SIGNATURES", index)
+        self.assertNotIn("function _isStaleSavedCockpitLayout", index)
+        self.assertNotIn("data.cockpitLayoutVersion = COCKPIT_LAYOUT_VERSION", index)
+        load_start = index.index("function _loadSavedLayout()")
+        load_end = index.index("function exportLayout()", load_start)
+        load_body = index[load_start:load_end]
+        self.assertIn("_loadActiveNamedLayoutOrFallback()", load_body)
+        self.assertNotIn("_ensureRequiredLayoutWidgets()", load_body)
+
+    def test_named_layout_storage_keys_are_declared(self):
+        store = (ROOT / "store.js").read_text(encoding="utf-8")
+        self.assertIn("namedLayouts: 'dash_named_layouts_v1'", store)
+        self.assertIn("activeLayoutId: 'dash_active_layout_id'", store)
+        self.assertIn("defaultLayoutId: 'dash_default_layout_id'", store)
+
+    def test_named_layout_core_helpers_exist(self):
+        index = (ROOT / "index.html").read_text(encoding="utf-8")
+        for name in [
+            "_readNamedLayouts",
+            "_writeNamedLayouts",
+            "_captureCurrentLayout",
+            "_loadLayoutItems",
+            "_saveCurrentLayoutView",
+            "_saveCurrentLayoutAs",
+            "_renameCurrentLayoutView",
+            "_deleteCurrentLayoutView",
+            "_setCurrentLayoutDefault",
+            "_createBlankLayoutView",
+            "_refreshLayoutViewSelector",
+            "_loadActiveNamedLayoutOrFallback",
+        ]:
+            self.assertIn("function " + name, index)
+
+    def test_named_layouts_do_not_use_required_widget_injection(self):
+        index = (ROOT / "index.html").read_text(encoding="utf-8")
+        self.assertIn("function _loadLayoutItems(items, options)", index)
+        load_start = index.index("function _loadLayoutItems(items, options)")
+        load_end = index.index("function applyCockpitLayout", load_start)
+        load_body = index[load_start:load_end]
+        self.assertNotIn("_ensureRequiredLayoutWidgets()", load_body)
+        self.assertIn("_createBlankLayoutView()", index)
+        blank_start = index.index("function _createBlankLayoutView()")
+        blank_end = index.index("function _saveCurrentLayoutView", blank_start)
+        blank_body = index[blank_start:blank_end]
+        self.assertNotIn("_ensureRequiredLayoutWidgets()", blank_body)
+
+    def test_layout_menu_exposes_named_view_controls(self):
+        index = (ROOT / "index.html").read_text(encoding="utf-8")
+        theme = (ROOT / "css" / "theme.css").read_text(encoding="utf-8")
+        for element_id in [
+            "layoutViewSelect",
+            "layoutDialogOverlay",
+            "layoutDialogInput",
+            "layoutDialogConfirm",
+            "blankLayoutBtn",
+            "saveAsLayoutBtn",
+            "renameLayoutBtn",
+            "deleteLayoutBtn",
+            "defaultLayoutBtn",
+            "builtInCockpitBtn",
+        ]:
+            self.assertIn('id="' + element_id + '"', index)
+        self.assertIn("layout-view-select", index)
+        self.assertIn("layout-menu-grid", index)
+        self.assertIn("layout-dialog-overlay", index)
+        self.assertIn(".layout-view-select", theme)
+        self.assertIn(".layout-menu-grid", theme)
+        self.assertIn(".layout-dialog-overlay", theme)
+
+    def test_named_layout_view_actions_are_wired(self):
+        index = (ROOT / "index.html").read_text(encoding="utf-8")
+        self.assertIn("_saveCurrentLayoutView()", index)
+        self.assertIn("_saveCurrentLayoutAs()", index)
+        self.assertIn("_renameCurrentLayoutView()", index)
+        self.assertIn("_deleteCurrentLayoutView()", index)
+        self.assertIn("_setCurrentLayoutDefault()", index)
+        self.assertIn("_createBlankLayoutView()", index)
+        self.assertIn("_openLayoutDialog({", index)
+        self.assertIn("confirmText: '确认删除'", index)
+        self.assertIn("nextDefaultId && layouts[nextDefaultId]", index)
+        self.assertIn("document.getElementById('layoutViewSelect').addEventListener('change'", index)
+        self.assertIn("document.getElementById('layoutDialogConfirm').addEventListener('click'", index)
+        self.assertIn("document.getElementById('builtInCockpitBtn').addEventListener('click'", index)
+        self.assertNotIn("prompt(", index)
+        self.assertNotIn("confirm(", index)
+
+    def test_named_layout_refresh_prefers_active_then_default(self):
+        index = (ROOT / "index.html").read_text(encoding="utf-8")
+        self.assertIn("_loadActiveNamedLayoutOrFallback()", index)
+        self.assertIn("localStorage.getItem(STORAGE_KEYS.activeLayoutId)", index)
+        self.assertIn("localStorage.getItem(STORAGE_KEYS.defaultLayoutId)", index)
+        self.assertIn("var preferredId = activeId || defaultId", index)
+        self.assertIn("_loadNamedLayout(preferredId", index)
+
+    def test_named_layout_autosave_only_updates_user_layouts(self):
+        index = (ROOT / "index.html").read_text(encoding="utf-8")
+        start = index.index("function _autoSaveLayout()")
+        end = index.index("function _loadSavedLayout()", start)
+        block = index[start:end]
+        self.assertIn("STORAGE_KEYS.activeLayoutId", block)
+        self.assertIn("_readNamedLayouts()", block)
+        self.assertIn("layout.kind === 'user'", block)
+        self.assertNotIn("STORAGE_KEYS.layoutMode, 'cockpit'", block)
+
+    def test_named_layout_names_are_deduplicated(self):
+        index = (ROOT / "index.html").read_text(encoding="utf-8")
+        self.assertIn("function _uniqueLayoutName(layouts, name, exceptId)", index)
+        self.assertIn("name = _uniqueLayoutName(layouts, name);", index)
+        self.assertIn("name = _uniqueLayoutName(layouts, name, id);", index)
+
+    def test_delete_layout_dialog_uses_danger_state(self):
+        index = (ROOT / "index.html").read_text(encoding="utf-8")
+        theme = (ROOT / "css" / "theme.css").read_text(encoding="utf-8")
+        self.assertIn("document.getElementById('layoutDialogConfirm').classList.toggle('danger'", index)
+        self.assertIn(".layout-dialog-btn.primary.danger", theme)
 
     def test_market_evidence_shelf_is_secondary_overlay(self):
         index = (ROOT / "index.html").read_text(encoding="utf-8")

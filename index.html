@@ -143,10 +143,18 @@ body.ready{opacity:1}
   <details class="topbar-layout-menu">
     <summary title="布局操作">布局</summary>
     <div class="topbar-layout-popover">
-      <button class="topbar-layout-btn" id="saveLayoutBtn" title="保存布局 (Ctrl+S)">保存</button>
-      <button class="topbar-layout-btn" id="cockpitLayoutBtn" title="切换到盘中驾驶舱布局">驾驶舱</button>
-      <button class="topbar-layout-btn" id="exportLayoutBtn" title="导出布局 JSON">导出</button>
-      <button class="topbar-layout-btn" id="importLayoutBtn" title="导入布局 JSON">导入</button>
+      <select class="layout-view-select" id="layoutViewSelect" title="切换布局视图"></select>
+      <div class="layout-menu-grid">
+        <button class="topbar-layout-btn" id="blankLayoutBtn" title="从空白画布开始">新建空白</button>
+        <button class="topbar-layout-btn" id="saveLayoutBtn" title="保存当前布局 (Ctrl+S)">保存</button>
+        <button class="topbar-layout-btn" id="saveAsLayoutBtn" title="另存为新的布局视图">另存为</button>
+        <button class="topbar-layout-btn" id="renameLayoutBtn" title="重命名当前布局视图">重命名</button>
+        <button class="topbar-layout-btn" id="deleteLayoutBtn" title="删除当前布局视图">删除</button>
+        <button class="topbar-layout-btn" id="defaultLayoutBtn" title="刷新后默认打开当前布局">设为默认</button>
+        <button class="topbar-layout-btn" id="builtInCockpitBtn" title="加载内置盘中驾驶舱模板">内置驾驶舱</button>
+        <button class="topbar-layout-btn" id="exportLayoutBtn" title="导出布局 JSON">导出</button>
+        <button class="topbar-layout-btn" id="importLayoutBtn" title="导入布局 JSON">导入</button>
+      </div>
     </div>
   </details>
   <input type="file" id="importFileInput" accept=".json" style="display:none">
@@ -168,6 +176,19 @@ body.ready{opacity:1}
 
 <!-- Context Menu -->
 <div class="context-menu" id="contextMenu"></div>
+
+<!-- Layout Dialog -->
+<div class="layout-dialog-overlay" id="layoutDialogOverlay">
+  <div class="layout-dialog">
+    <div class="layout-dialog-title" id="layoutDialogTitle">保存布局</div>
+    <div class="layout-dialog-message" id="layoutDialogMessage"></div>
+    <input class="layout-dialog-input" id="layoutDialogInput" maxlength="24" autocomplete="off" spellcheck="false">
+    <div class="layout-dialog-actions">
+      <button class="layout-dialog-btn ghost" id="layoutDialogCancel">取消</button>
+      <button class="layout-dialog-btn primary" id="layoutDialogConfirm">确定</button>
+    </div>
+  </div>
+</div>
 
 <!-- Widget Panel -->
 <div class="widget-panel-overlay" id="widgetPanelOverlay">
@@ -237,6 +258,7 @@ body.ready{opacity:1}
 // === GridStack Init ===
 var grid = null;
 var activePreset = null;
+var activeLayoutId = null;
 var _suppressLayoutSave = false;
 var FIRST_SCREEN_WIDGETS = ['W25','W15','W24','W14','W04','W22'];
 var SECONDARY_EVIDENCE_WIDGETS = ['W08','W09','W10','W12','W13','W21','W06'];
@@ -251,12 +273,6 @@ var COCKPIT_LAYOUT = [
   { id:'W24', x:6, y:5, w:6, h:4 },
   { id:'W04', x:0, y:9, w:4, h:5 },
   { id:'W22', x:4, y:9, w:8, h:5 }
-];
-var COCKPIT_MIGRATABLE_SIGNATURES = [
-  'W04:0,13,4,3|W14:9,7,3,6|W15:0,7,5,6|W22:4,13,8,6|W24:5,7,4,6|W25:0,0,12,7',
-  'W04:0,14,4,3|W14:5,8,3,6|W15:0,8,5,6|W22:8,14,4,5|W24:8,8,4,6|W25:0,0,12,8',
-  'W04:0,9,4,5|W14:9,0,3,5|W15:6,0,3,5|W22:4,9,8,5|W24:6,5,6,4|W25:0,0,6,9',
-  'W04:0,10,4,5|W14:9,0,3,5|W15:6,0,3,5|W22:4,10,8,5|W24:6,5,6,5|W25:0,0,6,10'
 ];
 
 function initGrid() {
@@ -283,8 +299,8 @@ function initGrid() {
   grid.on('resizestop', function(e, el) { _onWidgetResize(el); });
   grid.on('change', function() { _autoSaveLayout(); });
 
-  // 从 localStorage 恢复布局
-  _loadSavedLayout();
+  // 从命名布局恢复；没有用户布局时回退到内置驾驶舱模板
+  _loadActiveNamedLayoutOrFallback();
 
   document.getElementById('loading').style.display = 'none';
   document.getElementById('topbar').style.display = '';
@@ -391,21 +407,344 @@ function _mountLayoutWidget(item) {
   }
 }
 
-function applyCockpitLayout(options) {
+function _readNamedLayouts() {
+  try {
+    var raw = localStorage.getItem(STORAGE_KEYS.namedLayouts);
+    var parsed = raw ? JSON.parse(raw) : {};
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+  } catch(e) {
+    return {};
+  }
+}
+
+function _writeNamedLayouts(layouts) {
+  try { localStorage.setItem(STORAGE_KEYS.namedLayouts, JSON.stringify(layouts || {})); } catch(e) {}
+}
+
+function _newLayoutId() {
+  return 'layout_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 7);
+}
+
+var _layoutDialogSubmit = null;
+
+function _normalizeLayoutName(name) {
+  name = String(name).trim();
+  return name ? name.slice(0, 24) : '';
+}
+
+function _closeLayoutDialog() {
+  var overlay = document.getElementById('layoutDialogOverlay');
+  if (overlay) overlay.classList.remove('show');
+  var confirmBtn = document.getElementById('layoutDialogConfirm');
+  confirmBtn.classList.remove('danger');
+  confirmBtn.textContent = '确定';
+  _layoutDialogSubmit = null;
+}
+
+function _openLayoutDialog(options) {
+  options = options || {};
+  var overlay = document.getElementById('layoutDialogOverlay');
+  var title = document.getElementById('layoutDialogTitle');
+  var message = document.getElementById('layoutDialogMessage');
+  var input = document.getElementById('layoutDialogInput');
+  if (!overlay || !title || !message || !input) return;
+  title.textContent = options.title || '布局';
+  message.textContent = options.message || '';
+  input.value = options.value || '';
+  input.style.display = options.input === false ? 'none' : '';
+  document.getElementById('layoutDialogConfirm').textContent = options.confirmText || '确定';
+  document.getElementById('layoutDialogConfirm').classList.toggle('danger', options.danger === true);
+  _layoutDialogSubmit = function() {
+    if (options.input === false) {
+      _closeLayoutDialog();
+      if (typeof options.onConfirm === 'function') options.onConfirm();
+      return;
+    }
+    var name = _normalizeLayoutName(input.value);
+    if (!name) { showToast('布局名称不能为空'); input.focus(); return; }
+    _closeLayoutDialog();
+    if (typeof options.onConfirm === 'function') options.onConfirm(name);
+  };
+  overlay.classList.add('show');
+  setTimeout(function() {
+    if (options.input !== false) {
+      input.focus();
+      input.select();
+    } else {
+      document.getElementById('layoutDialogConfirm').focus();
+    }
+  }, 0);
+}
+
+function _uniqueLayoutName(layouts, name, exceptId) {
+  var base = (name || '未命名布局').slice(0, 24);
+  var candidate = base;
+  var n = 2;
+  var exists = function(value) {
+    return Object.keys(layouts || {}).some(function(id) {
+      return id !== exceptId && (layouts[id] || {}).name === value;
+    });
+  };
+  while (exists(candidate)) {
+    candidate = (base.slice(0, 20) + '-' + n).slice(0, 24);
+    n += 1;
+  }
+  return candidate;
+}
+
+function _captureCurrentLayout() {
+  if (!grid) return [];
+  return (grid.save(false) || []).filter(function(item) {
+    return item && item.id && WidgetRegistry.getMeta(item.id);
+  }).map(function(item) {
+    return {
+      id: item.id,
+      x: item.x || 0,
+      y: item.y || 0,
+      w: item.w || 1,
+      h: item.h || 1
+    };
+  });
+}
+
+function _setCurrentLayoutId(id) {
+  activeLayoutId = id || null;
+  try {
+    if (activeLayoutId) localStorage.setItem(STORAGE_KEYS.activeLayoutId, activeLayoutId);
+    else localStorage.removeItem(STORAGE_KEYS.activeLayoutId);
+  } catch(e) {}
+  _refreshLayoutViewSelector();
+}
+
+function _sortedLayoutIds(layouts) {
+  return Object.keys(layouts || {}).sort(function(a, b) {
+    var la = layouts[a] || {};
+    var lb = layouts[b] || {};
+    var ta = la.updatedAt || la.createdAt || '';
+    var tb = lb.updatedAt || lb.createdAt || '';
+    if (ta !== tb) return ta < tb ? 1 : -1;
+    return (la.name || a).localeCompare(lb.name || b, 'zh-CN');
+  });
+}
+
+function _refreshLayoutViewSelector() {
+  var select = document.getElementById('layoutViewSelect');
+  if (!select) return;
+  var layouts = _readNamedLayouts();
+  var defaultId = '';
+  try { defaultId = localStorage.getItem(STORAGE_KEYS.defaultLayoutId) || ''; } catch(e) {}
+  var ids = _sortedLayoutIds(layouts);
+  select.innerHTML = '';
+  var base = document.createElement('option');
+  base.value = '';
+  base.textContent = activeLayoutId ? '选择布局' : '内置/未保存';
+  select.appendChild(base);
+  ids.forEach(function(id) {
+    var layout = layouts[id];
+    if (!layout) return;
+    var opt = document.createElement('option');
+    opt.value = id;
+    opt.textContent = (layout.name || id) + (id === defaultId ? ' · 默认' : '');
+    select.appendChild(opt);
+  });
+  select.value = activeLayoutId && layouts[activeLayoutId] ? activeLayoutId : '';
+}
+
+function _loadLayoutItems(items, options) {
   options = options || {};
   _closeTransientSurfaces();
   _suppressLayoutSave = true;
   try {
     _clearGridWidgets();
-    COCKPIT_LAYOUT.forEach(_mountLayoutWidget);
+    (items || []).forEach(_mountLayoutWidget);
   } finally {
     _suppressLayoutSave = false;
   }
-  document.body.classList.add('cockpit-mode');
+  document.body.classList.toggle('cockpit-mode', options.cockpit === true);
+  try { DataStore.notifyAll(); } catch(e) {}
+}
+
+function _loadNamedLayout(id, options) {
+  options = options || {};
+  var layouts = _readNamedLayouts();
+  var layout = layouts[id];
+  if (!layout || !Array.isArray(layout.items)) return false;
+  _loadLayoutItems(layout.items, { cockpit: layout.kind === 'cockpit' });
+  _setCurrentLayoutId(id);
+  if (options.toast !== false) showToast('已切换布局：' + (layout.name || id));
+  return true;
+}
+
+function _migrateLegacySavedLayoutToNamedView() {
+  var layouts = _readNamedLayouts();
+  if (_sortedLayoutIds(layouts).length) return null;
+  try {
+    var saved = localStorage.getItem(STORAGE_KEYS.layout);
+    if (!saved) return null;
+    var data = JSON.parse(saved);
+    var items = data && data.v === '2.1' && Array.isArray(data.items) ? data.items : null;
+    if (!items || !items.length) return null;
+    var now = new Date().toISOString();
+    var id = 'layout_legacy';
+    layouts[id] = {
+      id: id,
+      name: localStorage.getItem(STORAGE_KEYS.layoutMode) === 'cockpit' ? '驾驶舱' : '旧布局',
+      kind: 'user',
+      createdAt: now,
+      updatedAt: now,
+      items: items
+    };
+    _writeNamedLayouts(layouts);
+    localStorage.setItem(STORAGE_KEYS.activeLayoutId, id);
+    if (!localStorage.getItem(STORAGE_KEYS.defaultLayoutId)) localStorage.setItem(STORAGE_KEYS.defaultLayoutId, id);
+    return id;
+  } catch(e) {
+    return null;
+  }
+}
+
+function _loadActiveNamedLayoutOrFallback() {
+  var activeId = '';
+  var defaultId = '';
+  try {
+    activeId = localStorage.getItem(STORAGE_KEYS.activeLayoutId) || '';
+    defaultId = localStorage.getItem(STORAGE_KEYS.defaultLayoutId) || '';
+  } catch(e) {}
+  var preferredId = activeId || defaultId;
+  if (preferredId && _loadNamedLayout(preferredId, { toast:false })) return;
+  if (defaultId && defaultId !== preferredId && _loadNamedLayout(defaultId, { toast:false })) return;
+  var legacyId = _migrateLegacySavedLayoutToNamedView();
+  if (legacyId && _loadNamedLayout(legacyId, { toast:false })) {
+    showToast('已迁移旧布局为命名视图');
+    return;
+  }
+  applyCockpitLayout({ persist:false, toast:false });
+  showToast('已加载内置驾驶舱');
+}
+
+function _createBlankLayoutView() {
+  _loadLayoutItems([], { cockpit:false });
+  _setCurrentLayoutId(null);
+  showToast('已新建空白画布');
+}
+
+function _saveCurrentLayoutView() {
+  var layouts = _readNamedLayouts();
+  var id = activeLayoutId;
+  if (!id || !layouts[id]) {
+    _saveCurrentLayoutAs();
+    return;
+  }
+  layouts[id].items = _captureCurrentLayout();
+  layouts[id].updatedAt = new Date().toISOString();
+  layouts[id].kind = layouts[id].kind || 'user';
+  _writeNamedLayouts(layouts);
+  _refreshLayoutViewSelector();
+  showToast('已保存布局：' + (layouts[id].name || id));
+}
+
+function _saveCurrentLayoutAs() {
+  _openLayoutDialog({
+    title: '保存当前布局',
+    message: '给这屏布局命名，后续可在“布局”下拉框中切换。',
+    value: '',
+    onConfirm: function(name) {
+      var layouts = _readNamedLayouts();
+      name = _uniqueLayoutName(layouts, name);
+      var id = _newLayoutId();
+      var now = new Date().toISOString();
+      layouts[id] = {
+        id: id,
+        name: name,
+        kind: 'user',
+        createdAt: now,
+        updatedAt: now,
+        items: _captureCurrentLayout()
+      };
+      _writeNamedLayouts(layouts);
+      _setCurrentLayoutId(id);
+      try {
+        if (!localStorage.getItem(STORAGE_KEYS.defaultLayoutId)) localStorage.setItem(STORAGE_KEYS.defaultLayoutId, id);
+      } catch(e) {}
+      _refreshLayoutViewSelector();
+      showToast('已保存布局：' + name);
+    }
+  });
+}
+
+function _renameCurrentLayoutView() {
+  var layouts = _readNamedLayouts();
+  var id = activeLayoutId;
+  if (!id || !layouts[id]) { showToast('当前是未保存布局'); return; }
+  _openLayoutDialog({
+    title: '重命名布局',
+    message: '只修改名称，不改变当前组件位置。',
+    value: layouts[id].name || '',
+    onConfirm: function(name) {
+      name = _uniqueLayoutName(layouts, name, id);
+      layouts[id].name = name;
+      layouts[id].updatedAt = new Date().toISOString();
+      _writeNamedLayouts(layouts);
+      _refreshLayoutViewSelector();
+      showToast('已重命名为：' + name);
+    }
+  });
+}
+
+function _deleteCurrentLayoutView() {
+  var layouts = _readNamedLayouts();
+  var id = activeLayoutId;
+  if (!id || !layouts[id]) { showToast('当前布局尚未保存'); return; }
+  var name = layouts[id].name || id;
+  _openLayoutDialog({
+    title: '删除布局',
+    message: '删除布局“' + name + '”？这个操作不会删除组件本身，只删除这套摆放方案。',
+    input: false,
+    danger: true,
+    confirmText: '确认删除',
+    onConfirm: function() {
+      delete layouts[id];
+      _writeNamedLayouts(layouts);
+      var nextIds = _sortedLayoutIds(layouts);
+      var nextDefaultId = '';
+      try {
+        if (localStorage.getItem(STORAGE_KEYS.defaultLayoutId) === id) {
+          if (nextIds[0]) localStorage.setItem(STORAGE_KEYS.defaultLayoutId, nextIds[0]);
+          else localStorage.removeItem(STORAGE_KEYS.defaultLayoutId);
+        }
+        nextDefaultId = localStorage.getItem(STORAGE_KEYS.defaultLayoutId) || '';
+      } catch(e) {}
+      if (nextDefaultId && layouts[nextDefaultId]) {
+        _loadNamedLayout(nextDefaultId, { toast:false });
+        showToast('已删除布局：' + name);
+      } else if (nextIds[0]) {
+        _loadNamedLayout(nextIds[0], { toast:false });
+        showToast('已删除布局：' + name);
+      } else {
+        _setCurrentLayoutId(null);
+        applyCockpitLayout({ persist:false, toast:false });
+        showToast('已删除布局：' + name);
+      }
+    }
+  });
+}
+
+function _setCurrentLayoutDefault() {
+  var layouts = _readNamedLayouts();
+  var id = activeLayoutId;
+  if (!id || !layouts[id]) { showToast('请先保存当前布局'); return; }
+  try { localStorage.setItem(STORAGE_KEYS.defaultLayoutId, id); } catch(e) {}
+  _refreshLayoutViewSelector();
+  showToast('已设为默认：' + (layouts[id].name || id));
+}
+
+function applyCockpitLayout(options) {
+  options = options || {};
+  _loadLayoutItems(COCKPIT_LAYOUT, { cockpit:true });
+  _setCurrentLayoutId(null);
   if (options.persist !== false) {
     try { localStorage.setItem(STORAGE_KEYS.layoutMode, 'cockpit'); } catch(e) {}
     try { localStorage.setItem(STORAGE_KEYS.cockpitLayoutVersion, COCKPIT_LAYOUT_VERSION); } catch(e) {}
-    _autoSaveLayout();
   }
   if (options.toast !== false) showToast('已切换盘中驾驶舱：态势 + 持仓 + 风控 + 票据');
 }
@@ -460,6 +799,7 @@ function _closeTopbarMenus() {
 
 function _closeTransientSurfaces() {
   _closeTopbarMenus();
+  _closeLayoutDialog();
   var contextMenu = document.getElementById('contextMenu');
   if (contextMenu) contextMenu.classList.remove('show');
   ['widgetPanelOverlay', 'inputPanelOverlay', 'llmPanelOverlay', 'evidenceShelfOverlay'].forEach(function(id) {
@@ -974,101 +1314,20 @@ document.addEventListener('contextmenu', function(e) {
 function _autoSaveLayout() {
   if (_suppressLayoutSave) return;
   try {
-    var layout = grid.save(false);
-    var payload = {v:'2.1', items:layout};
-    if (document.body.classList.contains('cockpit-mode')) {
-      payload.cockpitLayoutVersion = COCKPIT_LAYOUT_VERSION;
-      localStorage.setItem(STORAGE_KEYS.layoutMode, 'cockpit');
-      localStorage.setItem(STORAGE_KEYS.cockpitLayoutVersion, COCKPIT_LAYOUT_VERSION);
+    var layouts = _readNamedLayouts();
+    var currentId = activeLayoutId || localStorage.getItem(STORAGE_KEYS.activeLayoutId);
+    var layout = currentId ? layouts[currentId] : null;
+    if (layout && layout.kind === 'user') {
+      layout.items = _captureCurrentLayout();
+      layout.updatedAt = new Date().toISOString();
+      _writeNamedLayouts(layouts);
+      _refreshLayoutViewSelector();
+      return;
     }
-    localStorage.setItem(STORAGE_KEYS.layout, JSON.stringify(payload));
   } catch(e) {}
-}
-function _layoutSignature(items) {
-  return (items || []).filter(function(item) {
-    return FIRST_SCREEN_WIDGETS.indexOf(item.id) >= 0;
-  }).map(function(item) {
-    return {
-      id: item.id,
-      x: item.x || 0,
-      y: item.y || 0,
-      w: item.w || 0,
-      h: item.h || 0
-    };
-  }).sort(function(a, b) {
-    return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
-  }).map(function(item) {
-    return item.id + ':' + [item.x, item.y, item.w, item.h].join(',');
-  }).join('|');
-}
-function _isMigratableSavedCockpitLayout(data) {
-  return !!(data && Array.isArray(data.items) && COCKPIT_MIGRATABLE_SIGNATURES.indexOf(_layoutSignature(data.items)) >= 0);
-}
-function _isStaleSavedCockpitLayout(data) {
-  try {
-    if (localStorage.getItem(STORAGE_KEYS.layoutMode) !== 'cockpit') return false;
-    var savedVersion = (data && data.cockpitLayoutVersion) || localStorage.getItem(STORAGE_KEYS.cockpitLayoutVersion);
-    return savedVersion !== COCKPIT_LAYOUT_VERSION;
-  } catch(e) {
-    return false;
-  }
 }
 function _loadSavedLayout() {
-  // v2.1: 只加载 v2.1 格式布局 {v:'2.1', items:[...]}
-  try {
-    var saved = localStorage.getItem(STORAGE_KEYS.layout);
-    var data = saved ? JSON.parse(saved) : null;
-    if (_isStaleSavedCockpitLayout(data)) {
-      if (_isMigratableSavedCockpitLayout(data)) {
-        localStorage.removeItem(STORAGE_KEYS.layout);
-        applyCockpitLayout({ persist:true, toast:false });
-        showToast('已升级默认盘中驾驶舱');
-        return;
-      }
-      localStorage.setItem(STORAGE_KEYS.cockpitLayoutVersion, COCKPIT_LAYOUT_VERSION);
-      if (data && data.v === '2.1' && Array.isArray(data.items)) {
-        data.cockpitLayoutVersion = COCKPIT_LAYOUT_VERSION;
-        localStorage.setItem(STORAGE_KEYS.layout, JSON.stringify(data));
-      }
-    }
-    if (saved) {
-      if (data.v === '2.1' && Array.isArray(data.items) && data.items.length) {
-        data.items.forEach(function(item) {
-          var id = item.id;
-          var meta = WidgetRegistry.getMeta(id);
-          if (!meta) return;
-          var entry = WidgetRegistry.get(id);
-          var gsItem = grid.addWidget({
-            x: item.x||0, y: item.y||0,
-            w: item.w||meta.defaultSize.w, h: item.h||meta.defaultSize.h,
-            id: id
-          });
-          var contentEl = gsItem.querySelector('.grid-stack-item-content');
-          if (contentEl) contentEl.id = 'content_' + id;
-          if (entry && entry.Class) {
-            var instance = new entry.Class({
-              id: meta.id, type: meta.type, title: meta.title,
-              category: meta.category, tier: meta.tier,
-              dataPaths: meta.dataPaths, defaultSize: meta.defaultSize,
-            });
-            widgetInstances[id] = instance;
-            instance.mount(document.getElementById('content_' + id));
-          }
-        });
-        _ensureRequiredLayoutWidgets();
-        try {
-          if (localStorage.getItem(STORAGE_KEYS.layoutMode) === 'cockpit') {
-            document.body.classList.add('cockpit-mode');
-          }
-        } catch(e) {}
-        return;
-      }
-    }
-  } catch(e) {}
-  // 旧格式或不兼容 → 清除，并加载盘中驾驶舱兜底工作台
-  try { localStorage.removeItem(STORAGE_KEYS.layout); } catch(e) {}
-  applyCockpitLayout({ persist:false, toast:false });
-  showToast('已加载默认盘中驾驶舱');
+  _loadActiveNamedLayoutOrFallback();
 }
 function exportLayout() {
   var layout = grid.save(false);
@@ -1086,11 +1345,10 @@ function importLayout(file) {
   reader.onload = function(e) {
     try {
       var data = JSON.parse(e.target.result);
-      (data.widgets || data || []).forEach(function(item) {
-        var id = item.id; if (!id) return;
-        if (!widgetInstances[id]) _addWidgetToGrid(id);
-      });
-      showToast('布局已导入');
+      var items = data.widgets || data.items || data || [];
+      _loadLayoutItems(items, { cockpit:false });
+      _setCurrentLayoutId(null);
+      showToast('布局已导入（未保存）');
     } catch(err) { showToast('导入失败：格式错误'); }
   };
   reader.readAsText(file);
@@ -1113,7 +1371,7 @@ document.addEventListener('keydown', function(e) {
     e.preventDefault();
     _showInputPanel();
   }
-  if ((e.ctrlKey || e.metaKey) && e.key === 's') { e.preventDefault(); _autoSaveLayout(); showToast('已保存'); }
+  if ((e.ctrlKey || e.metaKey) && e.key === 's') { e.preventDefault(); _saveCurrentLayoutView(); }
   if ((e.ctrlKey || e.metaKey) && e.key === 'z') { e.preventDefault(); _undoRemoveWidget(); }
   if (e.key === 'a' || e.key === 'A') {
     e.preventDefault();
@@ -1331,9 +1589,28 @@ function showToast(msg) {
   t._timeout = setTimeout(function() { t.className = 'toast'; }, 2500);
 }
 
-// === Event bindings ===// v2.1: preset select removed
-document.getElementById('saveLayoutBtn').addEventListener('click', function() { _closeTopbarMenus(); _autoSaveLayout(); showToast('已保存'); });
-document.getElementById('cockpitLayoutBtn').addEventListener('click', function() { applyCockpitLayout({ persist:true, toast:true }); });
+// === Event bindings ===// v3.0: named layout views
+document.getElementById('layoutDialogOverlay').addEventListener('click', function(e) {
+  if (e.target === this) _closeLayoutDialog();
+});
+document.getElementById('layoutDialogCancel').addEventListener('click', function() { _closeLayoutDialog(); });
+document.getElementById('layoutDialogConfirm').addEventListener('click', function() {
+  if (typeof _layoutDialogSubmit === 'function') _layoutDialogSubmit();
+});
+document.getElementById('layoutDialogInput').addEventListener('keydown', function(e) {
+  if (e.key === 'Enter' && typeof _layoutDialogSubmit === 'function') _layoutDialogSubmit();
+  if (e.key === 'Escape') _closeLayoutDialog();
+});
+document.getElementById('layoutViewSelect').addEventListener('change', function() {
+  if (this.value) _loadNamedLayout(this.value, { toast:true });
+});
+document.getElementById('blankLayoutBtn').addEventListener('click', function() { _closeTopbarMenus(); _createBlankLayoutView(); });
+document.getElementById('saveLayoutBtn').addEventListener('click', function() { _closeTopbarMenus(); _saveCurrentLayoutView(); });
+document.getElementById('saveAsLayoutBtn').addEventListener('click', function() { _closeTopbarMenus(); _saveCurrentLayoutAs(); });
+document.getElementById('renameLayoutBtn').addEventListener('click', function() { _closeTopbarMenus(); _renameCurrentLayoutView(); });
+document.getElementById('deleteLayoutBtn').addEventListener('click', function() { _closeTopbarMenus(); _deleteCurrentLayoutView(); });
+document.getElementById('defaultLayoutBtn').addEventListener('click', function() { _closeTopbarMenus(); _setCurrentLayoutDefault(); });
+document.getElementById('builtInCockpitBtn').addEventListener('click', function() { _closeTopbarMenus(); applyCockpitLayout({ persist:true, toast:true }); });
 document.getElementById('exportLayoutBtn').addEventListener('click', function() { _closeTopbarMenus(); exportLayout(); });
 document.getElementById('importLayoutBtn').addEventListener('click', function() {
   _closeTopbarMenus();

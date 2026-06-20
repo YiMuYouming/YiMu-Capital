@@ -9,6 +9,9 @@ const STORAGE_KEYS = {
   layout: 'dash_layout_v2',    // 画板布局 JSON (v2.1 新 key)
   layoutMode: 'dash_layout_mode', // 当前布局模式（如 cockpit）
   cockpitLayoutVersion: 'dash_cockpit_layout_version', // 默认驾驶舱布局版本
+  namedLayouts: 'dash_named_layouts_v1', // 命名布局视图集合
+  activeLayoutId: 'dash_active_layout_id', // 当前布局视图
+  defaultLayoutId: 'dash_default_layout_id', // 默认布局视图
 };
 
 const DataStore = (function() {
