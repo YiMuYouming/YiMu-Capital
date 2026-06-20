@@ -292,6 +292,21 @@ class PnLCurveWidget extends YiMuWidget {
     return count ? { value: sum / count, count: count } : null;
   }
 
+  _avgPositionForValidCurveSamples(positionArr, portfolioArr) {
+    var sum = 0, count = 0;
+    (positionArr || []).forEach(function(v, i) {
+      var pv = portfolioArr ? portfolioArr[i] : null;
+      var p = pv == null ? null : parseFloat(pv);
+      if (p == null || isNaN(p)) return;
+      if (v == null) return;
+      var n = parseFloat(v);
+      if (isNaN(n)) return;
+      sum += n;
+      count += 1;
+    });
+    return count ? { value: sum / count, count: count } : null;
+  }
+
   _periodSliceFromAllDaily(period) {
     var ad = this._allDailyData;
     if (!ad || !ad.portfolio || !ad.portfolio.length) return null;
@@ -324,7 +339,7 @@ class PnLCurveWidget extends YiMuWidget {
       : this._periodSliceFromAllDaily(period);
     if (!src) return { returnPct:null, avgPosPct:null, posSamples:0 };
     var returnPct = src.rawDailyReturns ? this._compoundReturns(src.portfolio) : this._lastValidNumber(src.portfolio);
-    var avg = this._avgValidNumber(src.position);
+    var avg = this._avgPositionForValidCurveSamples(src.position, src.portfolio);
     return {
       returnPct: returnPct,
       avgPosPct: avg ? avg.value : null,
@@ -339,13 +354,47 @@ class PnLCurveWidget extends YiMuWidget {
     var posLabel = document.getElementById('pnl_pos_label');
     if (pnlLabel) pnlLabel.textContent = periodText + '收益';
     if (posLabel) posLabel.textContent = period === 'today' ? '今日仓位' : periodText + '平均仓位';
-    if (period === 'today') return;
 
     var pnlEl = document.getElementById('pnl_pnl');
     var pnlSub = document.getElementById('pnl_pnl_sub');
     var posEl = document.getElementById('pnl_pos');
     var posSub = document.getElementById('pnl_pos_sub');
     if (!pnlEl || !posEl) return;
+
+    if (period === 'today' && chartData && chartData.is_fallback) {
+      var fallbackDate = chartData.data_date || '最近交易日';
+      if (posLabel) posLabel.textContent = '最近交易日仓位';
+      var fallbackPos = this._lastValidNumber(chartData.position);
+      if (fallbackPos == null) {
+        posEl.textContent = '—';
+        posEl.style.color = 'var(--text-disabled)';
+        if (posSub) posSub.textContent = '等待最近交易日仓位';
+      } else {
+        posEl.textContent = fallbackPos.toFixed(0) + '%';
+        posEl.style.color = fallbackPos > 80 ? 'var(--danger)' : fallbackPos > 50 ? 'var(--warn)' : 'var(--accent)';
+        if (posSub) posSub.textContent = fallbackDate + ' 仓位';
+      }
+      if (isQuoteUnavailable) {
+        pnlEl.textContent = '—';
+        pnlEl.style.color = 'var(--text-disabled)';
+        if (pnlSub) pnlSub.textContent = '估值不可信';
+      } else {
+        var fallbackReturn = this._lastValidNumber(chartData.portfolio);
+        if (pnlLabel) pnlLabel.textContent = '最近交易日收益';
+        if (fallbackReturn == null) {
+          pnlEl.textContent = '—';
+          pnlEl.style.color = 'var(--text-disabled)';
+          if (pnlSub) pnlSub.textContent = '等待最近交易日收益';
+        } else {
+          pnlEl.textContent = (fallbackReturn >= 0 ? '+' : '') + fallbackReturn.toFixed(2) + '%';
+          pnlEl.style.color = fallbackReturn >= 0 ? 'var(--up)' : 'var(--down)';
+          if (pnlSub) pnlSub.textContent = fallbackDate + ' 收益';
+        }
+      }
+      return;
+    }
+
+    if (period === 'today') return;
 
     if (isQuoteUnavailable) {
       pnlEl.textContent = '—';

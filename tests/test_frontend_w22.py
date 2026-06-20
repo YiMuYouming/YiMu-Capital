@@ -275,6 +275,32 @@ console.log(JSON.stringify({week:week, month:month}));
         self.assertEqual(result["month"]["pos"], "30%", result)
         self.assertIn("2 个采样", result["month"]["posSub"], result)
 
+    def test_period_average_position_uses_only_valid_curve_samples(self):
+        """周期平均仓位只按收益曲线有效点计数，曲线空点不进分母"""
+        script = r"""
+var inst = new PnLCurveWidget({id:'W22'});
+inst.id = 'W22';
+inst._state = {
+  period:'week', index:'sh', totalAsset:200000, totalDeposit:200000,
+  liveQ:{}, positions:[], pnlLive:{valuation_complete:true, pnl_amount:100, pnl_pct:0.1, pos_pct:80}
+};
+inst._updateKPI({
+  type:'daily',
+  labels:['06-15','06-16','06-17'],
+  portfolio:[0.5, null, 3.0],
+  benchmark:[0.2, null, 1.0],
+  position:[10, 90, 30],
+  nav:[1.0, null, 1.03]
+});
+console.log(JSON.stringify({
+  pos: document.getElementById('pnl_pos').textContent,
+  posSub: document.getElementById('pnl_pos_sub').textContent
+}));
+"""
+        result = _run_node(script, files=["widgets/pnl-curve.js"])
+        self.assertEqual(result.get("pos"), "20%", result)
+        self.assertIn("2 个采样", result.get("posSub", ""), result)
+
     def test_period_kpi_all_daily_fallback_compounds_daily_returns(self):
         """周期接口未返回时，用 all 日线缓存兜底并按 TWR 连乘"""
         script = r"""
@@ -301,6 +327,40 @@ console.log(JSON.stringify({
         self.assertEqual(result.get("pnlLabel"), "近一周收益", result)
         self.assertEqual(result.get("pnl"), "+1.99%", result)
         self.assertEqual(result.get("pos"), "30%", result)
+
+    def test_today_fallback_uses_last_trading_day_return_not_summary_zero(self):
+        """非交易日 today fallback 时，主收益 KPI 显示最近交易日收益，不显示 summary 0"""
+        script = r"""
+var inst = new PnLCurveWidget({id:'W22'});
+inst.id = 'W22';
+inst._state = {
+  period:'today', index:'sh', totalAsset:200000, totalDeposit:200000,
+  liveQ:{}, positions:[], pnlLive:{valuation_complete:true, pnl_amount:0, pnl_pct:0, pos_pct:42}
+};
+inst._updateKPI({
+  type:'intraday',
+  data_date:'2026-06-19',
+  is_fallback:true,
+  labels:['09:30','14:55'],
+  portfolio:[0.0, -0.73],
+  benchmark:[0.0, -0.43],
+  position:[42, 42],
+  nav:[1.0, 0.9927]
+});
+console.log(JSON.stringify({
+  pnlLabel: document.getElementById('pnl_pnl_label').textContent,
+  pnl: document.getElementById('pnl_pnl').textContent,
+  pnlSub: document.getElementById('pnl_pnl_sub').textContent,
+  posLabel: document.getElementById('pnl_pos_label').textContent,
+  pos: document.getElementById('pnl_pos').textContent
+}));
+"""
+        result = _run_node(script, files=["widgets/pnl-curve.js"])
+        self.assertEqual(result.get("pnlLabel"), "最近交易日收益", result)
+        self.assertEqual(result.get("pnl"), "-0.73%", result)
+        self.assertIn("2026-06-19", result.get("pnlSub", ""), result)
+        self.assertEqual(result.get("posLabel"), "最近交易日仓位", result)
+        self.assertEqual(result.get("pos"), "42%", result)
 
     def test_missing_day_start_price_shows_baseline_missing_not_zero(self):
         """_day_start_price=null 且无 SSOT 今日盈亏 → 今日盈亏不显示 0"""
