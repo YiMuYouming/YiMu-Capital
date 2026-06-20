@@ -243,13 +243,20 @@ var SECONDARY_EVIDENCE_WIDGETS = ['W08','W09','W10','W12','W13','W21','W06'];
 var REQUIRED_LAYOUT_WIDGETS = ['W25', 'W15', 'W24'];
 var CORE_IDS = FIRST_SCREEN_WIDGETS.slice();
 var EVIDENCE_SHELF_WIDGETS = SECONDARY_EVIDENCE_WIDGETS;
+var COCKPIT_LAYOUT_VERSION = '3.0-density-20260620-4';
 var COCKPIT_LAYOUT = [
-  { id:'W25', x:0, y:0, w:12, h:7 },
-  { id:'W15', x:0, y:7, w:5, h:6 },
-  { id:'W24', x:5, y:7, w:4, h:6 },
-  { id:'W14', x:9, y:7, w:3, h:6 },
-  { id:'W04', x:0, y:13, w:4, h:3 },
-  { id:'W22', x:4, y:13, w:8, h:6 }
+  { id:'W25', x:0, y:0, w:6, h:9 },
+  { id:'W15', x:6, y:0, w:3, h:5 },
+  { id:'W14', x:9, y:0, w:3, h:5 },
+  { id:'W24', x:6, y:5, w:6, h:4 },
+  { id:'W04', x:0, y:9, w:4, h:5 },
+  { id:'W22', x:4, y:9, w:8, h:5 }
+];
+var COCKPIT_MIGRATABLE_SIGNATURES = [
+  'W04:0,13,4,3|W14:9,7,3,6|W15:0,7,5,6|W22:4,13,8,6|W24:5,7,4,6|W25:0,0,12,7',
+  'W04:0,14,4,3|W14:5,8,3,6|W15:0,8,5,6|W22:8,14,4,5|W24:8,8,4,6|W25:0,0,12,8',
+  'W04:0,9,4,5|W14:9,0,3,5|W15:6,0,3,5|W22:4,9,8,5|W24:6,5,6,4|W25:0,0,6,9',
+  'W04:0,10,4,5|W14:9,0,3,5|W15:6,0,3,5|W22:4,10,8,5|W24:6,5,6,5|W25:0,0,6,10'
 ];
 
 function initGrid() {
@@ -397,6 +404,7 @@ function applyCockpitLayout(options) {
   document.body.classList.add('cockpit-mode');
   if (options.persist !== false) {
     try { localStorage.setItem(STORAGE_KEYS.layoutMode, 'cockpit'); } catch(e) {}
+    try { localStorage.setItem(STORAGE_KEYS.cockpitLayoutVersion, COCKPIT_LAYOUT_VERSION); } catch(e) {}
     _autoSaveLayout();
   }
   if (options.toast !== false) showToast('已切换盘中驾驶舱：态势 + 持仓 + 风控 + 票据');
@@ -967,15 +975,63 @@ function _autoSaveLayout() {
   if (_suppressLayoutSave) return;
   try {
     var layout = grid.save(false);
-    localStorage.setItem(STORAGE_KEYS.layout, JSON.stringify({v:'2.1', items:layout}));
+    var payload = {v:'2.1', items:layout};
+    if (document.body.classList.contains('cockpit-mode')) {
+      payload.cockpitLayoutVersion = COCKPIT_LAYOUT_VERSION;
+      localStorage.setItem(STORAGE_KEYS.layoutMode, 'cockpit');
+      localStorage.setItem(STORAGE_KEYS.cockpitLayoutVersion, COCKPIT_LAYOUT_VERSION);
+    }
+    localStorage.setItem(STORAGE_KEYS.layout, JSON.stringify(payload));
   } catch(e) {}
+}
+function _layoutSignature(items) {
+  return (items || []).filter(function(item) {
+    return FIRST_SCREEN_WIDGETS.indexOf(item.id) >= 0;
+  }).map(function(item) {
+    return {
+      id: item.id,
+      x: item.x || 0,
+      y: item.y || 0,
+      w: item.w || 0,
+      h: item.h || 0
+    };
+  }).sort(function(a, b) {
+    return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+  }).map(function(item) {
+    return item.id + ':' + [item.x, item.y, item.w, item.h].join(',');
+  }).join('|');
+}
+function _isMigratableSavedCockpitLayout(data) {
+  return !!(data && Array.isArray(data.items) && COCKPIT_MIGRATABLE_SIGNATURES.indexOf(_layoutSignature(data.items)) >= 0);
+}
+function _isStaleSavedCockpitLayout(data) {
+  try {
+    if (localStorage.getItem(STORAGE_KEYS.layoutMode) !== 'cockpit') return false;
+    var savedVersion = (data && data.cockpitLayoutVersion) || localStorage.getItem(STORAGE_KEYS.cockpitLayoutVersion);
+    return savedVersion !== COCKPIT_LAYOUT_VERSION;
+  } catch(e) {
+    return false;
+  }
 }
 function _loadSavedLayout() {
   // v2.1: 只加载 v2.1 格式布局 {v:'2.1', items:[...]}
   try {
     var saved = localStorage.getItem(STORAGE_KEYS.layout);
+    var data = saved ? JSON.parse(saved) : null;
+    if (_isStaleSavedCockpitLayout(data)) {
+      if (_isMigratableSavedCockpitLayout(data)) {
+        localStorage.removeItem(STORAGE_KEYS.layout);
+        applyCockpitLayout({ persist:true, toast:false });
+        showToast('已升级默认盘中驾驶舱');
+        return;
+      }
+      localStorage.setItem(STORAGE_KEYS.cockpitLayoutVersion, COCKPIT_LAYOUT_VERSION);
+      if (data && data.v === '2.1' && Array.isArray(data.items)) {
+        data.cockpitLayoutVersion = COCKPIT_LAYOUT_VERSION;
+        localStorage.setItem(STORAGE_KEYS.layout, JSON.stringify(data));
+      }
+    }
     if (saved) {
-      var data = JSON.parse(saved);
       if (data.v === '2.1' && Array.isArray(data.items) && data.items.length) {
         data.items.forEach(function(item) {
           var id = item.id;

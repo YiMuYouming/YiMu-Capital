@@ -2508,6 +2508,180 @@ body.compact-mode .grid-stack-item:not(.core-widget) { display: none !important;
   font-weight:900;
   color:var(--text-secondary);
 }
+body.cockpit-mode .grid-stack-item[gs-id="W25"] .widget-body,
+body.cockpit-mode .grid-stack-item[gs-id="W15"] .widget-body,
+body.cockpit-mode .grid-stack-item[gs-id="W24"] .widget-body,
+body.cockpit-mode .grid-stack-item[gs-id="W04"] .widget-body,
+body.cockpit-mode .grid-stack-item[gs-id="W22"] .widget-body{
+  padding:6px;
+}
+body.cockpit-mode .grid-stack-item[gs-id="W25"] .evidence-board{
+  gap:6px;
+  overflow:auto;
+  padding-right:0;
+}
+body.cockpit-mode .grid-stack-item[gs-id="W25"] .evidence-dashboard-hero{
+  grid-template-columns:minmax(0,1fr) minmax(230px,.72fr);
+  gap:6px;
+  padding:8px 10px;
+  border-radius:var(--radius-sm);
+}
+body.cockpit-mode .grid-stack-item[gs-id="W25"] .evidence-command-title{
+  margin-top:3px;
+  font-size:23px;
+  line-height:1.02;
+}
+body.cockpit-mode .grid-stack-item[gs-id="W25"] .evidence-command-reason{
+  margin-top:4px;
+  font-size:12px;
+  line-height:1.25;
+}
+body.cockpit-mode .grid-stack-item[gs-id="W25"] .evidence-command-next{
+  gap:6px;
+  margin-top:6px;
+  padding:6px 8px;
+}
+body.cockpit-mode .grid-stack-item[gs-id="W25"] .evidence-command-next b{
+  font-size:12px;
+  line-height:1.2;
+}
+body.cockpit-mode .grid-stack-item[gs-id="W25"] .evidence-dashboard-metrics{
+  grid-template-columns:repeat(2,minmax(0,1fr));
+  gap:5px;
+}
+body.cockpit-mode .grid-stack-item[gs-id="W25"] .evidence-dashboard-metrics div{
+  padding:5px 7px;
+}
+body.cockpit-mode .grid-stack-item[gs-id="W25"] .evidence-dashboard-metrics strong{
+  font-size:13px;
+}
+body.cockpit-mode .grid-stack-item[gs-id="W25"] .evidence-gate-row{
+  grid-template-columns:repeat(auto-fit,minmax(118px,1fr));
+  gap:5px;
+}
+body.cockpit-mode .grid-stack-item[gs-id="W25"] .evidence-gate{
+  padding:5px 6px 5px 8px;
+  border-radius:var(--radius-sm);
+}
+body.cockpit-mode .grid-stack-item[gs-id="W25"] .evidence-gate-value{
+  margin-top:2px;
+  font-size:13px;
+}
+body.cockpit-mode .grid-stack-item[gs-id="W25"] .evidence-gate-detail{
+  margin-top:2px;
+  line-height:1.18;
+}
+body.cockpit-mode .grid-stack-item[gs-id="W25"] .evidence-dashboard-grid{
+  grid-template-columns:minmax(0,1.16fr) minmax(190px,.84fr);
+  grid-template-areas:"queue phase" "queue source";
+  gap:6px;
+  overflow:hidden;
+}
+body.cockpit-mode .grid-stack-item[gs-id="W25"] .evidence-queue-panel{grid-area:queue;max-height:170px}
+body.cockpit-mode .grid-stack-item[gs-id="W25"] .evidence-phase-panel{grid-area:phase}
+body.cockpit-mode .grid-stack-item[gs-id="W25"] .evidence-source-panel{grid-area:source}
+body.cockpit-mode .grid-stack-item[gs-id="W25"] .evidence-queue-item{
+  gap:5px;
+  padding:5px 6px;
+  margin-bottom:4px;
+  border-radius:var(--radius-sm);
+}
+body.cockpit-mode .grid-stack-item[gs-id="W25"] .evidence-queue-item>span{
+  min-width:24px;
+  height:18px;
+  font-size:9px;
+}
+body.cockpit-mode .grid-stack-item[gs-id="W25"] .evidence-queue-item b{font-size:12px}
+body.cockpit-mode .grid-stack-item[gs-id="W25"] .evidence-queue-item em{
+  margin-top:1px;
+  font-size:10px;
+  line-height:1.22;
+}
+body.cockpit-mode .grid-stack-item[gs-id="W25"] .evidence-phase-panel,
+body.cockpit-mode .grid-stack-item[gs-id="W25"] .evidence-source-panel{
+  padding:6px 7px;
+  border-radius:var(--radius-sm);
+}
+body.cockpit-mode .grid-stack-item[gs-id="W25"] .evidence-phase-title{
+  margin-top:3px;
+  font-size:16px;
+}
+body.cockpit-mode .grid-stack-item[gs-id="W25"] .evidence-phase-detail{
+  margin-top:3px;
+  line-height:1.28;
+}
+body.cockpit-mode .grid-stack-item[gs-id="W25"] .evidence-risk-focus{
+  margin-top:6px;
+  padding:6px;
+}
+body.cockpit-mode .grid-stack-item[gs-id="W15"] .w15-acceptance{
+  grid-template-columns:1fr;
+  gap:4px;
+  margin-bottom:6px;
+}
+body.cockpit-mode .grid-stack-item[gs-id="W15"] .w15-acceptance-grid{
+  grid-template-columns:repeat(2,minmax(0,1fr));
+  gap:4px;
+}
+body.cockpit-mode .grid-stack-item[gs-id="W15"] .w15-acceptance-head,
+body.cockpit-mode .grid-stack-item[gs-id="W15"] .w15-acceptance-step{
+  padding:5px 7px;
+}
+body.cockpit-mode .grid-stack-item[gs-id="W15"] .w15-kpi-grid{
+  grid-template-columns:repeat(2,minmax(0,1fr));
+  gap:4px;
+  margin-bottom:6px;
+  padding:6px;
+  font-size:11px;
+}
+body.cockpit-mode .grid-stack-item[gs-id="W15"] .w15-kpi-value{
+  font-size:13px;
+}
+body.cockpit-mode .grid-stack-item[gs-id="W15"] .w15-record-head{
+  margin-top:6px;
+  margin-bottom:4px;
+}
+body.cockpit-mode .grid-stack-item[gs-id="W24"] .ticket-inbox-shell,
+body.cockpit-mode .grid-stack-item[gs-id="W24"] .ticket-inbox-main{
+  gap:6px;
+}
+body.cockpit-mode .grid-stack-item[gs-id="W24"] .ticket-command-strip,
+body.cockpit-mode .grid-stack-item[gs-id="W24"] .ticket-execution-chain,
+body.cockpit-mode .grid-stack-item[gs-id="W24"] .ticket-acceptance-rail,
+body.cockpit-mode .grid-stack-item[gs-id="W24"] .ticket-summary-grid{
+  gap:4px;
+  margin-bottom:6px;
+}
+body.cockpit-mode .grid-stack-item[gs-id="W24"] .ticket-command-strip>div,
+body.cockpit-mode .grid-stack-item[gs-id="W24"] .ticket-chain-title,
+body.cockpit-mode .grid-stack-item[gs-id="W24"] .ticket-chain-step,
+body.cockpit-mode .grid-stack-item[gs-id="W24"] .ticket-acceptance-step,
+body.cockpit-mode .grid-stack-item[gs-id="W24"] .ticket-summary-pill{
+  padding:5px 7px;
+}
+body.cockpit-mode .grid-stack-item[gs-id="W24"] .ticket-row{
+  min-height:50px;
+  padding:6px 8px;
+}
+body.cockpit-mode .grid-stack-item[gs-id="W22"] .pnl-kpi{
+  margin-bottom:1px;
+}
+body.cockpit-mode .grid-stack-item[gs-id="W22"] .pnl-kpi-card{
+  min-height:52px;
+  padding:7px 9px;
+}
+body.cockpit-mode .grid-stack-item[gs-id="W22"] .pnl-kpi-val{
+  font-size:18px;
+}
+body.cockpit-mode .grid-stack-item[gs-id="W22"] .pnl-ctrl{
+  padding:6px 10px;
+}
+body.cockpit-mode .grid-stack-item[gs-id="W22"] .pnl-chart-wrap,
+body.cockpit-mode .grid-stack-item[gs-id="W22"] .pnl-legend,
+body.cockpit-mode .grid-stack-item[gs-id="W22"] .pnl-drawer-trigger,
+body.cockpit-mode .grid-stack-item[gs-id="W22"] .pnl-drawer{
+  display:none;
+}
 @media(max-width:760px){
   .evidence-dashboard-hero{
     grid-template-columns:1fr;

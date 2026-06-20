@@ -2529,12 +2529,12 @@ assert.notStrictEqual(registry.getMeta(groups.first_screen[0].id).title, '污染
         layout_end = index.index("];", layout_start) + 2
         layout = index[layout_start:layout_end]
         expected_layout = [
-            "{ id:'W25', x:0, y:0, w:12, h:7 }",
-            "{ id:'W15', x:0, y:7, w:5, h:6 }",
-            "{ id:'W24', x:5, y:7, w:4, h:6 }",
-            "{ id:'W14', x:9, y:7, w:3, h:6 }",
-            "{ id:'W04', x:0, y:13, w:4, h:3 }",
-            "{ id:'W22', x:4, y:13, w:8, h:6 }",
+            "{ id:'W25', x:0, y:0, w:6, h:9 }",
+            "{ id:'W15', x:6, y:0, w:3, h:5 }",
+            "{ id:'W14', x:9, y:0, w:3, h:5 }",
+            "{ id:'W24', x:6, y:5, w:6, h:4 }",
+            "{ id:'W04', x:0, y:9, w:4, h:5 }",
+            "{ id:'W22', x:4, y:9, w:8, h:5 }",
         ]
         for item in expected_layout:
             self.assertIn(item, layout)
@@ -2544,6 +2544,35 @@ assert.notStrictEqual(registry.getMeta(groups.first_screen[0].id).title, '污染
         self.assertIn("WidgetRegistry.isFirstScreen(id)", index)
         self.assertIn("WidgetRegistry.isFirstScreen(widgetId)", index)
         self.assertIn("FIRST_SCREEN_WIDGETS.forEach", index)
+
+    def test_cockpit_density_styles_keep_fixed_panels_compact(self):
+        theme = (ROOT / "css" / "theme.css").read_text(encoding="utf-8")
+        self.assertIn('body.cockpit-mode .grid-stack-item[gs-id="W25"] .evidence-dashboard-hero', theme)
+        self.assertIn('body.cockpit-mode .grid-stack-item[gs-id="W25"] .evidence-gate-row', theme)
+        self.assertIn('body.cockpit-mode .grid-stack-item[gs-id="W25"] .evidence-dashboard-grid', theme)
+        self.assertIn('grid-template-columns:repeat(auto-fit,minmax(118px,1fr))', theme)
+        self.assertIn('grid-template-areas:"queue phase" "queue source"', theme)
+        self.assertIn('body.cockpit-mode .grid-stack-item[gs-id="W25"] .evidence-board', theme)
+        self.assertIn('overflow:auto', theme)
+        self.assertIn('max-height:170px', theme)
+        self.assertIn('body.cockpit-mode .grid-stack-item[gs-id="W15"] .w15-kpi-grid', theme)
+        self.assertIn('body.cockpit-mode .grid-stack-item[gs-id="W22"] .pnl-kpi-card', theme)
+
+    def test_cockpit_layout_version_replaces_stale_saved_cockpit(self):
+        index = (ROOT / "index.html").read_text(encoding="utf-8")
+        store = (ROOT / "store.js").read_text(encoding="utf-8")
+        self.assertIn("cockpitLayoutVersion: 'dash_cockpit_layout_version'", store)
+        self.assertIn("var COCKPIT_LAYOUT_VERSION = '3.0-density-20260620-4'", index)
+        self.assertIn("var COCKPIT_MIGRATABLE_SIGNATURES = [", index)
+        self.assertIn("W04:0,10,4,5|W14:9,0,3,5|W15:6,0,3,5|W22:4,10,8,5|W24:6,5,6,5|W25:0,0,6,10", index)
+        self.assertIn("function _layoutSignature(items)", index)
+        self.assertIn("function _isMigratableSavedCockpitLayout(data)", index)
+        self.assertIn("function _isStaleSavedCockpitLayout(data)", index)
+        self.assertIn("COCKPIT_MIGRATABLE_SIGNATURES.indexOf(_layoutSignature(data.items)) >= 0", index)
+        self.assertIn("localStorage.removeItem(STORAGE_KEYS.layout)", index)
+        self.assertIn("applyCockpitLayout({ persist:true, toast:false })", index)
+        self.assertIn("data.cockpitLayoutVersion = COCKPIT_LAYOUT_VERSION", index)
+        self.assertIn("STORAGE_KEYS.cockpitLayoutVersion", index)
 
     def test_market_evidence_shelf_is_secondary_overlay(self):
         index = (ROOT / "index.html").read_text(encoding="utf-8")
