@@ -218,6 +218,90 @@ console.log(JSON.stringify({
         self.assertIn("实时收益", result.get("periodSub", ""),
             f"正常应显示'实时收益': {result}")
 
+    def test_period_switch_updates_primary_return_and_average_position_kpis(self):
+        """周/月切换后，前两个动态 KPI 展示周期收益与平均仓位"""
+        script = r"""
+var inst = new PnLCurveWidget({id:'W22'});
+inst.id = 'W22';
+inst._state = {
+  period:'week', index:'sh', totalAsset:200000, totalDeposit:200000,
+  liveQ:{}, positions:[], pnlLive:{valuation_complete:true, pnl_amount:100, pnl_pct:0.1, pos_pct:80}
+};
+inst._updateKPI({
+  type:'daily',
+  labels:['06-15','06-16','06-17'],
+  portfolio:[0.5, 1.25, 3.0],
+  benchmark:[0.2, 0.4, 1.0],
+  position:[20, 40, 60],
+  nav:[1.0, 1.01, 1.03]
+});
+var week = {
+  pnlLabel: document.getElementById('pnl_pnl_label').textContent,
+  pnl: document.getElementById('pnl_pnl').textContent,
+  pnlSub: document.getElementById('pnl_pnl_sub').textContent,
+  posLabel: document.getElementById('pnl_pos_label').textContent,
+  pos: document.getElementById('pnl_pos').textContent,
+  posSub: document.getElementById('pnl_pos_sub').textContent
+};
+inst._state.period = 'month';
+inst._updateKPI({
+  type:'daily',
+  labels:['06-01','06-10','06-19'],
+  portfolio:[-1.0, 0.0, 2.5],
+  benchmark:[-0.5, 0.1, 0.5],
+  position:[10, null, 50],
+  nav:[1.0, 1.0, 1.025]
+});
+var month = {
+  pnlLabel: document.getElementById('pnl_pnl_label').textContent,
+  pnl: document.getElementById('pnl_pnl').textContent,
+  pnlSub: document.getElementById('pnl_pnl_sub').textContent,
+  posLabel: document.getElementById('pnl_pos_label').textContent,
+  pos: document.getElementById('pnl_pos').textContent,
+  posSub: document.getElementById('pnl_pos_sub').textContent
+};
+console.log(JSON.stringify({week:week, month:month}));
+"""
+        result = _run_node(script, files=["widgets/pnl-curve.js"])
+        self.assertEqual(result["week"]["pnlLabel"], "近一周收益", result)
+        self.assertEqual(result["week"]["pnl"], "+3.00%", result)
+        self.assertIn("TWR", result["week"]["pnlSub"], result)
+        self.assertEqual(result["week"]["posLabel"], "近一周平均仓位", result)
+        self.assertEqual(result["week"]["pos"], "40%", result)
+        self.assertIn("3 个采样", result["week"]["posSub"], result)
+        self.assertEqual(result["month"]["pnlLabel"], "近一月收益", result)
+        self.assertEqual(result["month"]["pnl"], "+2.50%", result)
+        self.assertEqual(result["month"]["posLabel"], "近一月平均仓位", result)
+        self.assertEqual(result["month"]["pos"], "30%", result)
+        self.assertIn("2 个采样", result["month"]["posSub"], result)
+
+    def test_period_kpi_all_daily_fallback_compounds_daily_returns(self):
+        """周期接口未返回时，用 all 日线缓存兜底并按 TWR 连乘"""
+        script = r"""
+var inst = new PnLCurveWidget({id:'W22'});
+inst.id = 'W22';
+inst._state = {
+  period:'week', index:'sh', totalAsset:200000, totalDeposit:200000,
+  liveQ:{}, positions:[], pnlLive:{valuation_complete:true}
+};
+inst._allDailyData = {
+  portfolio:[1.0, 2.0, -1.0],
+  benchmark:[0.0, 0.0, 0.0],
+  position:[10, 30, 50],
+  dates:['2026-06-17','2026-06-18','2026-06-19']
+};
+inst._updateKPI(null);
+console.log(JSON.stringify({
+  pnlLabel: document.getElementById('pnl_pnl_label').textContent,
+  pnl: document.getElementById('pnl_pnl').textContent,
+  pos: document.getElementById('pnl_pos').textContent
+}));
+"""
+        result = _run_node(script, files=["widgets/pnl-curve.js"])
+        self.assertEqual(result.get("pnlLabel"), "近一周收益", result)
+        self.assertEqual(result.get("pnl"), "+1.99%", result)
+        self.assertEqual(result.get("pos"), "30%", result)
+
     def test_missing_day_start_price_shows_baseline_missing_not_zero(self):
         """_day_start_price=null 且无 SSOT 今日盈亏 → 今日盈亏不显示 0"""
         result = self._run_kpi_test({

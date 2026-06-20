@@ -129,8 +129,8 @@ class PnLCurveWidget extends YiMuWidget {
       '</div>' +
       // KPI row 2: 今日（实时变）
       '<div class="pnl-kpi" id="pnl_kpi2_' + this.id + '">' +
-        '<div class="pnl-kpi-card pnl-kpi-dyn"><div class="pnl-kpi-lbl">今日盈亏</div><div class="pnl-kpi-val" id="pnl_pnl">—</div><div class="pnl-kpi-sub" id="pnl_pnl_sub">—</div></div>' +
-        '<div class="pnl-kpi-card pnl-kpi-dyn"><div class="pnl-kpi-lbl">今日仓位</div><div class="pnl-kpi-val" id="pnl_pos">—</div><div class="pnl-kpi-sub" id="pnl_pos_sub">—</div></div>' +
+        '<div class="pnl-kpi-card pnl-kpi-dyn"><div class="pnl-kpi-lbl" id="pnl_pnl_label">今日收益</div><div class="pnl-kpi-val" id="pnl_pnl">—</div><div class="pnl-kpi-sub" id="pnl_pnl_sub">—</div></div>' +
+        '<div class="pnl-kpi-card pnl-kpi-dyn"><div class="pnl-kpi-lbl" id="pnl_pos_label">今日仓位</div><div class="pnl-kpi-val" id="pnl_pos">—</div><div class="pnl-kpi-sub" id="pnl_pos_sub">—</div></div>' +
         '<div class="pnl-kpi-card pnl-kpi-dyn"><div class="pnl-kpi-lbl" id="pnl_period_label">今日TWR</div><div class="pnl-kpi-val" id="pnl_period_val">—</div><div class="pnl-kpi-sub" id="pnl_period_sub">—</div></div>' +
         '<div class="pnl-kpi-card pnl-kpi-dyn"><div class="pnl-kpi-lbl">今日相对指数</div><div class="pnl-kpi-val" id="pnl_today_alpha">—</div><div class="pnl-kpi-sub" id="pnl_today_alpha_sub">—</div></div>' +
         '<div class="pnl-kpi-card pnl-kpi-dyn"><div class="pnl-kpi-lbl" id="pnl_dd_label">今日回撤</div><div class="pnl-kpi-val" id="pnl_dd_val">—</div><div class="pnl-kpi-sub" id="pnl_dd_sub">—</div></div>' +
@@ -267,6 +267,118 @@ class PnLCurveWidget extends YiMuWidget {
     return worstDD.dd < 0 ? worstDD : null;
   }
 
+  _periodText(period) {
+    return { today:'今日', week:'近一周', month:'近一月', quarter:'近三月', year:'近一年' }[period] || period;
+  }
+
+  _lastValidNumber(arr) {
+    if (!arr) return null;
+    for (var i = arr.length - 1; i >= 0; i--) {
+      var n = arr[i] == null ? null : parseFloat(arr[i]);
+      if (n != null && !isNaN(n)) return n;
+    }
+    return null;
+  }
+
+  _avgValidNumber(arr) {
+    var sum = 0, count = 0;
+    (arr || []).forEach(function(v) {
+      if (v == null) return;
+      var n = parseFloat(v);
+      if (isNaN(n)) return;
+      sum += n;
+      count += 1;
+    });
+    return count ? { value: sum / count, count: count } : null;
+  }
+
+  _periodSliceFromAllDaily(period) {
+    var ad = this._allDailyData;
+    if (!ad || !ad.portfolio || !ad.portfolio.length) return null;
+    var limitMap = { week:5, month:22, quarter:60, year:250 };
+    var limit = limitMap[period] || ad.portfolio.length;
+    var start = Math.max(0, ad.portfolio.length - limit);
+    return {
+      portfolio: ad.portfolio.slice(start),
+      position: ad.position ? ad.position.slice(start) : [],
+      rawDailyReturns: true
+    };
+  }
+
+  _compoundReturns(arr) {
+    var cum = 1.0, hasData = false;
+    (arr || []).forEach(function(v) {
+      if (v == null) return;
+      var n = parseFloat(v);
+      if (isNaN(n)) return;
+      hasData = true;
+      cum *= (1 + n / 100);
+    });
+    return hasData ? (cum - 1) * 100 : null;
+  }
+
+  _calcSelectedPeriodSnapshot(chartData) {
+    var period = this._state && this._state.period;
+    var src = chartData && chartData.portfolio && chartData.portfolio.length
+      ? chartData
+      : this._periodSliceFromAllDaily(period);
+    if (!src) return { returnPct:null, avgPosPct:null, posSamples:0 };
+    var returnPct = src.rawDailyReturns ? this._compoundReturns(src.portfolio) : this._lastValidNumber(src.portfolio);
+    var avg = this._avgValidNumber(src.position);
+    return {
+      returnPct: returnPct,
+      avgPosPct: avg ? avg.value : null,
+      posSamples: avg ? avg.count : 0
+    };
+  }
+
+  _updatePrimaryPeriodKpis(chartData, isQuoteUnavailable) {
+    var period = (this._state && this._state.period) || 'today';
+    var periodText = this._periodText(period);
+    var pnlLabel = document.getElementById('pnl_pnl_label');
+    var posLabel = document.getElementById('pnl_pos_label');
+    if (pnlLabel) pnlLabel.textContent = periodText + '收益';
+    if (posLabel) posLabel.textContent = period === 'today' ? '今日仓位' : periodText + '平均仓位';
+    if (period === 'today') return;
+
+    var pnlEl = document.getElementById('pnl_pnl');
+    var pnlSub = document.getElementById('pnl_pnl_sub');
+    var posEl = document.getElementById('pnl_pos');
+    var posSub = document.getElementById('pnl_pos_sub');
+    if (!pnlEl || !posEl) return;
+
+    if (isQuoteUnavailable) {
+      pnlEl.textContent = '—';
+      pnlEl.style.color = 'var(--text-disabled)';
+      if (pnlSub) pnlSub.textContent = '估值不可信';
+      posEl.textContent = '—';
+      posEl.style.color = 'var(--text-disabled)';
+      if (posSub) posSub.textContent = '估值不可信';
+      return;
+    }
+
+    var snap = this._calcSelectedPeriodSnapshot(chartData);
+    if (snap.returnPct == null) {
+      pnlEl.textContent = '—';
+      pnlEl.style.color = 'var(--text-disabled)';
+      if (pnlSub) pnlSub.textContent = '等待周期收益曲线';
+    } else {
+      pnlEl.textContent = (snap.returnPct >= 0 ? '+' : '') + snap.returnPct.toFixed(2) + '%';
+      pnlEl.style.color = snap.returnPct >= 0 ? 'var(--up)' : 'var(--down)';
+      if (pnlSub) pnlSub.textContent = periodText + ' TWR';
+    }
+
+    if (snap.avgPosPct == null) {
+      posEl.textContent = '—';
+      posEl.style.color = 'var(--text-disabled)';
+      if (posSub) posSub.textContent = '等待仓位采样';
+    } else {
+      posEl.textContent = snap.avgPosPct.toFixed(0) + '%';
+      posEl.style.color = snap.avgPosPct > 80 ? 'var(--danger)' : snap.avgPosPct > 50 ? 'var(--warn)' : 'var(--accent)';
+      if (posSub) posSub.textContent = snap.posSamples + ' 个采样';
+    }
+  }
+
   // ===== KPI update =====
   _updateKPI(chartData) {
     var s = this._state;
@@ -379,6 +491,7 @@ class PnLCurveWidget extends YiMuWidget {
       posEl.style.color = posPct > 80 ? 'var(--danger)' : posPct > 50 ? 'var(--warn)' : 'var(--accent)';
     }
     document.getElementById('pnl_pos_sub').textContent = (s.positions||[]).filter(function(p){return (p['状态']||'').indexOf('清')<0&&(p['状态']||'').indexOf('删除')<0}).length + ' 只持仓';
+    this._updatePrimaryPeriodKpis(chartData, isQuoteUnavailable);
 
     // Period KPI — 标签联动
     // Phase 5: 估值不可信时所有动态 KPI 同步置不可用
@@ -395,8 +508,7 @@ class PnLCurveWidget extends YiMuWidget {
     }
     var isFallback = chartData && chartData.is_fallback;
     var fbDate = isFallback ? (chartData.data_date || '?') : '';
-    var periodLabel = { today:'今日', week:'近一周', month:'近一月', quarter:'近三月', year:'近一年' };
-    var perStr = periodLabel[s.period] || s.period;
+    var perStr = this._periodText(s.period);
     if (isFallback && s.period === 'today') {
       perStr = fbDate + ' 回退';
     }

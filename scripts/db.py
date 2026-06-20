@@ -1025,7 +1025,7 @@ def query_pnl(range='today', index='sh'):
             rows = _exec(f"""
                 SELECT date, pnl_pct, {idx_field} AS bm_pct, pos_pct, nav
                 FROM daily_summary ORDER BY date DESC LIMIT ?
-            """, (limit,))
+            """, (limit + 1,))
             rows = list(reversed(rows))  # 倒回日期升序
         else:
             rows = _exec(f"""
@@ -1061,13 +1061,14 @@ def query_pnl(range='today', index='sh'):
                 })
 
         # 维持 rolling 窗口大小（追加今天后去掉最早的）
-        if limit and len(rows_list) > limit:
-            rows_list = rows_list[-limit:]
+        if limit and len(rows_list) > limit + 1:
+            rows_list = rows_list[-(limit + 1):]
 
-        labels = [r['date'][-5:] for r in rows_list]
-        bm_raw = [r['bm_pct'] for r in rows_list]
-        pos_vals = [r['pos_pct'] for r in rows_list]
-        nav_vals = [r['nav'] for r in rows_list]
+        display_rows = rows_list[-limit:] if limit else rows_list
+        labels = [r['date'][-5:] for r in display_rows]
+        bm_raw = [r['bm_pct'] for r in display_rows]
+        pos_vals = [r['pos_pct'] for r in display_rows]
+        nav_vals = [r['nav'] for r in display_rows]
 
         def nav_returns(rows_for_nav):
             vals = []
@@ -1081,7 +1082,8 @@ def query_pnl(range='today', index='sh'):
                 prev_nav = nav
             return vals
 
-        pnl_raw = nav_returns(rows_list)
+        pnl_calc = nav_returns(rows_list)
+        pnl_raw = pnl_calc[-len(display_rows):] if display_rows else []
 
         # 'all' 给抽屉用 → 原始日收益（抽屉自己算 TWR）
         if range == 'all':
@@ -1092,7 +1094,7 @@ def query_pnl(range='today', index='sh'):
                 'benchmark': bm_raw,
                 'position': pos_vals,
                 'nav': nav_vals,
-                'dates': [r['date'] for r in rows_list],
+                'dates': [r['date'] for r in display_rows],
             }
 
         # 其他 → 累积 TWR 曲线
@@ -1111,7 +1113,7 @@ def query_pnl(range='today', index='sh'):
             'benchmark': to_cumulative(bm_raw),
             'position': pos_vals,
             'nav': nav_vals,
-            'dates': [r['date'] for r in rows_list],
+            'dates': [r['date'] for r in display_rows],
     }
 
 

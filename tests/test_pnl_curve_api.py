@@ -144,6 +144,25 @@ class PnlQueryZeroValueTests(unittest.TestCase):
         self.assertEqual(result["portfolio"][0], 0.0, result)
         self.assertAlmostEqual(result["portfolio"][1], 5.0, places=4)
 
+    def test_query_pnl_week_uses_previous_nav_for_first_window_day(self):
+        """week=最近5个交易日收益，第一天也要用窗口前一日 nav 计算"""
+        rows = [
+            ("2026-06-12", 1.00, 0),
+            ("2026-06-15", 1.01, 10),
+            ("2026-06-16", 1.03, 20),
+            ("2026-06-17", 1.02, 30),
+            ("2026-06-18", 1.05, 40),
+            ("2026-06-19", 1.14, 50),
+        ]
+        for date_str, nav, pos in rows:
+            db._exec_write(
+                "INSERT INTO daily_summary (date,nav,pnl_pct,sh_pct,sz_pct,cy_pct,pos_pct,deposit) VALUES (?,?,?,?,?,?,?,?)",
+                (date_str, nav, 0.0, 0.0, 0.0, 0.0, pos, 200000))
+        result = db.query_pnl("week", "sh")
+        self.assertEqual(result["dates"], [r[0] for r in rows[-5:]], result)
+        self.assertEqual(result["position"], [10, 20, 30, 40, 50], result)
+        self.assertAlmostEqual(result["portfolio"][-1], 14.0, places=3, msg=result)
+
     def test_query_pnl_all_overlays_today_benchmark_from_intraday(self):
         """日结 daily_summary 若今天指数为 0，应以最后一条日内快照补齐"""
         today = datetime.now().strftime("%Y-%m-%d")
