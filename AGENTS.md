@@ -26,6 +26,7 @@ Tencent/EM fallback → bridge CACHE → /api/live/quotes + live_index (PyTDX �
 iwencai pywencai → CACHE["iwencai"] → 情绪指标
 同花顺 hot_list → CACHE["hot_list"] → 涨停梯队
 account_baselines + trade_records + live quote → /api/account/state (账户 SSOT)
+dashboard facts + health + tickets + freshness → /api/ai/context (Agent 只读事实包)
 snapshot_auction 9:28 → auction_snapshot.json (竞价5维)
 open_day.py/close_day.py → 开盘生成基线+rsync上云 / 收盘SQLite备份+拉回+项目数据包备份
 git commit → 代码留痕；需要部署云端时按确认后的 git/rsync 代码同步流程执行；data/* 不走 git
@@ -53,7 +54,7 @@ python3 scripts/ops/close_day.py --apply
 | 顶栏标签 | 含义 |
 |---------|------|
 | 正常 | 无 critical 无 degraded，交易录入可用 |
-| 降级 | 有 degraded（iwencai 过期/llm 未配/基准缺失），交易录入可用 |
+| 降级 | 有 degraded（iwencai 过期/基准缺失等非关键问题），交易录入可用 |
 | 阻断 | critical 故障（行情 dead/账户 error/锚点缺失），交易录入关闭 |
 | 无响应 | API 不可达（云端服务或 SSH tunnel 中断） |
 
@@ -68,6 +69,7 @@ python3 scripts/ops/close_day.py --apply
 | 紫米（运维） | 云端部署/SSH/服务 | 运维脚本 | 只读 |
 
 - 代码任务优先交洋米实现、欧米审查。
+- 洋米盯盘/排障回答前，优先 `GET /api/ai/context` 读取统一事实包；字段解释见 `docs/ops/yangmi-ai-context-runbook.md`。
 - 文档/流程任务可交稳米。
 - agent-board 是跨 agent 派单和验收入口。
 - 遇到 8088/18088 混淆、交易录入、数据同步问题先看 runbook。
@@ -90,6 +92,7 @@ python3 scripts/ops/close_day.py --apply
 | `/api/pnl/summary` | GET | PnL 摘要（含 valuation_complete） | 实时 |
 | `/api/pnl?range=today&index=sh` | GET | PnL 曲线 | 5min/日结 |
 | `/api/live/quotes` | GET | 实时行情（含 iwencai/北向/热榜） | 5s |
+| `/api/ai/context` | GET | Agent 只读事实包（健康/新鲜度/风险/票据/人审动作） | 按需 |
 | `/api/baseline` | GET | dashboard_data.json | 60s |
 | `/api/sync` | POST | W15 单笔成交录入 | 随录 |
 | `/api/trades/review?date=YYYY-MM-DD` | GET | W23 逐笔复盘 | 按需 |
@@ -102,6 +105,7 @@ python3 scripts/ops/close_day.py --apply
 | 看板白屏 | `curl localhost:8088/api/pnl/summary` |
 | 顶栏显示"阻断" | `curl localhost:8088/api/health` 查 critical_ok / trade_entry_allowed |
 | 顶栏显示"无响应" | 检查 SSH tunnel: `lsof -i :8088 \| grep ssh`；检查 hermes 服务: `systemctl is-active yimu-live-dashboard.service` |
+| 洋米读不到事实包 | `curl -s localhost:8088/api/ai/context \| python3 -m json.tool`；失败再查 `/api/health` |
 | 情绪数据空 | iwencai 采集在跑吗？`/api/live/quotes` 有 iwencai 字段吗？ |
 | W15 显示"基准不可用" | 核查隔夜标的是否缺 `_meta.day_start_prices` |
 | 竞价面板无数据 | 9:28 过了吗？auction_snapshot.json mtime 今天？ |

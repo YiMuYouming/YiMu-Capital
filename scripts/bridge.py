@@ -1929,7 +1929,7 @@ def _trade_entry_gate(health, rule_state):
     """Combine health gate with real-time rule_state gate."""
     health_allowed = bool((health or {}).get("trade_entry_allowed", False))
     if not health_allowed:
-        reasons = (health or {}).get("degraded_reasons") or []
+        reasons = (health or {}).get("critical_reasons") or (health or {}).get("degraded_reasons") or []
         return False, "; ".join(str(r) for r in reasons) if reasons else "系统健康检查未通过"
 
     rule = rule_state or {}
@@ -1943,6 +1943,469 @@ def _trade_entry_gate(health, rule_state):
         return False, "规则状态阻断" + suffix
 
     return True, None
+
+
+def _ai_current_mode(now=None):
+    ref = now or datetime.now()
+    t = ref.time()
+    if t < _time(9, 25):
+        return "preopen"
+    if _time(9, 25) <= t <= _time(15, 0):
+        return "intraday"
+    if t <= _time(18, 0):
+        return "closed"
+    return "review"
+
+
+def _ai_freshness_summary(health, account_state):
+    health = health or {}
+    account_state = account_state or {}
+    return {
+        "quotes": {
+            "status": (health.get("quotes") or {}).get("status", "unknown"),
+            "detail": (health.get("quotes") or {}).get("detail"),
+            "updated_at": (CACHE.get("live_quotes") or {}).get("_updated"),
+        },
+        "iwencai": {
+            "status": (health.get("iwencai") or {}).get("status", "unknown"),
+            "updated_at": (CACHE.get("iwencai") or {}).get("_updated"),
+        },
+        "account": {
+            "status": (health.get("account") or {}).get("status", "unknown"),
+            "updated_at": account_state.get("_updated"),
+            "quote_status": account_state.get("quote_status"),
+            "detail": account_state.get("error") or account_state.get("block_reason"),
+            "anchor_source": (account_state.get("anchor") or {}).get("source"),
+        },
+        "baseline": {
+            "status": (health.get("baseline") or {}).get("status", "unknown"),
+        },
+    }
+
+
+def _ai_candidate_list(dashboard_data, limit=12):
+    candidates = []
+    for source_key, source_label in (("lianban_pool", "lianban"), ("trend_pool", "trend")):
+        for item in (dashboard_data or {}).get(source_key) or []:
+            if not isinstance(item, dict):
+                continue
+            candidates.append({
+                "source": source_label,
+                "code": str(item.get("代码") or item.get("code") or ""),
+                "name": str(item.get("标的") or item.get("名称") or item.get("name") or ""),
+                "sector": item.get("板块"),
+                "role": item.get("角色"),
+            })
+            if len(candidates) >= limit:
+                return candidates
+    return candidates
+
+
+def _ai_account_error_state(date_str, ref, error):
+    return {
+        "date": date_str,
+        "anchor_missing": True,
+        "anchor_trusted": False,
+        "valuation_complete": False,
+        "total_asset": None,
+        "cash": None,
+        "mv": None,
+        "pnl_amount": None,
+        "pnl_pct": None,
+        "pos_pct": None,
+        "positions": [],
+        "closed_positions": [],
+        "trades": [],
+        "quote_status": "missing",
+        "source": "account_load_error",
+        "error": str(error)[:200],
+        "_updated": ref.isoformat(),
+        "anchor": {
+            "date": date_str,
+            "effective_at": None,
+            "trade_id_cutoff": 0,
+            "source": "account_load_error",
+        },
+    }
+
+
+def _ai_ticket_summary(date_str, limit=30):
+    try:
+        from scripts.db import _exec, query_trade_tickets
+        tickets = query_trade_tickets(date_from=date_str, date_to=date_str, limit=limit)
+        count_rows = _exec("""
+            SELECT status, COUNT(*) AS n
+            FROM trade_tickets
+            WHERE trade_date = ?
+            GROUP BY status
+        """, (date_str,))
+        query_status = "ok"
+        error = None
+    except Exception as e:
+        tickets = []
+        count_rows = []
+        query_status = "error"
+        error = str(e)[:160]
+    pending_statuses = {"draft", "confirmed"}
+    executable_statuses = {"executable", "audit_degraded", "partially_filled"}
+    completed_statuses = {"filled", "closed", "closed_with_conflict", "cancelled"}
+    items = []
+    counts = {"pending": 0, "executable": 0, "completed": 0, "blocked": 0, "other": 0}
+    total = 0
+    for row in count_rows:
+        status = str(row["status"] if hasattr(row, "__getitem__") else row.get("status") or "")
+        n = int(row["n"] if hasattr(row, "__getitem__") else row.get("n") or 0)
+        total += n
+        if status == "blocked":
+            counts["blocked"] += n
+        elif status in pending_statuses:
+            counts["pending"] += n
+        elif status in executable_statuses:
+            counts["executable"] += n
+        elif status in completed_statuses:
+            counts["completed"] += n
+        else:
+            counts["other"] += n
+    for ticket in tickets:
+        status = str(ticket.get("status") or "")
+        items.append({
+            "ticket_id": ticket.get("ticket_id"),
+            "status": status,
+            "action_type": ticket.get("action_type"),
+            "window": ticket.get("window"),
+            "code": ticket.get("code"),
+            "name": ticket.get("name"),
+        })
+    return {
+        "status": query_status,
+        "error": error,
+        "pending": counts["pending"],
+        "executable": counts["executable"],
+        "completed": counts["completed"],
+        "blocked": counts["blocked"],
+        "other": counts["other"],
+        "total": total,
+        "limit": int(limit),
+        "has_more": total > len(items),
+        "items": items,
+    }
+
+
+def _ai_open_ticket_conflicts(date_str, limit=20):
+    try:
+        from scripts.db import _exec
+        rows = _exec("""
+            SELECT trade_date, ticket_id, code, conflict_type, severity, note
+            FROM ticket_conflict_log
+            WHERE trade_date = ?
+              AND COALESCE(resolution_status, 'open') = 'open'
+            ORDER BY id DESC
+            LIMIT ?
+        """, (date_str, int(limit)))
+        error = None
+    except Exception as e:
+        rows = []
+        error = str(e)[:160]
+    return {
+        "status": "error" if error else "ok",
+        "error": error,
+        "items": [dict(row) for row in rows],
+    }
+
+
+def _ai_context_risks_alerts_human(health, rule_state, freshness, tickets, conflicts):
+    risks = []
+    alerts = []
+    human_required = []
+
+    health = health or {}
+    rule_state = rule_state or {}
+    freshness = freshness or {}
+
+    quote_status = ((freshness.get("quotes") or {}).get("status") or "unknown").lower()
+    if quote_status in ("stale", "dead", "missing"):
+        code = "QUOTE_DEAD" if quote_status in ("dead", "missing") else "QUOTE_STALE"
+        risks.append({
+            "code": code,
+            "scope": "market_data",
+            "title": "行情数据不可交易",
+            "reason": (freshness.get("quotes") or {}).get("detail") or quote_status,
+        })
+        human_required.append({
+            "code": "DATA_REVIEW_REQUIRED",
+            "title": "复核行情数据",
+            "reason": "行情 stale/dead 时不能让 AI 直接给可交易动作",
+        })
+
+    for reason in health.get("degraded_reasons") or []:
+        alerts.append({
+            "code": "HEALTH_DEGRADED",
+            "title": "健康降级",
+            "reason": str(reason),
+        })
+
+    if health.get("critical_ok") is False:
+        risks.append({
+            "code": "HEALTH_CRITICAL",
+            "scope": "system",
+            "title": "系统关键链路阻断",
+            "reason": "; ".join(str(r) for r in (health.get("critical_reasons") or [])) or health.get("status"),
+        })
+
+    for block in rule_state.get("blocks") or []:
+        if not isinstance(block, dict):
+            continue
+        risks.append({
+            "code": block.get("code") or "RULE_BLOCK",
+            "scope": block.get("scope") or "rule_state",
+            "title": block.get("title") or "规则阻断",
+            "reason": block.get("reason") or block.get("message") or "",
+        })
+
+    if health.get("trade_entry_allowed") is False or rule_state.get("tradable") is False:
+        human_required.append({
+            "code": "TRADE_BLOCKED",
+            "title": "交易阻断需人工复核",
+            "reason": "健康门禁或规则状态不允许自动推进交易动作",
+        })
+
+    if tickets.get("status") == "error":
+        risks.append({
+            "code": "TICKET_QUERY_ERROR",
+            "scope": "tickets",
+            "title": "票据读取失败",
+            "reason": tickets.get("error") or "ticket query failed",
+        })
+        human_required.append({
+            "code": "TICKET_DATA_REVIEW",
+            "title": "复核票据数据",
+            "reason": "票据读取失败，不能假定无票据",
+        })
+
+    if (conflicts or {}).get("status") == "error":
+        risks.append({
+            "code": "TICKET_CONFLICT_QUERY_ERROR",
+            "scope": "tickets",
+            "title": "票据冲突读取失败",
+            "reason": conflicts.get("error") or "ticket conflict query failed",
+        })
+        human_required.append({
+            "code": "TICKET_CONFLICT_DATA_REVIEW",
+            "title": "复核票据冲突数据",
+            "reason": "票据冲突读取失败，不能假定无未解决冲突",
+        })
+
+    conflict_items = (conflicts or {}).get("items") or []
+    for conflict in conflict_items:
+        alerts.append({
+            "code": "TICKET_CONFLICT",
+            "title": "票据冲突",
+            "ticket_id": conflict.get("ticket_id"),
+            "target": conflict.get("code"),
+            "reason": conflict.get("note") or conflict.get("conflict_type"),
+            "severity": conflict.get("severity"),
+        })
+    if conflict_items:
+        human_required.append({
+            "code": "TICKET_CONFLICT_REVIEW",
+            "title": "复核票据冲突",
+            "reason": f"{len(conflict_items)} 条未解决票据冲突",
+        })
+
+    actionable = [
+        item for item in (tickets or {}).get("items") or []
+        if str(item.get("status") or "") in {
+            "draft", "confirmed", "executable", "audit_degraded", "partially_filled"
+        }
+    ]
+    for item in actionable[:5]:
+        human_required.append({
+            "code": "TICKET_REVIEW_REQUIRED",
+            "title": "票据需人工确认",
+            "ticket_id": item.get("ticket_id"),
+            "reason": f"{item.get('status')} {item.get('action_type') or ''}".strip(),
+        })
+
+    return risks, alerts, human_required
+
+
+def _ai_context_error_payload(error, now=None):
+    ref = now or datetime.now()
+    date_str = ref.strftime("%Y-%m-%d")
+    reason = str(error)[:200]
+    return {
+        "schema_version": "ai_context.v1",
+        "generated_at": ref.isoformat(),
+        "date": date_str,
+        "mode": _ai_current_mode(ref),
+        "situation": {
+            "health": {
+                "status": "unhealthy",
+                "critical_ok": False,
+                "critical_reasons": [f"ai_context: {reason}"],
+                "degraded_reasons": [],
+            },
+            "connection": {
+                "bridge": "ok",
+                "db": "unknown",
+                "quotes": "unknown",
+            },
+            "trade_entry_allowed": False,
+            "trade_entry_reason": f"AI context build error: {reason}",
+            "pnl": {
+                "total_asset": None,
+                "pnl_amount": None,
+                "pnl_pct": None,
+                "valuation_complete": False,
+            },
+            "position": {
+                "pos_pct": None,
+                "position_count": 0,
+                "sellable_count": 0,
+            },
+            "sentiment": {
+                "value": None,
+                "available": False,
+                "freshness": None,
+            },
+        },
+        "evidence": [],
+        "alerts": [],
+        "risks": [{
+            "code": "AI_CONTEXT_BUILD_ERROR",
+            "scope": "system",
+            "title": "AI 事实包构建失败",
+            "reason": reason,
+        }],
+        "tickets": {
+            "status": "unknown",
+            "error": "context build failed before ticket summary completed",
+            "pending": 0,
+            "executable": 0,
+            "completed": 0,
+            "blocked": 0,
+            "other": 0,
+            "total": 0,
+            "limit": 0,
+            "has_more": False,
+            "items": [],
+        },
+        "positions": [],
+        "candidates": [],
+        "freshness": {
+            "quotes": {"status": "unknown", "detail": None, "updated_at": None},
+            "iwencai": {"status": "unknown", "updated_at": None},
+            "account": {"status": "error", "updated_at": None, "quote_status": None,
+                        "detail": reason, "anchor_source": None},
+            "baseline": {"status": "unknown"},
+        },
+        "next_actions": [{
+            "code": "REVIEW_BLOCK",
+            "title": "先复核 AI 事实包构建失败",
+            "reason": reason,
+        }],
+        "human_required": [{
+            "code": "AI_CONTEXT_REVIEW_REQUIRED",
+            "title": "复核 AI 事实包",
+            "reason": "AI context 构建失败，不能据此推进交易动作",
+        }],
+    }
+
+
+def _build_ai_context(now=None):
+    """Build the read-only fact contract consumed by AI agents.
+
+    This function only composes existing dashboard state. It must not write DB,
+    files, CACHE, or call trade mutation endpoints.
+    """
+    ref = now or datetime.now()
+    date_str = ref.strftime("%Y-%m-%d")
+    dashboard_data = _load_dashboard_data()
+    try:
+        account_state = load_current_account_state(CACHE.get("live_quotes", {}), now=ref, create_anchor=False)
+    except Exception as e:
+        account_state = _ai_account_error_state(date_str, ref, e)
+    health = _build_health(account_state=account_state, now=ref)
+    rule_state = _build_rule_state(now=ref, account_state=account_state)
+    trade_allowed, trade_reason = _trade_entry_gate(health, rule_state)
+    live_payload = _build_live_quotes_payload(rule_state=rule_state)
+    iwencai = live_payload.get("iwencai") or {}
+    tickets = _ai_ticket_summary(date_str)
+    conflicts = _ai_open_ticket_conflicts(date_str)
+    freshness = _ai_freshness_summary(health, account_state)
+    quote_status = str((freshness.get("quotes") or {}).get("status") or "").lower()
+    if quote_status in ("stale", "dead", "missing"):
+        trade_allowed = False
+        trade_reason = trade_reason or f"AI context blocks trading because quotes are {quote_status}"
+    if tickets.get("status") == "error":
+        trade_allowed = False
+        trade_reason = tickets.get("error") or "ticket query failed"
+    if conflicts.get("status") == "error":
+        trade_allowed = False
+        trade_reason = conflicts.get("error") or "ticket conflict query failed"
+    situation = {
+        "health": {
+            "status": health.get("status"),
+            "critical_ok": health.get("critical_ok"),
+            "critical_reasons": health.get("critical_reasons") or [],
+            "degraded_reasons": health.get("degraded_reasons") or [],
+        },
+        "connection": {
+            "bridge": (health.get("bridge") or {}).get("status"),
+            "db": (health.get("db") or {}).get("status"),
+            "quotes": (health.get("quotes") or {}).get("status"),
+        },
+        "trade_entry_allowed": bool(trade_allowed),
+        "trade_entry_reason": trade_reason,
+        "pnl": {
+            "total_asset": account_state.get("total_asset"),
+            "pnl_amount": account_state.get("pnl_amount"),
+            "pnl_pct": account_state.get("pnl_pct"),
+            "valuation_complete": account_state.get("valuation_complete"),
+        },
+        "position": {
+            "pos_pct": account_state.get("pos_pct"),
+            "position_count": len(account_state.get("positions") or []),
+            "sellable_count": sum(1 for p in account_state.get("positions") or [] if p.get("sellable_qty")),
+        },
+        "sentiment": {
+            "value": iwencai.get("情绪值"),
+            "available": iwencai.get("_available", True) if iwencai else False,
+            "freshness": iwencai.get("_freshness"),
+        },
+    }
+    risks, alerts, human_required = _ai_context_risks_alerts_human(
+        health, rule_state, freshness, tickets, conflicts
+    )
+    next_actions = []
+    if not trade_allowed:
+        next_actions.append({"code": "REVIEW_BLOCK", "title": "先复核阻断原因", "reason": trade_reason})
+    elif tickets.get("executable"):
+        next_actions.append({"code": "REVIEW_EXECUTABLE_TICKETS", "title": "复核可执行票据", "count": tickets.get("executable")})
+    else:
+        next_actions.append({"code": "OBSERVE", "title": "保持观察", "reason": "无阻断且暂无可执行票据"})
+
+    return {
+        "schema_version": "ai_context.v1",
+        "generated_at": ref.isoformat(),
+        "date": date_str,
+        "mode": _ai_current_mode(ref),
+        "situation": situation,
+        "evidence": [
+            {"id": "E1", "title": "账户持仓", "source": "/api/account/state"},
+            {"id": "E2", "title": "票据闭环", "source": "/api/trade/tickets"},
+            {"id": "E3", "title": "市场情绪", "source": "/api/live/quotes"},
+            {"id": "E4", "title": "账户收益", "source": "/api/pnl/summary"},
+        ],
+        "alerts": alerts,
+        "risks": risks,
+        "tickets": tickets,
+        "positions": account_state.get("positions") or [],
+        "candidates": _ai_candidate_list(dashboard_data),
+        "freshness": freshness,
+        "next_actions": next_actions,
+        "human_required": human_required,
+    }
 
 
 def _build_full_snapshot():
@@ -2288,7 +2751,7 @@ def _build_account_audit(today=None):
     return result
 
 
-def _build_health():
+def _build_health(account_state=None, now=None):
     """Build health status for all subsystems. Read-only, no side effects.
     Returns a dict with per-domain status and an overall status.
     """
@@ -2306,12 +2769,14 @@ def _build_health():
         result["db"] = {"status": "error", "detail": str(e)[:120]}
 
     # baseline
+    ref = now or datetime.now()
+    today_str = ref.strftime("%Y-%m-%d")
     bf = _baseline_freshness()
     result["baseline"] = {"status": bf}
 
     # quotes — freshness + coverage (先算裸缓存，后由 account quote_status 修正)
-    qf = _compute_freshness("live_quote", CACHE.get("live_quotes", {}))
-    covered, total, missing_pos = _quotes_coverage()
+    qf = _compute_freshness("live_quote", CACHE.get("live_quotes", {}), now=ref)
+    covered, total, missing_pos = _quotes_coverage(today=today_str)
     quotes_result = {"status": qf, "covered": covered, "total": total}
     if total > 0:
         if covered == 0:
@@ -2326,12 +2791,12 @@ def _build_health():
     result["quotes"] = quotes_result
 
     # iwencai
-    if_ = _compute_freshness("iwencai", CACHE.get("iwencai", {}))
+    if_ = _compute_freshness("iwencai", CACHE.get("iwencai", {}), now=ref)
     result["iwencai"] = {"status": if_}
 
     # account — 加载后同时修正 quotes status（收盘快照不应判dead）
     try:
-        state = load_current_account_state(CACHE.get("live_quotes", {}))
+        state = account_state if account_state is not None else load_current_account_state(CACHE.get("live_quotes", {}), now=ref)
         acct_quote_status = (state or {}).get("quote_status", "")
         if acct_quote_status == "close_snapshot":
             qr = result.setdefault("quotes", {})
@@ -2363,7 +2828,7 @@ def _build_health():
 
     # pnl
     try:
-        summary = _current_pnl_summary()
+        summary = _merge_pnl_summary(query_pnl_summary(), account_state) if account_state is not None else _current_pnl_summary()
         if summary and summary.get("total_asset") is not None:
             vc = summary.get("valuation_complete")
             if vc is False:
@@ -2446,7 +2911,7 @@ def _build_health():
     # look degraded; it only disables LLM-specific actions/history.
     # account_basis — 集成账户基准审计
     try:
-        audit = _build_account_audit()
+        audit = _build_account_audit(today=today_str)
         basis_status = audit.get("basis_status", "missing_anchor")
         ab = {
             "status": basis_status,
@@ -2469,6 +2934,7 @@ def _build_health():
 
     result["critical_ok"] = len(critical_issues) == 0
     result["trade_entry_allowed"] = len(critical_issues) == 0
+    result["critical_reasons"] = critical_issues if critical_issues else None
     result["degraded_reasons"] = degraded_list if degraded_list else None
 
     # overall status — 在 Phase 4 收集完成后最后计算（跳过非 dict 字段）
@@ -2532,6 +2998,14 @@ class BridgeHandler(SimpleHTTPRequestHandler):
                 self.send_header('Content-Type', 'application/json')
                 self.end_headers()
                 self.wfile.write(body)
+            finally:
+                self._db_close()
+            return
+        elif parsed.path == '/api/ai/context':
+            try:
+                _send_json(self, 200, _build_ai_context())
+            except Exception as e:
+                _send_json(self, 200, _ai_context_error_payload(e))
             finally:
                 self._db_close()
             return

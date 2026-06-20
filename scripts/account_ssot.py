@@ -1172,7 +1172,7 @@ def _lot_summary_by_code(trade_date):
     return summaries
 
 
-def load_current_account_state(live_quotes, now=None, data_file=None, history_file=None):
+def load_current_account_state(live_quotes, now=None, data_file=None, history_file=None, create_anchor=True):
     """Load the locked daily anchor and replay new trade records and fund events."""
     from scripts.db import insert_account_baseline, query_account_baseline, query_last_trade_id, query_trades, query_fund_events
 
@@ -1197,14 +1197,48 @@ def load_current_account_state(live_quotes, now=None, data_file=None, history_fi
             day_start_asset = meta.get("day_start_asset", 0)
         else:
             day_start_asset = meta.get("last_total_asset", 0)
-    anchor = ensure_today_anchor(
-        data,
-        day_start_asset,
-        now=anchor_effective_at,
-        get_anchor=query_account_baseline,
-        insert_anchor=insert_account_baseline,
-        get_last_trade_id=query_last_trade_id,
-    )
+    if create_anchor:
+        anchor = ensure_today_anchor(
+            data,
+            day_start_asset,
+            now=anchor_effective_at,
+            get_anchor=query_account_baseline,
+            insert_anchor=insert_account_baseline,
+            get_last_trade_id=query_last_trade_id,
+        )
+    else:
+        anchor = query_account_baseline(date_str)
+        if anchor and anchor.get("source") == "recovery" and len(anchor.get("positions") or []) > 0:
+            anchor = {
+                "date": date_str,
+                "source": "blocked",
+                "block_reason": "existing recovery anchor with positions — untrusted",
+                "existing_source": "recovery",
+                "positions": anchor.get("positions") or [],
+            }
+        if not anchor:
+            return {
+                "date": date_str,
+                "anchor_missing": True,
+                "anchor_trusted": False,
+                "valuation_complete": False,
+                "total_asset": None,
+                "cash": None,
+                "mv": None,
+                "pnl_pct": None,
+                "positions": [],
+                "closed_positions": [],
+                "trades": [],
+                "quote_status": "missing",
+                "source": "missing_anchor",
+                "_updated": (live_quotes or {}).get("_updated") or effective_at,
+                "anchor": {
+                    "date": date_str,
+                    "effective_at": None,
+                    "trade_id_cutoff": 0,
+                    "source": "missing_anchor",
+                },
+            }
     if isinstance(anchor, dict) and anchor.get("source") == "blocked":
         return {
             "date": date_str,

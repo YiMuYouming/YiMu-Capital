@@ -250,6 +250,342 @@ class AccountBasisAuditTest(unittest.TestCase):
         self.assertGreaterEqual(total, covered)
 
 
+class AIContextApiTest(unittest.TestCase):
+    """Dashboard 3 Phase 2: AI agents read one stable read-only fact contract."""
+
+    def setUp(self):
+        _setup(self)
+        from datetime import datetime, timedelta, timezone
+        tz = timezone(timedelta(hours=8))
+        now = datetime.now(tz)
+        now_str = now.strftime('%Y-%m-%dT%H:%M:%S+08:00')
+        today = now.strftime("%Y-%m-%d")
+        db.insert_account_baseline({
+            "date": today,
+            "effective_at": f"{today}T09:30:00",
+            "trade_id_cutoff": 0,
+            "cash": 100000,
+            "day_start_asset": 200000,
+            "total_deposit": 200000,
+            "positions": [{"标的": "TEST", "代码": "000001", "数量": 100, "成本": 10, "状态": "持有"}],
+            "source": "previous_close",
+            "_meta": {"day_start_prices": {"000001": 10}},
+        })
+        bridge.CACHE['_stock_codes'] = ['000001']
+        bridge.CACHE['live_quotes'] = {"000001": {"最新价": 10.5}, "_updated": now_str}
+        bridge.CACHE['iwencai'] = {"情绪值": 65, "_updated": now_str}
+        bridge.CACHE['live_index'] = {"上证指数涨幅": "+0.30%", "_updated": now_str}
+        bridge.DATA_FILE.write_text(json.dumps({
+            "meta": {"date": today, "updated": now_str},
+            "positions": [{"代码": "000001", "标的": "TEST"}],
+            "lianban_pool": [{"代码": "000002", "标的": "LB"}],
+            "trend_pool": [{"代码": "000003", "标的": "TR"}],
+            "pnl": {},
+        }, ensure_ascii=False))
+
+    def tearDown(self):
+        _teardown(self)
+
+    def _handler_get(self, path):
+        h = object.__new__(bridge.BridgeHandler)
+        h.command = 'GET'
+        h.path = path
+        h.requestline = f'GET {path} HTTP/1.1'
+        h.request_version = 'HTTP/1.1'
+        h.request = mock.MagicMock()
+        h.request.version = 'HTTP/1.1'
+        h.client_address = ('127.0.0.1', 12345)
+        h.server = mock.MagicMock()
+        h.headers = mock.MagicMock()
+        h.headers.get = lambda k, d=None: '0'
+        h.log_message = mock.MagicMock()
+        h._resp_status = None
+        h._resp_body = b''
+        def _sr(c, p=None): h._resp_status = c
+        def _sh(k, v): pass
+        def _eh(): pass
+        def _ww(s, d): h._resp_body += d
+        h.send_response = _sr
+        h.send_header = _sh
+        h.end_headers = _eh
+        h.wfile = type('WFile', (), {'write': _ww})()
+        return h
+
+    def test_ai_context_has_stable_top_level_contract(self):
+        ctx = bridge._build_ai_context()
+        for key in ["schema_version", "generated_at", "date", "mode", "situation", "evidence", "alerts", "risks",
+                    "tickets", "positions", "candidates", "freshness",
+                    "next_actions", "human_required"]:
+            self.assertIn(key, ctx)
+        self.assertEqual(ctx["schema_version"], "ai_context.v1")
+        self.assertIn("trade_entry_allowed", ctx["situation"])
+        self.assertIn("health", ctx["situation"])
+        self.assertIn("connection", ctx["situation"])
+        self.assertIsInstance(ctx["positions"], list)
+        self.assertEqual(ctx["tickets"]["items"], [])
+        self.assertGreaterEqual(len(ctx["candidates"]), 2)
+        self.assertEqual(ctx["candidates"][0]["source"], "lianban")
+        self.assertEqual(ctx["candidates"][1]["source"], "trend")
+
+    def test_ai_context_includes_freshness_for_quotes_iwencai_account_and_baseline(self):
+        ctx = bridge._build_ai_context()
+        freshness = ctx["freshness"]
+        for key in ["quotes", "iwencai", "account", "baseline"]:
+            self.assertIn(key, freshness)
+            self.assertIn("status", freshness[key])
+
+    def test_ai_context_does_not_create_missing_today_anchor(self):
+        from datetime import datetime
+        db._exec("DELETE FROM account_baselines")
+        db.insert_account_baseline({
+            "date": "2026-06-02",
+            "effective_at": "2026-06-02T15:00:00",
+            "trade_id_cutoff": 0,
+            "cash": 100000,
+            "day_start_asset": 200000,
+            "total_deposit": 200000,
+            "positions": [{"标的": "TEST", "代码": "000001", "数量": 100, "成本": 10, "状态": "持有"}],
+            "source": "previous_close",
+        })
+        before = len(db._exec("SELECT * FROM account_baselines"))
+
+        ctx = bridge._build_ai_context(now=datetime(2026, 6, 3, 10, 0, 0))
+
+        after = len(db._exec("SELECT * FROM account_baselines"))
+        self.assertEqual(before, after, "AI context 只读，不得为 2026-06-03 自动创建 anchor")
+        self.assertFalse(ctx["situation"]["trade_entry_allowed"])
+        self.assertEqual(ctx["freshness"]["account"]["status"], "error")
+
+    def test_ai_context_never_calls_ensure_today_anchor(self):
+        import scripts.account_ssot as account_ssot
+        original = account_ssot.ensure_today_anchor
+        guard = mock.MagicMock(side_effect=AssertionError("AI context must not create anchors"))
+        try:
+            account_ssot.ensure_today_anchor = guard
+            ctx = bridge._build_ai_context()
+        finally:
+            account_ssot.ensure_today_anchor = original
+
+        self.assertIn("situation", ctx)
+        self.assertFalse(guard.called)
+
+    def test_ai_context_rule_blocks_are_risks_and_human_required(self):
+        original = bridge._build_rule_state
+        try:
+            bridge._build_rule_state = lambda now=None, account_state=None: {
+                "tradable": False,
+                "blocks": [{"code": "DATA_UNTRUSTED", "scope": "all", "reason": "账户数据不可信"}],
+                "warnings": [],
+                "windows": {},
+            }
+            ctx = bridge._build_ai_context()
+        finally:
+            bridge._build_rule_state = original
+
+        self.assertFalse(ctx["situation"]["trade_entry_allowed"])
+        self.assertTrue(any(r.get("code") == "DATA_UNTRUSTED" for r in ctx["risks"]))
+        self.assertTrue(any(h.get("code") == "TRADE_BLOCKED" for h in ctx["human_required"]))
+
+    def test_ai_context_stale_quotes_require_human_review_before_trading(self):
+        from datetime import datetime
+        db._exec("DELETE FROM account_baselines")
+        db.insert_account_baseline({
+            "date": "2026-06-03",
+            "effective_at": "2026-06-03T09:30:00",
+            "trade_id_cutoff": 0,
+            "cash": 100000,
+            "day_start_asset": 200000,
+            "total_deposit": 200000,
+            "positions": [{"标的": "TEST", "代码": "000001", "数量": 100, "成本": 10, "状态": "持有"}],
+            "source": "previous_close",
+            "_meta": {"day_start_prices": {"000001": 10}},
+        })
+        bridge.DATA_FILE.write_text(json.dumps({
+            "meta": {"date": "2026-06-03", "updated": "2026-06-03T09:30:00+08:00"},
+            "positions": [{"代码": "000001", "标的": "TEST"}],
+            "pnl": {},
+        }, ensure_ascii=False))
+        stale_ts = "2026-06-03T09:58:00+08:00"
+        bridge.CACHE['live_quotes'] = {"000001": {"最新价": 10.5}, "_updated": stale_ts}
+
+        ctx = bridge._build_ai_context(now=datetime(2026, 6, 3, 10, 0, 0))
+
+        self.assertFalse(ctx["situation"]["trade_entry_allowed"])
+        self.assertEqual(ctx["freshness"]["quotes"]["status"], "stale")
+        self.assertTrue(any(r.get("code") == "QUOTE_STALE" for r in ctx["risks"]))
+        self.assertTrue(any(h.get("code") == "DATA_REVIEW_REQUIRED" for h in ctx["human_required"]))
+
+    def test_ai_context_open_ticket_conflict_becomes_alert(self):
+        today = __import__("datetime").datetime.now().strftime("%Y-%m-%d")
+        db._exec_write("""
+            INSERT INTO ticket_conflict_log
+            (trade_date, ticket_id, code, conflict_type, severity, expected_json, actual_json, note)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """, (today, "TICKET-X", "000001", "T1_SELLABLE_MISMATCH", "high", "{}", "{}", "sellable mismatch"))
+
+        ctx = bridge._build_ai_context()
+
+        self.assertTrue(any(a.get("code") == "TICKET_CONFLICT" for a in ctx["alerts"]))
+        self.assertTrue(any(h.get("code") == "TICKET_CONFLICT_REVIEW" for h in ctx["human_required"]))
+
+    def test_ai_context_partially_filled_ticket_requires_review(self):
+        today = __import__("datetime").datetime.now().strftime("%Y-%m-%d")
+        ticket_id = db.create_trade_ticket({
+            "trade_date": today,
+            "code": "000001",
+            "name": "TEST",
+            "action_type": "sell",
+            "status": "partially_filled",
+        })
+
+        ctx = bridge._build_ai_context()
+
+        self.assertEqual(ctx["tickets"]["executable"], 1)
+        self.assertTrue(any(
+            h.get("code") == "TICKET_REVIEW_REQUIRED" and h.get("ticket_id") == ticket_id
+            for h in ctx["human_required"]
+        ))
+
+    def test_ai_context_account_load_error_returns_fail_closed_context(self):
+        original = bridge.load_current_account_state
+        try:
+            bridge.load_current_account_state = mock.MagicMock(side_effect=RuntimeError("db readonly failure"))
+            ctx = bridge._build_ai_context()
+        finally:
+            bridge.load_current_account_state = original
+
+        self.assertFalse(ctx["situation"]["trade_entry_allowed"])
+        self.assertEqual(ctx["freshness"]["account"]["anchor_source"], "account_load_error")
+        self.assertIn("db readonly failure", ctx["freshness"]["account"]["detail"])
+        self.assertTrue(any(r.get("code") == "HEALTH_CRITICAL" for r in ctx["risks"]))
+
+    def test_get_ai_context_returns_json(self):
+        h = self._handler_get('/api/ai/context')
+
+        h.do_GET()
+
+        self.assertEqual(h._resp_status, 200)
+        body = json.loads(h._resp_body)
+        self.assertEqual(body.get("date"), __import__("datetime").datetime.now().strftime("%Y-%m-%d"))
+        self.assertIn("situation", body)
+
+    def test_get_ai_context_does_not_call_ensure_db(self):
+        original = bridge._ensure_db
+        try:
+            bridge._ensure_db = mock.MagicMock(side_effect=AssertionError("ai context must not initialize or migrate DB"))
+            h = self._handler_get('/api/ai/context')
+            h.do_GET()
+        finally:
+            bridge._ensure_db = original
+
+        self.assertEqual(h._resp_status, 200)
+
+    def test_ai_context_health_critical_reason_is_explicit(self):
+        db._exec("DELETE FROM account_baselines")
+
+        ctx = bridge._build_ai_context()
+
+        self.assertTrue(any(r.get("code") == "HEALTH_CRITICAL" for r in ctx["risks"]))
+        reason = " ".join(str(r.get("reason") or "") for r in ctx["risks"])
+        self.assertIn("account", reason)
+
+    def test_ai_context_trade_reason_prioritizes_critical_reasons(self):
+        db._exec("DELETE FROM account_baselines")
+        bridge.CACHE['live_quotes'] = {}
+
+        ctx = bridge._build_ai_context()
+
+        self.assertFalse(ctx["situation"]["trade_entry_allowed"])
+        reason = ctx["situation"].get("trade_entry_reason") or ""
+        self.assertTrue("account:" in reason or "quotes:" in reason, reason)
+        self.assertNotEqual(reason, "系统健康检查未通过")
+
+    def test_ai_context_ticket_counts_are_not_limited_to_items_page(self):
+        today = __import__("datetime").datetime.now().strftime("%Y-%m-%d")
+        for i in range(30):
+            db.create_trade_ticket({
+                "trade_date": today,
+                "code": f"30{i:04d}"[-6:],
+                "name": f"FILL{i}",
+                "action_type": "sell",
+                "status": "filled",
+            })
+        db.create_trade_ticket({
+            "trade_date": today,
+            "code": "999999",
+            "name": "BLOCK",
+            "action_type": "buy",
+            "status": "blocked",
+        })
+
+        ctx = bridge._build_ai_context()
+
+        self.assertEqual(ctx["tickets"]["total"], 31)
+        self.assertEqual(ctx["tickets"]["completed"], 30)
+        self.assertEqual(ctx["tickets"]["blocked"], 1)
+        self.assertEqual(len(ctx["tickets"]["items"]), 30)
+        self.assertTrue(ctx["tickets"]["has_more"])
+
+    def test_ai_context_ticket_query_error_blocks_actions(self):
+        original = bridge._ai_ticket_summary
+        try:
+            bridge._ai_ticket_summary = lambda date_str, limit=30: {
+                "status": "error",
+                "error": "ticket table unavailable",
+                "pending": 0,
+                "executable": 0,
+                "completed": 0,
+                "blocked": 0,
+                "other": 0,
+                "total": 0,
+                "limit": limit,
+                "has_more": False,
+                "items": [],
+            }
+            ctx = bridge._build_ai_context()
+        finally:
+            bridge._ai_ticket_summary = original
+
+        self.assertFalse(ctx["situation"]["trade_entry_allowed"])
+        self.assertTrue(any(r.get("code") == "TICKET_QUERY_ERROR" for r in ctx["risks"]))
+        self.assertTrue(any(h.get("code") == "TICKET_DATA_REVIEW" for h in ctx["human_required"]))
+        self.assertEqual(ctx["next_actions"][0]["code"], "REVIEW_BLOCK")
+
+    def test_ai_context_conflict_query_error_requires_human_review(self):
+        original = bridge._ai_open_ticket_conflicts
+        try:
+            bridge._ai_open_ticket_conflicts = lambda date_str, limit=20: {
+                "status": "error",
+                "error": "conflict table unavailable",
+                "items": [],
+            }
+            ctx = bridge._build_ai_context()
+        finally:
+            bridge._ai_open_ticket_conflicts = original
+
+        self.assertFalse(ctx["situation"]["trade_entry_allowed"])
+        self.assertTrue(any(r.get("code") == "TICKET_CONFLICT_QUERY_ERROR" for r in ctx["risks"]))
+        self.assertTrue(any(h.get("code") == "TICKET_CONFLICT_DATA_REVIEW" for h in ctx["human_required"]))
+        self.assertEqual(ctx["next_actions"][0]["code"], "REVIEW_BLOCK")
+
+    def test_get_ai_context_internal_error_returns_stable_fail_closed_schema(self):
+        original = bridge._build_rule_state
+        try:
+            bridge._build_rule_state = mock.MagicMock(side_effect=RuntimeError("rule engine unavailable"))
+            h = self._handler_get('/api/ai/context')
+            h.do_GET()
+        finally:
+            bridge._build_rule_state = original
+
+        self.assertEqual(h._resp_status, 200)
+        body = json.loads(h._resp_body)
+        for key in ["schema_version", "generated_at", "date", "mode", "situation", "freshness",
+                    "risks", "alerts", "tickets", "positions", "candidates", "next_actions", "human_required"]:
+            self.assertIn(key, body)
+        self.assertFalse(body["situation"]["trade_entry_allowed"])
+        self.assertTrue(any(r.get("code") == "AI_CONTEXT_BUILD_ERROR" for r in body["risks"]))
+
+
 class HealthStratificationTest(unittest.TestCase):
     """/api/health 分层: critical_ok, trade_entry_allowed, degraded_reasons"""
 
@@ -506,8 +842,8 @@ class ValuationCompleteCriticalTest(unittest.TestCase):
         self.assertFalse(health.get('trade_entry_allowed', True), f"应 trade_entry_allowed=false: {health}")
 
 
-class HealthLlmConfigDegradedTest(unittest.TestCase):
-    """llm_config missing → degraded, not unhealthy"""
+class HealthLlmConfigOptionalTest(unittest.TestCase):
+    """llm_config missing is optional and does not degrade core dashboard health."""
 
     def setUp(self):
         _setup(self)
@@ -527,25 +863,25 @@ class HealthLlmConfigDegradedTest(unittest.TestCase):
     def tearDown(self):
         _teardown(self)
 
-    def test_llm_missing_is_degraded_not_unhealthy(self):
-        """llm_config=missing 时 status=degraded, 不是 unhealthy"""
+    def test_llm_missing_is_optional_not_unhealthy(self):
+        """llm_config=missing 时不影响核心健康状态"""
         with mock.patch("scripts.bridge._load_api_config", return_value={}):
             health = bridge._build_health()
         self.assertEqual(health.get("llm_config", {}).get("status"), "missing")
         self.assertNotEqual(health.get("status"), "unhealthy",
                             "llm_config missing 不应 unhealthy")
-        self.assertEqual(health.get("status"), "degraded",
-                            "llm_config missing 应 degraded")
+        self.assertEqual(health.get("status"), "healthy",
+                         "llm_config missing 不应让核心看板降级")
         self.assertTrue(health.get("critical_ok", False),
                         "llm_config missing 不应 critical_ok=false")
 
-    def test_llm_missing_in_degraded_reasons(self):
-        """llm_config=missing 出现在 degraded_reasons"""
+    def test_llm_missing_not_in_degraded_reasons(self):
+        """llm_config=missing 不进入 degraded_reasons"""
         with mock.patch("scripts.bridge._load_api_config", return_value={}):
             health = bridge._build_health()
         reasons = health.get("degraded_reasons") or []
-        self.assertTrue(any("llm_config" in str(r).lower() for r in reasons),
-                        f"degraded_reasons 应包含 llm_config: {reasons}")
+        self.assertFalse(any("llm_config" in str(r).lower() for r in reasons),
+                         f"degraded_reasons 不应包含 llm_config: {reasons}")
 
 
 class HealthAccountBasisTest(unittest.TestCase):
