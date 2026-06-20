@@ -2556,12 +2556,9 @@ assert.notStrictEqual(registry.getMeta(groups.first_screen[0].id).title, '污染
         self.assertIn('overflow:auto', theme)
         self.assertIn('max-height:170px', theme)
         self.assertIn('body.cockpit-mode .grid-stack-item[gs-id="W15"] .w15-kpi-grid', theme)
-        self.assertIn('body.cockpit-mode .grid-stack-item[gs-id="W22"] .pnl-kpi-card', theme)
-        self.assertIn('body.cockpit-mode .grid-stack-item[gs-id="W22"] .pnl-chart-wrap{', theme)
-        self.assertIn('body.cockpit-mode .grid-stack-item[gs-id="W22"] .widget-fullscreen .pnl-chart-wrap', theme)
-        self.assertIn('body.cockpit-mode .grid-stack-item[gs-id="W22"] .widget-fullscreen .pnl-legend', theme)
-        w22_cockpit = theme[theme.index('body.cockpit-mode .grid-stack-item[gs-id="W22"] .pnl-kpi{'):theme.index('@media(max-width:760px)', theme.index('body.cockpit-mode .grid-stack-item[gs-id="W22"] .pnl-kpi{'))]
-        self.assertNotIn('.pnl-chart-wrap,\nbody.cockpit-mode .grid-stack-item[gs-id="W22"] .pnl-legend', w22_cockpit)
+        self.assertNotIn('body.cockpit-mode .grid-stack-item[gs-id="W22"] .pnl-chart-wrap', theme)
+        self.assertNotIn('body.cockpit-mode .grid-stack-item[gs-id="W22"] .pnl-legend', theme)
+        self.assertNotIn('body.cockpit-mode .grid-stack-item[gs-id="W22"] .pnl-drawer', theme)
 
     def test_cockpit_layout_version_replaces_stale_saved_cockpit(self):
         index = (ROOT / "index.html").read_text(encoding="utf-8")
@@ -2642,11 +2639,8 @@ assert.notStrictEqual(registry.getMeta(groups.first_screen[0].id).title, '污染
         for wid in ["W25", "W04", "W24", "W15"]:
             self.assertIn('data-widget="' + wid + '"', shortcuts)
         self.assertIn('id="pnlCurveBtn"', shortcuts)
-        self.assertIn("function _openPnlCurveWidget()", index)
-        self.assertIn("_openPnlCurveWidget()", index)
-        self.assertIn("inst._toggleFullscreen()", index)
-        self.assertIn("requestAnimationFrame(openWhenReady)", index)
-        self.assertIn("attempts < 8", index)
+        self.assertIn("_addWidgetToGrid('W22')", index)
+        self.assertNotIn("function _openPnlCurveWidget()", index)
         for wid in ["W25", "W04", "W24", "W15", "W22"]:
             self.assertIn(wid, shortcuts)
         for label in ["证据", "组件", "核心"]:

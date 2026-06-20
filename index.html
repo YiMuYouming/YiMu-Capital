@@ -8,7 +8,7 @@
 <!-- GridStack.js v12.x CDN (版本锁定) -->
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/gridstack@12.0.0/dist/gridstack.min.css">
 <!-- 内部样式 -->
-<link rel="stylesheet" href="css/theme.css?v=20260620-w22-cockpit-curve">
+<link rel="stylesheet" href="css/theme.css?v=20260620-w22-full-restore">
 <!-- 兜底数据 -->
 <script src="data/embedded-data.js"></script>
 <!-- 核心模块 -->
@@ -344,27 +344,6 @@ function _ensureRequiredLayoutWidgets() {
   REQUIRED_LAYOUT_WIDGETS.forEach(function(widgetId) {
     if (!widgetInstances[widgetId]) _addWidgetToGrid(widgetId);
   });
-}
-
-function _openPnlCurveWidget() {
-  if (!widgetInstances['W22']) _addWidgetToGrid('W22');
-  var attempts = 0;
-  function openWhenReady() {
-    var el = document.querySelector('[gs-id="W22"]');
-    var inst = widgetInstances['W22'];
-    if ((!el || !inst || !inst._container) && attempts < 8) {
-      attempts++;
-      requestAnimationFrame(openWhenReady);
-      return;
-    }
-    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    if (inst && inst._fsState === 0 && typeof inst._toggleFullscreen === 'function') {
-      inst._toggleFullscreen();
-    } else if (inst && typeof inst.refresh === 'function') {
-      inst.refresh();
-    }
-  }
-  requestAnimationFrame(openWhenReady);
 }
 
 function _clearGridWidgets() {
@@ -758,7 +737,7 @@ document.getElementById('evidenceShelfRefresh').addEventListener('click', _refre
 // 顶栏按钮
 document.getElementById('addWidgetBtn').addEventListener('click', _showWidgetPanel);
 document.getElementById('evidenceShelfBtn').addEventListener('click', _showEvidenceShelf);
-document.getElementById('pnlCurveBtn').addEventListener('click', function() { _closeTopbarMenus(); _openPnlCurveWidget(); });
+document.getElementById('pnlCurveBtn').addEventListener('click', function() { _closeTopbarMenus(); _addWidgetToGrid('W22'); });
 document.querySelectorAll('.topbar-shortcut[data-widget]').forEach(function(btn) {
   btn.addEventListener('click', function() { _closeTopbarMenus(); _addWidgetToGrid(btn.dataset.widget); });
 });
