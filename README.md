@@ -56,6 +56,12 @@ python3 scripts/ops/close_day.py --apply     # 云端备份 + 拉回本地
 
 ### 数据备份与恢复
 
+备份分三层，不重复承担同一个职责：
+
+- **Hermes 生产数据**：`/home/agentuser/YiMu-Capital/data/` 是 8088 的主数据源，不能当成备份。生产误写、损坏、误删时，Hermes 会一起受影响。
+- **WorkBuddy 全量 OSS**：适合整机/项目级灾备，范围大、恢复慢。
+- **live-dashboard 专用数据包**：适合快速恢复收益曲线、成交记录和关键运行 JSON，是日常优先使用的数据恢复入口。
+
 专用备份脚本建议加 `--pull-cloud-first`，先在 hermes 生产机创建 SQLite 一致性备份，
 再拉回本地。随后脚本会使用 SQLite online backup 复制本地 `data/pnl.db`，再把存在的运行 JSON
 一起打包到 `data/backups/live-dashboard-data/live-dashboard-data-<stamp>.tar.gz`。

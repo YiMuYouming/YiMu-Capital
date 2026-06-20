@@ -31,6 +31,22 @@ open_day.py/close_day.py → 开盘生成基线+rsync上云 / 收盘SQLite备份
 git commit → 代码留痕；需要部署云端时按确认后的 git/rsync 代码同步流程执行；data/* 不走 git
 ```
 
+## 数据备份口径
+
+- **Git 是代码留痕，不是数据备份**：禁止提交 `data/*`、`data/*.db*`、运行 JSON 和备份包。
+- **Hermes 是生产源，不当作备份层**：`/home/agentuser/YiMu-Capital/data/pnl.db` 是 8088 实际读写的主数据；它在云端，但生产源损坏/误写时也会同步损坏。
+- **全量 OSS 是灾备层**：WorkBuddy 的全量备份会覆盖 `~/Documents/YM_Capital`，适合整机/目录级恢复，但定位单个交易数据文件较慢。
+- **专用数据备份是快速恢复层**：需要恢复收益曲线/成交数据时，优先使用 `backup_live_dashboard_data.py` 生成的 tar.gz，里面包含一致性 `pnl.db`、关键 JSON 和 `manifest.json`。
+
+```bash
+python3 scripts/ops/backup_live_dashboard_data.py --dry-run
+python3 scripts/ops/backup_live_dashboard_data.py --apply --pull-cloud-first --upload-oss
+```
+
+默认路径：
+- 本地：`data/backups/live-dashboard-data/live-dashboard-data-<stamp>.tar.gz`
+- OSS：`oss://ym-mac/yimu-capital/live-dashboard-data/`
+
 ## 健康语义
 
 | 顶栏标签 | 含义 |
