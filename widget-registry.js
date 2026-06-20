@@ -1,11 +1,11 @@
 // widget-registry.js — 弈沐资本数据看板 v2.0 组件注册表
-// 25 组件元数据 + 动态加载 + 按类型分组
+// 26 组件元数据 + 动态加载 + 按类型分组
 'use strict';
 
 const WidgetRegistry = (function() {
   var registry = {};
 
-  // === 25 组件元数据 ===
+  // === 26 组件元数据 ===
   var widgets = [
     // 工具类
     { id:'W01', type:'timeline',      title:'时段时间线',   category:'tool',     tier:'slow',   defaultSize:{w:12,h:2},  dataPaths:[], priority:'P0', usageRole:'hidden_eval', usageLabel:'隐藏' },
@@ -38,6 +38,7 @@ const WidgetRegistry = (function() {
     { id:'W23', type:'trade-review',title:'逐笔复盘',     category:'data',     tier:'manual', defaultSize:{w:12,h:5},  dataPaths:[], priority:'P1', usageRole:'review_low', usageLabel:'复盘' },
     { id:'W24', type:'trade-tickets',title:'交易票据',     category:'risk',     tier:'manual', defaultSize:{w:12,h:5},  dataPaths:['trade_tickets'], priority:'P0', usageRole:'first_screen', usageLabel:'首屏' },
     { id:'W25', type:'evidence-board',title:'作战态势',     category:'decision', tier:'tick',   defaultSize:{w:12,h:5},  dataPaths:['pnl_live','trade_tickets','sentiment','iwencai','rule_state','live_index'], priority:'P0', usageRole:'first_screen', usageLabel:'首屏' },
+    { id:'W26', type:'attack-direction',title:'主攻方向',     category:'decision', tier:'fast',   defaultSize:{w:8,h:5},  dataPaths:['attack_direction','hot_list','sector_inflow'], priority:'P1', usageRole:'secondary_evidence', usageLabel:'侧屏' },
   ];
 
   // 注册组件 class

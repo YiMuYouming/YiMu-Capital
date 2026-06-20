@@ -1,8 +1,12 @@
 """Regression tests for live quote collectors."""
+import re
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 from scripts.collectors import iwencai_poll, quotes
+
+ROOT = Path(__file__).resolve().parent.parent
 
 
 class QuotesCollectorTests(unittest.TestCase):
@@ -56,6 +60,44 @@ class QuotesCollectorTests(unittest.TestCase):
         self.assertEqual(iwencai_poll.CACHE["iwencai"]["涨停家数"], 43)
         self.assertEqual(iwencai_poll.CACHE["iwencai"]["跌停家数"], 12)
         self.assertEqual(iwencai_poll.CACHE["iwencai"]["_limit_source"], "eastmoney_zt_pool")
+
+    def test_bridge_referenced_iwencai_poll_functions_exist(self):
+        bridge_src = (ROOT / "scripts" / "bridge.py").read_text(encoding="utf-8")
+        refs = sorted(set(re.findall(r"iwencai_poll\.([A-Za-z_][A-Za-z0-9_]*)", bridge_src)))
+        missing = [
+            name for name in refs
+            if name != "CACHE" and not hasattr(iwencai_poll, name)
+        ]
+        self.assertEqual(missing, [], "bridge.py references missing iwencai_poll members")
+
+    def test_poll_limit_up_detail_writes_normalized_detail_cache(self):
+        def fake_query(query, limit=100):
+            return {"datas": [
+                {
+                    "股票代码": "000001.SZ",
+                    "股票简称": "算力一号",
+                    "涨停原因类别": "算力+半导体",
+                    "首次封板时间": "09:34:12",
+                    "连续涨停天数": "1",
+                    "所属行业": "半导体",
+                },
+                {
+                    "股票代码": "000001.SZ",
+                    "股票简称": "算力一号",
+                    "涨停原因类别": "算力",
+                    "首次封板时间": "09:34:12",
+                    "连续涨停天数": "1",
+                },
+            ]}
+
+        with patch("scripts.collectors.iwencai_poll._iwencai_query", side_effect=fake_query):
+            payload = iwencai_poll.poll_limit_up_detail(force=True)
+
+        self.assertEqual(payload["returned"], 1)
+        self.assertEqual(iwencai_poll.CACHE["limit_up_detail"]["stocks"][0]["code"], "000001")
+        self.assertEqual(iwencai_poll.CACHE["limit_up_detail"]["stocks"][0]["name"], "算力一号")
+        self.assertEqual(iwencai_poll.CACHE["limit_up_detail"]["stocks"][0]["seal_time"], "09:34:12")
+        self.assertEqual(iwencai_poll.CACHE["limit_up_detail"]["stocks"][0]["board_count"], 1)
 
     def test_collect_limit_counts_writes_independent_cache_and_hot_metadata(self):
         quotes.CACHE["hot_list"] = {"zt_count": 0, "zt_stocks": []}

@@ -32,6 +32,8 @@ open_day.py/close_day.py → 开盘生成基线+rsync上云 / 收盘SQLite备份
 git commit → 代码留痕；需要部署云端时按确认后的 git/rsync 代码同步流程执行；data/* 不走 git
 ```
 
+三端一致代码流程见 `docs/ops/three-end-code-sync-runbook.md`。本地是唯一代码编辑入口，GitHub 是代码 SSOT，Hermes 只运行已提交并推送的代码；生产热改必须回补 Git 后才算完成。
+
 ## 数据备份口径
 
 - **Git 是代码留痕，不是数据备份**：禁止提交 `data/*`、`data/*.db*`、运行 JSON 和备份包。
@@ -148,3 +150,4 @@ python3 scripts/ops/local_dev_proxy.py --port 18088
 - 禁止把 `data/*` 提交到 git
 - 禁止在云端跑依赖本地 Vault 的 `gen_dashboard_data.py`
 - 禁止用 `pkill -f` 杀进程（用 `kill PID`）
+- 禁止在 Hermes 生产目录直接热改代码后不回补 Git

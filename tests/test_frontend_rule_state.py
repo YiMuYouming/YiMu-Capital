@@ -662,6 +662,56 @@ class CandidatePoolWidgetTest(unittest.TestCase):
         self.assertIn("000004", html)
 
 
+class AttackDirectionWidgetTest(unittest.TestCase):
+    def test_w26_renders_confirmed_direction_and_escapes_samples(self):
+        fixture = {
+            "attack_direction": {
+                "_updated": "2026-06-20T09:42:00+08:00",
+                "source": "limit_up_detail + sector_inflow",
+                "source_status": "confirmed",
+                "window": "09:30-09:45",
+                "source_freshness": {"level": "live", "label": "实时"},
+                "summary": {
+                    "leader_sector": "算力/半导体",
+                    "conclusion": "主攻确认",
+                    "confidence": 82,
+                    "early_first_count": 3,
+                    "first_count": 4,
+                    "all_limit_count": 6,
+                    "sector_count": 2,
+                },
+                "sectors": [{
+                    "sector": "算力/半导体",
+                    "conclusion": "主攻确认",
+                    "score": 91,
+                    "early_first_count": 3,
+                    "follow_count": 2,
+                    "all_limit_count": 6,
+                    "sample": [{"name": "<script>alert(1)</script>", "code": "000001", "seal_time": "09:35", "reason": "<b>AI</b>"}],
+                }],
+                "warnings": ["<img src=x onerror=alert(1)>"],
+            }
+        }
+        result = _render_widget("attack-direction.js", "W26", fixture)
+        html = result.get("html", "")
+        self.assertNotIn("_error", result)
+        self.assertIn("W26 早封首板", html)
+        self.assertIn("主攻确认", html)
+        self.assertIn("算力/半导体", html)
+        self.assertIn("早封 <b>3</b>", html)
+        self.assertIn("置信", html)
+        self.assertNotIn("<script", html)
+        self.assertNotIn("<img", html)
+        self.assertNotIn("alert(", html)
+
+    def test_w26_missing_source_uses_quiet_empty_state(self):
+        result = _render_widget("attack-direction.js", "W26", {"attack_direction": {"source_status": "missing_source"}})
+        html = result.get("html", "")
+        self.assertIn("ui-empty", html)
+        self.assertIn("今日确认涨停源暂不可用", html)
+        self.assertIn("等待交易时段涨停明细或题材归因源更新", html)
+
+
 class TradeTicketsWidgetRenderTest(unittest.TestCase):
     def test_index_keeps_health_confirmed_when_trade_entry_is_blocked(self):
         src = (ROOT / "index.html").read_text(encoding="utf-8")
@@ -2448,7 +2498,7 @@ class WidgetPanelUxTest(unittest.TestCase):
                 r"id:'" + wid + r"'.+usageRole:'first_screen'",
                 "first-screen widget missing usageRole: " + wid,
             )
-        for wid in ["W08", "W09", "W10", "W12", "W13", "W21", "W06"]:
+        for wid in ["W08", "W09", "W10", "W12", "W13", "W21", "W06", "W26"]:
             self.assertRegex(
                 registry,
                 r"id:'" + wid + r"'.+usageRole:'secondary_evidence'",
@@ -2486,7 +2536,7 @@ const registry = context.WidgetRegistry;
 
 const expected = {
   first_screen: ['W04', 'W14', 'W15', 'W22', 'W24', 'W25'],
-  secondary_evidence: ['W06', 'W08', 'W09', 'W10', 'W12', 'W13', 'W21'],
+  secondary_evidence: ['W06', 'W08', 'W09', 'W10', 'W12', 'W13', 'W21', 'W26'],
   review_low: ['W05', 'W11', 'W17', 'W18', 'W19', 'W20', 'W23'],
   hidden_eval: ['W01', 'W02', 'W03', 'W07', 'W16'],
 };

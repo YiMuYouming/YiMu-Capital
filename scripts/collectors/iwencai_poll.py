@@ -74,6 +74,119 @@ def _val(row, keyword, clean=False):
     return _clean(v) if clean and v is not None else v
 
 
+def _stock_code(row):
+    raw = (
+        _val(row, "股票代码")
+        or _val(row, "代码")
+        or row.get("code")
+        or row.get("证券代码")
+        or ""
+    )
+    code = str(raw).strip()
+    if "." in code:
+        code = code.split(".")[0]
+    digits = "".join(ch for ch in code if ch.isdigit())
+    return digits.zfill(6)[-6:] if digits else code
+
+
+def _stock_name(row):
+    return str(
+        _val(row, "股票简称")
+        or _val(row, "名称")
+        or row.get("name")
+        or row.get("股票名称")
+        or ""
+    ).strip()
+
+
+def _limit_detail_row(row):
+    code = _stock_code(row)
+    name = _stock_name(row)
+    reason = (
+        _val(row, "涨停原因类别")
+        or _val(row, "涨停原因")
+        or _val(row, "所属概念")
+        or _val(row, "概念")
+        or _val(row, "所属行业")
+        or _val(row, "行业")
+        or ""
+    )
+    seal_time = (
+        _val(row, "首次封板时间")
+        or _val(row, "首封时间")
+        or _val(row, "封板时间")
+        or _val(row, "涨停时间")
+        or ""
+    )
+    board_count = (
+        _val(row, "连续涨停天数", clean=True)
+        or _val(row, "连板数", clean=True)
+        or _val(row, "几天几板", clean=True)
+        or 1
+    )
+    item = {
+        "code": code,
+        "name": name,
+        "reason": str(reason or "").strip(),
+        "seal_time": str(seal_time or "").strip(),
+        "board_count": int(board_count) if isinstance(board_count, (int, float)) else board_count,
+        "industry": str(_val(row, "所属行业") or _val(row, "行业") or "").strip(),
+        "concepts": str(_val(row, "所属概念") or _val(row, "概念") or "").strip(),
+    }
+    return item if code or name else None
+
+
+def poll_limit_up_detail(force=False):
+    """Poll confirmed limit-up stock details for W26 attack direction.
+
+    This collector is best-effort. Empty/failed detail data must not block the
+    dashboard: W26 can fall back to hot_list/reason_stats and explicitly mark
+    early-seal validation as unavailable.
+    """
+    if not force and not is_trading_time():
+        return
+
+    queries = [
+        "今日涨停 非st 股票代码 股票简称 涨停原因类别 首次封板时间 连续涨停天数 所属概念 所属行业",
+        "今日涨停 非st 股票代码 股票简称 涨停原因 封板时间 连续涨停天数 所属行业",
+        "今日涨停 非st 股票代码 股票简称 所属概念 所属行业",
+    ]
+    last_error = None
+    for query in queries:
+        try:
+            result = _iwencai_query(query, limit=300) or {}
+            datas = result.get("datas") or []
+            stocks = []
+            seen = set()
+            for row in datas:
+                if not isinstance(row, dict):
+                    continue
+                item = _limit_detail_row(row)
+                if not item:
+                    continue
+                key = item.get("code") or item.get("name")
+                if key in seen:
+                    continue
+                seen.add(key)
+                stocks.append(item)
+            payload = {
+                "stocks": stocks,
+                "returned": len(stocks),
+                "total": len(datas),
+                "query": query,
+                "_source": "iwencai_limit_up_detail",
+                "_updated": datetime.now().strftime("%Y-%m-%dT%H:%M:%S+08:00"),
+            }
+            CACHE["limit_up_detail"] = payload
+            return payload
+        except Exception as e:
+            last_error = e
+            continue
+    if last_error:
+        print(f"  [iwencai_poll] limit_up_detail error: {last_error}", file=sys.stderr)
+    return None
+
+
 def _avg_pct(datas, col_keyword):
     """从 dict list 中提取涨跌幅列并算均值"""
     vals = []

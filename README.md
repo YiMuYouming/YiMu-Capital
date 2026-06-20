@@ -108,8 +108,8 @@ live-dashboard/
 ├── index.html              # GridStack 画板
 ├── store.js                # DataStore 三层合并
 ├── widget-base.js          # 组件基类
-├── widget-registry.js      # 23 组件注册表
-├── widgets/                # W01-W23 组件
+├── widget-registry.js      # 26 组件注册表
+├── widgets/                # W01-W26 组件
 ├── scripts/
 │   ├── bridge.py           # HTTP 桥接 + APScheduler
 │   ├── ops/                # 开/收盘自动化脚本
@@ -126,6 +126,7 @@ live-dashboard/
 ## 文档入口
 
 - `docs/ops/2026-05-28-cloud-data-sync-runbook.md` — 完整运维手册
+- `docs/ops/three-end-code-sync-runbook.md` — 本地/GitHub/Hermes 三端一致代码流程
 - `docs/audit/2026-05-28-v3.1-completion-baseline.md` — V3.1 完成基线
 - `docs/audit/2026-06-20-dashboard-3-closeout.md` — Dashboard 3.0 Phase 3 收口基线
 - `AGENTS.md` — 团队协作与任务派发
