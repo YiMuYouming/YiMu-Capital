@@ -4,6 +4,7 @@ import json
 import io
 import sqlite3
 import subprocess
+import tarfile
 import tempfile
 import unittest
 from contextlib import redirect_stdout
@@ -181,6 +182,190 @@ class BackupRollbackTests(unittest.TestCase):
         backup_dir.mkdir(parents=True)
         with self.assertRaises(SystemExit):
             rollback_ticket_migration.main(["--apply", "--data-dir", str(self.data_dir), "--backup", str(backup_dir)])
+
+
+class BackupLiveDashboardDataTests(unittest.TestCase):
+
+    def setUp(self):
+        self.tmpdir = Path(tempfile.mkdtemp())
+        self.data_dir = self.tmpdir / "data"
+        self.data_dir.mkdir()
+        conn = sqlite3.connect(self.data_dir / "pnl.db")
+        try:
+            conn.execute("CREATE TABLE daily_summary (date TEXT PRIMARY KEY, nav REAL)")
+            conn.execute("INSERT INTO daily_summary VALUES (?, ?)", ("2026-06-19", 1.0043))
+            conn.commit()
+        finally:
+            conn.close()
+        (self.data_dir / "dashboard_data.json").write_text(
+            json.dumps({"meta": {"updated": "2026-06-19T15:10:00+08:00"}}),
+            encoding="utf-8",
+        )
+        (self.data_dir / "sentiment_auto.json").write_text('{"sentiment":39}', encoding="utf-8")
+
+    def test_live_data_backup_dry_run_writes_nothing(self):
+        from scripts.ops import backup_live_dashboard_data
+        out = io.StringIO()
+        with redirect_stdout(out):
+            backup_live_dashboard_data.main([
+                "--dry-run",
+                "--data-dir", str(self.data_dir),
+                "--output-dir", str(self.data_dir / "backups" / "live-dashboard-data"),
+                "--stamp", "20260620-120000",
+            ])
+        self.assertFalse((self.data_dir / "backups").exists())
+        self.assertIn("[DRY-RUN]", out.getvalue())
+
+    def test_live_data_backup_apply_creates_archive_with_manifest_and_consistent_db(self):
+        from scripts.ops import backup_live_dashboard_data
+        out_dir = self.data_dir / "backups" / "live-dashboard-data"
+        backup_live_dashboard_data.main([
+            "--apply",
+            "--data-dir", str(self.data_dir),
+            "--output-dir", str(out_dir),
+            "--stamp", "20260620-120000",
+        ])
+        archive = out_dir / "live-dashboard-data-20260620-120000.tar.gz"
+        self.assertTrue(archive.exists())
+        with tarfile.open(archive, "r:gz") as tar:
+            names = set(tar.getnames())
+            self.assertIn("manifest.json", names)
+            self.assertIn("pnl.db", names)
+            self.assertIn("dashboard_data.json", names)
+            self.assertIn("sentiment_auto.json", names)
+            manifest = json.loads(tar.extractfile("manifest.json").read().decode("utf-8"))
+            db_bytes = tar.extractfile("pnl.db").read()
+        self.assertEqual(manifest["archive_name"], archive.name)
+        self.assertIn("pnl.db", manifest["files"])
+        restored_db = self.tmpdir / "restored-pnl.db"
+        restored_db.write_bytes(db_bytes)
+        conn = sqlite3.connect(restored_db)
+        try:
+            row = conn.execute("SELECT nav FROM daily_summary WHERE date='2026-06-19'").fetchone()
+        finally:
+            conn.close()
+        self.assertEqual(row[0], 1.0043)
+
+    def test_live_data_backup_upload_oss_invokes_configured_uploader(self):
+        from scripts.ops import backup_live_dashboard_data
+        out_dir = self.data_dir / "backups" / "live-dashboard-data"
+        calls = []
+
+        def fake_run(cmd, **kw):
+            calls.append(cmd)
+            return subprocess.CompletedProcess(cmd, 0, "ok\n", "")
+
+        with patch("scripts.ops.common.subprocess.run", side_effect=fake_run):
+            backup_live_dashboard_data.main([
+                "--apply",
+                "--upload-oss",
+                "--data-dir", str(self.data_dir),
+                "--output-dir", str(out_dir),
+                "--stamp", "20260620-120000",
+                "--oss-python", "/tmp/python",
+                "--oss-uploader", "/tmp/oss_upload.py",
+                "--oss-prefix", "yimu-capital/live-dashboard-data",
+            ])
+
+        joined = " ".join(" ".join(cmd) for cmd in calls)
+        self.assertIn("/tmp/python", joined)
+        self.assertIn("/tmp/oss_upload.py", joined)
+        self.assertIn("live-dashboard-data-20260620-120000.tar.gz", joined)
+        self.assertIn("yimu-capital/live-dashboard-data", joined)
+
+    def test_live_data_backup_can_pull_cloud_before_archive(self):
+        from scripts.ops import backup_live_dashboard_data
+        out_dir = self.data_dir / "backups" / "live-dashboard-data"
+        calls = []
+
+        def fake_run(cmd, **kw):
+            calls.append(cmd)
+            cmd_str = " ".join(cmd)
+            if "ls -t" in cmd_str:
+                return subprocess.CompletedProcess(cmd, 0, "/remote/data/pnl.db.backup-live-data-20260620-120000\n", "")
+            if "ssh" in cmd_str and "integrity_check" in cmd_str:
+                return subprocess.CompletedProcess(cmd, 0, "pnl.db.backup-live-data-20260620-120000\nintegrity_check: ok\n", "")
+            if "for f in" in cmd_str:
+                return subprocess.CompletedProcess(cmd, 0, "dashboard_data.json\n", "")
+            return subprocess.CompletedProcess(cmd, 0, "", "")
+
+        with patch("scripts.ops.common.subprocess.run", side_effect=fake_run):
+            backup_live_dashboard_data.main([
+                "--apply",
+                "--pull-cloud-first",
+                "--data-dir", str(self.data_dir),
+                "--output-dir", str(out_dir),
+                "--stamp", "20260620-120000",
+                "--remote", "agentuser@example",
+                "--remote-data-dir", "/remote/data",
+                "--remote-project", "/remote/project",
+                "--remote-python", "/remote/project/.venv/bin/python",
+            ])
+
+        archive = out_dir / "live-dashboard-data-20260620-120000.tar.gz"
+        self.assertTrue(archive.exists())
+        joined = " ".join(" ".join(cmd) for cmd in calls)
+        self.assertIn("ssh agentuser@example", joined)
+        self.assertIn("pnl.db.backup-live-data-", joined)
+        self.assertNotIn("'/remote/data/pnl.db.backup-live-data-*'", joined)
+        self.assertIn("rsync", joined)
+        self.assertIn("dashboard_data.json", joined)
+        self.assertNotIn("--ignore-missing-args", joined)
+
+    def test_live_data_backup_cloud_backup_failure_stops_before_archive_and_upload(self):
+        from scripts.ops import backup_live_dashboard_data
+        out_dir = self.data_dir / "backups" / "live-dashboard-data"
+        calls = []
+
+        def fake_run(cmd, **kw):
+            calls.append(cmd)
+            cmd_str = " ".join(cmd)
+            if "ssh" in cmd_str and "integrity_check" in cmd_str:
+                return subprocess.CompletedProcess(cmd, 1, "bad.db\nintegrity_check: malformed\n", "remote failed")
+            raise AssertionError(f"unexpected command after failed backup: {cmd}")
+
+        with patch("scripts.ops.common.subprocess.run", side_effect=fake_run):
+            with self.assertRaises(RuntimeError):
+                backup_live_dashboard_data.main([
+                    "--apply",
+                    "--pull-cloud-first",
+                    "--upload-oss",
+                    "--data-dir", str(self.data_dir),
+                    "--output-dir", str(out_dir),
+                    "--stamp", "20260620-120000",
+                ])
+
+        self.assertFalse((out_dir / "live-dashboard-data-20260620-120000.tar.gz").exists())
+        joined = " ".join(" ".join(cmd) for cmd in calls)
+        self.assertNotIn("oss_upload.py", joined)
+
+    def test_live_data_backup_json_listing_failure_stops_before_archive(self):
+        from scripts.ops import backup_live_dashboard_data
+        out_dir = self.data_dir / "backups" / "live-dashboard-data"
+
+        def fake_run(cmd, **kw):
+            cmd_str = " ".join(cmd)
+            if "ls -t" in cmd_str:
+                return subprocess.CompletedProcess(cmd, 0, "/remote/data/pnl.db.backup-live-data-20260620-120000\n", "")
+            if "ssh" in cmd_str and "integrity_check" in cmd_str:
+                return subprocess.CompletedProcess(cmd, 0, "pnl.db.backup-live-data-20260620-120000\nintegrity_check: ok\n", "")
+            if cmd and cmd[0] == "rsync":
+                return subprocess.CompletedProcess(cmd, 0, "", "")
+            if "for f in" in cmd_str:
+                return subprocess.CompletedProcess(cmd, 255, "", "permission denied")
+            return subprocess.CompletedProcess(cmd, 0, "", "")
+
+        with patch("scripts.ops.common.subprocess.run", side_effect=fake_run):
+            with self.assertRaises(RuntimeError):
+                backup_live_dashboard_data.main([
+                    "--apply",
+                    "--pull-cloud-first",
+                    "--data-dir", str(self.data_dir),
+                    "--output-dir", str(out_dir),
+                    "--stamp", "20260620-120000",
+                ])
+
+        self.assertFalse((out_dir / "live-dashboard-data-20260620-120000.tar.gz").exists())
 
 
 class TicketUpgradeReadinessTests(unittest.TestCase):

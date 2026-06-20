@@ -43,11 +43,27 @@ python3 scripts/ops/close_day.py --apply     # 云端备份 + 拉回本地
 
 - **代码走 git**：本地先 `git commit`；需要部署云端时，再按确认后的 git/rsync 代码同步流程执行。
 - **数据不走 git**：`data/pnl.db`、`data/dashboard_data.json`、盘中快照。
+- **数据走专用备份**：本地生成一致性 tar.gz，必要时上传 OSS。
+  ```bash
+  python3 scripts/ops/backup_live_dashboard_data.py --dry-run
+  python3 scripts/ops/backup_live_dashboard_data.py --apply --pull-cloud-first --upload-oss
+  ```
 - **收工前**：
   ```bash
   git status --short          # 确认代码干净
   git diff -- data/           # 确认数据未混入
   ```
+
+### 数据备份与恢复
+
+专用备份脚本建议加 `--pull-cloud-first`，先在 hermes 生产机创建 SQLite 一致性备份，
+再拉回本地。随后脚本会使用 SQLite online backup 复制本地 `data/pnl.db`，再把存在的运行 JSON
+一起打包到 `data/backups/live-dashboard-data/live-dashboard-data-<stamp>.tar.gz`。
+加 `--upload-oss` 后，同一个压缩包会上传到
+`oss://ym-mac/yimu-capital/live-dashboard-data/`。
+
+恢复时不要走 git。先停服务，解压备份包，把 `pnl.db` 和需要恢复的 JSON 放回
+`data/`，再执行 SQLite `PRAGMA integrity_check`，最后重启服务。
 
 ## 依赖
 
