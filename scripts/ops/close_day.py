@@ -9,6 +9,7 @@ Usage:
 """
 
 import argparse
+import shlex
 import subprocess
 import sys
 from datetime import datetime
@@ -16,10 +17,12 @@ from pathlib import Path
 
 try:
     from scripts.ops.common import run, sqlite_integrity
+    from scripts.ops import backup_live_dashboard_data
     from scripts.account_ssot import build_daily_ticket_review
 except ModuleNotFoundError:
     sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent))
     from scripts.ops.common import run, sqlite_integrity
+    from scripts.ops import backup_live_dashboard_data
     from scripts.account_ssot import build_daily_ticket_review
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -52,6 +55,8 @@ def parse_args(argv=None):
                    help=argparse.SUPPRESS)
     p.add_argument("--local-data-dir", default=str(LOCAL_DATA_DIR),
                    help=argparse.SUPPRESS)
+    p.add_argument("--skip-data-backup", action="store_true",
+                   help="跳过收盘后的项目专用数据包备份")
     return p.parse_args(argv)
 
 
@@ -68,6 +73,41 @@ def build_remote_backup_script(remote_data_dir):
         'print(dst.name); print("integrity_check:", r); '
         'exit(1) if r.lower()!="ok" else None'
     )
+
+
+def run_project_data_backup(local_data, date_str):
+    stamp = f"close-{date_str.replace('-', '')}-{datetime.now().strftime('%H%M%S')}"
+    output_dir = Path(local_data) / "backups" / "live-dashboard-data"
+    backup_live_dashboard_data.main([
+        "--apply",
+        "--upload-oss",
+        "--data-dir", str(local_data),
+        "--output-dir", str(output_dir),
+        "--stamp", stamp,
+    ])
+
+
+def rsync_remote_arg(remote, path):
+    return f"{remote}:{shlex.quote(str(path))}"
+
+
+def list_existing_remote_json_files(remote, remote_data_dir):
+    json_names = " ".join(shlex.quote(name) for name in SYNC_JSON_FILES)
+    list_cmd = [
+        "ssh",
+        remote,
+        f"cd {shlex.quote(remote_data_dir)} && for f in {json_names}; do [ -f \"$f\" ] && printf '%s\\n' \"$f\"; done",
+    ]
+    list_result = run(list_cmd, dry_run=False, check=False, capture_output=True)
+    if not list_result or list_result.returncode != 0:
+        err = list_result.stderr.strip() if list_result and list_result.stderr else "unknown"
+        print(f"  ❌ 辅助 JSON 列表获取失败: {err}")
+        sys.exit(1)
+    return [
+        line.strip()
+        for line in ((list_result.stdout or "").splitlines() if list_result and list_result.stdout else [])
+        if line.strip()
+    ]
 
 
 def main():
@@ -138,14 +178,18 @@ def main():
         print(f"  {fname}: {status}")
 
     if not dry_run:
-        remote_files = [f"{REMOTE}:{remote_data}/{f}" for f in SYNC_JSON_FILES]
-        rsync_cmd = [
-            "rsync", "-avz", "--ignore-missing-args", "--backup",
-            *remote_files,
-            f"{local_data}/",
-        ]
-        run(rsync_cmd, dry_run=False)
-        print("  ✅ 辅助 JSON 同步完成")
+        existing_json = list_existing_remote_json_files(REMOTE, remote_data)
+        if existing_json:
+            remote_files = [rsync_remote_arg(REMOTE, f"{remote_data}/{f}") for f in existing_json]
+            rsync_cmd = [
+                "rsync", "-avz", "--backup",
+                *remote_files,
+                f"{local_data}/",
+            ]
+            run(rsync_cmd, dry_run=False)
+            print("  ✅ 辅助 JSON 同步完成")
+        else:
+            print("  ⚠️ 云端未找到可同步的辅助 JSON")
     else:
         print("  [DRY-RUN] 跳过 rsync")
         for f in SYNC_JSON_FILES:
@@ -179,6 +223,19 @@ def main():
         out_path = review_dir / f"ticket_review_{date_str}.md"
         out_path.write_text(summary.get("review_markdown", ""), encoding="utf-8")
         print(f"  ✅ Markdown 已写入: {out_path}")
+
+    # 6. 项目专用数据包备份
+    print()
+    print("[STEP 6] 项目专用数据包备份")
+    if dry_run:
+        print("  [DRY-RUN] 跳过专用数据包备份")
+        preview_output_dir = local_data / "backups" / "live-dashboard-data"
+        print("  close_day.py --apply 会在数据拉回和完整性检查后自动执行专用备份")
+        print(f"  备份参数: --data-dir {local_data} --output-dir {preview_output_dir} --upload-oss")
+    elif getattr(args, "skip_data_backup", False):
+        print("  跳过：--skip-data-backup")
+    else:
+        run_project_data_backup(local_data, date_str)
 
     print()
     print("=" * 60)

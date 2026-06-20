@@ -2,7 +2,7 @@
 """Create a dedicated local archive for live-dashboard runtime data.
 
 Data stays out of git. Use --upload-oss to copy the same archive to OSS through
-the existing WorkBuddy uploader.
+the existing OSS uploader utility; this does not join the WorkBuddy full backup.
 """
 
 import argparse
@@ -66,7 +66,7 @@ def parse_args(argv=None):
     parser.add_argument("--oss-python", default=str(DEFAULT_OSS_PYTHON),
                         help="运行 OSS uploader 的 Python")
     parser.add_argument("--oss-uploader", default=str(DEFAULT_OSS_UPLOADER),
-                        help="WorkBuddy OSS 上传脚本")
+                        help="OSS 上传脚本路径（复用上传工具，不接入 WorkBuddy 全量备份）")
     parser.add_argument("--oss-prefix", default=DEFAULT_OSS_PREFIX,
                         help="OSS 目标前缀")
     parser.add_argument("--remote", default=DEFAULT_REMOTE,

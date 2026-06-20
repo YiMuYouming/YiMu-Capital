@@ -29,7 +29,7 @@ python3 scripts/ops/open_day.py --apply --restart-cloud  # 同步后重启云端
 ```bash
 cd ~/Documents/YM_Capital/live-dashboard
 python3 scripts/ops/close_day.py --dry-run   # 预览步骤
-python3 scripts/ops/close_day.py --apply     # 云端备份 + 拉回本地
+python3 scripts/ops/close_day.py --apply     # 云端备份 + 拉回本地 + 项目专用数据包备份
 ```
 
 ## 盘中
@@ -43,10 +43,9 @@ python3 scripts/ops/close_day.py --apply     # 云端备份 + 拉回本地
 
 - **代码走 git**：本地先 `git commit`；需要部署云端时，再按确认后的 git/rsync 代码同步流程执行。
 - **数据不走 git**：`data/pnl.db`、`data/dashboard_data.json`、盘中快照。
-- **数据走专用备份**：本地生成一致性 tar.gz，必要时上传 OSS。
+- **数据走项目专用备份**：`close_day.py --apply` 收盘后自动在本项目 `data/backups/live-dashboard-data/` 生成一致性 tar.gz，并上传 OSS。
   ```bash
-  python3 scripts/ops/backup_live_dashboard_data.py --dry-run
-  python3 scripts/ops/backup_live_dashboard_data.py --apply --pull-cloud-first --upload-oss
+  python3 scripts/ops/close_day.py --apply
   ```
 - **收工前**：
   ```bash
@@ -59,14 +58,21 @@ python3 scripts/ops/close_day.py --apply     # 云端备份 + 拉回本地
 备份分三层，不重复承担同一个职责：
 
 - **Hermes 生产数据**：`/home/agentuser/YiMu-Capital/data/` 是 8088 的主数据源，不能当成备份。生产误写、损坏、误删时，Hermes 会一起受影响。
-- **WorkBuddy 全量 OSS**：适合整机/项目级灾备，范围大、恢复慢。
+- **WorkBuddy 全量 OSS**：适合整机/目录级灾备，范围大、恢复慢；live-dashboard 的日常数据包不挂在 WorkBuddy 全量流程里，避免和通用备份混在一起。
 - **live-dashboard 专用数据包**：适合快速恢复收益曲线、成交记录和关键运行 JSON，是日常优先使用的数据恢复入口。
 
-专用备份脚本建议加 `--pull-cloud-first`，先在 hermes 生产机创建 SQLite 一致性备份，
-再拉回本地。随后脚本会使用 SQLite online backup 复制本地 `data/pnl.db`，再把存在的运行 JSON
-一起打包到 `data/backups/live-dashboard-data/live-dashboard-data-<stamp>.tar.gz`。
-加 `--upload-oss` 后，同一个压缩包会上传到
+日常收盘只需要执行 `python3 scripts/ops/close_day.py --apply`。脚本会先在 hermes 创建 SQLite
+一致性备份并拉回本地，再同步存在的运行 JSON，最后自动调用项目专用数据包备份。
+备份包会写到 `data/backups/live-dashboard-data/live-dashboard-data-<stamp>.tar.gz`，
+同一个压缩包会上传到
 `oss://ym-mac/yimu-capital/live-dashboard-data/`。
+
+紧急情况下可用 `python3 scripts/ops/close_day.py --apply --skip-data-backup` 跳过最后的数据包备份。
+需要临时补一份当前生产数据包时，再手动运行：
+
+```bash
+python3 scripts/ops/backup_live_dashboard_data.py --apply --pull-cloud-first --upload-oss
+```
 
 恢复时不要走 git。先停服务，解压备份包，把 `pnl.db` 和需要恢复的 JSON 放回
 `data/`，再执行 SQLite `PRAGMA integrity_check`，最后重启服务。

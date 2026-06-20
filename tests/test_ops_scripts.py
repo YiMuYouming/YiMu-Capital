@@ -552,16 +552,142 @@ class CloseDayDryRunTests(unittest.TestCase):
         with patch("scripts.ops.common.subprocess.run"):
             with patch("scripts.ops.close_day.build_daily_ticket_review", create=True) as mock_review:
                 mock_review.return_value = {"review_markdown": "# review"}
+                with patch("scripts.ops.close_day.backup_live_dashboard_data.main") as mock_backup:
+                    with patch("scripts.ops.close_day.argparse.ArgumentParser.parse_args") as mock_args:
+                        mock_args.return_value = MagicMock(
+                            dry_run=True, apply=False, date="2026-06-03",
+                            remote_data_dir="/home/agentuser/YiMu-Capital/data",
+                            local_data_dir="/tmp",
+                            skip_data_backup=False,
+                        )
+                        out = io.StringIO()
+                        with redirect_stdout(out):
+                            close_day.main()
+        self.assertIn("Ticket review summary generated for 2026-06-03", out.getvalue())
+        mock_backup.assert_not_called()
+
+    def test_apply_runs_project_data_backup_after_close_sync(self):
+        from scripts.ops import close_day
+        tmpdir = Path(tempfile.mkdtemp())
+        real_db = tmpdir / "pnl.db"
+        import sqlite3
+        con = sqlite3.connect(str(real_db))
+        con.execute("CREATE TABLE t (x)")
+        con.close()
+
+        def fake_run(cmd, **kw):
+            cmd_str = str(cmd)
+            if "for f in dashboard_data.json" in cmd_str:
+                return subprocess.CompletedProcess(cmd, 0, "dashboard_data.json\npnl_history.json\n", "")
+            if "ls -t" in cmd_str:
+                return subprocess.CompletedProcess(cmd, 0, "data/pnl.db.backup-close-20260603-150530\n", "")
+            if "ssh" in cmd_str and "integrity_check" in cmd_str:
+                return subprocess.CompletedProcess(cmd, 0, "pnl.db.backup-close-20260603-150530\nintegrity_check: ok\n", "")
+            if "PRAGMA integrity_check" in cmd_str:
+                return subprocess.CompletedProcess(cmd, 0, "ok\n", "")
+            return subprocess.CompletedProcess(cmd, 0, "", "")
+
+        with patch("scripts.ops.common.subprocess.run", side_effect=fake_run):
+            with patch("scripts.ops.close_day.build_daily_ticket_review", create=True) as mock_review:
+                mock_review.return_value = {"review_markdown": "# ticket review"}
+                with patch("scripts.ops.close_day.backup_live_dashboard_data.main") as mock_backup:
+                    with patch("scripts.ops.close_day.argparse.ArgumentParser.parse_args") as mock_args:
+                        mock_args.return_value = MagicMock(
+                            dry_run=False, apply=True, date="2026-06-03",
+                            remote_data_dir="/home/agentuser/YiMu-Capital/data",
+                            local_data_dir=str(tmpdir),
+                            skip_data_backup=False,
+                        )
+                        close_day.main()
+
+        mock_backup.assert_called_once()
+        backup_args = mock_backup.call_args.args[0]
+        self.assertIn("--apply", backup_args)
+        self.assertIn("--upload-oss", backup_args)
+        self.assertNotIn("--pull-cloud-first", backup_args)
+        self.assertIn("--data-dir", backup_args)
+        self.assertIn(str(tmpdir), backup_args)
+        self.assertIn("--output-dir", backup_args)
+        self.assertIn(str(tmpdir / "backups" / "live-dashboard-data"), backup_args)
+
+    def test_apply_can_skip_project_data_backup(self):
+        from scripts.ops import close_day
+        tmpdir = Path(tempfile.mkdtemp())
+        real_db = tmpdir / "pnl.db"
+        import sqlite3
+        con = sqlite3.connect(str(real_db))
+        con.execute("CREATE TABLE t (x)")
+        con.close()
+
+        def fake_run(cmd, **kw):
+            cmd_str = str(cmd)
+            if "for f in dashboard_data.json" in cmd_str:
+                return subprocess.CompletedProcess(cmd, 0, "dashboard_data.json\npnl_history.json\n", "")
+            if "ls -t" in cmd_str:
+                return subprocess.CompletedProcess(cmd, 0, "data/pnl.db.backup-close-20260603-150530\n", "")
+            if "ssh" in cmd_str and "integrity_check" in cmd_str:
+                return subprocess.CompletedProcess(cmd, 0, "pnl.db.backup-close-20260603-150530\nintegrity_check: ok\n", "")
+            if "PRAGMA integrity_check" in cmd_str:
+                return subprocess.CompletedProcess(cmd, 0, "ok\n", "")
+            return subprocess.CompletedProcess(cmd, 0, "", "")
+
+        with patch("scripts.ops.common.subprocess.run", side_effect=fake_run):
+            with patch("scripts.ops.close_day.build_daily_ticket_review", create=True) as mock_review:
+                mock_review.return_value = {"review_markdown": "# ticket review"}
+                with patch("scripts.ops.close_day.backup_live_dashboard_data.main") as mock_backup:
+                    with patch("scripts.ops.close_day.argparse.ArgumentParser.parse_args") as mock_args:
+                        mock_args.return_value = MagicMock(
+                            dry_run=False, apply=True, date="2026-06-03",
+                            remote_data_dir="/home/agentuser/YiMu-Capital/data",
+                            local_data_dir=str(tmpdir),
+                            skip_data_backup=True,
+                        )
+                        close_day.main()
+
+        mock_backup.assert_not_called()
+
+    def test_apply_skips_json_rsync_when_remote_has_no_json(self):
+        from scripts.ops import close_day
+        tmpdir = Path(tempfile.mkdtemp())
+        real_db = tmpdir / "pnl.db"
+        import sqlite3
+        con = sqlite3.connect(str(real_db))
+        con.execute("CREATE TABLE t (x)")
+        con.close()
+
+        commands_seen = []
+
+        def fake_run(cmd, **kw):
+            cmd_str = str(cmd)
+            commands_seen.append(cmd_str)
+            if "for f in dashboard_data.json" in cmd_str:
+                return subprocess.CompletedProcess(cmd, 0, "", "")
+            if "ls -t" in cmd_str:
+                return subprocess.CompletedProcess(cmd, 0, "data/pnl.db.backup-close-20260603-150530\n", "")
+            if "ssh" in cmd_str and "integrity_check" in cmd_str:
+                return subprocess.CompletedProcess(cmd, 0, "pnl.db.backup-close-20260603-150530\nintegrity_check: ok\n", "")
+            if "PRAGMA integrity_check" in cmd_str:
+                return subprocess.CompletedProcess(cmd, 0, "ok\n", "")
+            return subprocess.CompletedProcess(cmd, 0, "", "")
+
+        with patch("scripts.ops.common.subprocess.run", side_effect=fake_run):
+            with patch("scripts.ops.close_day.build_daily_ticket_review", create=True) as mock_review:
+                mock_review.return_value = {"review_markdown": "# ticket review"}
                 with patch("scripts.ops.close_day.argparse.ArgumentParser.parse_args") as mock_args:
                     mock_args.return_value = MagicMock(
-                        dry_run=True, apply=False, date="2026-06-03",
+                        dry_run=False, apply=True, date="2026-06-03",
                         remote_data_dir="/home/agentuser/YiMu-Capital/data",
-                        local_data_dir="/tmp",
+                        local_data_dir=str(tmpdir),
+                        skip_data_backup=True,
                     )
                     out = io.StringIO()
                     with redirect_stdout(out):
                         close_day.main()
-        self.assertIn("Ticket review summary generated for 2026-06-03", out.getvalue())
+
+        self.assertIn("云端未找到可同步的辅助 JSON", out.getvalue())
+        all_cmds = " ".join(commands_seen)
+        self.assertNotIn("/dashboard_data.json", all_cmds)
+        self.assertNotIn("/pnl_history.json", all_cmds)
 
     def test_apply_calls_sqlite_backup_sync_and_integrity(self):
         """close_day.py --apply 调用 ssh backup + rsync + integrity，全部 mock"""
@@ -579,6 +705,8 @@ class CloseDayDryRunTests(unittest.TestCase):
             call_count += 1
             cmd_str = str(cmd)
             commands_seen.append(cmd_str)
+            if "for f in dashboard_data.json" in cmd_str:
+                return subprocess.CompletedProcess(cmd, 0, "dashboard_data.json\npnl_history.json\n", "")
             if "ls -t" in cmd_str:
                 return subprocess.CompletedProcess(cmd, 0, ls_stdout, "")
             if "ssh" in cmd_str and "integrity_check" in cmd_str:
@@ -599,6 +727,7 @@ class CloseDayDryRunTests(unittest.TestCase):
                     dry_run=False, apply=True,
                     remote_data_dir="/home/agentuser/YiMu-Capital/data",
                     local_data_dir=str(tmpdir),
+                    skip_data_backup=True,
                 )
                 close_day.main()
         self.assertGreaterEqual(call_count, 1)
@@ -606,6 +735,7 @@ class CloseDayDryRunTests(unittest.TestCase):
         self.assertIn("ssh", all_cmds, "应调 ssh backup")
         self.assertIn("rsync", all_cmds, "应调 rsync")
         self.assertIn("integrity_check", all_cmds, "应调 integrity check")
+        self.assertNotIn("--ignore-missing-args", all_cmds)
 
     def test_apply_writes_ticket_review_markdown(self):
         from scripts.ops import close_day
@@ -618,6 +748,8 @@ class CloseDayDryRunTests(unittest.TestCase):
 
         def fake_run(cmd, **kw):
             cmd_str = str(cmd)
+            if "for f in dashboard_data.json" in cmd_str:
+                return subprocess.CompletedProcess(cmd, 0, "dashboard_data.json\npnl_history.json\n", "")
             if "ls -t" in cmd_str:
                 return subprocess.CompletedProcess(cmd, 0, "data/pnl.db.backup-close-20260603-150530\n", "")
             if "ssh" in cmd_str and "integrity_check" in cmd_str:
@@ -634,6 +766,7 @@ class CloseDayDryRunTests(unittest.TestCase):
                         dry_run=False, apply=True, date="2026-06-03",
                         remote_data_dir="/home/agentuser/YiMu-Capital/data",
                         local_data_dir=str(tmpdir),
+                        skip_data_backup=True,
                     )
                     close_day.main()
 

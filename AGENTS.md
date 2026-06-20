@@ -27,7 +27,7 @@ iwencai pywencai → CACHE["iwencai"] → 情绪指标
 同花顺 hot_list → CACHE["hot_list"] → 涨停梯队
 account_baselines + trade_records + live quote → /api/account/state (账户 SSOT)
 snapshot_auction 9:28 → auction_snapshot.json (竞价5维)
-open_day.py/close_day.py → 开盘生成基线+rsync上云 / 收盘SQLite备份+拉回
+open_day.py/close_day.py → 开盘生成基线+rsync上云 / 收盘SQLite备份+拉回+项目数据包备份
 git commit → 代码留痕；需要部署云端时按确认后的 git/rsync 代码同步流程执行；data/* 不走 git
 ```
 
@@ -35,12 +35,13 @@ git commit → 代码留痕；需要部署云端时按确认后的 git/rsync 代
 
 - **Git 是代码留痕，不是数据备份**：禁止提交 `data/*`、`data/*.db*`、运行 JSON 和备份包。
 - **Hermes 是生产源，不当作备份层**：`/home/agentuser/YiMu-Capital/data/pnl.db` 是 8088 实际读写的主数据；它在云端，但生产源损坏/误写时也会同步损坏。
-- **全量 OSS 是灾备层**：WorkBuddy 的全量备份会覆盖 `~/Documents/YM_Capital`，适合整机/目录级恢复，但定位单个交易数据文件较慢。
+- **全量 OSS 是灾备层**：WorkBuddy 的全量备份适合整机/目录级恢复，但 live-dashboard 的日常专用数据包不挂入 WorkBuddy 全量流程，避免通用备份和交易恢复包混在一起。
 - **专用数据备份是快速恢复层**：需要恢复收益曲线/成交数据时，优先使用 `backup_live_dashboard_data.py` 生成的 tar.gz，里面包含一致性 `pnl.db`、关键 JSON 和 `manifest.json`。
+- **收盘自动备份**：`python3 scripts/ops/close_day.py --apply` 在收盘同步和本地完整性检查后，自动生成本项目专用数据包并上传 OSS；紧急跳过用 `--skip-data-backup`。
 
 ```bash
-python3 scripts/ops/backup_live_dashboard_data.py --dry-run
-python3 scripts/ops/backup_live_dashboard_data.py --apply --pull-cloud-first --upload-oss
+python3 scripts/ops/close_day.py --dry-run
+python3 scripts/ops/close_day.py --apply
 ```
 
 默认路径：
