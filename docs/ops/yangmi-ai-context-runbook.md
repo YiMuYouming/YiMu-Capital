@@ -27,13 +27,14 @@ curl -s http://127.0.0.1:18088/api/ai/context | python3 -m json.tool
 
 洋米回答盯盘问题时，先按这个顺序读：
 
-1. `schema_version` 和 `generated_at`：确认拿到的是当前契约和新鲜事实包。
-2. `freshness`：确认行情、账户、情绪、基线是否 live/delayed/stale/dead。
-3. `situation.trade_entry_allowed` 和 `situation.trade_entry_reason`：先判断能不能推进交易动作。
-4. `risks`：所有阻断和关键风险先报出来。
-5. `human_required`：这里列出的事项必须让主人确认或复核。
-6. `tickets`：看 pending/executable/blocked/completed 以及具体票据。
-7. `positions`、`candidates`、`alerts`：补充持仓、候选和提示。
+1. 先读 `/Users/yimu/Documents/YM_Capital/ai-rule-system/RULE_GATE.md` 和 `docs/trade-ticket-workflow.md`，确认当前规则门与票据写入边界。
+2. 再读 `/api/ai/context` 的 `schema_version` 和 `generated_at`：确认拿到的是当前契约和新鲜事实包。
+3. `freshness`：确认行情、账户、情绪、基线是否 live/delayed/stale/dead。
+4. `situation.trade_entry_allowed` 和 `situation.trade_entry_reason`：先判断能不能推进交易动作。
+5. `risks`：所有阻断和关键风险先报出来。
+6. `human_required`：这里列出的事项必须让主人确认或复核。
+7. `tickets`：看 pending/executable/blocked/completed 以及具体票据。
+8. `positions`、`candidates`、`alerts`：补充持仓、候选和提示。
 
 ## 常见问题怎么答
 

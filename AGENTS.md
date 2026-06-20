@@ -69,7 +69,7 @@ python3 scripts/ops/close_day.py --apply
 | 紫米（运维） | 云端部署/SSH/服务 | 运维脚本 | 只读 |
 
 - 代码任务优先交洋米实现、欧米审查。
-- 洋米盯盘/排障回答前，优先 `GET /api/ai/context` 读取统一事实包；字段解释见 `docs/ops/yangmi-ai-context-runbook.md`。
+- 洋米盯盘/排障回答前，先按 `ai-rule-system/RULE_GATE.md` 和 `docs/trade-ticket-workflow.md` 确认规则/票据边界，再 `GET /api/ai/context` 读取统一事实包；字段解释见 `docs/ops/yangmi-ai-context-runbook.md`。
 - 文档/流程任务可交稳米。
 - agent-board 是跨 agent 派单和验收入口。
 - 遇到 8088/18088 混淆、交易录入、数据同步问题先看 runbook。
