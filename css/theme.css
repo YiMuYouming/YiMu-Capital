@@ -2701,11 +2701,33 @@ body.cockpit-mode .grid-stack-item[gs-id="W22"] .pnl-kpi-val{
 body.cockpit-mode .grid-stack-item[gs-id="W22"] .pnl-ctrl{
   padding:6px 10px;
 }
-body.cockpit-mode .grid-stack-item[gs-id="W22"] .pnl-chart-wrap,
+body.cockpit-mode .grid-stack-item[gs-id="W22"] .pnl-chart-wrap{
+  min-height:96px;
+  padding:5px 10px 4px;
+}
+body.cockpit-mode .grid-stack-item[gs-id="W22"] .pnl-chart-wrap canvas{
+  height:88px;
+}
 body.cockpit-mode .grid-stack-item[gs-id="W22"] .pnl-legend,
 body.cockpit-mode .grid-stack-item[gs-id="W22"] .pnl-drawer-trigger,
 body.cockpit-mode .grid-stack-item[gs-id="W22"] .pnl-drawer{
   display:none;
+}
+body.cockpit-mode .grid-stack-item[gs-id="W22"] .widget-fullscreen .pnl-chart-wrap{
+  min-height:292px;
+  padding:8px 14px 4px;
+}
+body.cockpit-mode .grid-stack-item[gs-id="W22"] .widget-fullscreen .pnl-chart-wrap canvas{
+  height:280px;
+}
+body.cockpit-mode .grid-stack-item[gs-id="W22"] .widget-fullscreen .pnl-legend{
+  display:flex;
+}
+body.cockpit-mode .grid-stack-item[gs-id="W22"] .widget-fullscreen .pnl-drawer-trigger{
+  display:block;
+}
+body.cockpit-mode .grid-stack-item[gs-id="W22"] .widget-fullscreen .pnl-drawer.pnl-drawer-open{
+  display:block;
 }
 @media(max-width:760px){
   .evidence-dashboard-hero{
