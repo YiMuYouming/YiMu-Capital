@@ -351,6 +351,7 @@ const DataStore = (function() {
     }
 
     d.trade_tickets = Array.isArray(_tradeTickets) ? _tradeTickets : [];
+    if (_aiContext) d.ai_context = _aiContext;
 
     setMerged(d);
     return d;
@@ -358,6 +359,7 @@ const DataStore = (function() {
 
   var _pnlLive = null;
   var _tradeTickets = null;
+  var _aiContext = null;
 
   // === 内部持久化数据域（refresh 周期不丢失）===
   var _sentimentNodes = null;    // sentient_auto.json 快照
@@ -405,6 +407,26 @@ const DataStore = (function() {
       .catch(function() { return null; });
   }
 
+  function _fetchAiContext() {
+    if (typeof location !== 'undefined' && location.protocol === 'file:') return Promise.resolve(null);
+    return fetch('/api/ai/context')
+      .then(function(r) {
+        if (!r.ok) {
+          _aiContext = null;
+          return null;
+        }
+        return r.json();
+      })
+      .then(function(data) {
+        _aiContext = (data && data.schema_version) ? data : null;
+        return _aiContext;
+      })
+      .catch(function() {
+        _aiContext = null;
+        return null;
+      });
+  }
+
   // === 刷新数据（v2.0 多源实时管线）===
   var _refreshCount = 0;
   var _slowDataCounter = 0;
@@ -442,7 +464,7 @@ const DataStore = (function() {
       if (_sseClient && _sseClient.readyState === EventSource.OPEN) {
         chain.then(function(base) {
           if (reloadBase && base) baseData = base;
-          return Promise.all([_fetchPnlSummary(), _fetchTradeTickets()]).then(function(results) {
+          return Promise.all([_fetchPnlSummary(), _fetchTradeTickets(), _fetchAiContext()]).then(function(results) {
             var pnlLive = results[0];
             if (pnlLive) _pnlLive = pnlLive;
           });
@@ -458,7 +480,7 @@ const DataStore = (function() {
           return adapter.fetchLive();
         }).then(function(live) {
           if (live) { liveData = live; connectionStatus = _connectionStatusFromLive(live); }
-          return Promise.all([_fetchPnlSummary(), _fetchTradeTickets()]).then(function(results) {
+          return Promise.all([_fetchPnlSummary(), _fetchTradeTickets(), _fetchAiContext()]).then(function(results) {
             var pnlLive = results[0];
             if (pnlLive) _pnlLive = pnlLive;
           });
@@ -505,7 +527,7 @@ const DataStore = (function() {
       return adapter.fetchLive();
     }).then(function(live) {
       if (live) { liveData = live; connectionStatus = _connectionStatusFromLive(live); }
-      return Promise.all([_fetchPnlSummary(), _fetchTradeTickets()]).then(function(results) {
+      return Promise.all([_fetchPnlSummary(), _fetchTradeTickets(), _fetchAiContext()]).then(function(results) {
         var pnlLive = results[0];
         if (pnlLive) _pnlLive = pnlLive;
       });

@@ -414,6 +414,371 @@ DataStore.fetchAll().then(function() {
         self.assertTrue(result.get("hasNodes"), f"result={result}")
 
 
+class W25AiContextDataStoreTest(unittest.TestCase):
+
+    def test_refresh_fetches_ai_context_with_get_and_merges_it(self):
+        script = BASE_MOCKS + r"""
+global._mockFetchResponses['/api/trade/tickets'] = { tickets: [] };
+global._mockFetchResponses['/api/ai/context'] = {
+  schema_version: 'ai_context.v1',
+  trade_entry_reason: '风险通过，等待执行窗口',
+  trade_entry_allowed: true
+};
+global._mockFetchResponses['auction_snapshot.json'] = {
+  fetched: bjToday + 'T09:28:00+08:00', '指数竞价': [],
+  '涨跌家数': {}, '高标竞价': [], '自选池竞价': [], '信号灯': {}
+};
+global._mockFetchResponses['sentiment_auto.json'] = {};
+global._mockFetchResponses['sentiment_auto.json'][bjToday] = [nodeRecent('10:00')];
+
+var calls = [];
+global.fetch = function(url, options) {
+  var u = typeof url === 'string' ? url : (url.url || '');
+  calls.push({ url: u, method: options && options.method });
+  for (var key in global._mockFetchResponses) {
+    if (u.indexOf(key) >= 0) {
+      var resp = global._mockFetchResponses[key];
+      return Promise.resolve({ ok: true, json: function() { return Promise.resolve(resp); } });
+    }
+  }
+  return Promise.resolve({ ok: false, json: function() { return Promise.resolve(null); } });
+};
+
+DataStore.fetchAll().then(function() {
+  var ai = (DataStore.merged || {}).ai_context || {};
+  var aiCalls = calls.filter(function(c) { return c.url.indexOf('/api/ai/context') >= 0; });
+  console.log(JSON.stringify({
+    hasAiContextCall: aiCalls.length > 0,
+    aiContextMethods: aiCalls.map(function(c) { return c.method || 'GET'; }),
+    schemaVersion: ai.schema_version,
+    tradeEntryReason: ai.trade_entry_reason
+  }));
+}).catch(function(e) { console.log(JSON.stringify({ _error: String(e).slice(0,200) })); });
+"""
+        result = _run_node(script, files=["store.js"])
+        self.assertTrue(result.get("hasAiContextCall"), f"应拉取 /api/ai/context: {result}")
+        self.assertTrue(
+            all(method != "POST" for method in result.get("aiContextMethods", [])),
+            f"/api/ai/context 不应使用 POST: {result}",
+        )
+        self.assertEqual(result.get("schemaVersion"), "ai_context.v1", f"应合并 ai_context: {result}")
+        self.assertEqual(result.get("tradeEntryReason"), "风险通过，等待执行窗口", f"应保留 trade_entry_reason: {result}")
+
+    def test_tick_refresh_updates_ai_context_without_sse(self):
+        script = BASE_MOCKS + r"""
+global._mockFetchResponses['/api/trade/tickets'] = { tickets: [] };
+global._mockFetchResponses['/api/ai/context'] = {
+  schema_version: 'ai_context.v1',
+  trade_entry_reason: '初始事实包',
+  trade_entry_allowed: false
+};
+global._mockFetchResponses['auction_snapshot.json'] = {
+  fetched: bjToday + 'T09:28:00+08:00', '指数竞价': [],
+  '涨跌家数': {}, '高标竞价': [], '自选池竞价': [], '信号灯': {}
+};
+global._mockFetchResponses['sentiment_auto.json'] = {};
+global._mockFetchResponses['sentiment_auto.json'][bjToday] = [nodeRecent('10:00')];
+
+var calls = [];
+global.fetch = function(url, options) {
+  var u = typeof url === 'string' ? url : (url.url || '');
+  calls.push({ url: u, method: options && options.method });
+  for (var key in global._mockFetchResponses) {
+    if (u.indexOf(key) >= 0) {
+      var resp = global._mockFetchResponses[key];
+      return Promise.resolve({ ok: true, json: function() { return Promise.resolve(resp); } });
+    }
+  }
+  return Promise.resolve({ ok: false, json: function() { return Promise.resolve(null); } });
+};
+
+DataStore.fetchAll().then(function() {
+  global._mockFetchResponses['/api/ai/context'] = {
+    schema_version: 'ai_context.v1',
+    trade_entry_reason: 'tick 后事实包',
+    trade_entry_allowed: true
+  };
+  DataStore.refresh('tick');
+  setTimeout(function() {
+    var ai = (DataStore.merged || {}).ai_context || {};
+    console.log(JSON.stringify({
+      reason: ai.trade_entry_reason,
+      allowed: ai.trade_entry_allowed,
+      aiCalls: calls.filter(function(c) { return c.url.indexOf('/api/ai/context') >= 0; }).length
+    }));
+  }, 30);
+}).catch(function(e) { console.log(JSON.stringify({ _error: String(e).slice(0,200) })); });
+"""
+        result = _run_node(script, files=["store.js"])
+        self.assertEqual(result.get("reason"), "tick 后事实包", f"tick 应更新 ai_context: {result}")
+        self.assertTrue(result.get("allowed"), f"tick 应合并最新 ai_context: {result}")
+        self.assertGreaterEqual(result.get("aiCalls", 0), 2, f"fetchAll + tick 都应拉 ai context: {result}")
+
+    def test_sse_open_tick_refreshes_ai_context(self):
+        script = BASE_MOCKS + r"""
+global._mockFetchResponses['/api/trade/tickets'] = { tickets: [] };
+global._mockFetchResponses['/api/ai/context'] = {
+  schema_version: 'ai_context.v1',
+  trade_entry_reason: 'SSE 初始事实包',
+  trade_entry_allowed: false
+};
+global._mockFetchResponses['auction_snapshot.json'] = {
+  fetched: bjToday + 'T09:28:00+08:00', '指数竞价': [],
+  '涨跌家数': {}, '高标竞价': [], '自选池竞价': [], '信号灯': {}
+};
+global._mockFetchResponses['sentiment_auto.json'] = {};
+global._mockFetchResponses['sentiment_auto.json'][bjToday] = [nodeRecent('10:00')];
+
+var calls = [];
+global.fetch = function(url, options) {
+  var u = typeof url === 'string' ? url : (url.url || '');
+  calls.push({ url: u, method: options && options.method });
+  for (var key in global._mockFetchResponses) {
+    if (u.indexOf(key) >= 0) {
+      var resp = global._mockFetchResponses[key];
+      return Promise.resolve({ ok: true, json: function() { return Promise.resolve(resp); } });
+    }
+  }
+  return Promise.resolve({ ok: false, json: function() { return Promise.resolve(null); } });
+};
+global.EventSource = function(url) { this.url = url; this.readyState = EventSource.OPEN; };
+EventSource.CONNECTING = 0; EventSource.OPEN = 1; EventSource.CLOSED = 2;
+
+DataStore.fetchAll().then(function() {
+  DataStore.init();
+  global._mockFetchResponses['/api/ai/context'] = {
+    schema_version: 'ai_context.v1',
+    trade_entry_reason: 'SSE tick 后事实包',
+    trade_entry_allowed: true
+  };
+  DataStore.refresh('tick');
+  setTimeout(function() {
+    var ai = (DataStore.merged || {}).ai_context || {};
+    console.log(JSON.stringify({
+      reason: ai.trade_entry_reason,
+      allowed: ai.trade_entry_allowed,
+      aiCalls: calls.filter(function(c) { return c.url.indexOf('/api/ai/context') >= 0; }).length
+    }));
+  }, 30);
+}).catch(function(e) { console.log(JSON.stringify({ _error: String(e).slice(0,200) })); });
+"""
+        result = _run_node(script, files=["store.js"])
+        self.assertEqual(result.get("reason"), "SSE tick 后事实包", f"SSE-open tick 应更新 ai_context: {result}")
+        self.assertTrue(result.get("allowed"), f"SSE-open tick 应合并最新 ai_context: {result}")
+        self.assertGreaterEqual(result.get("aiCalls", 0), 2, f"fetchAll + SSE tick 都应拉 ai context: {result}")
+
+    def test_ai_context_fetch_failure_keeps_dashboard_merged(self):
+        script = BASE_MOCKS + r"""
+global._mockFetchResponses['/api/trade/tickets'] = { tickets: [{ ticket_id: 'T-OK', status: 'filled' }] };
+global._mockFetchResponses['auction_snapshot.json'] = {
+  fetched: bjToday + 'T09:28:00+08:00', '指数竞价': [],
+  '涨跌家数': {}, '高标竞价': [], '自选池竞价': [], '信号灯': {}
+};
+global._mockFetchResponses['sentiment_auto.json'] = {};
+global._mockFetchResponses['sentiment_auto.json'][bjToday] = [nodeRecent('10:00')];
+
+var calls = [];
+global.fetch = function(url, options) {
+  var u = typeof url === 'string' ? url : (url.url || '');
+  calls.push({ url: u, method: options && options.method });
+  if (u.indexOf('/api/ai/context') >= 0) {
+    return Promise.resolve({ ok: false, json: function() { return Promise.resolve(null); } });
+  }
+  for (var key in global._mockFetchResponses) {
+    if (u.indexOf(key) >= 0) {
+      var resp = global._mockFetchResponses[key];
+      return Promise.resolve({ ok: true, json: function() { return Promise.resolve(resp); } });
+    }
+  }
+  return Promise.resolve({ ok: false, json: function() { return Promise.resolve(null); } });
+};
+
+DataStore.fetchAll().then(function() {
+  var m = DataStore.merged || {};
+  console.log(JSON.stringify({
+    styleScore: m.style && m.style['总分'],
+    freshnessLevel: m._freshness && m._freshness.level,
+    totalAsset: m.pnl_live && m.pnl_live.total_asset,
+    ticketId: m.trade_tickets && m.trade_tickets[0] && m.trade_tickets[0].ticket_id,
+    hasAiContext: !!m.ai_context,
+    aiCalls: calls.filter(function(c) { return c.url.indexOf('/api/ai/context') >= 0; }).length
+  }));
+}).catch(function(e) { console.log(JSON.stringify({ _error: String(e).slice(0,200) })); });
+"""
+        result = _run_node(script, files=["store.js"])
+        self.assertEqual(result.get("styleScore"), 85, f"baseline 应照常合并: {result}")
+        self.assertEqual(result.get("freshnessLevel"), "live", f"live quotes 应照常合并: {result}")
+        self.assertEqual(result.get("totalAsset"), 100000, f"pnl 应照常合并: {result}")
+        self.assertEqual(result.get("ticketId"), "T-OK", f"tickets 应照常合并: {result}")
+        self.assertFalse(result.get("hasAiContext"), f"失败时不应生成 ai_context: {result}")
+        self.assertGreaterEqual(result.get("aiCalls", 0), 1, f"应尝试拉 ai context: {result}")
+
+    def test_tick_ai_context_failure_clears_previous_context(self):
+        script = BASE_MOCKS + r"""
+global._mockFetchResponses['/api/trade/tickets'] = { tickets: [{ ticket_id: 'T-OK', status: 'filled' }] };
+global._mockFetchResponses['/api/ai/context'] = {
+  schema_version: 'ai_context.v1',
+  trade_entry_reason: '旧裁决不得沿用',
+  trade_entry_allowed: true
+};
+global._mockFetchResponses['auction_snapshot.json'] = {
+  fetched: bjToday + 'T09:28:00+08:00', '指数竞价': [],
+  '涨跌家数': {}, '高标竞价': [], '自选池竞价': [], '信号灯': {}
+};
+global._mockFetchResponses['sentiment_auto.json'] = {};
+global._mockFetchResponses['sentiment_auto.json'][bjToday] = [nodeRecent('10:00')];
+
+var failAiContext = false;
+var calls = [];
+global.fetch = function(url, options) {
+  var u = typeof url === 'string' ? url : (url.url || '');
+  calls.push({ url: u, method: options && options.method });
+  if (u.indexOf('/api/ai/context') >= 0 && failAiContext) {
+    return Promise.resolve({ ok: false, json: function() { return Promise.resolve(null); } });
+  }
+  for (var key in global._mockFetchResponses) {
+    if (u.indexOf(key) >= 0) {
+      var resp = global._mockFetchResponses[key];
+      return Promise.resolve({ ok: true, json: function() { return Promise.resolve(resp); } });
+    }
+  }
+  return Promise.resolve({ ok: false, json: function() { return Promise.resolve(null); } });
+};
+
+DataStore.fetchAll().then(function() {
+  var before = (DataStore.merged || {}).ai_context || {};
+  failAiContext = true;
+  DataStore.refresh('tick');
+  setTimeout(function() {
+    var m = DataStore.merged || {};
+    console.log(JSON.stringify({
+      beforeReason: before.trade_entry_reason,
+      hasAiContextAfterFailure: !!m.ai_context,
+      styleScore: m.style && m.style['总分'],
+      freshnessLevel: m._freshness && m._freshness.level,
+      totalAsset: m.pnl_live && m.pnl_live.total_asset,
+      ticketId: m.trade_tickets && m.trade_tickets[0] && m.trade_tickets[0].ticket_id,
+      aiCalls: calls.filter(function(c) { return c.url.indexOf('/api/ai/context') >= 0; }).length
+    }));
+  }, 30);
+}).catch(function(e) { console.log(JSON.stringify({ _error: String(e).slice(0,200) })); });
+"""
+        result = _run_node(script, files=["store.js"])
+        self.assertEqual(result.get("beforeReason"), "旧裁决不得沿用", f"首次应拿到 ai_context: {result}")
+        self.assertFalse(result.get("hasAiContextAfterFailure"), f"tick 失败后必须清空旧 ai_context: {result}")
+        self.assertEqual(result.get("styleScore"), 85, f"baseline 应保留: {result}")
+        self.assertEqual(result.get("freshnessLevel"), "live", f"live quotes 应保留: {result}")
+        self.assertEqual(result.get("totalAsset"), 100000, f"pnl 应保留: {result}")
+        self.assertEqual(result.get("ticketId"), "T-OK", f"tickets 应保留: {result}")
+        self.assertGreaterEqual(result.get("aiCalls", 0), 2, f"fetchAll + tick 都应拉 ai context: {result}")
+
+    def test_tick_empty_ai_context_clears_previous_context(self):
+        script = BASE_MOCKS + r"""
+global._mockFetchResponses['/api/trade/tickets'] = { tickets: [{ ticket_id: 'T-OK', status: 'filled' }] };
+global._mockFetchResponses['/api/ai/context'] = {
+  schema_version: 'ai_context.v1',
+  trade_entry_reason: '旧空包不得沿用',
+  trade_entry_allowed: true
+};
+global._mockFetchResponses['auction_snapshot.json'] = {
+  fetched: bjToday + 'T09:28:00+08:00', '指数竞价': [],
+  '涨跌家数': {}, '高标竞价': [], '自选池竞价': [], '信号灯': {}
+};
+global._mockFetchResponses['sentiment_auto.json'] = {};
+global._mockFetchResponses['sentiment_auto.json'][bjToday] = [nodeRecent('10:00')];
+
+var calls = [];
+global.fetch = function(url, options) {
+  var u = typeof url === 'string' ? url : (url.url || '');
+  calls.push({ url: u, method: options && options.method });
+  for (var key in global._mockFetchResponses) {
+    if (u.indexOf(key) >= 0) {
+      var resp = global._mockFetchResponses[key];
+      return Promise.resolve({ ok: true, json: function() { return Promise.resolve(resp); } });
+    }
+  }
+  return Promise.resolve({ ok: false, json: function() { return Promise.resolve(null); } });
+};
+
+DataStore.fetchAll().then(function() {
+  var before = (DataStore.merged || {}).ai_context || {};
+  global._mockFetchResponses['/api/ai/context'] = {};
+  DataStore.refresh('tick');
+  setTimeout(function() {
+    var m = DataStore.merged || {};
+    console.log(JSON.stringify({
+      beforeReason: before.trade_entry_reason,
+      hasAiContextAfterEmpty: !!m.ai_context,
+      styleScore: m.style && m.style['总分'],
+      freshnessLevel: m._freshness && m._freshness.level,
+      totalAsset: m.pnl_live && m.pnl_live.total_asset,
+      ticketId: m.trade_tickets && m.trade_tickets[0] && m.trade_tickets[0].ticket_id,
+      aiCalls: calls.filter(function(c) { return c.url.indexOf('/api/ai/context') >= 0; }).length
+    }));
+  }, 30);
+}).catch(function(e) { console.log(JSON.stringify({ _error: String(e).slice(0,200) })); });
+"""
+        result = _run_node(script, files=["store.js"])
+        self.assertEqual(result.get("beforeReason"), "旧空包不得沿用", f"首次应拿到 ai_context: {result}")
+        self.assertFalse(result.get("hasAiContextAfterEmpty"), f"tick 返回空对象后必须清空旧 ai_context: {result}")
+        self.assertEqual(result.get("styleScore"), 85, f"baseline 应保留: {result}")
+        self.assertEqual(result.get("freshnessLevel"), "live", f"live quotes 应保留: {result}")
+        self.assertEqual(result.get("totalAsset"), 100000, f"pnl 应保留: {result}")
+        self.assertEqual(result.get("ticketId"), "T-OK", f"tickets 应保留: {result}")
+        self.assertGreaterEqual(result.get("aiCalls", 0), 2, f"fetchAll + tick 都应拉 ai context: {result}")
+
+    def test_file_protocol_skips_ai_context_fetch(self):
+        script = BASE_MOCKS + r"""
+global.location = { protocol: 'file:' };
+var fs = require('fs');
+eval(fs.readFileSync('store.js', 'utf8') + '\nglobal.DataStore = DataStore;');
+
+global._mockFetchResponses['data/dashboard_data.json'] = {
+  meta: {}, market: {}, sentiment: {}, lianban_pool: [],
+  trend_pool: [], positions: [], sectors: [], risk: {}, style: { '总分': 85 }
+};
+global._mockFetchResponses['data/dashboard_live.json'] = {
+  live_index: {}, live_quotes: {}, iwencai: {}, _freshness: { level: 'live' }
+};
+global._mockFetchResponses['/api/ai/context'] = {
+  schema_version: 'ai_context.v1',
+  trade_entry_reason: 'file 协议不应拉取'
+};
+global._mockFetchResponses['auction_snapshot.json'] = {
+  fetched: bjToday + 'T09:28:00+08:00', '指数竞价': [],
+  '涨跌家数': {}, '高标竞价': [], '自选池竞价': [], '信号灯': {}
+};
+global._mockFetchResponses['sentiment_auto.json'] = {};
+global._mockFetchResponses['sentiment_auto.json'][bjToday] = [nodeRecent('10:00')];
+
+var calls = [];
+global.fetch = function(url, options) {
+  var u = typeof url === 'string' ? url : (url.url || '');
+  calls.push({ url: u, method: options && options.method });
+  for (var key in global._mockFetchResponses) {
+    if (u.indexOf(key) >= 0) {
+      var resp = global._mockFetchResponses[key];
+      return Promise.resolve({ ok: true, json: function() { return Promise.resolve(resp); } });
+    }
+  }
+  return Promise.resolve({ ok: false, json: function() { return Promise.resolve(null); } });
+};
+
+global.DataStore.fetchAll().then(function() {
+  var m = global.DataStore.merged || {};
+  console.log(JSON.stringify({
+    styleScore: m.style && m.style['总分'],
+    aiCalls: calls.filter(function(c) { return c.url.indexOf('/api/ai/context') >= 0; }).length,
+    hasAiContext: !!m.ai_context
+  }));
+}).catch(function(e) { console.log(JSON.stringify({ _error: String(e).slice(0,200) })); });
+"""
+        result = _run_node(script)
+        self.assertEqual(result.get("styleScore"), 85, f"file:// baseline 应照常合并: {result}")
+        self.assertEqual(result.get("aiCalls"), 0, f"file:// 不应拉 /api/ai/context: {result}")
+        self.assertFalse(result.get("hasAiContext"), f"file:// 不应注入 ai_context: {result}")
+
+
 # ── W05 stale + no fetch tests ──
 
 class W05StaleTest(unittest.TestCase):
