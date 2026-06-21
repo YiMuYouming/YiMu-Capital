@@ -11,6 +11,32 @@
 | `http://localhost:18089` | 本地诊断 | 可选完整服务，不默认录真实交易 |
 | `file://index.html` | 离线查看 | 无实时 API，无成交录入 |
 
+## 生产拓扑
+
+```text
+浏览器 localhost:8088
+      ↓ SSH tunnel (-L 8088:127.0.0.1:8088)
+hermes 43.132.146.234
+   └─ systemd: yimu-live-dashboard.service
+      └─ bridge.py 8088 (云端, PyTDX dead 已知限制)
+         ├─ 持仓估值/W22 → Tencent/EM fallback
+         ├─ 情绪节点 → iwencai
+         ├─ 热榜/涨停梯队/W26 → hot_list + limit_up_detail
+         └─ 竞价 → snapshot_auction 9:28
+```
+
+核心数据管线：
+
+```text
+复盘笔记(SSOT, D-1) → gen_dashboard_data.py → dashboard_data.json(每日基线)
+Tencent/EM fallback → bridge CACHE → /api/live/quotes + live_index
+iwencai pywencai → CACHE["iwencai"] → 情绪指标
+hot_list + limit_up_detail → 涨停梯队 + W26 主攻方向
+account_baselines + trade_records + live quote → /api/account/state (账户 SSOT)
+dashboard facts + health + tickets + freshness → /api/ai/context (Agent 只读事实包)
+open_day.py/close_day.py → 开盘生成基线+rsync上云 / 收盘SQLite备份+拉回+review_source_packet+项目数据包备份
+```
+
 ## 开盘前
 
 推荐使用自动化脚本（默认 dry-run）：
@@ -38,6 +64,17 @@ python3 scripts/ops/close_day.py --apply     # 云端备份 + 拉回本地 + rev
 - **组件调试**在 `http://localhost:18088`（本地预览）看效果，只读不录。
 - **监控**：顶栏健康标签表示 `正常 / 降级 / 阻断 / 无响应`。
 - **数据源**：云端 PyTDX 不可用（已知限制），行情走 Tencent/EM fallback，情绪 iwencai。
+
+### 健康语义
+
+| 顶栏标签 | 含义 |
+|---------|------|
+| 正常 | 无 critical 无 degraded，交易录入可用 |
+| 降级 | 有 degraded（iwencai 过期/基准缺失等非关键问题），交易录入可用 |
+| 阻断 | critical 故障（行情 dead/账户 error/锚点缺失），交易录入关闭 |
+| 无响应 | API 不可达（云端服务或 SSH tunnel 中断） |
+
+交易入口以 `/api/health.trade_entry_allowed` 为准；不要把“降级”误判成“阻断”。
 
 ## 代码 vs 数据
 
@@ -100,6 +137,37 @@ python3 scripts/ops/backup_live_dashboard_data.py --apply --pull-cloud-first --u
 python3 scripts/check_runtime.py --health      # 运行中健康检查
 python3 scripts/check_runtime.py --preflight   # 启动前检查
 ```
+
+## API 端点
+
+| 端点 | 方法 | 说明 | 频率 |
+|------|------|------|------|
+| `/api/health` | GET | 服务与关键数据健康状态（含 account_basis） | 实时 |
+| `/api/account/state` | GET | 账户 SSOT 派生状态 | 实时 |
+| `/api/account/audit` | GET | 账户基准审计（日初价/清仓缺口） | 实时 |
+| `/api/pnl/summary` | GET | PnL 摘要（含 valuation_complete） | 实时 |
+| `/api/pnl?range=today&index=sh` | GET | PnL 曲线 | 5min/日结 |
+| `/api/live/quotes` | GET | 实时行情（含 iwencai、北向、热榜、W26 主攻方向） | 5s |
+| `/api/ai/context` | GET | Agent 只读事实包（健康/新鲜度/风险/票据/人审动作） | 按需 |
+| `/api/baseline` | GET | dashboard_data.json | 60s |
+| `/api/sync` | POST | W15 单笔成交录入 | 随录 |
+| `/api/trades/review?date=YYYY-MM-DD` | GET | W23 逐笔复盘 | 按需 |
+| `/api/llm` | POST | AI 研判 | 15min/manual |
+
+## 故障排查
+
+| 症状 | 排查 |
+|------|------|
+| 看板白屏 | `curl localhost:8088/api/pnl/summary` |
+| 顶栏显示"阻断" | `curl localhost:8088/api/health` 查 `critical_ok` / `trade_entry_allowed` |
+| 顶栏显示"无响应" | 检查 SSH tunnel: `lsof -i :8088 \| grep ssh`；检查 hermes 服务: `systemctl is-active yimu-live-dashboard.service` |
+| 洋米读不到事实包 | `curl -s localhost:8088/api/ai/context \| python3 -m json.tool`；失败再查 `/api/health` |
+| 情绪数据空 | `/api/live/quotes` 是否有 `iwencai` 字段，iwencai collector 是否在跑 |
+| W15 显示"基准不可用" | 核查隔夜标的是否缺 `_meta.day_start_prices` |
+| 竞价面板无数据 | 9:28 过了吗？`auction_snapshot.json` mtime 今天？ |
+| LLM 不触发 | `~/.claude/settings.json` 有 `ANTHROPIC_BASE_URL` 和 token 吗？ |
+| PyTDX 字段缺失 | 已知限制（hermes 香港节点不稳定），走 Tencent/EM fallback |
+| 成交录不进去 | 是否在 18088 上操作？本地预览只读，请用 8088 |
 
 ## 项目结构
 
