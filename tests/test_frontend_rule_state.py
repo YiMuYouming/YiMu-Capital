@@ -2440,6 +2440,150 @@ assert.strictEqual(inst._traceTarget({ source: 'W15 account state' }), 'widget:W
         self.assertNotIn('data-evidence-target="widget:W08"', html)
 
 
+class W25CommandSummaryTest(unittest.TestCase):
+    """W25 command snapshot prefers /api/ai/context semantics when available."""
+
+    def _build_summary(self, fixture, runtime=None):
+        script = r"""
+const assert = require('assert');
+const fs = require('fs');
+const vm = require('vm');
+const src = fs.readFileSync('evidence-summary.js', 'utf8');
+const context = { console: console };
+vm.runInNewContext(src, context, { filename: 'evidence-summary.js' });
+const summary = context.EvidenceSummary.build(DATA_FIXTURE, RUNTIME_FIXTURE);
+console.log(JSON.stringify(summary));
+""".replace("DATA_FIXTURE", json.dumps(fixture)).replace(
+            "RUNTIME_FIXTURE", json.dumps(runtime or {})
+        )
+        result = subprocess.run(
+            ["node", "--no-warnings", "-e", script],
+            capture_output=True, text=True, timeout=10,
+            cwd=str(ROOT),
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        return json.loads(result.stdout.strip().split("\n")[-1])
+
+    def test_blocked_command_uses_ai_context_situation_reason(self):
+        summary = self._build_summary({
+            "ai_context": {
+                "schema_version": "2.0",
+                "situation": {
+                    "trade_entry_allowed": False,
+                    "trade_entry_reason": "SENTIMENT_STALE: 情绪源过期",
+                },
+                "freshness": {"quotes": {"status": "live"}},
+                "tickets": {"executable": 0},
+            },
+            "rule_state": {"tradable": True, "caps": {"total_pct": 40}, "blocks": []},
+        }, {"healthConfirmed": True, "tradeEntryAllowed": True})
+
+        self.assertEqual(summary["command_source"], "ai_context")
+        self.assertEqual(summary["command"]["tone"], "blocked")
+        self.assertEqual(summary["command"]["label"], "阻断")
+        self.assertIn("SENTIMENT_STALE", summary["command"]["reason"])
+        self.assertIn("复核阻断", summary["command"]["next"])
+        self.assertTrue(any(item["target"] == "W14" for item in summary["action_queue"]))
+
+    def test_executable_ai_context_ticket_targets_w24(self):
+        summary = self._build_summary({
+            "ai_context": {
+                "schema_version": "2.0",
+                "situation": {"trade_entry_allowed": True, "trade_entry_reason": "规则允许"},
+                "freshness": {"quotes": {"status": "live"}},
+                "tickets": {"executable": 1, "total": 1},
+            },
+            "rule_state": {"tradable": False, "caps": {"total_pct": 0}, "blocks": [
+                {"code": "DAY_STOP", "message": "fallback 阻断不应覆盖 ai_context"}
+            ]},
+        }, {"healthConfirmed": True, "tradeEntryAllowed": False, "healthCritical": True})
+
+        self.assertEqual(summary["command_source"], "ai_context")
+        self.assertIn(summary["command"]["label"], ["可执行", "可执行票据"])
+        self.assertEqual(summary["command"]["tone"], "ready")
+        self.assertIn("W24", summary["command"]["next"])
+        self.assertEqual(summary["action_queue"][0]["target"], "W24")
+        self.assertIn("W24", summary["focus_widgets"])
+
+    def test_stale_quotes_freshness_row_is_not_tradable(self):
+        summary = self._build_summary({
+            "ai_context": {
+                "schema_version": "2.0",
+                "situation": {"trade_entry_allowed": True, "trade_entry_reason": "规则允许"},
+                "freshness": {
+                    "quotes": {
+                        "source": "tdx",
+                        "status": "stale",
+                        "detail": "last quote age 91s",
+                    },
+                    "iwencai": {"status": "live", "trading": True},
+                },
+                "tickets": {"executable": 0},
+            },
+        }, {"healthConfirmed": True, "tradeEntryAllowed": True})
+
+        rows = {row["id"]: row for row in summary["freshness_rows"]}
+        self.assertEqual(rows["quotes"]["status"], "stale")
+        self.assertFalse(rows["quotes"]["trading"])
+        self.assertIn(rows["quotes"]["tone"], ["warn", "blocked"])
+        self.assertIn("last quote age", rows["quotes"]["detail"])
+
+    def test_non_live_freshness_statuses_are_not_tradable(self):
+        summary = self._build_summary({
+            "ai_context": {
+                "schema_version": "2.0",
+                "situation": {"trade_entry_allowed": True, "trade_entry_reason": "规则允许"},
+                "freshness": {
+                    "quotes": {"status": "dead"},
+                    "iwencai": {"status": "missing"},
+                    "account": {"status": "error"},
+                    "baseline": {"status": "baseline"},
+                    "llm": {"status": "manual"},
+                    "tickets": {"status": "unknown"},
+                },
+                "tickets": {"executable": 0},
+            },
+        }, {"healthConfirmed": True, "tradeEntryAllowed": True})
+
+        rows = {row["id"]: row for row in summary["freshness_rows"]}
+        for row_id in ["quotes", "iwencai", "account", "baseline", "llm", "tickets"]:
+            self.assertFalse(rows[row_id]["trading"], f"{row_id} should not be tradable: {rows[row_id]}")
+
+    def test_fallback_unknown_ticket_freshness_is_not_tradable(self):
+        summary = self._build_summary({
+            "pnl_live": {"valuation_complete": True, "quote_status": "live"},
+            "trade_tickets": [],
+            "rule_state": {"tradable": True, "caps": {"total_pct": 40}, "blocks": []},
+        }, {"healthConfirmed": True, "tradeEntryAllowed": True})
+
+        rows = {row["id"]: row for row in summary["freshness_rows"]}
+        self.assertEqual(summary["command_source"], "fallback")
+        self.assertEqual(rows["tickets"]["status"], "unknown")
+        self.assertFalse(rows["tickets"]["trading"])
+
+    def test_ai_context_risks_and_alerts_enter_action_queue(self):
+        summary = self._build_summary({
+            "ai_context": {
+                "schema_version": "2.0",
+                "situation": {"trade_entry_allowed": True, "trade_entry_reason": "规则允许"},
+                "freshness": {"quotes": {"status": "live"}},
+                "tickets": {"executable": 0},
+                "risks": [
+                    {"code": "DATA_REVIEW_REQUIRED", "title": "数据复核", "reason": "quotes dead"},
+                    {"code": "HEALTH_CRITICAL", "title": "健康阻断", "reason": "db readonly"},
+                ],
+                "alerts": [
+                    {"code": "TICKET_CONFLICT", "title": "票据冲突", "reason": "sellable mismatch"},
+                ],
+            },
+        }, {"healthConfirmed": True, "tradeEntryAllowed": True})
+
+        queue = summary["action_queue"]
+        self.assertTrue(any(item["target"] == "W14" and "数据复核" in item["title"] and "quotes dead" in item["reason"] for item in queue))
+        self.assertTrue(any(item["target"] == "W14" and "健康阻断" in item["title"] and "db readonly" in item["reason"] for item in queue))
+        self.assertTrue(any(item["target"] == "W24" and "票据冲突" in item["title"] and "sellable mismatch" in item["reason"] for item in queue))
+
+
 class ReadOnlyInsightUxTest(unittest.TestCase):
     """Dashboard keeps AI interaction outside the cockpit surface."""
 

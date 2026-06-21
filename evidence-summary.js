@@ -130,6 +130,132 @@
   function action(id, title, target, reason, tone) {
     return { id: id, title: title, target: target, reason: reason || '', tone: tone || 'neutral' };
   }
+  function aiContext(data) {
+    var ctx = data && data.ai_context;
+    return ctx && ctx.schema_version ? ctx : null;
+  }
+  function freshnessStatus(v) {
+    if (v && typeof v === 'object') return text(v.status || v.level, 'unknown');
+    return text(v, 'unknown');
+  }
+  function freshnessTone(status) {
+    if (status === 'live') return 'live';
+    if (status === 'delayed') return 'warn';
+    if (status === 'stale' || status === 'dead' || status === 'missing' || status === 'error' || status === 'blocked') return 'blocked';
+    if (status === 'baseline' || status === 'manual') return 'warn';
+    return 'neutral';
+  }
+  function freshnessTrading(row, status) {
+    if (row && row.trading === false) return false;
+    if (status === 'stale' || status === 'dead' || status === 'missing' || status === 'error' || status === 'blocked') return false;
+    if (status === 'baseline' || status === 'manual' || status === 'unknown') return false;
+    return row && row.trading === true ? true : status === 'live' || status === 'delayed';
+  }
+  function freshnessDetail(row) {
+    if (!row || typeof row !== 'object') return '';
+    return text(row.detail || row.reason || row.label || row.updated_at || row.generated_at, '');
+  }
+  function freshnessRowsFromContext(ctx) {
+    var fresh = (ctx && ctx.freshness) || {};
+    var tickets = ctx && ctx.tickets;
+    var ids = ['quotes', 'iwencai', 'account', 'baseline', 'tickets', 'llm'];
+    return ids.map(function(id) {
+      var row = id === 'tickets' && !fresh[id] ? tickets : fresh[id];
+      var status = id === 'tickets' && row && row.status == null
+        ? ((num(row.blocked) || 0) > 0 ? 'blocked' : ((num(row.executable) || 0) > 0 ? 'live' : 'unknown'))
+        : freshnessStatus(row);
+      var source = row && typeof row === 'object' ? text(row.source || row.anchor_source, id) : id;
+      var detail = id === 'tickets' && row && typeof row === 'object' && !fresh[id]
+        ? 'pending ' + (num(row.pending) || 0) + ' / executable ' + (num(row.executable) || 0) + ' / blocked ' + (num(row.blocked) || 0)
+        : freshnessDetail(row);
+      return {
+        id: id,
+        source: source,
+        status: status,
+        trading: freshnessTrading(row, status),
+        detail: detail,
+        tone: freshnessTone(status)
+      };
+    });
+  }
+  function fallbackFreshnessRows(data, quoteStatus, valuationComplete) {
+    var iwFresh = (data.iwencai && data.iwencai._freshness) || {};
+    var rootFresh = data._freshness || {};
+    var ticketCountsValue = ticketCounts(data.trade_tickets);
+    var accountStatus = valuationComplete ? 'live' : 'error';
+    var ticketStatus = ticketCountsValue.total ? 'live' : 'unknown';
+    return [
+      { id: 'quotes', source: 'pnl_live', status: quoteStatus || 'unknown', trading: freshnessTrading(null, quoteStatus || 'unknown'), detail: '', tone: freshnessTone(quoteStatus || 'unknown') },
+      { id: 'iwencai', source: 'iwencai', status: freshnessStatus(iwFresh.level ? iwFresh : 'unknown'), trading: freshnessTrading(iwFresh, freshnessStatus(iwFresh.level ? iwFresh : 'unknown')), detail: freshnessDetail(iwFresh), tone: freshnessTone(freshnessStatus(iwFresh.level ? iwFresh : 'unknown')) },
+      { id: 'account', source: 'pnl_live', status: accountStatus, trading: freshnessTrading(null, accountStatus), detail: valuationComplete ? '' : text(data.pnl_live && data.pnl_live.block_reason, '估值未完成'), tone: freshnessTone(accountStatus) },
+      { id: 'baseline', source: 'dashboard', status: freshnessStatus(rootFresh.level ? rootFresh : 'unknown'), trading: false, detail: freshnessDetail(rootFresh), tone: freshnessTone(freshnessStatus(rootFresh.level ? rootFresh : 'unknown')) },
+      { id: 'tickets', source: 'trade_tickets', status: ticketStatus, trading: freshnessTrading(null, ticketStatus) && ticketCountsValue.blocked === 0, detail: 'pending ' + ticketCountsValue.pending + ' / executable ' + ticketCountsValue.executable + ' / blocked ' + ticketCountsValue.blocked, tone: ticketCountsValue.blocked > 0 ? 'warn' : 'neutral' },
+      { id: 'llm', source: 'llm', status: 'unknown', trading: false, detail: '', tone: 'neutral' }
+    ];
+  }
+  function commandFromAiContext(ctx, fallbackCommand) {
+    var sit = (ctx && ctx.situation) || {};
+    var tickets = (ctx && ctx.tickets) || {};
+    var reason = text(sit.trade_entry_reason, fallbackCommand && fallbackCommand.reason);
+    if (sit.trade_entry_allowed === false) {
+      return { id: 'S0', label: '阻断', tone: 'blocked', reason: reason, next: '复核阻断原因，先看 W14 与 freshness 明细' };
+    }
+    if ((num(tickets.executable) || 0) > 0) {
+      return { id: 'S0', label: '可执行', tone: 'ready', reason: '存在 ' + (num(tickets.executable) || 0) + ' 张可执行票据，先核对 W24', next: '打开 W24 核对票据与执行链' };
+    }
+    if (sit.trade_entry_allowed === true) {
+      return { id: 'S0', label: '观察等待', tone: 'watch', reason: reason || '交易入口允许，等待票据或窗口信号', next: '保持观察，等待 W24 票据或窗口信号' };
+    }
+    return fallbackCommand;
+  }
+  function queueFromAiContext(ctx, fallbackQueue) {
+    var queue = [];
+    var sit = (ctx && ctx.situation) || {};
+    var tickets = (ctx && ctx.tickets) || {};
+    var risks = Array.isArray(ctx && ctx.risks) ? ctx.risks : [];
+    var alerts = Array.isArray(ctx && ctx.alerts) ? ctx.alerts : [];
+    var human = Array.isArray(ctx && ctx.human_required) ? ctx.human_required : [];
+    var nextActions = Array.isArray(ctx && ctx.next_actions) ? ctx.next_actions : [];
+    function queueTarget(item) {
+      if (item.target || item.widget) return item.target || item.widget;
+      return String(item.code || '').indexOf('TICKET') >= 0 ? 'W24' : 'W14';
+    }
+    function pushContextItem(item, tone) {
+      if (queue.length >= 5) return;
+      queue.push(action(
+        'Q' + (queue.length + 1),
+        text(item.title || item.label || item.code, '人工复核'),
+        queueTarget(item),
+        text(item.reason || item.detail || item.message, ''),
+        item.tone || tone || 'warn'
+      ));
+    }
+    if (sit.trade_entry_allowed === false) {
+      queue.push(action('Q1', '复核阻断原因', 'W14', text(sit.trade_entry_reason, '交易入口阻断'), 'danger'));
+    }
+    if ((num(tickets.executable) || 0) > 0) {
+      queue.push(action('Q' + (queue.length + 1), '核对可执行票据', 'W24', '可执行 ' + (num(tickets.executable) || 0) + ' / 总票据 ' + text(tickets.total, '—'), 'ready'));
+    }
+    risks.concat(alerts).forEach(function(item) {
+      pushContextItem(item, item && item.severity === 'critical' ? 'danger' : 'warn');
+    });
+    human.concat(nextActions).forEach(function(item) {
+      pushContextItem(item, 'warn');
+    });
+    return (queue.length ? queue : fallbackQueue).slice(0, 5);
+  }
+  function focusWidgets(command, queue, freshnessRows) {
+    var out = [];
+    function add(wid) {
+      if (wid && out.indexOf(wid) < 0 && out.length < 3) out.push(wid);
+    }
+    (queue || []).forEach(function(item) { add(item.target); });
+    if (command && command.tone === 'blocked') add('W14');
+    if ((freshnessRows || []).some(function(row) { return row.id === 'quotes' && row.trading === false; })) add('W15');
+    if ((freshnessRows || []).some(function(row) { return row.id === 'iwencai' && row.trading === false; })) add('W04');
+    if (!out.length) add(command && command.tone === 'ready' ? 'W24' : 'W14');
+    return out.slice(0, 3);
+  }
 
   function normalizeRuntime(runtime) {
     runtime = runtime || {};
@@ -322,13 +448,21 @@
     }
     actionQueue.push(action('Q' + (actionQueue.length + 1), '核对市场温度', 'W04', '情绪 ' + situation.sentiment.text + ' / ' + phase.label, 'neutral'));
 
+    var ctx = aiContext(data);
+    var normalizedFreshnessRows = ctx ? freshnessRowsFromContext(ctx) : fallbackFreshnessRows(data, quoteStatus, valuationComplete);
+    var normalizedCommand = ctx ? commandFromAiContext(ctx, command) : command;
+    var normalizedQueue = ctx ? queueFromAiContext(ctx, actionQueue) : actionQueue.slice(0, 5);
+
     return {
+      command_source: ctx ? 'ai_context' : 'fallback',
       generated_at: rt.now,
       situation: situation,
-      command: command,
+      command: normalizedCommand,
       phase: phase,
       gates: gates,
-      action_queue: actionQueue.slice(0, 5),
+      action_queue: normalizedQueue,
+      freshness_rows: normalizedFreshnessRows,
+      focus_widgets: focusWidgets(normalizedCommand, normalizedQueue, normalizedFreshnessRows),
       evidence: evidence,
       alerts: alerts,
       risks: risks
