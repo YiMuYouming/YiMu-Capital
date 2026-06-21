@@ -334,6 +334,40 @@ class AIContextApiTest(unittest.TestCase):
             self.assertIn(key, freshness)
             self.assertIn("status", freshness[key])
 
+    def test_ai_context_exposes_command_cockpit_inputs(self):
+        today = __import__("datetime").datetime.now().strftime("%Y-%m-%d")
+        for status, action_type in [
+            ("draft", "buy"),
+            ("executable", "sell"),
+            ("blocked", "buy"),
+            ("filled", "sell"),
+        ]:
+            db.create_trade_ticket({
+                "trade_date": today,
+                "code": f"10{len(status):04d}"[-6:],
+                "name": status.upper(),
+                "action_type": action_type,
+                "status": status,
+            })
+
+        ctx = bridge._build_ai_context()
+
+        self.assertIn("trade_entry_allowed", ctx["situation"])
+        self.assertIn("trade_entry_reason", ctx["situation"])
+        for key in ["quotes", "iwencai", "account", "baseline"]:
+            self.assertIn(key, ctx["freshness"])
+            self.assertIn("status", ctx["freshness"][key])
+        for key in ["pending", "executable", "blocked", "completed", "items"]:
+            self.assertIn(key, ctx["tickets"])
+        self.assertEqual(ctx["tickets"]["pending"], 1)
+        self.assertEqual(ctx["tickets"]["executable"], 1)
+        self.assertEqual(ctx["tickets"]["blocked"], 1)
+        self.assertEqual(ctx["tickets"]["completed"], 1)
+        self.assertIsInstance(ctx["tickets"]["items"], list)
+        self.assertIsInstance(ctx["next_actions"], list)
+        self.assertGreaterEqual(len(ctx["next_actions"]), 1)
+        self.assertIsInstance(ctx["human_required"], list)
+
     def test_ai_context_does_not_create_missing_today_anchor(self):
         from datetime import datetime
         db._exec("DELETE FROM account_baselines")
