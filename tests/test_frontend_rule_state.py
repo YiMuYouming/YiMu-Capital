@@ -2584,6 +2584,70 @@ console.log(JSON.stringify(summary));
         self.assertTrue(any(item["target"] == "W24" and "票据冲突" in item["title"] and "sellable mismatch" in item["reason"] for item in queue))
 
 
+class W25CommandRenderTest(unittest.TestCase):
+    """W25 renders the S0/A1/E1/F1 command cockpit from ai_context."""
+
+    def test_renders_command_cockpit_semantic_blocks(self):
+        fixture = {
+            "ai_context": {
+                "schema_version": "2.0",
+                "situation": {
+                    "trade_entry_allowed": False,
+                    "trade_entry_reason": "SENTIMENT_STALE: 阻断，情绪源过期",
+                },
+                "freshness": {
+                    "quotes": {
+                        "source": "tdx",
+                        "status": "stale",
+                        "detail": "last quote age 91s",
+                    },
+                    "iwencai": {"source": "iwencai", "status": "live", "trading": True},
+                    "llm": {"source": "W20", "status": "manual", "detail": "研判摘要人工更新"},
+                },
+                "tickets": {"executable": 1, "total": 2},
+                "risks": [
+                    {"code": "DATA_REVIEW_REQUIRED", "title": "数据复核", "reason": "quotes stale"},
+                ],
+                "alerts": [
+                    {"code": "TICKET_CONFLICT", "title": "票据冲突", "reason": "W24 票据需复核"},
+                ],
+            },
+            "pnl_live": {
+                "total_asset": 720000,
+                "cash": 520000,
+                "mv": 200000,
+                "pos_pct": 27.7,
+                "pnl_pct": -0.21,
+                "quote_status": "stale",
+                "valuation_complete": True,
+                "positions": [{"标的": "光讯科技", "代码": "002281", "市值": 200000}],
+            },
+            "sentiment": {"情绪值": 59},
+            "iwencai": {"涨停家数": 46, "跌停家数": 2},
+            "rule_state": {"tradable": True, "caps": {"total_pct": 40}, "blocks": []},
+        }
+        extra_js = (ROOT / "evidence-summary.js").read_text(encoding="utf-8")
+        result = _render_widget("evidence-board.js", "W25", fixture, extra_js=extra_js)
+        html = result.get("html", "")
+
+        self.assertNotIn("_error", html)
+        self.assertIn("盘中裁决", html)
+        self.assertIn("阻断", html)
+        self.assertIn("SENTIMENT_STALE", html)
+        self.assertIn("优先处理", html)
+        self.assertIn("数据新鲜度", html)
+        self.assertIn("关键证据", html)
+        self.assertIn("当前聚焦", html)
+        self.assertIn("quotes", html)
+        self.assertIn("stale", html)
+        self.assertIn("llm", html)
+        self.assertIn("manual", html)
+        self.assertTrue("仅观察" in html or "不可交易" in html)
+        self.assertIn('data-evidence-target="widget:W24"', html)
+        self.assertIn('data-evidence-target="widget:W20"', html)
+        self.assertIn('data-evidence-target="widget:W14"', html)
+
+
 class ReadOnlyInsightUxTest(unittest.TestCase):
     """Dashboard keeps AI interaction outside the cockpit surface."""
 
@@ -2855,6 +2919,8 @@ assert.notStrictEqual(registry.getMeta(groups.first_screen[0].id).title, '污染
         self.assertIn('body.cockpit-mode .grid-stack-item[gs-id="W25"] .evidence-dashboard-hero', theme)
         self.assertIn('body.cockpit-mode .grid-stack-item[gs-id="W25"] .evidence-gate-row', theme)
         self.assertIn('body.cockpit-mode .grid-stack-item[gs-id="W25"] .evidence-dashboard-grid', theme)
+        self.assertIn('body.cockpit-mode .grid-stack-item[gs-id="W25"] .evidence-command-cockpit', theme)
+        self.assertIn('body.cockpit-mode .grid-stack-item[gs-id="W25"] .evidence-freshness-panel', theme)
         self.assertIn('grid-template-columns:repeat(auto-fit,minmax(118px,1fr))', theme)
         self.assertIn('grid-template-areas:"queue phase" "queue source"', theme)
         self.assertIn('body.cockpit-mode .grid-stack-item[gs-id="W25"] .evidence-board', theme)
