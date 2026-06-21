@@ -24,6 +24,18 @@ function _evCommandClass(tone) {
   if (tone === 'blocked') return ' is-blocked';
   return ' is-watch';
 }
+function _evWidgetLabel(wid) {
+  var map = {
+    W04: '情绪数据',
+    W08: 'W1 信号',
+    W09: 'W2 信号',
+    W14: '风控门禁',
+    W15: '账户持仓',
+    W20: 'AI 研判',
+    W24: '票据队列'
+  };
+  return map[wid] || wid || '相关组件';
+}
 
 class EvidenceBoardWidget extends YiMuWidget {
   _runtime() {
@@ -69,13 +81,23 @@ class EvidenceBoardWidget extends YiMuWidget {
   _queueItem(item) {
     item = item || {};
     var cls = item.tone === 'danger' ? ' is-danger' : item.tone === 'ready' ? ' is-ready' : item.tone === 'warn' ? ' is-warn' : '';
-    var traceTarget = item.target ? this._traceTarget({ source: item.target }) : '';
+    var traceTarget = item.trace_target || (item.target ? this._traceTarget({ source: item.target }) : '');
     var target = traceTarget ? ' data-evidence-target="' + _evEsc(traceTarget) + '"' : '';
     return '<div class="evidence-queue-item evidence-card-trace' + cls + '"' + target + ' role="button" tabindex="0">' +
       '<span>' + _evEsc(item.id || '') + '</span>' +
-      '<div><b>' + _evEsc(item.title || '') + '</b><em>' + _evEsc(item.reason || '') + '</em></div>' +
-      '<strong>' + _evEsc(item.target || '') + '</strong>' +
+      '<div><b>' + _evEsc(item.label || item.title || '') + '</b><em>' + _evEsc(item.reason || '') + '</em></div>' +
+      '<strong>' + _evEsc(item.caption || (item.target ? (_evWidgetLabel(item.target) + ' · ' + item.target) : '')) + '</strong>' +
     '</div>';
+  }
+
+  _actionButton(item) {
+    item = item || {};
+    var traceTarget = item.trace_target || (item.target ? this._traceTarget({ source: item.target }) : '');
+    var target = traceTarget ? ' data-evidence-target="' + _evEsc(traceTarget) + '"' : '';
+    return '<button type="button" class="evidence-action-button evidence-card-trace"' + target + '>' +
+      '<span>' + _evEsc(item.label || '打开相关组件') + '</span>' +
+      '<em>' + _evEsc(item.caption || '') + '</em>' +
+    '</button>';
   }
 
   _freshnessTarget(id) {
@@ -95,11 +117,11 @@ class EvidenceBoardWidget extends YiMuWidget {
     row = row || {};
     var status = row.status || 'unknown';
     var cls = row.tone === 'blocked' ? ' is-blocked' : row.tone === 'warn' ? ' is-warn' : row.tone === 'live' ? ' is-live' : '';
-    var traceTarget = this._traceTarget({ source: this._freshnessTarget(row.id) });
+    var traceTarget = this._traceTarget({ source: row.target || this._freshnessTarget(row.id) });
     var target = traceTarget ? ' data-evidence-target="' + _evEsc(traceTarget) + '"' : '';
     var trading = row.trading ? '可用于交易' : (status === 'stale' || status === 'dead' || status === 'missing' || status === 'error' || status === 'blocked' ? '不可交易' : '仅观察');
     return '<div class="evidence-freshness-row evidence-card-trace' + cls + '"' + target + ' role="' + (traceTarget ? 'button' : 'group') + '" tabindex="' + (traceTarget ? '0' : '-1') + '">' +
-      '<span>' + _evEsc(row.id || '') + '</span>' +
+      '<span>' + _evEsc(row.label || row.id || '') + '</span>' +
       '<b>' + _evEsc(status) + '</b>' +
       '<em>' + _evEsc(row.source || '') + '</em>' +
       '<strong>' + _evEsc(trading) + '</strong>' +
@@ -107,11 +129,22 @@ class EvidenceBoardWidget extends YiMuWidget {
     '</div>';
   }
 
+  _freshnessSummary(summary) {
+    summary = summary || {};
+    var total = summary.total == null ? '—' : summary.total;
+    var tradable = summary.tradable_count == null ? '—' : summary.tradable_count;
+    var review = summary.review_count == null ? '—' : summary.review_count;
+    return '<div class="evidence-freshness-summary">' +
+      '<div><span>可交易</span><b>' + _evEsc(tradable) + '/' + _evEsc(total) + '</b></div>' +
+      '<div><span>需复核</span><b>' + _evEsc(review) + '</b></div>' +
+    '</div>';
+  }
+
   _focusChip(item) {
     var wid = typeof item === 'string' ? item : (item && (item.id || item.widget || item.target));
     var traceTarget = this._traceTarget({ source: wid || '' });
     var target = traceTarget ? ' data-evidence-target="' + _evEsc(traceTarget) + '"' : '';
-    return '<button type="button" class="evidence-focus-chip"' + target + '>' + _evEsc(wid || '—') + '</button>';
+    return '<button type="button" class="evidence-focus-chip"' + target + '><span>' + _evEsc(_evWidgetLabel(wid)) + '</span><em>' + _evEsc(wid || '—') + '</em></button>';
   }
 
   _evidenceItem(item) {
@@ -212,7 +245,7 @@ class EvidenceBoardWidget extends YiMuWidget {
     var command = snapshot.command || {};
     var phase = snapshot.phase || {};
     var gates = Array.isArray(snapshot.gates) ? snapshot.gates : [];
-    var queue = Array.isArray(snapshot.action_queue) ? snapshot.action_queue : [];
+    var queue = Array.isArray(snapshot.display_queue) ? snapshot.display_queue : (Array.isArray(snapshot.action_queue) ? snapshot.action_queue : []);
     var pnl = s.pnl || {};
     var connection = s.connection || {};
     var sentiment = s.sentiment || {};
@@ -220,13 +253,14 @@ class EvidenceBoardWidget extends YiMuWidget {
     var headline = command.label || s.summary || '状态未确认';
     var evidence = snapshot.evidence || [];
     var risk = this._firstPriority((snapshot.risks || []).concat(snapshot.alerts || []));
-    var freshnessRows = Array.isArray(snapshot.freshness_rows) ? snapshot.freshness_rows : [];
+    var freshnessSummary = snapshot.freshness_summary || {};
+    var freshnessRows = Array.isArray(freshnessSummary.urgent_rows) ? freshnessSummary.urgent_rows : (Array.isArray(snapshot.freshness_rows) ? snapshot.freshness_rows : []);
     var focusWidgets = Array.isArray(snapshot.focus_widgets) ? snapshot.focus_widgets.slice(0, 3) : [];
-    var sourceRefs = evidence.slice(0, 4)
-      .concat((snapshot.alerts || []).slice(0, 2))
-      .concat((snapshot.risks || []).slice(0, 2))
+    var topEvidence = Array.isArray(snapshot.top_evidence) ? snapshot.top_evidence : evidence.slice(0, 3);
+    var sourceRefs = topEvidence
       .map(this._evidenceItem, this).join('');
     var tradeSource = snapshot.command_source || 'fallback';
+    var primaryActions = Array.isArray(command.primary_actions) ? command.primary_actions : [];
 
     body.innerHTML = '<div class="evidence-board">' +
       '<div class="evidence-dashboard-hero' + _evCommandClass(command.tone) + '">' +
@@ -235,6 +269,7 @@ class EvidenceBoardWidget extends YiMuWidget {
           '<div class="evidence-command-title">' + _evEsc(headline) + '</div>' +
           '<div class="evidence-command-reason">' + _evEsc(command.reason || '') + '</div>' +
           '<div class="evidence-command-next"><span>下一步</span><b>' + _evEsc(command.next || '保持观察') + '</b></div>' +
+          '<div class="evidence-primary-actions">' + primaryActions.map(this._actionButton, this).join('') + '</div>' +
         '</div>' +
         '<div class="evidence-hero-metrics evidence-dashboard-metrics">' +
           '<div><span>情绪</span><strong>' + _evEsc(sentiment.text || '—') + '</strong></div>' +
@@ -246,8 +281,8 @@ class EvidenceBoardWidget extends YiMuWidget {
       '<div class="evidence-gate-row">' + gates.map(this._gate, this).join('') + '</div>' +
       '<div class="evidence-command-cockpit">' +
         '<section class="evidence-queue-panel"><div class="evidence-section-title"><span>A1 优先处理</span><span>' + queue.length + '</span></div>' + queue.map(this._queueItem, this).join('') + '</section>' +
-        '<section class="evidence-freshness-panel"><div class="evidence-section-title"><span>F1 数据新鲜度</span><span>' + freshnessRows.length + '</span></div>' + freshnessRows.map(this._freshnessRow, this).join('') + '</section>' +
-        '<section class="evidence-source-panel"><div class="evidence-section-title"><span>E1 关键证据</span><span>E/A/R</span></div>' + sourceRefs + '</section>' +
+        '<section class="evidence-freshness-panel"><div class="evidence-section-title"><span>F1 数据可信</span><span>' + freshnessRows.length + '</span></div>' + this._freshnessSummary(freshnessSummary) + freshnessRows.map(this._freshnessRow, this).join('') + '</section>' +
+        '<section class="evidence-source-panel"><div class="evidence-section-title"><span>E1 关键证据</span><span>' + topEvidence.length + '</span></div>' + sourceRefs + '</section>' +
         '<section class="evidence-focus-panel"><div class="evidence-section-title"><span>当前聚焦</span><span>' + focusWidgets.length + '</span></div>' +
           '<div class="evidence-focus-list">' + focusWidgets.map(this._focusChip, this).join('') + '</div>' +
           '<div class="evidence-focus-label">当前阶段</div>' +

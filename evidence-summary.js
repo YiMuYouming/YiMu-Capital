@@ -217,7 +217,9 @@
     var human = Array.isArray(ctx && ctx.human_required) ? ctx.human_required : [];
     var nextActions = Array.isArray(ctx && ctx.next_actions) ? ctx.next_actions : [];
     function queueTarget(item) {
-      if (item.target || item.widget) return item.target || item.widget;
+      if (String(item.code || '').indexOf('TICKET') >= 0) return 'W24';
+      if (item.widget) return item.widget;
+      if (item.target && /^W\d{2}$/.test(String(item.target))) return item.target;
       return String(item.code || '').indexOf('TICKET') >= 0 ? 'W24' : 'W14';
     }
     function pushContextItem(item, tone) {
@@ -276,6 +278,161 @@
     pushRenumbered(contextTask);
     fallbackQueue.slice(0, 4).forEach(pushRenumbered);
     return queue;
+  }
+  function widgetInfo(target) {
+    var map = {
+      W04: { name: '情绪数据', action: '查看情绪数据' },
+      W08: { name: 'W1 信号', action: '查看 W1 信号' },
+      W09: { name: 'W2 信号', action: '查看 W2 信号' },
+      W14: { name: '风控门禁', action: '打开风控门禁' },
+      W15: { name: '账户持仓', action: '核对账户持仓' },
+      W20: { name: 'AI 研判', action: '查看 AI 研判' },
+      W24: { name: '票据队列', action: '查看票据队列' }
+    };
+    return map[target] || { name: target || '相关组件', action: '打开相关组件' };
+  }
+  function traceTarget(target) {
+    if (!target) return '';
+    if (target === 'W08' || target === 'W09' || target === 'W06' || target === 'W10' || target === 'W12' || target === 'W13' || target === 'W21') return 'shelf:SHELF_' + target;
+    return 'widget:' + target;
+  }
+  function primaryActions(command, queue, freshnessRows) {
+    var out = [];
+    function add(target, reason) {
+      if (!target || out.some(function(item) { return item.target === target; }) || out.length >= 2) return;
+      var info = widgetInfo(target);
+      out.push({
+        label: info.action,
+        target: target,
+        trace_target: traceTarget(target),
+        caption: info.name + ' · ' + target,
+        reason: reason || ''
+      });
+    }
+    if (command && command.tone === 'blocked') add('W14', command.reason);
+    (queue || []).forEach(function(item) {
+      if (item && item.target) add(item.target, item.reason);
+    });
+    if ((freshnessRows || []).some(function(row) { return row.id === 'account' && row.trading === false; })) add('W15', '账户估值或持仓需要核对');
+    if ((freshnessRows || []).some(function(row) { return row.id === 'quotes' && row.trading === false; })) add('W15', '行情状态需要核对');
+    if ((freshnessRows || []).some(function(row) { return row.id === 'iwencai' && row.trading === false; })) add('W04', '情绪数据需要核对');
+    if (!out.length) add(command && command.tone === 'ready' ? 'W24' : 'W14', command && command.next);
+    return out;
+  }
+  function rowShortLabel(id) {
+    var map = {
+      ai_context: '事实包',
+      quotes: '行情',
+      iwencai: '情绪',
+      account: '账户',
+      baseline: 'baseline',
+      tickets: '票据',
+      llm: 'AI'
+    };
+    return map[id] || id || '数据';
+  }
+  function urgentFreshnessRows(rows) {
+    return (rows || []).filter(function(row) {
+      var status = row && row.status;
+      if (!row || row.trading !== false) return false;
+      if (status === 'ok' || status === 'live') return false;
+      if (row.id === 'llm' && status === 'unknown') return false;
+      if (row.id === 'tickets' && status === 'unknown') return false;
+      return true;
+    });
+  }
+  function freshnessSummary(rows) {
+    var list = rows || [];
+    var urgent = urgentFreshnessRows(list).slice(0, 4).map(function(row) {
+      return {
+        id: row.id,
+        label: rowShortLabel(row.id),
+        status: row.status,
+        detail: row.detail || '',
+        source: row.source || '',
+        trading: row.trading,
+        target: row.id === 'iwencai' ? 'W04' : (row.id === 'tickets' ? 'W24' : (row.id === 'ai_context' || row.id === 'llm' ? 'W20' : 'W15')),
+        tone: row.tone || 'warn'
+      };
+    });
+    return {
+      total: list.length,
+      tradable_count: list.filter(function(row) { return row && row.trading === true; }).length,
+      review_count: urgentFreshnessRows(list).length,
+      urgent_rows: urgent
+    };
+  }
+  function displayQueue(command, queue, freshnessRows) {
+    var out = [];
+    var fresh = freshnessSummary(freshnessRows);
+    function add(label, target, reason, tone) {
+      if (!label || out.length >= 3) return;
+      if (out.some(function(item) { return item.label === label && item.target === target; })) return;
+      if (target && out.some(function(item) { return item.target === target; })) return;
+      out.push({
+        id: 'Q' + (out.length + 1),
+        label: label,
+        title: label,
+        target: target,
+        trace_target: traceTarget(target),
+        caption: widgetInfo(target).name + ' · ' + target,
+        reason: reason || '',
+        tone: tone || 'neutral'
+      });
+    }
+    if (command && command.tone === 'blocked') add('系统阻断', 'W14', command.reason, 'danger');
+    if (fresh.review_count > 0) {
+      var reason = fresh.urgent_rows.map(function(row) {
+        return row.label + ' ' + row.status;
+      }).join(' / ');
+      var target = fresh.urgent_rows.some(function(row) { return row.id === 'iwencai'; }) && !fresh.urgent_rows.some(function(row) { return row.id === 'account' || row.id === 'quotes'; }) ? 'W04' : 'W15';
+      add('数据不可交易', target, reason, 'warn');
+    }
+    if ((queue || []).some(function(item) { return item && item.target === 'W24'; })) {
+      var ticketItem = (queue || []).find(function(item) { return item && item.target === 'W24'; });
+      add('票据闭环', 'W24', ticketItem && ticketItem.reason, ticketItem && ticketItem.tone);
+    }
+    (queue || []).forEach(function(item) {
+      if (!item || out.length >= 3) return;
+      var info = widgetInfo(item.target);
+      add(info.name, item.target, item.reason, item.tone);
+    });
+    return out;
+  }
+  function contextSignalItems(items, prefix, fallback) {
+    var list = Array.isArray(items) ? items : [];
+    if (!list.length) return fallback || [];
+    return list.map(function(item, idx) {
+      var rawTarget = item.target || item.widget || '';
+      var isTicket = String(item.code || '').indexOf('TICKET') >= 0;
+      var target = isTicket ? 'W24' : (/^W\d{2}$/.test(String(rawTarget)) ? rawTarget : 'W14');
+      var critical = item.severity === 'critical' || item.tone === 'danger';
+      var detail = text(item.reason || item.detail || item.message, '');
+      if (rawTarget && rawTarget !== target && !/^W\d{2}$/.test(String(rawTarget))) {
+        detail = detail ? (String(rawTarget) + ': ' + detail) : String(rawTarget);
+      }
+      return {
+        id: prefix + (idx + 1),
+        title: text(item.title || item.label || item.code, prefix === 'R' ? '风险' : '提示'),
+        detail: detail,
+        source: target,
+        tone: critical ? 'danger' : (item.tone || 'warn')
+      };
+    });
+  }
+  function nextFromActions(actions, fallback) {
+    actions = actions || [];
+    if (actions.length >= 2) return '先' + actions[0].label + '，再' + actions[1].label;
+    if (actions.length === 1) return '先' + actions[0].label;
+    return fallback || '保持观察';
+  }
+  function topEvidenceItems(evidence, alerts, risks) {
+    var priorityRisks = (risks || []).filter(function(item) {
+      return item && item.source && /W\d{2}/.test(String(item.source));
+    }).slice(0, 1);
+    var core = priorityRisks.concat(evidence || []).slice(0, 3);
+    if (core.length >= 3) return core;
+    return core.concat((risks || []).slice(0, 1)).concat((alerts || []).slice(0, 1)).slice(0, 3);
   }
   function focusWidgets(command, queue, freshnessRows) {
     var out = [];
@@ -485,6 +642,15 @@
     var normalizedFreshnessRows = ctx ? freshnessRowsFromContext(ctx) : fallbackContextFreshnessRows(fallbackFreshnessRows(data, quoteStatus, valuationComplete));
     var normalizedCommand = ctx ? commandFromAiContext(ctx, command) : command;
     var normalizedQueue = ctx ? queueFromAiContext(ctx, actionQueue) : fallbackContextQueue(actionQueue);
+    var normalizedRisks = ctx ? contextSignalItems(ctx.risks, 'R', risks) : risks;
+    var normalizedAlerts = ctx ? contextSignalItems(ctx.alerts, 'A', alerts) : alerts;
+    var commandActions = primaryActions(normalizedCommand, normalizedQueue, normalizedFreshnessRows);
+    normalizedCommand = Object.assign({}, normalizedCommand, {
+      next: nextFromActions(commandActions, normalizedCommand.next),
+      primary_actions: commandActions
+    });
+    var summaryFreshness = freshnessSummary(normalizedFreshnessRows);
+    var compactQueue = displayQueue(normalizedCommand, normalizedQueue, normalizedFreshnessRows);
 
     return {
       command_source: ctx ? 'ai_context' : 'fallback',
@@ -494,11 +660,14 @@
       phase: phase,
       gates: gates,
       action_queue: normalizedQueue,
+      display_queue: compactQueue,
       freshness_rows: normalizedFreshnessRows,
+      freshness_summary: summaryFreshness,
       focus_widgets: focusWidgets(normalizedCommand, normalizedQueue, normalizedFreshnessRows),
+      top_evidence: topEvidenceItems(evidence, normalizedAlerts, normalizedRisks),
       evidence: evidence,
-      alerts: alerts,
-      risks: risks
+      alerts: normalizedAlerts,
+      risks: normalizedRisks
     };
   }
 

@@ -2482,7 +2482,7 @@ console.log(JSON.stringify(summary));
         self.assertEqual(summary["command"]["tone"], "blocked")
         self.assertEqual(summary["command"]["label"], "阻断")
         self.assertIn("SENTIMENT_STALE", summary["command"]["reason"])
-        self.assertIn("复核阻断", summary["command"]["next"])
+        self.assertIn("打开风控门禁", summary["command"]["next"])
         self.assertTrue(any(item["target"] == "W14" for item in summary["action_queue"]))
 
     def test_executable_ai_context_ticket_targets_w24(self):
@@ -2501,9 +2501,71 @@ console.log(JSON.stringify(summary));
         self.assertEqual(summary["command_source"], "ai_context")
         self.assertIn(summary["command"]["label"], ["可执行", "可执行票据"])
         self.assertEqual(summary["command"]["tone"], "ready")
-        self.assertIn("W24", summary["command"]["next"])
+        self.assertIn("票据队列", summary["command"]["next"])
         self.assertEqual(summary["action_queue"][0]["target"], "W24")
         self.assertIn("W24", summary["focus_widgets"])
+        self.assertEqual(
+            len([item for item in summary["display_queue"] if item["target"] == "W24"]),
+            1,
+        )
+
+    def test_ai_context_risks_stay_visible_after_compaction(self):
+        summary = self._build_summary({
+            "ai_context": {
+                "schema_version": "2.0",
+                "situation": {
+                    "trade_entry_allowed": False,
+                    "trade_entry_reason": "健康阻断",
+                },
+                "freshness": {"quotes": {"status": "live"}},
+                "tickets": {"executable": 0},
+                "risks": [
+                    {
+                        "title": "数据库只读",
+                        "reason": "sqlite readonly",
+                        "target": "W14",
+                        "severity": "critical",
+                    }
+                ],
+                "alerts": [
+                    {
+                        "title": "票据冲突",
+                        "reason": "sellable mismatch",
+                        "target": "W24",
+                    }
+                ],
+            },
+        }, {"healthConfirmed": True, "tradeEntryAllowed": False})
+
+        self.assertTrue(any("数据库只读" in item["title"] and "sqlite readonly" in item["detail"] for item in summary["risks"]))
+        self.assertTrue(any("票据冲突" in item["title"] for item in summary["alerts"]))
+        self.assertTrue(any("数据库只读" in item["title"] for item in summary["top_evidence"]))
+
+    def test_ticket_conflict_stock_target_routes_to_ticket_queue(self):
+        summary = self._build_summary({
+            "ai_context": {
+                "schema_version": "2.0",
+                "situation": {
+                    "trade_entry_allowed": True,
+                    "trade_entry_reason": "规则允许",
+                },
+                "freshness": {"quotes": {"status": "live"}},
+                "tickets": {"executable": 0, "total": 1},
+                "alerts": [
+                    {
+                        "code": "TICKET_CONFLICT",
+                        "title": "票据冲突",
+                        "target": "000001",
+                        "reason": "sellable mismatch",
+                    }
+                ],
+            },
+        }, {"healthConfirmed": True, "tradeEntryAllowed": True})
+
+        self.assertTrue(any(item["target"] == "W24" and "票据" in item["label"] for item in summary["display_queue"]))
+        self.assertTrue(any(item["source"] == "W24" and "000001" in item["detail"] for item in summary["alerts"]))
+        self.assertTrue(any(item["source"] == "W24" for item in summary["top_evidence"]))
+        self.assertNotIn("widget:000001", json.dumps(summary, ensure_ascii=False))
 
     def test_stale_quotes_freshness_row_is_not_tradable(self):
         summary = self._build_summary({
@@ -2599,6 +2661,70 @@ console.log(JSON.stringify(summary));
         self.assertEqual(queue[1]["target"], "W20")
         self.assertIn("统一事实包", queue[1]["title"])
 
+    def test_command_exposes_human_readable_primary_actions(self):
+        summary = self._build_summary({
+            "ai_context": {
+                "schema_version": "2.0",
+                "situation": {
+                    "trade_entry_allowed": False,
+                    "trade_entry_reason": "账户估值或行情数据不可信",
+                },
+                "freshness": {
+                    "account": {"status": "error", "detail": "valuation_complete is false"},
+                    "quotes": {"status": "close_snapshot", "detail": "post-close snapshot"},
+                    "iwencai": {"status": "dead", "detail": "2026-06-21T12:51:30+08:00"},
+                },
+                "tickets": {"executable": 0, "total": 0},
+            },
+        }, {"healthConfirmed": True, "tradeEntryAllowed": False})
+
+        actions = summary["command"]["primary_actions"]
+        labels = [item["label"] for item in actions]
+        captions = [item["caption"] for item in actions]
+        self.assertIn("打开风控门禁", labels)
+        self.assertIn("核对账户持仓", labels)
+        self.assertIn("widget:W14", [item["trace_target"] for item in actions])
+        self.assertIn("widget:W15", [item["trace_target"] for item in actions])
+        self.assertTrue(any("风控门禁 · W14" in caption for caption in captions))
+        self.assertIn("先打开风控门禁", summary["command"]["next"])
+        self.assertNotIn("freshness", summary["command"]["next"])
+
+    def test_command_display_queue_and_freshness_summary_are_compact(self):
+        summary = self._build_summary({
+            "ai_context": {
+                "schema_version": "2.0",
+                "situation": {
+                    "trade_entry_allowed": False,
+                    "trade_entry_reason": "账户估值或行情数据不可信",
+                },
+                "freshness": {
+                    "quotes": {"status": "close_snapshot", "detail": "post-close snapshot"},
+                    "iwencai": {"status": "dead", "detail": "stale sentiment"},
+                    "account": {"status": "error", "detail": "valuation_complete is false"},
+                    "baseline": {"status": "stale", "detail": "-"},
+                    "tickets": {"status": "ok", "trading": False, "detail": "pending 0"},
+                    "llm": {"status": "unknown", "detail": ""},
+                },
+                "tickets": {"executable": 0, "total": 0},
+                "risks": [
+                    {"code": "HEALTH", "title": "系统关键链路阻断", "reason": "account unavailable", "target": "W14"},
+                    {"code": "RULE", "title": "规则阻断", "reason": "DATA_UNTRUSTED", "target": "W14"},
+                    {"code": "PRICE", "title": "行情不可交易", "reason": "close snapshot", "target": "W15"},
+                ],
+                "alerts": [
+                    {"code": "SENTIMENT", "title": "情绪源失效", "reason": "iwencai dead", "target": "W04"},
+                ],
+            },
+        }, {"healthConfirmed": True, "tradeEntryAllowed": False})
+
+        self.assertLessEqual(len(summary["display_queue"]), 3)
+        self.assertEqual(summary["display_queue"][0]["label"], "系统阻断")
+        self.assertEqual(summary["display_queue"][0]["target"], "W14")
+        self.assertIn("账户估值或行情数据不可信", summary["display_queue"][0]["reason"])
+        self.assertGreaterEqual(summary["freshness_summary"]["review_count"], 4)
+        self.assertLessEqual(len(summary["freshness_summary"]["urgent_rows"]), 4)
+        self.assertTrue(all(row["trading"] is False for row in summary["freshness_summary"]["urgent_rows"]))
+
     def test_ai_context_risks_and_alerts_enter_action_queue(self):
         summary = self._build_summary({
             "ai_context": {
@@ -2673,12 +2799,12 @@ class W25CommandRenderTest(unittest.TestCase):
         self.assertIn("阻断", html)
         self.assertIn("SENTIMENT_STALE", html)
         self.assertIn("优先处理", html)
-        self.assertIn("数据新鲜度", html)
+        self.assertIn("数据可信", html)
         self.assertIn("关键证据", html)
         self.assertIn("当前聚焦", html)
-        self.assertIn("quotes", html)
+        self.assertIn("行情", html)
         self.assertIn("stale", html)
-        self.assertIn("llm", html)
+        self.assertIn("AI", html)
         self.assertIn("manual", html)
         self.assertTrue("仅观察" in html or "不可交易" in html)
         self.assertIn('data-evidence-target="widget:W24"', html)
@@ -2706,9 +2832,98 @@ class W25CommandRenderTest(unittest.TestCase):
 
         self.assertNotIn("_error", html)
         self.assertIn("统一事实包不可用", html)
-        self.assertIn("ai_context", html)
+        self.assertIn("事实包", html)
         self.assertIn("missing", html)
         self.assertIn('data-evidence-target="widget:W20"', html)
+
+    def test_noise_reduced_first_screen_uses_business_actions(self):
+        fixture = {
+            "ai_context": {
+                "schema_version": "2.0",
+                "situation": {
+                    "trade_entry_allowed": False,
+                    "trade_entry_reason": "账户估值或行情数据不可信",
+                },
+                "freshness": {
+                    "account": {"status": "error", "detail": "valuation_complete is false"},
+                    "quotes": {"status": "close_snapshot", "detail": "post-close snapshot"},
+                    "iwencai": {"status": "dead", "detail": "2026-06-21T12:51:30+08:00"},
+                    "baseline": {"status": "stale", "detail": "-"},
+                    "tickets": {"status": "ok", "trading": False, "detail": "pending 0"},
+                    "llm": {"status": "unknown", "detail": ""},
+                },
+                "tickets": {"executable": 0, "total": 0},
+            },
+            "pnl_live": {
+                "total_asset": 720000,
+                "cash": 410000,
+                "mv": 306000,
+                "pos_pct": 42.5,
+                "pnl_pct": 0,
+                "quote_status": "close_snapshot",
+                "valuation_complete": False,
+                "block_reason": "账户估值或行情数据不可信",
+            },
+            "sentiment": {"情绪值": 39},
+            "rule_state": {"tradable": False, "caps": {"total_pct": 0}, "blocks": [
+                {"code": "DATA_UNTRUSTED", "message": "账户估值或行情数据不可信"}
+            ]},
+        }
+        extra_js = (ROOT / "evidence-summary.js").read_text(encoding="utf-8")
+        result = _render_widget("evidence-board.js", "W25", fixture, extra_js=extra_js)
+        html = result.get("html", "")
+
+        self.assertNotIn("_error", html)
+        self.assertIn("打开风控门禁", html)
+        self.assertIn("核对账户持仓", html)
+        self.assertIn("先打开风控门禁", html)
+        self.assertIn("风控门禁 · W14", html)
+        self.assertIn("账户持仓 · W15", html)
+        self.assertIn('class="evidence-primary-actions"', html)
+        self.assertIn('data-evidence-target="widget:W14"', html)
+        self.assertIn('data-evidence-target="widget:W15"', html)
+
+    def test_noise_reduced_a1_and_f1_are_compact(self):
+        fixture = {
+            "ai_context": {
+                "schema_version": "2.0",
+                "situation": {
+                    "trade_entry_allowed": False,
+                    "trade_entry_reason": "账户估值或行情数据不可信",
+                },
+                "freshness": {
+                    "account": {"status": "error", "detail": "valuation_complete is false"},
+                    "quotes": {"status": "close_snapshot", "detail": "post-close snapshot"},
+                    "iwencai": {"status": "dead", "detail": "sentiment stale"},
+                    "baseline": {"status": "stale", "detail": "-"},
+                    "tickets": {"status": "ok", "trading": False, "detail": "pending 0"},
+                    "llm": {"status": "unknown", "detail": ""},
+                },
+                "tickets": {"executable": 0, "total": 0},
+                "risks": [
+                    {"title": "系统关键链路阻断", "reason": "account unavailable", "target": "W14"},
+                    {"title": "规则阻断", "reason": "DATA_UNTRUSTED", "target": "W14"},
+                    {"title": "行情不可交易", "reason": "close snapshot", "target": "W15"},
+                ],
+                "alerts": [
+                    {"title": "情绪源失效", "reason": "iwencai dead", "target": "W04"},
+                ],
+            },
+            "pnl_live": {"quote_status": "close_snapshot", "valuation_complete": False},
+            "rule_state": {"tradable": False, "caps": {"total_pct": 0}, "blocks": []},
+        }
+        extra_js = (ROOT / "evidence-summary.js").read_text(encoding="utf-8")
+        result = _render_widget("evidence-board.js", "W25", fixture, extra_js=extra_js)
+        html = result.get("html", "")
+
+        self.assertIn("可交易", html)
+        self.assertIn("需复核", html)
+        self.assertIn("系统阻断", html)
+        self.assertIn("数据不可交易", html)
+        self.assertLessEqual(html.count("evidence-queue-item"), 3)
+        self.assertLessEqual(html.count("evidence-freshness-row"), 4)
+        self.assertNotIn("<span>tickets</span>", html)
+        self.assertNotIn("<span>llm</span>", html)
 
 
 class ReadOnlyInsightUxTest(unittest.TestCase):
@@ -2981,9 +3196,11 @@ assert.notStrictEqual(registry.getMeta(groups.first_screen[0].id).title, '污染
         theme = (ROOT / "css" / "theme.css").read_text(encoding="utf-8")
         self.assertIn('body.cockpit-mode .grid-stack-item[gs-id="W25"] .evidence-dashboard-hero', theme)
         self.assertIn('body.cockpit-mode .grid-stack-item[gs-id="W25"] .evidence-gate-row', theme)
+        self.assertIn('body.cockpit-mode .grid-stack-item[gs-id="W25"] .evidence-gate-row{display:none}', theme)
         self.assertIn('body.cockpit-mode .grid-stack-item[gs-id="W25"] .evidence-dashboard-grid', theme)
         self.assertIn('body.cockpit-mode .grid-stack-item[gs-id="W25"] .evidence-command-cockpit', theme)
         self.assertIn('body.cockpit-mode .grid-stack-item[gs-id="W25"] .evidence-freshness-panel', theme)
+        self.assertIn('grid-template-columns:auto minmax(86px,.82fr)', theme)
         command_cockpit = theme[
             theme.index('body.cockpit-mode .grid-stack-item[gs-id="W25"] .evidence-command-cockpit{'):
             theme.index('body.cockpit-mode .grid-stack-item[gs-id="W25"] .evidence-queue-panel{')
