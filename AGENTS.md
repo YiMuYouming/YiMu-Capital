@@ -49,7 +49,7 @@ python3 scripts/ops/close_day.py --apply
 这不是硬分工，主人可以随时调整；当前只是默认倾向：
 
 - 欧米：方案、复杂代码、审查、兜底。
-- 洋米：终端执行、部署验证、脚本落地；盯盘/交易动作先走 `docs/ops/yangmi-ai-context-runbook.md` 的规则门边界，再读 `/api/ai/context`。
+- 洋米：终端执行、部署验证、脚本落地；盯盘/交易动作先走 `docs/ops/yangmi-ai-context-runbook.md`，按 Rule 2.0 读取 `AGENT_QUICKSTART.md` / `compiled/rules.v1.json` / 规则门边界，再读 `/api/ai/context`。
 - 稳米：复盘、文档、流程；复盘前优先读 `data/review_packets/YYYY-MM-DD/review_source_packet.json`。
 - 黑米：小范围前端/IDE 快改。
 - 紫米：云端运维、异步陪伴、轻量查询。
@@ -61,7 +61,7 @@ python3 scripts/ops/close_day.py --apply
 - `README.md`：完整项目结构、打开方式、API、数据备份、故障排查。
 - `docs/ops/three-end-code-sync-runbook.md`：本地/GitHub/Hermes 三端代码一致流程。
 - `docs/ops/2026-05-28-cloud-data-sync-runbook.md`：开盘、收盘、云端数据同步 runbook。
-- `docs/ops/yangmi-ai-context-runbook.md`：洋米/盯盘 agent 读取 `/api/ai/context` 的规范。
+- `docs/ops/yangmi-ai-context-runbook.md`：洋米/盯盘 agent 读取 Rule 2.0 快速入口和 `/api/ai/context` 的规范。
 - `docs/audit/2026-06-20-dashboard-3-closeout.md`：Dashboard 3.0 Phase 3 收口基线。
 
 ## 最小排障入口
