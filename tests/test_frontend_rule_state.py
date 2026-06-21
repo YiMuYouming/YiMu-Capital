@@ -2335,6 +2335,8 @@ class EvidenceBoardWidgetTest(unittest.TestCase):
         self.assertIn("收盘快照", html)
         self.assertIn("evidence-dashboard-hero", html)
         self.assertIn("盘中裁决", html)
+        self.assertIn("evidence-gate-details", html)
+        self.assertIn("门禁明细", html)
         self.assertIn("evidence-gate-row", html)
         self.assertIn("数据可信", html)
         self.assertIn("规则门禁", html)
@@ -3195,11 +3197,42 @@ assert.notStrictEqual(registry.getMeta(groups.first_screen[0].id).title, '污染
     def test_cockpit_density_styles_keep_fixed_panels_compact(self):
         theme = (ROOT / "css" / "theme.css").read_text(encoding="utf-8")
         self.assertIn('body.cockpit-mode .grid-stack-item[gs-id="W25"] .evidence-dashboard-hero', theme)
+        self.assertIn('.evidence-board{container-type:inline-size;', theme)
+        self.assertIn('.evidence-gate-details', theme)
+        self.assertIn('body.cockpit-mode .grid-stack-item[gs-id="W25"] .evidence-gate-details{display:none}', theme)
+        hero_block = theme[
+            theme.index('.evidence-dashboard-hero{'):
+            theme.index('.evidence-dashboard-hero::before{')
+        ]
+        self.assertIn('flex:0 0 auto', hero_block)
+        w25_metrics_marker = '\n.grid-stack-item[gs-id="W25"] .evidence-dashboard-metrics{'
+        w25_metrics = theme[
+            theme.index(w25_metrics_marker):
+            theme.index('\n.grid-stack-item[gs-id="W25"] .evidence-dashboard-metrics div{')
+        ]
+        self.assertIn('grid-template-columns:repeat(4,minmax(0,1fr))', w25_metrics)
+        self.assertIn('align-self:start', w25_metrics)
+        self.assertIn('align-content:start', w25_metrics)
+        default_command_cockpit = theme[
+            theme.index('.evidence-dashboard-grid,\n.evidence-command-cockpit{'):
+            theme.index('.evidence-queue-panel,')
+        ]
+        self.assertIn('grid-template-columns:minmax(0,1.05fr) minmax(0,.9fr) minmax(0,1fr) minmax(0,.72fr)', default_command_cockpit)
+        self.assertNotIn('minmax(320px', default_command_cockpit)
+        self.assertIn('@container (max-width: 920px)', theme)
+        self.assertIn('@container (max-width: 560px)', theme)
+        self.assertIn('body.cockpit-mode .grid-stack-item[gs-id="W25"] .evidence-dashboard-hero', theme)
+        self.assertIn('body.cockpit-mode .grid-stack-item[gs-id="W25"] .evidence-command-cockpit', theme)
+        self.assertIn('grid-template-areas:"queue" "freshness" "source" "focus"', theme)
+        self.assertIn('grid-template-rows:none', theme)
+        self.assertIn('min-height:84px', theme)
+        self.assertIn('flex:0 0 auto', theme)
         self.assertIn('body.cockpit-mode .grid-stack-item[gs-id="W25"] .evidence-gate-row', theme)
         self.assertIn('body.cockpit-mode .grid-stack-item[gs-id="W25"] .evidence-gate-row{display:none}', theme)
         self.assertIn('body.cockpit-mode .grid-stack-item[gs-id="W25"] .evidence-dashboard-grid', theme)
         self.assertIn('body.cockpit-mode .grid-stack-item[gs-id="W25"] .evidence-command-cockpit', theme)
         self.assertIn('body.cockpit-mode .grid-stack-item[gs-id="W25"] .evidence-freshness-panel', theme)
+        self.assertIn('min-height:42px', theme)
         self.assertIn('grid-template-columns:auto minmax(86px,.82fr)', theme)
         command_cockpit = theme[
             theme.index('body.cockpit-mode .grid-stack-item[gs-id="W25"] .evidence-command-cockpit{'):
@@ -3214,6 +3247,8 @@ assert.notStrictEqual(registry.getMeta(groups.first_screen[0].id).title, '污染
         self.assertIn('body.cockpit-mode .grid-stack-item[gs-id="W25"] .evidence-command-cockpit', narrow_cockpit)
         self.assertIn('grid-template-columns:1fr', narrow_cockpit)
         self.assertIn('grid-template-areas:"queue" "freshness" "source" "focus"', narrow_cockpit)
+        self.assertIn('@media(max-width:760px){\n  .grid-stack-item[gs-id="W25"] .evidence-dashboard-metrics{', theme)
+        self.assertIn('grid-template-columns:repeat(2,minmax(0,1fr))', theme)
         self.assertIn('grid-template-columns:repeat(auto-fit,minmax(118px,1fr))', theme)
         self.assertIn('grid-template-areas:"queue phase" "queue source"', theme)
         self.assertIn('body.cockpit-mode .grid-stack-item[gs-id="W25"] .evidence-board', theme)

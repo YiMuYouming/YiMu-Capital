@@ -278,7 +278,9 @@ class EvidenceBoardWidget extends YiMuWidget {
           '<div><span>交易入口</span><strong>' + _evEsc(headline) + '</strong><em>' + _evEsc(tradeSource) + '</em></div>' +
         '</div>' +
       '</div>' +
-      '<div class="evidence-gate-row">' + gates.map(this._gate, this).join('') + '</div>' +
+      '<details class="evidence-gate-details"><summary><span>门禁明细</span><b>G1-G5</b></summary>' +
+        '<div class="evidence-gate-row">' + gates.map(this._gate, this).join('') + '</div>' +
+      '</details>' +
       '<div class="evidence-command-cockpit">' +
         '<section class="evidence-queue-panel"><div class="evidence-section-title"><span>A1 优先处理</span><span>' + queue.length + '</span></div>' + queue.map(this._queueItem, this).join('') + '</section>' +
         '<section class="evidence-freshness-panel"><div class="evidence-section-title"><span>F1 数据可信</span><span>' + freshnessRows.length + '</span></div>' + this._freshnessSummary(freshnessSummary) + freshnessRows.map(this._freshnessRow, this).join('') + '</section>' +
