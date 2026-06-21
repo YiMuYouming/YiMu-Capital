@@ -244,6 +244,39 @@
     });
     return (queue.length ? queue : fallbackQueue).slice(0, 5);
   }
+  function fallbackContextFreshnessRows(fallbackRows) {
+    return [{
+      id: 'ai_context',
+      source: '/api/ai/context',
+      status: 'missing',
+      trading: false,
+      detail: '统一事实包不可用，当前使用本地组件回退裁决',
+      tone: 'blocked'
+    }].concat(fallbackRows || []);
+  }
+  function fallbackContextQueue(fallbackQueue) {
+    fallbackQueue = fallbackQueue || [];
+    var contextTask = action('', '复核统一事实包', 'W20', '/api/ai/context 不可用，当前裁决来自本地回退', 'warn');
+    var queue = [];
+    function pushRenumbered(item) {
+      queue.push(action(
+        'Q' + (queue.length + 1),
+        item.title,
+        item.target,
+        item.reason,
+        item.tone
+      ));
+    }
+    if (fallbackQueue[0] && fallbackQueue[0].tone === 'danger') {
+      pushRenumbered(fallbackQueue[0]);
+      pushRenumbered(contextTask);
+      fallbackQueue.slice(1, 4).forEach(pushRenumbered);
+      return queue;
+    }
+    pushRenumbered(contextTask);
+    fallbackQueue.slice(0, 4).forEach(pushRenumbered);
+    return queue;
+  }
   function focusWidgets(command, queue, freshnessRows) {
     var out = [];
     function add(wid) {
@@ -449,9 +482,9 @@
     actionQueue.push(action('Q' + (actionQueue.length + 1), '核对市场温度', 'W04', '情绪 ' + situation.sentiment.text + ' / ' + phase.label, 'neutral'));
 
     var ctx = aiContext(data);
-    var normalizedFreshnessRows = ctx ? freshnessRowsFromContext(ctx) : fallbackFreshnessRows(data, quoteStatus, valuationComplete);
+    var normalizedFreshnessRows = ctx ? freshnessRowsFromContext(ctx) : fallbackContextFreshnessRows(fallbackFreshnessRows(data, quoteStatus, valuationComplete));
     var normalizedCommand = ctx ? commandFromAiContext(ctx, command) : command;
-    var normalizedQueue = ctx ? queueFromAiContext(ctx, actionQueue) : actionQueue.slice(0, 5);
+    var normalizedQueue = ctx ? queueFromAiContext(ctx, actionQueue) : fallbackContextQueue(actionQueue);
 
     return {
       command_source: ctx ? 'ai_context' : 'fallback',

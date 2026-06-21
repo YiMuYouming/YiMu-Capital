@@ -85,7 +85,8 @@ class EvidenceBoardWidget extends YiMuWidget {
       account: 'W15',
       baseline: 'W14',
       tickets: 'W24',
-      llm: 'W20'
+      llm: 'W20',
+      ai_context: 'W20'
     };
     return map[id] || '';
   }

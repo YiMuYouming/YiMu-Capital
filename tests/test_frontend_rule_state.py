@@ -2561,6 +2561,44 @@ console.log(JSON.stringify(summary));
         self.assertEqual(rows["tickets"]["status"], "unknown")
         self.assertFalse(rows["tickets"]["trading"])
 
+    def test_missing_ai_context_is_explicit_fallback_task_and_freshness(self):
+        summary = self._build_summary({
+            "pnl_live": {"valuation_complete": True, "quote_status": "live"},
+            "trade_tickets": [],
+            "rule_state": {"tradable": True, "caps": {"total_pct": 40}, "blocks": []},
+        }, {"healthConfirmed": True, "tradeEntryAllowed": True})
+
+        rows = {row["id"]: row for row in summary["freshness_rows"]}
+        self.assertEqual(summary["command_source"], "fallback")
+        self.assertEqual(rows["ai_context"]["status"], "missing")
+        self.assertFalse(rows["ai_context"]["trading"])
+        self.assertIn("统一事实包不可用", rows["ai_context"]["detail"])
+        self.assertEqual(summary["action_queue"][0]["target"], "W20")
+        self.assertIn("统一事实包", summary["action_queue"][0]["title"])
+
+    def test_missing_ai_context_does_not_hide_fallback_block_reason(self):
+        summary = self._build_summary({
+            "pnl_live": {
+                "valuation_complete": False,
+                "quote_status": "close_snapshot",
+                "block_reason": "账户估值或行情数据不可信",
+            },
+            "rule_state": {
+                "tradable": False,
+                "caps": {"total_pct": 0},
+                "blocks": [{"code": "DATA_UNTRUSTED", "message": "账户估值或行情数据不可信"}],
+            },
+        }, {"healthConfirmed": True, "tradeEntryAllowed": False, "connectionStatus": "close_snapshot"})
+
+        queue = summary["action_queue"]
+        self.assertEqual(queue[0]["id"], "Q1")
+        self.assertEqual(queue[0]["target"], "W14")
+        self.assertEqual(queue[0]["tone"], "danger")
+        self.assertIn("DATA_UNTRUSTED", queue[0]["reason"])
+        self.assertEqual(queue[1]["id"], "Q2")
+        self.assertEqual(queue[1]["target"], "W20")
+        self.assertIn("统一事实包", queue[1]["title"])
+
     def test_ai_context_risks_and_alerts_enter_action_queue(self):
         summary = self._build_summary({
             "ai_context": {
@@ -2646,6 +2684,31 @@ class W25CommandRenderTest(unittest.TestCase):
         self.assertIn('data-evidence-target="widget:W24"', html)
         self.assertIn('data-evidence-target="widget:W20"', html)
         self.assertIn('data-evidence-target="widget:W14"', html)
+
+    def test_fallback_render_makes_missing_ai_context_visible(self):
+        fixture = {
+            "pnl_live": {
+                "total_asset": 720000,
+                "cash": 520000,
+                "mv": 200000,
+                "pos_pct": 27.7,
+                "pnl_pct": -0.21,
+                "quote_status": "live",
+                "valuation_complete": True,
+            },
+            "sentiment": {"情绪值": 59},
+            "iwencai": {"涨停家数": 46, "跌停家数": 2},
+            "rule_state": {"tradable": True, "caps": {"total_pct": 40}, "blocks": []},
+        }
+        extra_js = (ROOT / "evidence-summary.js").read_text(encoding="utf-8")
+        result = _render_widget("evidence-board.js", "W25", fixture, extra_js=extra_js)
+        html = result.get("html", "")
+
+        self.assertNotIn("_error", html)
+        self.assertIn("统一事实包不可用", html)
+        self.assertIn("ai_context", html)
+        self.assertIn("missing", html)
+        self.assertIn('data-evidence-target="widget:W20"', html)
 
 
 class ReadOnlyInsightUxTest(unittest.TestCase):
