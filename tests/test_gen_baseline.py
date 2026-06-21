@@ -105,6 +105,78 @@ class TestGenBaseline(unittest.TestCase):
         self.assertGreaterEqual(len(trend), 1)
         self.assertEqual(trend[0].get("标的"), "北方华创")
 
+    def test_parse_appendix_pools_keeps_today_action_fields(self):
+        note = """---
+date: 2026-06-21
+---
+# test
+
+## 数据附录（机器解析用）
+
+### 连板自选池
+| 标的 | 代码 | 板块 | 今日定位 | 窗口 | 今日检查 | 触发/失效 | 涨幅 | 收盘价 | MA5 | 量比 | 换手 | 备注 |
+|------|------|------|----------|------|----------|-----------|------|--------|-----|------|------|------|
+| 雷赛智能 | 002979 | 机器人 | W1标的 | W1 | 封板强度 | 触发：高开3-7%；失效：炸板率>30% | +2.1% | 12.34 | 12.00 | 1.2 | 8% | 今日看封板延续 |
+
+### 趋势自选池
+| 标的 | 代码 | 板块 | 今日定位 | 窗口 | 今日检查 | 触发/失效 | 涨幅 | 收盘价 | MA5 | MA20 | 量比 | 换手 | 备注 |
+|------|------|------|----------|------|----------|-----------|------|--------|-----|------|------|------|------|
+| 北方华创 | 002371 | 半导体 | W2标的 | W2 | 回踩5日线 | 触发：缩量企稳；失效：放量破位 | -1.0% | 300.00 | 298.00 | 280.00 | 0.7 | 3% | 今日只看回踩确认 |
+"""
+        with tempfile.NamedTemporaryFile("w", suffix=".md", delete=False) as f:
+            f.write(note)
+            path = f.name
+        try:
+            appendix = parse_appendix(path)
+        finally:
+            Path(path).unlink(missing_ok=True)
+
+        lianban = appendix.get("lianban_pool", [])
+        trend = appendix.get("trend_pool", [])
+        self.assertEqual(lianban[0].get("今日定位"), "W1标的")
+        self.assertEqual(lianban[0].get("今日检查"), "封板强度")
+        self.assertIn("失效", lianban[0].get("触发/失效", ""))
+        self.assertEqual(trend[0].get("今日定位"), "W2标的")
+        self.assertEqual(trend[0].get("今日检查"), "回踩5日线")
+        self.assertIn("缩量企稳", trend[0].get("触发/失效", ""))
+
+    def test_parse_appendix_legacy_pool_rows_are_observation_only(self):
+        note = """---
+date: 2026-06-21
+---
+# test
+
+## 数据附录
+
+### 连板自选池
+| 标的 | 代码 | 板块 | 角色 | 操作 | 涨幅 | 收盘价 | MA5 | 量比 | 换手 | 备注 |
+|------|------|------|------|------|------|--------|-----|------|------|------|
+| 雷赛智能 | 002979 | 机器人 | 1进2 | 追涨 | +2.1% | 12.34 | 12.00 | 1.2 | 8% | 旧表 |
+
+### 趋势自选池
+| 标的 | 代码 | 板块 | 角色 | 操作 | 涨幅 | 收盘价 | MA5 | MA20 | 量比 | 换手 | 备注 |
+|------|------|------|------|------|------|--------|-----|------|------|------|------|
+| 北方华创 | 002371 | 半导体 | 趋势 | W2买入 | -1.0% | 300.00 | 298.00 | 280.00 | 0.7 | 3% | 旧表 |
+"""
+        with tempfile.NamedTemporaryFile("w", suffix=".md", delete=False) as f:
+            f.write(note)
+            path = f.name
+        try:
+            appendix = parse_appendix(path)
+        finally:
+            Path(path).unlink(missing_ok=True)
+
+        lianban = appendix.get("lianban_pool", [])[0]
+        trend = appendix.get("trend_pool", [])[0]
+        self.assertTrue(lianban.get("derived_from_legacy_fields"))
+        self.assertEqual(lianban.get("今日定位"), "观察标")
+        self.assertIn("旧字段兼容", lianban.get("今日检查", ""))
+        self.assertIn("只观察", lianban.get("触发/失效", ""))
+        self.assertTrue(trend.get("derived_from_legacy_fields"))
+        self.assertEqual(trend.get("今日定位"), "观察标")
+        self.assertIn("旧字段兼容", trend.get("今日检查", ""))
+        self.assertIn("只观察", trend.get("触发/失效", ""))
+
     def test_parse_appendix_sectors(self):
         appendix = parse_appendix(str(FIXTURE))
         sectors = appendix.get("sectors", [])

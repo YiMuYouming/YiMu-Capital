@@ -622,8 +622,8 @@ class CandidatePoolWidgetTest(unittest.TestCase):
     def test_w12_lianban_pool_shows_summary_and_escapes_rows(self):
         fixture = {
             "lianban_pool": [
-                {"标的": "<img src=x onerror=alert(1)>", "代码": "000001", "板块": "科技", "窗口": "W1", "角色": "1进2", "操作": "追涨", "涨幅": "+4.2%"},
-                {"标的": "测试B", "代码": "000002", "板块": "消费", "窗口": "W2", "角色": "观察", "操作": "只盯", "涨幅": "-1.1%"},
+                {"标的": "<img src=x onerror=alert(1)>", "代码": "000001", "板块": "科技", "窗口": "W1", "今日定位": "W1标的", "今日检查": "封板强度", "触发/失效": "触发：高开3-7%；失效：炸板率超过30%", "涨幅": "+4.2%"},
+                {"标的": "测试B", "代码": "000002", "板块": "消费", "窗口": "W2", "今日定位": "观察标", "今日检查": "分歧承接", "触发/失效": "只盯不买", "涨幅": "-1.1%"},
             ],
             "live_quotes": {"000001": {"涨幅": "+5.0%", "最新价": "10.2"}},
         }
@@ -639,13 +639,19 @@ class CandidatePoolWidgetTest(unittest.TestCase):
         self.assertNotIn("alert(", html, f"W12 不应显示污染脚本文案: {html[:900]}")
         self.assertIn("测试B", html)
         self.assertIn("000001", html)
+        self.assertIn("今日定位", html)
+        self.assertIn("今日检查", html)
+        self.assertIn("触发/失效", html)
+        self.assertIn("W1标的", html)
+        self.assertIn("封板强度", html)
+        self.assertIn("炸板率", html)
         self.assertIn(".candidate-brief-grid", theme)
 
     def test_w13_trend_pool_shows_summary_and_escapes_rows(self):
         fixture = {
             "trend_pool": [
-                {"标的": "趋势A", "代码": "000003", "板块": "AI", "窗口": "W2", "角色": "持仓", "操作": "买入", "涨幅": "+2.3%"},
-                {"标的": "趋势B", "代码": "000004", "板块": "<script>alert(2)</script>", "窗口": "观察", "角色": "观察", "操作": "等待", "涨幅": "-0.5%"},
+                {"标的": "趋势A", "代码": "000003", "板块": "AI", "窗口": "W2", "今日定位": "持仓处理", "今日检查": "回踩5日线", "触发/失效": "触发：缩量企稳；失效：放量破位", "涨幅": "+2.3%"},
+                {"标的": "趋势B", "代码": "000004", "板块": "<script>alert(2)</script>", "窗口": "观察", "今日定位": "观察标", "今日检查": "板块未退潮", "触发/失效": "等待确认", "涨幅": "-0.5%"},
             ],
             "live_quotes": {"000003": {"涨幅": "+3.0%", "最新价": "20.1"}},
         }
@@ -660,6 +666,29 @@ class CandidatePoolWidgetTest(unittest.TestCase):
         self.assertNotIn("alert(", html, f"W13 不应显示污染脚本文案: {html[:900]}")
         self.assertIn("趋势A", html)
         self.assertIn("000004", html)
+        self.assertIn("今日定位", html)
+        self.assertIn("今日检查", html)
+        self.assertIn("触发/失效", html)
+        self.assertIn("持仓处理", html)
+        self.assertIn("回踩5日线", html)
+        self.assertIn("放量破位", html)
+
+    def test_w12_w13_legacy_pool_rows_are_observation_only(self):
+        fixture = {
+            "lianban_pool": [
+                {"标的": "旧连板", "代码": "000005", "板块": "机器人", "窗口": "W1", "角色": "1进2", "操作": "追涨", "涨幅": "+1.0%"},
+            ],
+            "trend_pool": [
+                {"标的": "旧趋势", "代码": "000006", "板块": "半导体", "窗口": "W2", "角色": "趋势", "操作": "买入", "涨幅": "-0.3%"},
+            ],
+            "live_quotes": {},
+        }
+        w12 = _render_widget("lianban-pool.js", "W12", fixture).get("html", "")
+        w13 = _render_widget("trend-pool.js", "W13", fixture).get("html", "")
+        self.assertIn("旧字段兼容", w12)
+        self.assertIn("只观察", w12)
+        self.assertIn("旧字段兼容", w13)
+        self.assertIn("只观察", w13)
 
 
 class AttackDirectionWidgetTest(unittest.TestCase):
@@ -2102,7 +2131,10 @@ class W1TradeEntryGateTest(unittest.TestCase):
             "iwencai": {"涨停家数": 54, "一进二晋级率": 0.4},
             "live_index": {}, "live_quotes": {},
             "lianban_pool": [
-                {"标的": "测试连板", "代码": "000001", "板块": "科技", "角色": "1进2", "窗口": "W1", "涨幅": "+4"}
+                {"标的": "测试连板", "代码": "000001", "板块": "科技",
+                 "今日定位": "1进2", "今日检查": "高开3-7%且量比>1.5",
+                 "触发/失效": "触发：高开3-7%；失效：炸板率超过30%",
+                 "窗口": "W1", "涨幅": "+4"}
             ],
             "trend_pool": [],
             "trade_entry_allowed": True,
@@ -2118,6 +2150,55 @@ class W1TradeEntryGateTest(unittest.TestCase):
         self.assertLess(html.index("window-command"), html.index("情绪≥60%"),
                         f"W08 验收卡应在细节信号前: {html[:900]}")
         self.assertIn(".window-command-grid", theme)
+
+    def test_w1_legacy_role_action_is_observation_only(self):
+        fixture = {
+            "rule_state": {
+                "version": "g1a-v1", "tradable": True,
+                "caps": {"base_total_pct": 40, "total_pct": 20},
+                "windows": {"w1": {"in_session": True, "buy_allowed": True},
+                            "w2": {"in_session": False, "buy_allowed": False}},
+                "blocks": [], "warnings": [],
+            },
+            "sentiment": {"情绪值": 65, "昨日涨停收益": "3.2%", "最高板": "4板"},
+            "market": {"涨停家数": 54, "炸板率": "18%"},
+            "iwencai": {"涨停家数": 54, "一进二晋级率": 0.4},
+            "live_index": {},
+            "live_quotes": {"000001": {"涨幅": "+4.5%", "量比": 2.0}},
+            "lianban_pool": [
+                {"标的": "旧连板", "代码": "000001", "板块": "科技",
+                 "角色": "1进2", "操作": "追涨", "窗口": "W1", "涨幅": "+4.5"}
+            ],
+            "trend_pool": [],
+            "trade_entry_allowed": True,
+        }
+        result = _render_widget("w1-check.js", "W08", fixture)
+        html = result.get("html", "")
+        self.assertIn("只观察", html, f"W08 旧角色/操作应降级只观察: {html[:900]}")
+        self.assertNotIn("追涨</div>", html, f"W08 旧字段不得生成追涨状态: {html[:900]}")
+
+    def test_w1_legacy_trend_row_does_not_show_entry_button(self):
+        fixture = {
+            "rule_state": {
+                "version": "g1a-v1", "tradable": True,
+                "caps": {"base_total_pct": 40, "total_pct": 20},
+                "windows": {"w1": {"in_session": True, "buy_allowed": True},
+                            "w2": {"in_session": False, "buy_allowed": False}},
+                "blocks": [], "warnings": [],
+            },
+            "sentiment": {"情绪值": 65},
+            "live_index": {},
+            "live_quotes": {"000002": {"最新价": 10.5, "涨幅": "+2.0%"}},
+            "lianban_pool": [],
+            "trend_pool": [{"标的": "旧趋势W1", "代码": "000002", "板块": "科技",
+                             "角色": "持仓", "操作": "买入", "窗口": "W1",
+                             "涨幅": "+2.0", "MA5": 10.0}],
+            "trade_entry_allowed": True,
+        }
+        result = _render_widget("w1-check.js", "W08", fixture)
+        html = result.get("html", "")
+        self.assertIn("旧趋势W1", html, f"W08 应展示旧趋势行供观察: {html[:900]}")
+        self.assertNotIn("_prefillW15", html, f"W08 旧趋势行不得生成录入入口: {html[:900]}")
 
 
 class W2TradeEntryGateTest(unittest.TestCase):
@@ -2152,9 +2233,11 @@ class W2TradeEntryGateTest(unittest.TestCase):
             "sentiment": {"情绪值": 65},
             "live_index": {}, "live_quotes": {},
             "lianban_pool": [{"标的": "测试连板", "代码": "000001", "板块": "科技",
-                               "角色": "情绪标", "涨幅": "+3"}],
+                               "今日定位": "情绪标", "今日检查": "板块龙头存活",
+                               "触发/失效": "只盯不买", "涨幅": "+3"}],
             "trend_pool": [{"标的": "测试趋势", "代码": "000002", "板块": "科技",
-                             "角色": "持仓", "涨幅": "-2"}],
+                             "今日定位": "持仓处理", "今日检查": "60mMA10回踩",
+                             "触发/失效": "触发：缩量企稳；失效：放量破位", "涨幅": "-2"}],
             "trade_entry_allowed": True,
         }
         result = _render_widget("w2-check.js", "W09", fixture)
@@ -2177,7 +2260,9 @@ class W2TradeEntryGateTest(unittest.TestCase):
             },
             "lianban_pool": [],
             "trend_pool": [{"标的": "测试趋势", "代码": "000002", "板块": "科技",
-                             "角色": "持仓", "窗口": "W2", "涨幅": "+1.2", "MA5": 10.0}],
+                             "今日定位": "持仓处理", "今日检查": "回踩确认",
+                             "触发/失效": "触发：缩量企稳；失效：跌破MA10",
+                             "窗口": "W2", "涨幅": "+1.2", "MA5": 10.0}],
             "trade_entry_allowed": True,
         }
         result = _render_widget("w2-check.js", "W09", fixture)
@@ -2191,6 +2276,32 @@ class W2TradeEntryGateTest(unittest.TestCase):
         self.assertLess(html.index("window-command"), html.index("趋势 W2"),
                         f"W09 验收卡应在候选明细前: {html[:900]}")
         self.assertIn(".window-command-grid", theme)
+
+    def test_w2_legacy_role_action_is_observation_only(self):
+        fixture = {
+            "rule_state": {
+                "version": "g1a-v1", "tradable": True,
+                "caps": {"base_total_pct": 40, "total_pct": 20},
+                "windows": {"w1": {"in_session": False, "buy_allowed": False},
+                            "w2": {"in_session": True, "buy_allowed": True}},
+                "blocks": [], "warnings": [],
+            },
+            "sentiment": {"情绪值": 65, "昨日涨停收益": "3.2%", "赚钱效应": "好"},
+            "live_index": {"上涨家数": 3000, "下跌家数": 1800},
+            "live_quotes": {
+                "000002": {"最新价": 10.0, "涨幅": "+1.2%", "量比": 0.6,
+                           "MA10_60m": 10.0, "MA10_60m_dir": "向上"}
+            },
+            "lianban_pool": [],
+            "trend_pool": [{"标的": "旧趋势", "代码": "000002", "板块": "科技",
+                             "角色": "持仓", "操作": "买入", "窗口": "W2",
+                             "涨幅": "+1.2", "MA5": 10.0}],
+            "trade_entry_allowed": True,
+        }
+        result = _render_widget("w2-check.js", "W09", fixture)
+        html = result.get("html", "")
+        self.assertIn("观察", html, f"W09 旧角色/操作应降级观察: {html[:900]}")
+        self.assertNotIn("_prefillW15", html, f"W09 旧字段不得生成录入入口: {html[:900]}")
 
 class EvidenceBoardWidgetTest(unittest.TestCase):
     """W25 renders stable S0/E/A/R references for external AI workflows"""

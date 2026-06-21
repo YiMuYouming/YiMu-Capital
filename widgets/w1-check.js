@@ -34,6 +34,28 @@ class W1CheckWidget extends YiMuWidget {
     var lbPool = lbPoolAll.filter(function(s){ var w=s['窗口']||''; return !w||w==='W1'; });
     var trPool = trPoolAll.filter(function(s){ var w=s['窗口']||''; return !w||w==='W1'; });
 
+    function todayRole(s) {
+      if (!s) return '';
+      return String(s['今日定位'] || (legacyOnly(s) ? '观察标' : s['角色']) || '');
+    }
+    function todayTrigger(s) {
+      if (!s) return '';
+      return String(s['触发/失效'] || s['触发失效'] || s['操作'] || '');
+    }
+    function legacyOnly(s) {
+      if (!s) return false;
+      var hasLegacy = !!(s['角色'] || s['操作']);
+      var hasTodayRole = !!s['今日定位'];
+      var hasTrigger = !!(s['触发/失效'] || s['触发失效']);
+      return !!s['derived_from_legacy_fields'] || (hasLegacy && (!hasTodayRole || !hasTrigger));
+    }
+    function observationOnly(s) {
+      var trigger = todayTrigger(s);
+      return legacyOnly(s) || !String(s && (s['触发/失效'] || s['触发失效']) || '').trim() ||
+        trigger.indexOf('只观察') >= 0 || trigger.indexOf('不授权') >= 0 ||
+        trigger.indexOf('只盯') >= 0 || trigger.indexOf('不买') >= 0;
+    }
+
     var initBase = DataStore.getInitialBase();
     var closeS = (initBase && initBase.sentiment) || {};
 
@@ -323,11 +345,12 @@ class W1CheckWidget extends YiMuWidget {
         // 开盘涨幅（定格），用于高开条件判定
         var oq = openQ[code] || liveQ[code] || {};
         var ochg = parseFloat(String(oq['涨幅']||s['涨幅']||'0').replace('%','').replace('+','')) || 0;
-        var role = s['角色'] || '';
-        var op = s['操作'] || '';
+        var role = todayRole(s);
+        var op = todayTrigger(s);
         var sector = s['板块'] || '';
 
-        var isWatch = role.indexOf('情绪标')>=0 || role.indexOf('龙头')>=0 || op.indexOf('只盯')>=0;
+        var isObservation = observationOnly(s);
+        var isWatch = isObservation || role.indexOf('情绪标')>=0 || role.indexOf('龙头')>=0 || op.indexOf('只盯')>=0;
         var isSkip = role.indexOf('移除')>=0 || op.indexOf('不碰')>=0;
         var is3jin4 = !isWatch && !isSkip && (role.indexOf('3进4')>=0 || name.indexOf('华电')>=0);
         var is2jin3 = !isWatch && !isSkip && (role.indexOf('2进3')>=0 || name.indexOf('万控')>=0);
@@ -368,7 +391,8 @@ class W1CheckWidget extends YiMuWidget {
         var stockFail = failCount>0;
 
         var stockStatus, stColor;
-        if (isSkip)       { stockStatus = '不碰'; stColor = 'var(--text-disabled)'; }
+        if (isObservation) { stockStatus = '只观察'; stColor = 'var(--text-secondary)'; }
+        else if (isSkip)       { stockStatus = '不碰'; stColor = 'var(--text-disabled)'; }
         else if (isWatch) { stockStatus = '只盯不买'; stColor = 'var(--text-secondary)'; }
         else if (stockOk) { stockStatus = '追涨'; stColor = 'var(--down)'; }
         else if (stockWait) { stockStatus = '待确认'; stColor = 'var(--warn)'; }
@@ -427,7 +451,7 @@ class W1CheckWidget extends YiMuWidget {
         var price = parseFloat(q['最新价']) || parseFloat(s['收盘价']||s['最新价']) || 0;
         var ma5 = parseFloat(s['MA5']) || 0;
         var distMA5 = ma5>0 ? ((price-ma5)/ma5*100) : null;
-        var holding = (s['角色']||'').indexOf('持仓')>=0 || (s['操作']||'').indexOf('持有')>=0;
+        var holding = !observationOnly(s) && (todayRole(s).indexOf('持仓')>=0 || todayTrigger(s).indexOf('持有')>=0);
 
         var ok = chg >= 0;
         var dotOk = ok;  // 绿涨红跌
@@ -440,7 +464,7 @@ class W1CheckWidget extends YiMuWidget {
           '<span style="font-weight:600;color:'+(chg>=0?'var(--up)':'var(--down)')+'">'+(chg>=0?'+':'')+chg.toFixed(1)+'%</span>'+
           (distMA5!==null?'<span style="font-size:10px;color:var(--text-disabled)">MA5 '+(distMA5>=0?'+':'')+distMA5.toFixed(1)+'%</span>':'<span style="font-size:10px;color:var(--text-disabled)">MA5 —</span>')+
           (s['止损']?'<span style="font-size:10px;color:var(--danger)">止损'+s['止损']+'</span>':'')+
-          ((typeof window === 'undefined' || !window._healthCritical) && w1BuyAllowed && dotOk ? '<button onclick="event.stopPropagation();_prefillW15(\''+(s['标的']||'').replace(/'/g,"\\'")+'\',\''+code+'\',\'W1\',\'W1买入信号：涨幅'+chg.toFixed(1)+'%\')" style="margin-left:4px;background:var(--info);color:#fff;border:none;padding:1px 6px;border-radius:3px;cursor:pointer;font-size:10px;white-space:nowrap">录入</button>' : '')+
+          ((typeof window === 'undefined' || !window._healthCritical) && !observationOnly(s) && w1BuyAllowed && dotOk ? '<button onclick="event.stopPropagation();_prefillW15(\''+(s['标的']||'').replace(/'/g,"\\'")+'\',\''+code+'\',\'W1\',\'W1买入信号：涨幅'+chg.toFixed(1)+'%\')" style="margin-left:4px;background:var(--info);color:#fff;border:none;padding:1px 6px;border-radius:3px;cursor:pointer;font-size:10px;white-space:nowrap">录入</button>' : '')+
           '</div>';
       });
       html += '</div>';

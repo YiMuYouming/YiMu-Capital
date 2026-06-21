@@ -17,6 +17,30 @@ function _lbChgNum(v) {
   return parseFloat(String(v || '').replace('%','').replace('+','')) || 0;
 }
 
+function _lbContract(s) {
+  var todayRole = s['今日定位'];
+  var todayCheck = s['今日检查'];
+  var triggerInvalid = s['触发/失效'] || s['触发失效'];
+  var legacyRole = s['角色'];
+  var legacyAction = s['操作'];
+  var hasLegacy = !!(legacyRole || legacyAction);
+  var hasTodayContract = !!(todayRole || todayCheck || triggerInvalid);
+  if (!hasTodayContract && hasLegacy) {
+    return {
+      role: '观察标',
+      check: '旧字段兼容：需补今日检查',
+      trigger: '缺少新版触发/失效；只观察，不授权买卖',
+      note: (s['备注'] || '') + ' 旧字段：角色=' + (legacyRole || '—') + '；操作=' + (legacyAction || '—')
+    };
+  }
+  return {
+    role: todayRole || legacyRole || '—',
+    check: todayCheck || '—',
+    trigger: triggerInvalid || '缺少触发/失效；只观察，不授权买卖',
+    note: s['备注'] || '—'
+  };
+}
+
 class LianbanPoolWidget extends YiMuWidget {
   constructor(config) {
     super(config);
@@ -42,16 +66,22 @@ class LianbanPoolWidget extends YiMuWidget {
     var quotes = (data && data.live_quotes) || {};
     var self = this;
 
-    var cols = ['标的','板块','涨幅','最新价','量比','换手','MA10(60m)','MA5','角色','操作','备注'];
+    var cols = ['标的','板块','涨幅','最新价','量比','换手','MA10(60m)','MA5','今日定位','窗口','今日检查','触发/失效','备注'];
     var w1Count = pool.filter(function(s){ return (s['窗口'] || '') === 'W1'; }).length;
     var w2Count = pool.filter(function(s){ return (s['窗口'] || '') === 'W2'; }).length;
-    var watchCount = pool.filter(function(s){ return String(s['操作'] || '').indexOf('只盯') >= 0 || String(s['角色'] || '').indexOf('观察') >= 0; }).length;
+    var watchCount = pool.filter(function(s){
+      var c = _lbContract(s);
+      var role = String(c.role || '');
+      var check = String(c.check || '');
+      return check.indexOf('只盯') >= 0 || role.indexOf('观察') >= 0 || role.indexOf('温度') >= 0;
+    }).length;
 
     // 构建行数据
     var rows = pool.map(function(s) {
       var code = _lbCleanText(s['代码'], '');
       var live = quotes[code] || {};
       var chg = live['涨幅'] || s['涨幅'] || '—';
+      var contract = _lbContract(s);
       return {
         code: code,
         cells: {
@@ -63,9 +93,11 @@ class LianbanPoolWidget extends YiMuWidget {
           '换手':   live['换手'] || s['换手'] || '—',
           'MA10(60m)': (live['MA10_60m']||s['MA10_60m']) || '—',
           'MA5':   s['MA5'] || '—',
-          '角色':   s['角色'] || '—',
-          '操作':   s['操作'] || '—',
-          '备注':   s['备注'] || '—'
+          '今日定位': contract.role,
+          '窗口':   s['窗口'] || '—',
+          '今日检查': contract.check,
+          '触发/失效': contract.trigger,
+          '备注':   contract.note
         },
         _chgNum: _lbChgNum(chg)
       };
@@ -81,7 +113,7 @@ class LianbanPoolWidget extends YiMuWidget {
     var sortArrow = self._sortDir === 'asc' ? ' ▲' : (self._sortDir === 'desc' ? ' ▼' : '');
 
     var html = '<div class="candidate-brief candidate-brief-lianban">' +
-      '<div class="candidate-brief-main"><span class="evidence-inline-ref">W12</span><span class="candidate-brief-title">连板池验收</span><em>按窗口、角色和实时涨幅核对。</em></div>' +
+      '<div class="candidate-brief-main"><span class="evidence-inline-ref">W12</span><span class="candidate-brief-title">连板池验收</span><em>按今日定位、触发/失效和实时涨幅核对。</em></div>' +
       '<div class="candidate-brief-grid">' +
         '<div><span>总数</span><b>' + rows.length + '</b></div>' +
         '<div><span>W1</span><b>' + w1Count + '</b></div>' +
@@ -110,7 +142,7 @@ class LianbanPoolWidget extends YiMuWidget {
           var str = String(val);
           cls = str.charAt(0) === '+' ? 'up' : str.charAt(0) === '-' ? 'down' : '';
         }
-        if (key === '操作') {
+        if (key === '今日检查') {
           if (String(val).indexOf('追') >= 0) cls = 'up';
           else if (String(val).indexOf('只盯') >= 0) cls = 'warn';
         }

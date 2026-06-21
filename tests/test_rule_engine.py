@@ -57,12 +57,12 @@ class TestRuleEngine(unittest.TestCase):
         self.assertEqual(result["连板实际"], 75)
         self.assertEqual(result["总仓位上限"], 30)
 
-    def test_friday_trend_cap(self):
+    def test_friday_does_not_cap_trend_by_itself(self):
         fm = {"熔断触发": False, "连亏天数": 0, "晋级率": "50", "weekday": "周五"}
         style = {"连板占比": 75, "趋势占比": 25, "总仓位上限": 30}
         result = compute_style_execution(fm, style)
-        self.assertEqual(result["趋势实际"], 15)
-        self.assertIn("周五", result.get("原因2", ""))
+        self.assertEqual(result["趋势实际"], 25)
+        self.assertNotIn("周五", result.get("原因2", ""))
 
     def test_friday_trend_below_cap(self):
         fm = {"熔断触发": False, "连亏天数": 0, "晋级率": "50", "weekday": "周五"}

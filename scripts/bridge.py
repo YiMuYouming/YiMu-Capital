@@ -561,8 +561,53 @@ def _parse_field_float(raw, default=None):
         return default
 
 
+def _normalize_today_pool_contract(row):
+    today_role = row.get("今日定位")
+    today_check = row.get("今日检查")
+    trigger_invalid = row.get("触发/失效") or row.get("触发失效")
+    legacy_role = row.get("角色")
+    legacy_action = row.get("操作")
+    has_legacy = bool(legacy_role or legacy_action)
+    has_today_role = bool(str(today_role or "").strip())
+    has_trigger = bool(str(trigger_invalid or "").strip())
+    derived = has_legacy and (not has_today_role or not has_trigger)
+    return {
+        "今日定位": today_role if has_today_role else ("观察标" if derived else "—"),
+        "今日检查": today_check or ("旧字段兼容：需补今日检查" if derived else "—"),
+        "触发/失效": trigger_invalid or "缺少新版触发/失效；只观察，不授权买卖",
+        "derived_from_legacy_fields": derived,
+        "legacy_role": legacy_role or "",
+        "legacy_action": legacy_action or "",
+    }
+
+
+def _pool_row_observation_only(row):
+    if not isinstance(row, dict):
+        return True
+    trigger = str(row.get("触发/失效") or row.get("触发失效") or row.get("操作") or "")
+    has_legacy = bool(row.get("角色") or row.get("操作"))
+    has_today_role = bool(str(row.get("今日定位") or "").strip())
+    has_trigger = bool(str(row.get("触发/失效") or row.get("触发失效") or "").strip())
+    has_pool_contract_context = any(k in row for k in (
+        "今日定位", "今日检查", "触发/失效", "触发失效",
+        "derived_from_legacy_fields", "legacy_role", "legacy_action", "角色", "操作",
+    ))
+    return (
+        bool(row.get("derived_from_legacy_fields"))
+        or (has_legacy and (not has_today_role or not has_trigger))
+        or (has_pool_contract_context and not str(row.get("触发/失效") or row.get("触发失效") or "").strip())
+        or "只观察" in trigger
+        or "不授权" in trigger
+        or "只盯" in trigger
+        or "不买" in trigger
+    )
+
+
 def _validate_w1_buy(found, warnings):
     """W1 BUY: 涨幅 3-9.5%，量比、MA10 作为参考"""
+    if _pool_row_observation_only(found):
+        warnings.append("候选池行仅观察/缺少新版触发失效，不授权 BUY")
+        return
     chg = _parse_field_float(found.get("涨幅"), None)
     if chg is None:
         warnings.append("W1 缺涨幅数据")
@@ -575,6 +620,9 @@ def _validate_w1_buy(found, warnings):
 
 def _validate_trend_w2_buy(found, warnings):
     """趋势 W2 BUY（对齐 W09 条件）: MA方向向上 + 距MA10 -1.5%~1.0% + 缩量<0.8 + 未大跌 >-5%"""
+    if _pool_row_observation_only(found):
+        warnings.append("候选池行仅观察/缺少新版触发失效，不授权 BUY")
+        return
     chg = _parse_field_float(found.get("涨幅"), None)
     vr = _parse_field_float(found.get("量比"), None)
     ma10 = _parse_field_float(found.get("MA10_60m"), None)
@@ -619,6 +667,9 @@ def _validate_trend_w2_buy(found, warnings):
 
 def _validate_lianban_w2_buy(found, lb_pool, sentiment_snap, warnings):
     """连板 W2 BUY（对齐 W09 条件）: 分歧回落 + 缩量 + 龙头活 + 非冰点"""
+    if _pool_row_observation_only(found):
+        warnings.append("候选池行仅观察/缺少新版触发失效，不授权 BUY")
+        return
     chg = _parse_field_float(found.get("涨幅"), None)
     vr = _parse_field_float(found.get("量比"), None)
     sector = str(found.get("板块", ""))
@@ -642,7 +693,9 @@ def _validate_lianban_w2_buy(found, lb_pool, sentiment_snap, warnings):
     leader_alive = False
     if sector:
         for s in lb_pool:
-            if str(s.get("板块", "")) == sector and "情绪标" in str(s.get("角色", "")):
+            if (not _pool_row_observation_only(s)
+                    and str(s.get("板块", "")) == sector
+                    and "情绪标" in str(s.get("今日定位") or s.get("角色", ""))):
                 lchg = _parse_field_float(s.get("涨幅"), None)
                 if lchg is not None and lchg >= 3:
                     leader_alive = True
@@ -2453,11 +2506,20 @@ def _build_full_snapshot():
         code = str(s.get('代码', ''))
         q = live_quotes.get(code, {})
         pnl_str = str(q.get('涨幅', '—'))
+        contract = _normalize_today_pool_contract(s)
         lianban_pool.append({
             '标的': s.get('标的', '—'),
             '代码': code,
             '板块': s.get('板块', '—'),
-            '角色': s.get('角色', '—'),
+            '今日定位': contract['今日定位'],
+            '窗口': s.get('窗口', '—'),
+            '今日检查': contract['今日检查'],
+            '触发/失效': contract['触发/失效'],
+            'derived_from_legacy_fields': contract['derived_from_legacy_fields'],
+            'legacy_role': contract['legacy_role'],
+            'legacy_action': contract['legacy_action'],
+            '角色': contract['今日定位'],
+            '操作': contract['触发/失效'],
             '涨幅': pnl_str,
             '量比': q.get('量比', s.get('量比', '—')),
             'MA10_60m': q.get('MA10_60m', '—'),
@@ -2470,11 +2532,20 @@ def _build_full_snapshot():
     for s in (dd.get('trend_pool') or []):
         code = str(s.get('代码', ''))
         q = live_quotes.get(code, {})
+        contract = _normalize_today_pool_contract(s)
         trend_pool.append({
             '标的': s.get('标的', '—'),
             '代码': code,
             '板块': s.get('板块', '—'),
-            '角色': s.get('角色', '—'),
+            '今日定位': contract['今日定位'],
+            '窗口': s.get('窗口', '—'),
+            '今日检查': contract['今日检查'],
+            '触发/失效': contract['触发/失效'],
+            'derived_from_legacy_fields': contract['derived_from_legacy_fields'],
+            'legacy_role': contract['legacy_role'],
+            'legacy_action': contract['legacy_action'],
+            '角色': contract['今日定位'],
+            '操作': contract['触发/失效'],
             '涨幅': q.get('涨幅', '—'),
             '量比': q.get('量比', s.get('量比', '—')),
             'MA10_60m': q.get('MA10_60m', '—'),

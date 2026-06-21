@@ -368,15 +368,6 @@ def evaluate_rule_state(inputs, now=None):
         warnings.append(_finding("CLIMAX_REDUCE", "position", "高潮保护降半仓",
                                  emotion_pct=emotion, min_pct=80, reduced_total_pct=total_cap))
 
-    # ── 周五 ──
-    plan_w1_open = str(time_window.get("w1_status") or "").strip() == "开放"
-    if now.weekday() == 4 and not plan_w1_open:
-        blocks.append(_finding("FRIDAY_W1", "w1", "周五关闭 W1", weekday="周五"))
-        if trend_pct > 15:
-            trend_pct = 15
-            blocks.append(_finding("FRIDAY_TREND_CAP", "position", "周五趋势占比上限 15%",
-                                   trend_pct=style.get("trend_pct"), max_pct=15))
-
     # ── W1 窗口 ──
     if lb_side_cap == 0 and lianban_pct > 0:
         blocks.append(_finding("LIANBAN_SIDE_CLOSED", "lianban", "连板侧仓位关闭",

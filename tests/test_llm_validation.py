@@ -174,6 +174,59 @@ class BuyHardValidationTest(unittest.TestCase):
         self.assertEqual(verified[0]["status"], "⚠️")
         self.assertIn("缺涨", verified[0]["note"])
 
+    def test_buy_legacy_derived_pool_row_is_warning(self):
+        snap = _tradable_snapshot()
+        snap["趋势池"][0].update({
+            "derived_from_legacy_fields": True,
+            "legacy_role": "持仓",
+            "legacy_action": "买入",
+            "触发/失效": "缺少新版触发/失效；只观察，不授权买卖",
+        })
+        signals = [{"type": "BUY", "target": "测试趋势", "code": "000001",
+                     "window": "W2", "direction": "多", "confidence": "高"}]
+        verified = bridge._verify_signals(signals, snap)
+        self.assertEqual(verified[0]["status"], "⚠️")
+        self.assertIn("不授权 BUY", verified[0]["note"])
+
+    def test_buy_missing_trigger_invalid_is_warning(self):
+        snap = _tradable_snapshot()
+        snap["趋势池"][0].update({
+            "今日定位": "持仓处理",
+            "今日检查": "60mMA10回踩",
+        })
+        signals = [{"type": "BUY", "target": "测试趋势", "code": "000001",
+                     "window": "W2", "direction": "多", "confidence": "高"}]
+        verified = bridge._verify_signals(signals, snap)
+        self.assertEqual(verified[0]["status"], "⚠️")
+        self.assertIn("不授权 BUY", verified[0]["note"])
+
+    def test_partial_today_contract_does_not_fallback_to_legacy_role(self):
+        row = {
+            "标的": "半新版",
+            "角色": "持仓",
+            "操作": "买入",
+            "今日检查": "回踩确认",
+            "触发/失效": "触发：缩量企稳；失效：跌破MA10",
+        }
+        contract = bridge._normalize_today_pool_contract(row)
+        self.assertEqual(contract["今日定位"], "观察标")
+        self.assertTrue(contract["derived_from_legacy_fields"])
+        self.assertEqual(contract["legacy_role"], "持仓")
+
+    def test_buy_raw_partial_legacy_row_is_warning(self):
+        snap = _tradable_snapshot()
+        snap["趋势池"][0].update({
+            "角色": "持仓",
+            "操作": "买入",
+            "今日检查": "60mMA10回踩",
+            "触发/失效": "触发：缩量企稳；失效：跌破MA10",
+        })
+        signals = [{"type": "BUY", "target": "测试趋势", "code": "000001",
+                     "window": "W2", "direction": "多", "confidence": "高"}]
+        verified = bridge._verify_signals(signals, snap)
+        self.assertEqual(verified[0]["status"], "⚠️")
+        self.assertIn("不授权 BUY", verified[0]["note"])
+
     def test_parse_non_json_produces_warning(self):
         text, sigs, warns = bridge._parse_llm_response("not json at all")
         self.assertGreater(len(warns), 0)
@@ -487,7 +540,8 @@ class W2TrendValidationTest(unittest.TestCase):
 
     def test_lianban_w2_diverge_conditions(self):
         snap = {"指数": {}, "情绪": {"情绪值": 65}, "连板池": [
-            {"标的": "连板测试", "代码": "000002", "板块": "科技", "角色": "情绪标",
+            {"标的": "连板测试", "代码": "000002", "板块": "科技", "今日定位": "情绪标",
+             "今日检查": "分歧回落+缩量+龙头活", "触发/失效": "触发：缩量承接；失效：放量破位",
              "涨幅": "-3", "量比": "0.6", "MA10_60m": "100", "MA10_60m_dir": "—"}],
             "趋势池": [], "持仓": [], "板块": [], "风控": {}, "涨停梯队TOP5": [],
             "rule_state": self._make_rs()}
@@ -537,7 +591,8 @@ class W2TrendValidationTest(unittest.TestCase):
     def test_lianban_w2_emotion_10_is_warning(self):
         """连板 W2 情绪值=10（冰点）应 warning"""
         snap = {"指数": {}, "情绪": {"情绪值": 10}, "连板池": [
-            {"标的": "连板测试", "代码": "000002", "板块": "科技", "角色": "情绪标",
+            {"标的": "连板测试", "代码": "000002", "板块": "科技", "今日定位": "情绪标",
+             "今日检查": "分歧回落+缩量+龙头活", "触发/失效": "触发：缩量承接；失效：放量破位",
              "涨幅": "-3", "量比": "0.6", "MA10_60m": "100", "MA10_60m_dir": "—"}],
             "趋势池": [], "持仓": [], "板块": [], "风控": {}, "涨停梯队TOP5": [],
             "rule_state": self._make_rs()}
@@ -550,7 +605,8 @@ class W2TrendValidationTest(unittest.TestCase):
     def test_lianban_w2_emotion_missing_is_warning(self):
         """连板 W2 缺情绪数据应 warning"""
         snap = {"指数": {}, "情绪": {}, "连板池": [
-            {"标的": "连板测试", "代码": "000002", "板块": "科技", "角色": "情绪标",
+            {"标的": "连板测试", "代码": "000002", "板块": "科技", "今日定位": "情绪标",
+             "今日检查": "分歧回落+缩量+龙头活", "触发/失效": "触发：缩量承接；失效：放量破位",
              "涨幅": "-3", "量比": "0.6", "MA10_60m": "100", "MA10_60m_dir": "—"}],
             "趋势池": [], "持仓": [], "板块": [], "风控": {}, "涨停梯队TOP5": [],
             "rule_state": self._make_rs()}

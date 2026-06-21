@@ -77,7 +77,7 @@ def clean_value(val, field_name=""):
     # 去掉括号内注释： "一般（涨停收益2.92%一般）" → "一般"
     # 但保留标签型字段的括号内容
     label_fields = {"最高板", "次高板", "连板梯队", "高潮保护", "动作", "状态", "结论", "当前状态", "W2出手时机"}
-    string_fields = {"代码", "标的", "板块", "方向", "角色", "操作", "买点", "梯队", "龙头", "备注", "止损", "清仓原因", "原因", "影响", "灯", "指标", "判定", "时间", "价格"}
+    string_fields = {"代码", "标的", "板块", "方向", "角色", "操作", "今日定位", "今日检查", "触发/失效", "买点", "梯队", "龙头", "备注", "止损", "清仓原因", "原因", "影响", "灯", "指标", "判定", "时间", "价格"}
     if field_name not in label_fields:
         s = re.sub(r'（[^）]*）', '', s)  # 中文括号
         s = re.sub(r'\([^)]*\)', '', s)   # 英文括号
@@ -149,6 +149,31 @@ def parse_frontmatter(filepath):
             data[key] = val
     return data
 
+def _normalize_pool_rows(rows):
+    """Convert legacy role/action-only pool rows into observation-only rows."""
+    for row in rows or []:
+        today_role = row.get("今日定位")
+        today_check = row.get("今日检查")
+        trigger_invalid = row.get("触发/失效") or row.get("触发失效")
+        legacy_role = row.get("角色")
+        legacy_action = row.get("操作")
+        has_legacy = bool(legacy_role or legacy_action)
+        has_today_contract = bool(today_role or today_check or trigger_invalid)
+
+        if not has_today_contract and has_legacy:
+            row["derived_from_legacy_fields"] = True
+            row["legacy_role"] = legacy_role or ""
+            row["legacy_action"] = legacy_action or ""
+            row["今日定位"] = "观察标"
+            row["今日检查"] = "旧字段兼容：需补今日检查"
+            row["触发/失效"] = "缺少新版触发/失效；只观察，不授权买卖"
+            legacy_note = f"旧字段：角色={legacy_role or '—'}；操作={legacy_action or '—'}"
+            row["备注"] = (str(row.get("备注") or "").strip() + "；" + legacy_note).strip("；")
+        elif not trigger_invalid:
+            row["missing_trigger_invalid"] = True
+            row["触发/失效"] = "缺少触发/失效；只观察，不授权买卖"
+    return rows
+
 def parse_appendix(filepath):
     """解析复盘笔记末尾的「## 数据附录」章节，返回结构化数据"""
     try:
@@ -177,19 +202,23 @@ def parse_appendix(filepath):
         if '持仓明细' in title:
             result['positions'] = _parse_positions(body)
         elif '连板自选池' in title:
-            result['lianban_pool'] = _parse_table(body, {
+            result['lianban_pool'] = _normalize_pool_rows(_parse_table(body, {
                 '标的': '标的', '代码': '代码', '板块': '板块',
-                '窗口': '窗口', '角色': '角色', '操作': '操作',
+                '今日定位': '今日定位', '窗口': '窗口',
+                '今日检查': '今日检查', '触发/失效': '触发/失效',
+                '角色': '角色', '操作': '操作',
                 '涨幅': '涨幅', '收盘价': '收盘价', 'MA5': 'MA5',
                 '量比': '量比', '换手': '换手', '备注': '备注'
-            })
+            }))
         elif '趋势自选池' in title:
-            result['trend_pool'] = _parse_table(body, {
+            result['trend_pool'] = _normalize_pool_rows(_parse_table(body, {
                 '标的': '标的', '代码': '代码', '板块': '板块',
-                '窗口': '窗口', '角色': '角色', '操作': '操作',
+                '今日定位': '今日定位', '窗口': '窗口',
+                '今日检查': '今日检查', '触发/失效': '触发/失效',
+                '角色': '角色', '操作': '操作',
                 '涨幅': '涨幅', '收盘价': '收盘价', 'MA5': 'MA5',
                 'MA20': 'MA20', '量比': '量比', '换手': '换手', '备注': '备注'
-            })
+            }))
         elif '板块状态' in title:
             result['sectors'] = _parse_table(body, {
                 '板块': '板块', '类型': '类型', '涨停数': '涨停数',
@@ -836,8 +865,7 @@ def compute_style_execution(fm, style):
     判定优先级（从高到低）：
     1. 熔断触发 → 仓位归零
     2. 连亏 ≥ 2 天 → 强制空仓
-    3. 周五 → 趋势占比上限 15%
-    4. 无强支线 → 仓位从严
+    3. 无强支线 → 仓位从严
     （晋级率判定交给 dashboard W08 实时规则引擎，gen 只传分数不阻断）
     """
     reasons = []
@@ -856,8 +884,6 @@ def compute_style_execution(fm, style):
         jjl = float(jjl_str)
     except:
         jjl = 0
-    is_friday = str(fm.get("weekday", "")).startswith("周五")
-
     lb_actual = lb_pct
     tr_actual = tr_pct
 
@@ -878,12 +904,7 @@ def compute_style_execution(fm, style):
         reasons.append(f"连亏{lose_streak}天≥2天，强制空仓")
 
     # 规则 3: 晋级率分层判定（交给 dashboard W08 实时判定，gen 只传分数不硬卡）
-    # 规则 4: 周五
-    if is_friday and tr_actual > 15:
-        tr_actual = min(tr_actual, 15)
-        reason2s.append("周五→趋势占比上限15%")
-
-    # 规则 5: 无强支线（人工标注）
+    # 规则 4: 无强支线（人工标注）
     no_strong = fm.get("无强支线", None)
     if no_strong:
         total_cap = min(total_cap, 20)

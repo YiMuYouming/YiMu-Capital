@@ -121,11 +121,12 @@ class LiveRuleEngineTest(unittest.TestCase):
 
     # ── 周五规则 ──
 
-    def test_friday_blocks_only_w1_and_caps_trend(self):
+    def test_friday_itself_does_not_block_w1_or_cap_trend(self):
         state = evaluate_rule_state(valid_inputs(),
                                     datetime(2026, 5, 29, 14, 10))
-        self.assertIn("FRIDAY_W1", [b["code"] for b in state["blocks"]])
-        self.assertEqual(state["caps"]["trend_pct"], 15)
+        self.assertNotIn("FRIDAY_W1", [b["code"] for b in state["blocks"]])
+        self.assertNotIn("FRIDAY_TREND_CAP", [b["code"] for b in state["blocks"]])
+        self.assertEqual(state["caps"]["trend_pct"], 46)
         self.assertTrue(state["windows"]["w2"]["buy_allowed"])
 
     def test_premarket_window_plan_can_open_friday_w1(self):

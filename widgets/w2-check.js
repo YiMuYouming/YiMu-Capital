@@ -11,6 +11,28 @@ class W2CheckWidget extends YiMuWidget {
     var trPool = (data && data.trend_pool) || [];
     var lbPool = (data && data.lianban_pool) || [];
 
+    function todayRole(s) {
+      if (!s) return '';
+      return String(s['今日定位'] || (legacyOnly(s) ? '观察标' : s['角色']) || '');
+    }
+    function todayTrigger(s) {
+      if (!s) return '';
+      return String(s['触发/失效'] || s['触发失效'] || s['操作'] || '');
+    }
+    function legacyOnly(s) {
+      if (!s) return false;
+      var hasLegacy = !!(s['角色'] || s['操作']);
+      var hasTodayRole = !!s['今日定位'];
+      var hasTrigger = !!(s['触发/失效'] || s['触发失效']);
+      return !!s['derived_from_legacy_fields'] || (hasLegacy && (!hasTodayRole || !hasTrigger));
+    }
+    function observationOnly(s) {
+      var trigger = todayTrigger(s);
+      return legacyOnly(s) || !String(s && (s['触发/失效'] || s['触发失效']) || '').trim() ||
+        trigger.indexOf('只观察') >= 0 || trigger.indexOf('不授权') >= 0 ||
+        trigger.indexOf('只盯') >= 0 || trigger.indexOf('不买') >= 0;
+    }
+
     var now = new Date();
     var hour = now.getHours(), min = now.getMinutes();
     var inW2 = hour === 14 && min >= 0 && min <= 50;
@@ -176,30 +198,33 @@ class W2CheckWidget extends YiMuWidget {
       var hardMet = (near60m?1:0) + (shrink?1:0) + (notCrash?1:0);
 
       var signal, sigColor;
-      if (!w2BuyAllowed) {
+      var isObservation = observationOnly(s);
+      if (isObservation) {
+        signal = '观察'; sigColor = 'var(--text-secondary)';
+      } else if (!w2BuyAllowed) {
         // rule_state 判定 W2 不可交易，所有候选统一降级
         signal = '关闭'; sigColor = 'var(--text-disabled)';
       } else if (hardMet >= 3)      { signal = '买入'; sigColor = 'var(--down)'; }
       else if (hardMet >= 2) { signal = '接近'; sigColor = 'var(--warn)'; }
       else                   { signal = '—'; sigColor = 'var(--text-disabled)'; }
 
-      var holding = (s['角色']||'').indexOf('持仓')>=0 || (s['操作']||'').indexOf('持有')>=0;
+      var holding = !isObservation && (todayRole(s).indexOf('持仓')>=0 || todayTrigger(s).indexOf('持有')>=0);
 
       trendEvals.push({
         name:s['标的'], code:code, holding:holding,
         price:price, ma10_60m:ma10_60m, dist:dist, dir60:dir60,
         volRatio:volRatio, chg:chg, ma5:ma5,
         near60m:near60m, shrink:shrink, notCrash:notCrash, nearMA5:nearMA5,
-        hardMet:hardMet, signal:signal, sigColor:sigColor
+        hardMet:hardMet, signal:signal, sigColor:sigColor, observationOnly:isObservation
       });
     });
     trendEvals.sort(function(a,b){ return b.hardMet - a.hardMet || a.dist - b.dist; });
 
     if (trendEvals.length > 0) {
       trendEvals.forEach(function(t) {
-        var stockOk = t.hardMet >= 3 && w2BuyAllowed;
-        var stockWait = t.hardMet >= 2 && t.hardMet < 3 && w2BuyAllowed;
-        var stockFail = !w2BuyAllowed || t.hardMet < 2;
+        var stockOk = !t.observationOnly && t.hardMet >= 3 && w2BuyAllowed;
+        var stockWait = !t.observationOnly && t.hardMet >= 2 && t.hardMet < 3 && w2BuyAllowed;
+        var stockFail = !w2BuyAllowed || (!t.observationOnly && t.hardMet < 2);
 
         html += '<div style="padding:6px 4px;border-bottom:1px solid var(--border-light);display:flex;align-items:center;gap:8px">';
 
@@ -248,7 +273,7 @@ class W2CheckWidget extends YiMuWidget {
     // ===== 连板 W2 低吸候选（信号灯）=====
     var lbW2 = lbPool.filter(function(s){ var w=s['窗口']||''; return w==='W2'; });
     if (lbW2.length === 0) lbW2 = lbPool.filter(function(s){
-      var op=s['操作']||''; return op.indexOf('低吸')>=0 || op.indexOf('W2')>=0;
+      var op=todayTrigger(s); return !observationOnly(s) && (op.indexOf('低吸')>=0 || op.indexOf('W2')>=0);
     });
     if (lbW2.length > 0) {
       html += '<div style="font-size:12px;font-weight:700;color:var(--text-primary);margin:8px 0 4px;padding-top:4px;border-top:1px solid var(--border-light)">连板 W2' + (w2BuyAllowed ? ' 低吸' : ' 关闭') + '</div>';
@@ -260,7 +285,10 @@ class W2CheckWidget extends YiMuWidget {
         var chg = p(q['涨幅']||s['涨幅']);
         var vr = parseFloat(q['量比']||s['量比'])||1;
         var sector = s['板块'] || '';
-        var isSkip = (s['角色']||'').indexOf('移除')>=0 || (s['操作']||'').indexOf('不碰')>=0;
+        var isObservation = observationOnly(s);
+        var role = todayRole(s);
+        var trigger = todayTrigger(s);
+        var isSkip = role.indexOf('移除')>=0 || trigger.indexOf('不碰')>=0;
         if (isSkip) return;
 
         // 连板W2条件: 分歧回落 + 缩量 + 龙头存活 + 非冰点
@@ -269,7 +297,7 @@ class W2CheckWidget extends YiMuWidget {
         var leaderAlive = false;
         // 找板块龙头（从lbPool中找情绪标的）
         lbPool.forEach(function(ls){
-          if ((ls['角色']||'').indexOf('情绪标')>=0 && (ls['板块']||'')===sector) {
+          if (!observationOnly(ls) && todayRole(ls).indexOf('情绪标')>=0 && (ls['板块']||'')===sector) {
             var lchg = p((liveQ[ls['代码']]||{})['涨幅']||ls['涨幅']);
             if (lchg >= 3) leaderAlive = true;
           }
@@ -281,7 +309,9 @@ class W2CheckWidget extends YiMuWidget {
 
         // rule_state W2 关闭时连板候选统一降级
         var stockOk, stockWait, stockFail;
-        if (!w2BuyAllowed) {
+        if (isObservation) {
+          stockOk = false; stockWait = false; stockFail = false;
+        } else if (!w2BuyAllowed) {
           stockOk = false; stockWait = false; stockFail = true;
         } else {
           stockOk = hardMet >= 3;
@@ -290,7 +320,8 @@ class W2CheckWidget extends YiMuWidget {
         }
 
         var stockStatus, stColor;
-        if (!w2BuyAllowed) { stockStatus = '关闭'; stColor = 'var(--text-disabled)'; }
+        if (isObservation) { stockStatus = '观察'; stColor = 'var(--text-secondary)'; }
+        else if (!w2BuyAllowed) { stockStatus = '关闭'; stColor = 'var(--text-disabled)'; }
         else if (stockOk)      { stockStatus = '低吸'; stColor = 'var(--down)'; }
         else if (stockWait) { stockStatus = '观察'; stColor = 'var(--warn)'; }
         else              { stockStatus = '—'; stColor = 'var(--text-disabled)'; }
