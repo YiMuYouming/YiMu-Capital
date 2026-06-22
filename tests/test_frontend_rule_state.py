@@ -1346,6 +1346,30 @@ global.window = {
         self.assertIn("清仓追踪", html)
         self.assertLess(html.index("w15-acceptance"), html.index("w15-kpi-grid"))
 
+    def test_w15_position_rows_show_position_weight(self):
+        result = _render_widget("positions.js", "W15", {
+            "pnl_live": {
+                "total_asset": 200000,
+                "cash": 160000,
+                "mv": 40000,
+                "pos_pct": 20,
+                "pnl_amount": 0,
+                "pnl_pct": 0,
+                "quote_status": "close_snapshot",
+                "valuation_complete": True,
+                "positions": [
+                    {"标的": "测试", "代码": "000001", "市值": 40000, "现价": 40, "成本": 38, "today_pnl": 500, "today_pnl_pct": 1.25, "total_pnl": 2000, "total_pnl_pct": 5.26, "状态": "持有"}
+                ],
+                "trades": [],
+                "closed_positions": [],
+            },
+            "live_quotes": {},
+        })
+        self.assertNotIn("_error", result)
+        html = result["html"]
+        self.assertIn("<th>占比</th>", html)
+        self.assertIn("20.00%", html)
+
     def test_w15_closed_tracking_displays_total_realized_pnl(self):
         result = _render_widget("positions.js", "W15", {
             "pnl_live": {

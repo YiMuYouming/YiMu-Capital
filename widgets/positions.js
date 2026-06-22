@@ -190,12 +190,15 @@ class PositionsWidget extends YiMuWidget {
     } else {
     html += '<div class="w15-section-title"><span class="evidence-inline-ref">E1</span><span>持仓</span><span>（由成交流水驱动）</span></div>';
     if (active.length) {
-      html += '<table class="data-table w15-table"><thead><tr><th>标的</th><th>市值</th><th>现价</th><th>成本</th><th>今日盈亏</th><th>累计盈亏</th><th>止损</th></tr></thead><tbody>';
+      html += '<table class="data-table w15-table"><thead><tr><th>标的</th><th>市值</th><th>占比</th><th>现价</th><th>成本</th><th>今日盈亏</th><th>累计盈亏</th><th>止损</th></tr></thead><tbody>';
       active.forEach(function(p) {
         var tPnL = p['today_pnl'], tPct = p['today_pnl_pct'];
         var totPnL = p['total_pnl'], totPct = p['total_pnl_pct'];
         var tdc = (tPnL || 0) > 0 ? 'up' : (tPnL || 0) < 0 ? 'down' : '';
         var todc = (totPnL || 0) > 0 ? 'up' : (totPnL || 0) < 0 ? 'down' : '';
+        var mvRaw = p['市值'] == null ? null : parseFloat(p['市值']);
+        var weight = (ta > 0 && mvRaw != null && !isNaN(mvRaw)) ? (mvRaw / ta * 100) : null;
+        var weightCell = weight != null && !isNaN(weight) ? weight.toFixed(2) + '%' : '—';
 
         // 估值不可信时，价格相关字段标记不可用
         var mvCell, priceCell, todayCell, totalCell;
@@ -237,6 +240,7 @@ class PositionsWidget extends YiMuWidget {
         html += '<tr>' +
           '<td style="font-size:var(--fs-body);font-weight:600">' + _esc(p['标的']) + ' <span style="font-size:var(--fs-label);color:var(--text-disabled)">' + _esc(p['代码']) + '</span></td>' +
           '<td style="font-size:var(--fs-body);font-family:var(--font-mono);font-weight:600">' + mvCell + '</td>' +
+          '<td style="font-size:var(--fs-body);font-family:var(--font-mono);color:var(--text-secondary);font-weight:600">' + _esc(weightCell) + '</td>' +
           '<td style="font-size:var(--fs-body);font-family:var(--font-mono)">' + priceCell + '</td>' +
           '<td style="font-size:var(--fs-body);font-family:var(--font-mono);color:var(--text-secondary)">' + _fmtPrice(p['成本价'] != null ? p['成本价'] : p['成本']) + '</td>' +
           '<td class="' + (isValuationIncomplete ? '' : tdc) + '" style="font-size:var(--fs-body);font-family:var(--font-mono);font-weight:600">' + todayCell + '</td>' +
