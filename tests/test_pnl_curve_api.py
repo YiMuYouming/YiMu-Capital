@@ -5,6 +5,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 import scripts.db as db
+import scripts.bridge as bridge
 
 
 class PnlQueryZeroValueTests(unittest.TestCase):
@@ -175,6 +176,64 @@ class PnlQueryZeroValueTests(unittest.TestCase):
         result = db.query_pnl("all", "sh")
         self.assertEqual(result["dates"][-1], today)
         self.assertEqual(result["benchmark"][-1], -1.25)
+
+    def test_bridge_overlays_live_today_point_when_snapshots_are_missing(self):
+        """今日快照缺失但 SSOT 有今日状态时，/api/pnl 可叠加临时实时点。"""
+        chart = {
+            "type": "intraday",
+            "data_date": "2026-06-19",
+            "is_fallback": True,
+            "labels": ["09:30", "09:35", "09:40", "09:45"],
+            "portfolio": [0.0, 0.0, -0.73, None],
+            "benchmark": [0.0, 0.0, -0.43, None],
+            "position": [42.0, 42.0, 42.0, None],
+            "nav": [1.0, 1.0, 0.9927, None],
+            "_updated": "2026-06-19T14:55:00",
+        }
+        summary = {
+            "pnl_pct": -0.14,
+            "pos_pct": 32.6,
+            "total_asset": 713097.47,
+            "total_deposit": 711059.2252961266,
+            "valuation_complete": False,
+            "_updated": "2026-06-22T09:42:37+08:00",
+        }
+        live_index = {"上证指数涨幅": "+0.11%"}
+
+        result = bridge._overlay_live_today_pnl_point(
+            chart, summary, "today", "sh", live_index=live_index,
+            now=datetime(2026, 6, 22, 9, 44, 0),
+        )
+
+        self.assertFalse(result.get("is_fallback"), result)
+        self.assertTrue(result.get("is_live_overlay"), result)
+        self.assertEqual(result.get("data_date"), "2026-06-22", result)
+        idx = result["labels"].index("09:40")
+        self.assertEqual(result["portfolio"][idx], -0.14, result)
+        self.assertEqual(result["position"][idx], 32.6, result)
+        self.assertEqual(result["benchmark"][idx], 0.11, result)
+        self.assertIsNone(result["portfolio"][idx + 1], result)
+        self.assertFalse(result.get("valuation_complete"), result)
+
+    def test_bridge_keeps_non_trading_fallback_without_live_overlay(self):
+        """非今日 SSOT 更新时间不得把周末/盘前回退伪装成实时今日。"""
+        chart = {
+            "type": "intraday",
+            "data_date": "2026-06-19",
+            "is_fallback": True,
+            "labels": ["09:30"],
+            "portfolio": [-0.73],
+            "benchmark": [-0.43],
+            "position": [42.0],
+            "nav": [0.9927],
+            "_updated": "2026-06-19T14:55:00",
+        }
+        result = bridge._overlay_live_today_pnl_point(
+            chart, {"pnl_pct": 0, "_updated": "2026-06-19T15:00:00"},
+            "today", "sh", now=datetime(2026, 6, 22, 9, 44, 0),
+        )
+        self.assertTrue(result.get("is_fallback"), result)
+        self.assertEqual(result.get("data_date"), "2026-06-19", result)
 
 
 class PnlQueryZeroValueFileBasedTests(unittest.TestCase):

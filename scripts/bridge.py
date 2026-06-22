@@ -247,6 +247,120 @@ def _current_pnl_summary():
     return _merge_pnl_summary(legacy, state)
 
 
+def _number_or_none(value):
+    try:
+        if value is None:
+            return None
+        return float(str(value).replace("%", "").replace("+", ""))
+    except (TypeError, ValueError):
+        return None
+
+
+def _hhmm_to_minutes(label):
+    try:
+        h, m = str(label)[:5].split(":")
+        return int(h) * 60 + int(m)
+    except Exception:
+        return None
+
+
+def _slot_label_from_timestamp(timestamp, now):
+    raw = str(timestamp or "")
+    match = re.search(r"(\d{2}):(\d{2})", raw)
+    if match:
+        h, m = int(match.group(1)), int(match.group(2))
+    else:
+        h, m = now.hour, now.minute
+    minute_of_day = h * 60 + (m // 5) * 5
+    if 11 * 60 + 30 <= minute_of_day < 13 * 60:
+        minute_of_day = 11 * 60 + 25
+    elif minute_of_day > 14 * 60 + 55:
+        minute_of_day = 14 * 60 + 55
+    return f"{minute_of_day // 60:02d}:{minute_of_day % 60:02d}"
+
+
+def _overlay_live_today_pnl_point(chart, live_summary, range_val, index_val,
+                                  live_index=None, now=None):
+    """Expose today's SSOT point without writing untrusted valuation to snapshots."""
+    if range_val != 'today' or not isinstance(chart, dict) or not isinstance(live_summary, dict):
+        return chart
+    if chart.get('type') != 'intraday':
+        return chart
+
+    now = now or datetime.now()
+    today = now.strftime("%Y-%m-%d")
+    try:
+        from scripts.db import is_trading_day, TRADING_HOUR_START
+        if not is_trading_day(today) or (now.hour, now.minute) < TRADING_HOUR_START:
+            return chart
+    except Exception:
+        pass
+
+    updated = str(live_summary.get('_updated') or '')
+    if not updated.startswith(today):
+        return chart
+    pnl_pct = _number_or_none(live_summary.get('pnl_pct'))
+    if pnl_pct is None:
+        return chart
+
+    if chart.get('data_date') == today and not chart.get('is_fallback'):
+        return chart
+
+    labels = list(chart.get('labels') or [])
+    if not labels:
+        return chart
+
+    target_label = _slot_label_from_timestamp(updated, now)
+    target_idx = labels.index(target_label) if target_label in labels else None
+    if target_idx is None:
+        target_min = _hhmm_to_minutes(target_label)
+        candidates = [
+            (i, _hhmm_to_minutes(label)) for i, label in enumerate(labels)
+            if _hhmm_to_minutes(label) is not None
+        ]
+        past = [item for item in candidates if item[1] <= target_min]
+        if not past:
+            return chart
+        target_idx = past[-1][0]
+
+    idx_key = {'sh': '上证指数涨幅', 'sz': '深证指数涨幅', 'cy': '创业板指涨幅'}.get(index_val, '上证指数涨幅')
+    live_index = live_index or {}
+    benchmark = _number_or_none(live_index.get(idx_key))
+    if benchmark is None and index_val == 'cy':
+        benchmark = _number_or_none(live_index.get('创业指数涨幅'))
+    if benchmark is None:
+        benchmark = 0.0
+
+    pos_pct = _number_or_none(live_summary.get('pos_pct'))
+    if pos_pct is None:
+        pos_pct = 0.0
+    total_asset = _number_or_none(live_summary.get('total_asset'))
+    total_deposit = _number_or_none(live_summary.get('total_deposit'))
+    nav = total_asset / total_deposit if total_asset and total_deposit and total_deposit > 0 else None
+    if nav is None:
+        nav = _number_or_none(live_summary.get('nav')) or 1.0
+
+    def series(fill_value, live_value):
+        return [fill_value if i < target_idx else live_value if i == target_idx else None
+                for i in range(len(labels))]
+
+    result = dict(chart)
+    result.update({
+        'data_date': today,
+        'is_fallback': False,
+        'is_live_overlay': True,
+        'overlay_source': 'account_ssot',
+        'snapshot_authority': 'temporary_live_overlay',
+        'valuation_complete': bool(live_summary.get('valuation_complete')),
+        'portfolio': series(0.0, round(pnl_pct, 4)),
+        'benchmark': series(0.0, round(benchmark, 4)),
+        'position': series(0.0, round(pos_pct, 4)),
+        'nav': series(1.0, round(nav, 6)),
+        '_updated': updated,
+    })
+    return result
+
+
 def _closed_daily_loss_streak(now=None):
     """Count consecutive losing closed days from daily_summary, excluding today."""
     from datetime import datetime as _dt
@@ -3131,6 +3245,11 @@ class BridgeHandler(SimpleHTTPRequestHandler):
                 range_val = qs.get('range', ['today'])[0]
                 index_val = qs.get('index', ['sh'])[0]
                 result = query_pnl(range_val, index_val)
+                if range_val == 'today':
+                    result = _overlay_live_today_pnl_point(
+                        result, _current_pnl_summary(), range_val, index_val,
+                        live_index=CACHE.get('live_index') or {},
+                    )
                 result = _add_freshness(result, 'pnl', result.get('_updated'))
                 body = json.dumps(result, ensure_ascii=False).encode()
                 self.send_response(200)
