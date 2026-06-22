@@ -1346,6 +1346,33 @@ global.window = {
         self.assertIn("清仓追踪", html)
         self.assertLess(html.index("w15-acceptance"), html.index("w15-kpi-grid"))
 
+    def test_w15_closed_tracking_displays_total_realized_pnl(self):
+        result = _render_widget("positions.js", "W15", {
+            "pnl_live": {
+                "total_asset": 200000,
+                "cash": 200000,
+                "mv": 0,
+                "pos_pct": 0,
+                "pnl_amount": 0,
+                "pnl_pct": 0,
+                "positions": [],
+                "trades": [],
+                "closed_positions": [{
+                    "name": "旧仓",
+                    "code": "000002",
+                    "sell_price": 11,
+                    "realized_pnl": 100,
+                    "realized_today_pnl": -100,
+                    "reason": "止盈",
+                }],
+            },
+            "live_quotes": {"000002": {"最新价": 12}},
+        })
+        self.assertNotIn("_error", result)
+        html = result["html"]
+        self.assertIn("+100.00", html)
+        self.assertNotIn("-100.00", html)
+
     def test_index_exposes_ticket_entry_and_default_workspace(self):
         src = (ROOT / "index.html").read_text(encoding="utf-8")
         self.assertIn('data-widget="W25"', src)

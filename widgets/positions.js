@@ -292,7 +292,7 @@ class PositionsWidget extends YiMuWidget {
           var lq = liveQ[(c.code || '')] || {};
           var cur = parseFloat(lq['最新价']) || 0;
           var liveOk = cur > 0;
-          var realized = c.realized_today_pnl != null ? parseFloat(c.realized_today_pnl) : null;
+          var realized = c.realized_pnl != null ? parseFloat(c.realized_pnl) : (c.realized_today_pnl != null ? parseFloat(c.realized_today_pnl) : null);
           var realizedDisplay = realized != null ? _fmtPnL(realized) : '<span style="color:var(--text-disabled);font-weight:400">— / 基准不可用</span>';
           var ap = liveOk && sp > 0 ? ((cur - sp) / sp * 100) : null;
           var acls = ap != null ? (ap > 0 ? 'up' : ap < 0 ? 'down' : '') : '';

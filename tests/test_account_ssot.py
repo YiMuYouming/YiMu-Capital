@@ -1375,6 +1375,30 @@ class ClosedPositionsTest(unittest.TestCase):
         self.assertIsNone(closed[0]["realized_today_pnl"],
             f"无日初价清仓收益应为None, 实为{closed[0]['realized_today_pnl']}")
 
+    def test_closed_position_keeps_total_realized_pnl_separate_from_today_pnl(self):
+        """清仓展示用总实现盈亏，不得误用相对日初的 today_pnl。"""
+        db.insert_account_baseline({
+            "date": "2026-05-27", "effective_at": "2026-05-27T09:30:00",
+            "trade_id_cutoff": 0, "cash": 100000, "day_start_asset": 201200,
+            "total_deposit": 100000,
+            "positions": [{"标的": "TEST", "代码": "000011", "数量": 100, "成本": 10, "状态": "持有"}],
+            "source": "previous_close",
+            "_meta": {"day_start_prices": {"000011": 12}},
+        })
+        db.insert_trade({
+            "trade_date": "2026-05-27", "trade_time": "10:00",
+            "action": "卖出", "code": "000011", "name": "TEST",
+            "price": 11, "qty": 100, "realized_pnl": 100,
+        })
+        state = reduce_account_state(
+            db.query_account_baseline("2026-05-27"),
+            db.query_trades(date_from="2026-05-27", date_to="2026-05-27", limit=100),
+            {}, now="2026-05-27T10:01:00")
+        closed = state.get("closed_positions", [])
+        self.assertEqual(len(closed), 1)
+        self.assertEqual(closed[0]["realized_today_pnl"], -100)
+        self.assertEqual(closed[0]["realized_pnl"], 100)
+
 
 class SevenDayClosedPositionsTests(unittest.TestCase):
     """YM-W15-02: 7日内清仓来自 SSOT 账本，昨日/6日前可显示，8日前不可"""

@@ -426,8 +426,16 @@ def reduce_account_state(anchor, trades, quotes, now=None, fund_events=None):
                 cash += trade_cash_effect(trade)
                 remaining_sell = min(qty, old_qty)
                 new_qty = max(0, old_qty - remaining_sell)
-                position["数量"] = new_qty
                 sell_price = _number(trade.get("price"))
+                trade_realized = trade.get("realized_pnl")
+                total_realized_pnl = None
+                if trade_realized not in (None, ""):
+                    total_realized_pnl = round(_number(trade_realized), 2)
+                else:
+                    avg_cost = _number(position.get("成本"))
+                    if avg_cost > 0:
+                        total_realized_pnl = round((sell_price - avg_cost) * remaining_sell, 2)
+                position["数量"] = new_qty
 
                 # FIFO: deduct overnight first, then bought
                 # — Overnight portion
@@ -467,6 +475,7 @@ def reduce_account_state(anchor, trades, quotes, now=None, fund_events=None):
                         "sell_price": sell_price,
                         "sell_qty": qty,
                         "reason": str(trade.get("reason", "")),
+                        "realized_pnl": total_realized_pnl,
                         "realized_today_pnl": rpnl,
                         "closed_date": str(trade.get("trade_date", "")),
                         "close_trade_id": trade.get("id"),
