@@ -16,6 +16,7 @@ try:
     _parse_premarket_plan = getattr(_gen, "_parse_premarket_plan", None)
     _select_machine_pool = getattr(_gen, "_select_machine_pool", None)
     _preserve_active_price = getattr(_gen, "_preserve_active_price", None)
+    _compute_earned_cap = getattr(_gen, "_compute_earned_cap", None)
     _HAS_GEN = True
 except ImportError:
     parse_frontmatter = None
@@ -28,6 +29,7 @@ except ImportError:
     _parse_premarket_plan = None
     _select_machine_pool = None
     _preserve_active_price = None
+    _compute_earned_cap = None
     _HAS_GEN = False
 
 FIXTURE = Path(__file__).resolve().parent / "fixtures" / "sample_review_note.md"
@@ -35,6 +37,44 @@ FIXTURE = Path(__file__).resolve().parent / "fixtures" / "sample_review_note.md"
 
 @unittest.skipUnless(_HAS_GEN, "gen_dashboard_data not available")
 class TestGenBaseline(unittest.TestCase):
+
+    def test_earned_cap_counts_only_profitable_mainline_positions(self):
+        self.assertIsNotNone(_compute_earned_cap)
+        positions = [
+            {"代码": "000001", "标的": "主线A", "现价": 12, "成本": 10},
+            {"代码": "000002", "标的": "主线B", "现价": 9.8, "成本": 10},
+            {"代码": "000003", "标的": "非主线盈利", "现价": 20, "成本": 10},
+        ]
+        self.assertEqual(
+            _compute_earned_cap(
+                positions,
+                mainline_ids={"000001", "主线A", "000002", "主线B"},
+                mainline_confirmed=True,
+            ),
+            40,
+        )
+
+    def test_three_profitable_mainline_positions_need_protection_for_eighty(self):
+        self.assertIsNotNone(_compute_earned_cap)
+        positions = [
+            {"代码": "000001", "现价": 12, "成本": 10},
+            {"代码": "000002", "现价": 11, "成本": 10},
+            {"代码": "000003", "现价": 10.5, "成本": 10},
+        ]
+        mainline_ids = {"000001", "000002", "000003"}
+        self.assertEqual(
+            _compute_earned_cap(positions, mainline_ids=mainline_ids, mainline_confirmed=True),
+            60,
+        )
+        self.assertEqual(
+            _compute_earned_cap(
+                positions,
+                mainline_ids=mainline_ids,
+                mainline_confirmed=True,
+                protection_raised=True,
+            ),
+            80,
+        )
 
     def test_preserve_active_price_accepts_markdown_bold_quantity(self):
         self.assertIsNotNone(_preserve_active_price)

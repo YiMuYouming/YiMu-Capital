@@ -859,6 +859,99 @@ def _compute_total_cap(sd):
         trend_cap = 20
     return max(lianban_cap, trend_cap)
 
+def _cap_truthy(value):
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return False
+    return str(value).strip().lower() in ("1", "true", "yes", "y", "on", "是", "确认", "已确认", "已抬高")
+
+def _cap_position_pnl_pct(position):
+    for key in ("floating_pnl_pct", "total_pnl_pct", "today_pnl_pct", "浮盈%", "浮盈pct", "pnl_pct", "浮盈"):
+        raw = (position or {}).get(key)
+        if raw is None:
+            continue
+        match = re.search(r'([-+]?\d+\.?\d*)\s*%', str(raw))
+        if match:
+            try:
+                return float(match.group(1))
+            except (ValueError, TypeError):
+                pass
+        try:
+            return float(raw)
+        except (ValueError, TypeError):
+            pass
+
+    def _clean_md(val):
+        if isinstance(val, str):
+            return val.strip().lstrip('*').rstrip('*').strip()
+        return val
+
+    price_raw = _clean_md((position or {}).get('现价', ''))
+    cost_raw = _clean_md((position or {}).get('成本', '') or (position or {}).get('成本价', ''))
+    try:
+        price = float(price_raw) if price_raw else None
+        cost = float(cost_raw) if cost_raw else None
+        if price is not None and cost is not None and cost > 0:
+            return round((price - cost) / cost * 100, 2)
+    except (ValueError, TypeError):
+        pass
+    return None
+
+def _cap_position_ids(position):
+    ids = set()
+    for key in ("代码", "code", "标的", "名称", "name"):
+        val = str((position or {}).get(key) or "").strip().strip("*").strip()
+        if val:
+            ids.add(val)
+    return ids
+
+def _build_mainline_ids(data):
+    ids = set()
+    for section in ("lianban_pool", "trend_pool"):
+        for item in data.get(section) or []:
+            ids.update(_cap_position_ids(item))
+    for item in ((data.get("decision") or {}).get("锚定股状态") or []):
+        ids.update(_cap_position_ids(item))
+    return ids
+
+def _compute_earned_cap(positions, mainline_ids=None, mainline_confirmed=False, protection_raised=False):
+    """按 POS-SIZE-005 盈利解锁层计算 earned_cap_pct。
+
+    计数浮盈主线持仓，按盈利解锁阶梯返回：
+    - 无主线、无浮盈: 10%
+    - 主线确认但未浮盈: 20%
+    - 1只浮盈: 40%
+    - 2只浮盈: 60%
+    - 3只及以上浮盈且保护位抬高: 80%
+    """
+    mainline_ids = set(mainline_ids or [])
+    mainline_confirmed = bool(mainline_confirmed or mainline_ids)
+    profitable = 0
+    for p in positions:
+        if not isinstance(p, dict):
+            continue
+        name = str(p.get('标的', '') or '')
+        if name.startswith('~~'):
+            continue
+        explicit_mainline = p.get("is_mainline")
+        is_mainline = _cap_truthy(explicit_mainline) if explicit_mainline is not None else bool(_cap_position_ids(p) & mainline_ids)
+        if not is_mainline:
+            continue
+        pnl_val = _cap_position_pnl_pct(p)
+        if pnl_val is not None and pnl_val > 0:
+            profitable += 1
+
+    if not mainline_confirmed:
+        return 10
+    if profitable >= 3:
+        return 80 if _cap_truthy(protection_raised) else 60
+    if profitable >= 2:
+        return 60
+    if profitable >= 1:
+        return 40
+    return 20
+
 def compute_style_execution(fm, style):
     """规则引擎：根据 trading-core.md 计算 style.实际执行
 
@@ -1415,6 +1508,28 @@ def build_dashboard_data(review_path):
     _preserve_active_price(data)
     # 保留 pnl 字段（可用资金/总资产由 W15 记流水实时维护，gen 不覆盖）
     _preserve_pnl(data)
+    # 三层仓位：盈利解锁层（POS-SIZE-005）
+    positions_for_cap = data.get("positions", [])
+    mainline_ids_for_cap = _build_mainline_ids(data)
+    mainline_confirmed_for_cap = bool(mainline_ids_for_cap) or any(
+        isinstance(p, dict) and _cap_truthy(p.get("is_mainline"))
+        for p in positions_for_cap
+    )
+    protection_raised = style.get("protection_raised") or style.get("保护位已抬高")
+    if positions_for_cap and mainline_confirmed_for_cap:
+        style["earned_cap_pct"] = _compute_earned_cap(
+            positions_for_cap,
+            mainline_ids=mainline_ids_for_cap,
+            mainline_confirmed=mainline_confirmed_for_cap,
+            protection_raised=protection_raised,
+        )
+        opportunity_from_compute = style.get("总仓位上限", 60)
+        # 硬风控触发时 cap=0，不叠加 earned
+        if opportunity_from_compute > 0:
+            final_cap = min(opportunity_from_compute, style["earned_cap_pct"])
+            style["opportunity_cap_pct"] = opportunity_from_compute
+            style["总仓位上限"] = final_cap
+
     # 从 pnl.db 自动计算风控指标（连亏天数/周回撤/月回撤，笔记不用维护）
     _compute_risk_from_pnl(data)
 
