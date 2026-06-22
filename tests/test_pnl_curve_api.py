@@ -215,6 +215,43 @@ class PnlQueryZeroValueTests(unittest.TestCase):
         self.assertIsNone(result["portfolio"][idx + 1], result)
         self.assertFalse(result.get("valuation_complete"), result)
 
+    def test_bridge_overlays_today_trade_ledger_when_quotes_are_stale(self):
+        """行情旧但今日成交已入账时，曲线展示今日账本临时点并保持估值不可信。"""
+        chart = {
+            "type": "intraday",
+            "data_date": "2026-06-19",
+            "is_fallback": True,
+            "labels": ["09:30", "09:35", "09:40", "09:45"],
+            "portfolio": [0.0, 0.0, 0.0, None],
+            "benchmark": [0.0, 0.0, -0.43, None],
+            "position": [42.0, 42.0, 42.0, None],
+            "nav": [1.0, 1.0, 1.0, None],
+            "_updated": "2026-06-19T14:55:00",
+        }
+        summary = {
+            "pnl_pct": -0.14,
+            "pos_pct": 32.6,
+            "total_asset": 713097.47,
+            "total_deposit": 711059.2252961266,
+            "valuation_complete": False,
+            "quote_status": "stale",
+            "_updated": "2026-06-21T21:10:55+08:00",
+            "trades": [
+                {"trade_date": "2026-06-22", "trade_time": "09:41", "created_at": "2026-06-22 09:42:37"}
+            ],
+        }
+
+        result = bridge._overlay_live_today_pnl_point(
+            chart, summary, "today", "sh", now=datetime(2026, 6, 22, 9, 44, 0),
+        )
+
+        self.assertEqual(result.get("data_date"), "2026-06-22", result)
+        self.assertTrue(result.get("is_live_overlay"), result)
+        self.assertEqual(result.get("overlay_source"), "account_trade_ledger", result)
+        self.assertEqual(result.get("_updated"), "2026-06-22T09:42:37", result)
+        self.assertFalse(result.get("valuation_complete"), result)
+        self.assertEqual(result.get("quote_status"), "stale", result)
+
     def test_bridge_keeps_non_trading_fallback_without_live_overlay(self):
         """非今日 SSOT 更新时间不得把周末/盘前回退伪装成实时今日。"""
         chart = {

@@ -279,6 +279,23 @@ def _slot_label_from_timestamp(timestamp, now):
     return f"{minute_of_day // 60:02d}:{minute_of_day % 60:02d}"
 
 
+def _today_trade_overlay_timestamp(live_summary, today):
+    stamps = []
+    for trade in live_summary.get('trades') or []:
+        if str(trade.get('trade_date') or '') != today:
+            continue
+        raw = str(trade.get('created_at') or '').strip()
+        if raw.startswith(today):
+            stamps.append(raw.replace(" ", "T", 1))
+            continue
+        trade_time = str(trade.get('trade_time') or '').strip()
+        if re.match(r"^\d{2}:\d{2}(:\d{2})?$", trade_time):
+            if len(trade_time) == 5:
+                trade_time += ":00"
+            stamps.append(f"{today}T{trade_time}")
+    return max(stamps) if stamps else None
+
+
 def _overlay_live_today_pnl_point(chart, live_summary, range_val, index_val,
                                   live_index=None, now=None):
     """Expose today's SSOT point without writing untrusted valuation to snapshots."""
@@ -297,7 +314,12 @@ def _overlay_live_today_pnl_point(chart, live_summary, range_val, index_val,
         pass
 
     updated = str(live_summary.get('_updated') or '')
-    if not updated.startswith(today):
+    overlay_source = 'account_ssot'
+    overlay_updated = updated if updated.startswith(today) else None
+    if not overlay_updated:
+        overlay_updated = _today_trade_overlay_timestamp(live_summary, today)
+        overlay_source = 'account_trade_ledger' if overlay_updated else overlay_source
+    if not overlay_updated:
         return chart
     pnl_pct = _number_or_none(live_summary.get('pnl_pct'))
     if pnl_pct is None:
@@ -310,7 +332,7 @@ def _overlay_live_today_pnl_point(chart, live_summary, range_val, index_val,
     if not labels:
         return chart
 
-    target_label = _slot_label_from_timestamp(updated, now)
+    target_label = _slot_label_from_timestamp(overlay_updated, now)
     target_idx = labels.index(target_label) if target_label in labels else None
     if target_idx is None:
         target_min = _hhmm_to_minutes(target_label)
@@ -349,14 +371,15 @@ def _overlay_live_today_pnl_point(chart, live_summary, range_val, index_val,
         'data_date': today,
         'is_fallback': False,
         'is_live_overlay': True,
-        'overlay_source': 'account_ssot',
+        'overlay_source': overlay_source,
         'snapshot_authority': 'temporary_live_overlay',
         'valuation_complete': bool(live_summary.get('valuation_complete')),
+        'quote_status': live_summary.get('quote_status'),
         'portfolio': series(0.0, round(pnl_pct, 4)),
         'benchmark': series(0.0, round(benchmark, 4)),
         'position': series(0.0, round(pos_pct, 4)),
         'nav': series(1.0, round(nav, 6)),
-        '_updated': updated,
+        '_updated': overlay_updated,
     })
     return result
 
