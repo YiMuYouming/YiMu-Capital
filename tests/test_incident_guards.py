@@ -95,6 +95,61 @@ class BridgeGuardTests(unittest.TestCase):
 
         self.assertEqual(codes, ["002049", "002056", "002261", "002409", "603011"])
 
+    def test_runtime_live_subscription_repairs_shifted_pool_columns(self):
+        data = {
+            "lianban_pool": [],
+            "trend_pool": [
+                {"标的": "🟢温度标", "代码": "国瓷材料", "板块": "300285", "今日定位": "电子化学品", "窗口": "温度标"},
+                {"标的": "🟡趋势参考", "代码": "中际旭创", "板块": "300308", "今日定位": "CPO", "窗口": "参考"},
+            ],
+            "decision": {"锚定股状态": []},
+            "positions": [],
+        }
+        with patch("scripts.db.query_account_baseline", return_value=None), \
+             patch.object(bridge, "query_trades", return_value=[]), \
+             patch.object(bridge, "query_7day_closed_positions", return_value=[]):
+            codes = bridge._collect_runtime_stock_codes(data, today="2026-06-22")
+
+        self.assertEqual(codes, ["300285", "300308"])
+
+    def test_baseline_payload_repairs_shifted_pool_columns(self):
+        orig_data = bridge.DATA_FILE
+        orig_cache = dict(bridge.CACHE)
+        import json
+        import tempfile
+        from pathlib import Path
+        with tempfile.TemporaryDirectory() as tmp:
+            try:
+                bridge.DATA_FILE = Path(tmp) / "dashboard_data.json"
+                bridge.DATA_FILE.write_text(json.dumps({
+                    "meta": {"date": "2026-06-22", "updated": "2026-06-22T09:00:00+08:00"},
+                    "lianban_pool": [],
+                    "trend_pool": [
+                        {"标的": "🟢温度标", "代码": "国瓷材料", "板块": "300285", "今日定位": "电子化学品", "窗口": "温度标"}
+                    ],
+                    "positions": [],
+                    "risk": {},
+                }, ensure_ascii=False))
+                bridge.CACHE.clear()
+                bridge.CACHE["live_quotes"] = {
+                    "300285": {"最新价": 101.0, "涨幅": "+1.23%", "量比": "1.1"},
+                    "_updated": "2026-06-22T09:30:00+08:00",
+                }
+                with patch("scripts.db.query_account_baseline", return_value=None), \
+                     patch.object(bridge, "query_trades", return_value=[]), \
+                     patch.object(bridge, "query_7day_closed_positions", return_value=[]), \
+                     patch.object(bridge, "_build_rule_inputs", return_value={"risk": {}}):
+                    result = bridge._baseline_payload(now=datetime(2026, 6, 22, 9, 35))
+            finally:
+                bridge.DATA_FILE = orig_data
+                bridge.CACHE.clear()
+                bridge.CACHE.update(orig_cache)
+
+        row = result["trend_pool"][0]
+        self.assertEqual(row.get("标的"), "国瓷材料")
+        self.assertEqual(row.get("代码"), "300285")
+        self.assertEqual(row.get("板块"), "电子化学品")
+
     def test_quote_coverage_counts_runtime_trade_codes(self):
         orig_data = bridge.DATA_FILE
         orig_cache = dict(bridge.CACHE)

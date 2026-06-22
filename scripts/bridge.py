@@ -134,8 +134,38 @@ def _normalize_stock_code(value):
     return code if re.fullmatch(r"\d{6}", code) else None
 
 
+def _repair_shifted_pool_row(row):
+    if not isinstance(row, dict):
+        return row
+    fixed = dict(row)
+    code_val = str(fixed.get("代码") or "").strip()
+    board_val = str(fixed.get("板块") or "").strip()
+    if code_val and not _normalize_stock_code(code_val) and _normalize_stock_code(board_val):
+        original_role = str(fixed.get("标的") or "").strip()
+        original_sector = fixed.get("今日定位")
+        original_positioning = fixed.get("窗口")
+        fixed["池内角色"] = original_role
+        fixed["标的"] = code_val
+        fixed["代码"] = board_val
+        fixed["板块"] = original_sector
+        if original_positioning:
+            fixed["今日定位"] = original_positioning
+    return fixed
+
+
+def _repair_dashboard_pool_rows(data):
+    if not isinstance(data, dict):
+        return data
+    for key in ("lianban_pool", "trend_pool"):
+        rows = data.get(key)
+        if isinstance(rows, list):
+            data[key] = [_repair_shifted_pool_row(row) for row in rows]
+    return data
+
+
 def _collect_stock_codes(data):
     """Collect all instruments that must stay subscribed to live quotes."""
+    data = _repair_dashboard_pool_rows(dict(data or {}))
     raw_codes = (
         [s.get('代码') for s in data.get('lianban_pool', []) if s.get('代码')] +
         [s.get('代码') for s in data.get('trend_pool', []) if s.get('代码')] +
@@ -1929,7 +1959,7 @@ def _load_dashboard_data():
     try:
         if DATA_FILE.exists():
             with open(DATA_FILE) as f:
-                return json.load(f)
+                return _repair_dashboard_pool_rows(json.load(f))
     except Exception:
         pass
     return {}

@@ -152,6 +152,19 @@ def parse_frontmatter(filepath):
 def _normalize_pool_rows(rows):
     """Convert legacy role/action-only pool rows into observation-only rows."""
     for row in rows or []:
+        code_val = str(row.get("代码") or "").strip()
+        board_val = str(row.get("板块") or "").strip()
+        if code_val and not re.fullmatch(r"\d{6}", code_val) and re.fullmatch(r"\d{6}", board_val):
+            original_role = str(row.get("标的") or "").strip()
+            original_sector = row.get("今日定位")
+            original_positioning = row.get("窗口")
+            row["池内角色"] = original_role
+            row["标的"] = code_val
+            row["代码"] = board_val
+            row["板块"] = original_sector
+            if original_positioning:
+                row["今日定位"] = original_positioning
+
         today_role = row.get("今日定位")
         today_check = row.get("今日检查")
         trigger_invalid = row.get("触发/失效") or row.get("触发失效")

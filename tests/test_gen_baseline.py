@@ -180,6 +180,37 @@ date: 2026-06-21
         self.assertEqual(trend[0].get("今日检查"), "回踩5日线")
         self.assertIn("缩量企稳", trend[0].get("触发/失效", ""))
 
+    def test_parse_appendix_repairs_shifted_pool_name_and_code_columns(self):
+        note = """---
+date: 2026-06-21
+---
+# test
+
+## 数据附录（机器解析用）
+
+### 趋势自选池
+| 标的 | 代码 | 板块 | 今日定位 | 窗口 | 今日检查 | 触发/失效 | 涨幅 | 收盘价 | MA5 | MA20 | 量比 | 换手 | 备注 |
+|------|------|------|----------|------|----------|-----------|------|--------|-----|------|------|------|------|
+| 🟢温度标 | 国瓷材料 | 300285 | 🔬电子化学品 | **温度标** | 观察 | 主线延续信号 | +14.05% | 101.00 | 89.53 | 71.02 | 1.0 | 5% | 温度标 |
+| 🟡趋势参考 | 中际旭创 | 300308 | 💻AI算力/CPO | **参考** | 走强 | 触发：走强；失效：放量破位 | +2.00% | 200.00 | 190.00 | 170.00 | 1.2 | 4% | CPO龙头 |
+"""
+        with tempfile.NamedTemporaryFile("w", suffix=".md", delete=False) as f:
+            f.write(note)
+            path = f.name
+        try:
+            appendix = parse_appendix(path)
+        finally:
+            Path(path).unlink(missing_ok=True)
+
+        trend = appendix.get("trend_pool", [])
+        self.assertEqual(trend[0].get("标的"), "国瓷材料")
+        self.assertEqual(trend[0].get("代码"), "300285")
+        self.assertEqual(trend[0].get("板块"), "🔬电子化学品")
+        self.assertEqual(trend[0].get("池内角色"), "🟢温度标")
+        self.assertEqual(trend[0].get("今日定位"), "**温度标**")
+        self.assertEqual(trend[1].get("标的"), "中际旭创")
+        self.assertEqual(trend[1].get("代码"), "300308")
+
     def test_parse_appendix_legacy_pool_rows_are_observation_only(self):
         note = """---
 date: 2026-06-21
