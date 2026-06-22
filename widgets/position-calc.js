@@ -169,6 +169,9 @@ class PositionCalcWidget extends YiMuWidget {
     var commandState = globallyBlocked ? '阻断' : (rsWarnings.length ? '提示' : '可执行');
     var commandClass = globallyBlocked ? 'is-blocked' : (rsWarnings.length ? 'is-watch' : 'is-ready');
     var planW2CapText = _w03PctRangeText(planW2Cap);
+    var gateReason = globallyBlocked
+      ? ('阻断：' + (allScopeCodes.length ? allScopeCodes.join('、') : '全局门禁未通过'))
+      : (positionMode === 'earned_mainline' ? '执行：账户硬上限、主线机会、盈利解锁取最小值' : '执行：实时规则引擎输出仓位');
     html += '<div class="w03-command ' + commandClass + '">' +
       '<div class="w03-command-head">' +
         '<span><i>S0</i> 仓位指令</span>' +
@@ -189,19 +192,25 @@ class PositionCalcWidget extends YiMuWidget {
         '<span class="w03-layer-index">第一层</span>' +
         '<span class="w03-layer-title">总仓位门禁</span>' +
       '</div>' +
-      '<div class="w03-layer-main">' +
-        '<div><div class="w03-kpi ' + (globallyBlocked ? 'danger' : 'info') + '">' + _w03PctText(totalCap) + '%</div><div class="w03-caption">执行上限</div></div>' +
-        '<div class="w03-metrics">' +
-          '<span>基础 <b>' + _w03PctText(baseCap) + '%</b></span>' +
-          (positionMode === 'earned_mainline' ? '<span>账户 <b>' + _w03PctText(accountCap) + '%</b></span>' : '') +
-          (positionMode === 'earned_mainline' ? '<span>主线 <b>' + _w03PctText(opportunityCap) + '%</b></span>' : '') +
-          (positionMode === 'earned_mainline' ? '<span>盈利 <b>' + _w03PctText(earnedCap) + '%</b></span>' : '') +
-          (singleStockCap ? '<span>单票 <b>' + _w03PctText(singleStockCap) + '%</b></span>' : '') +
-          (planTotalCap !== baseCap ? '<span>计划 <b>' + _w03PctText(planTotalCap) + '%</b></span>' : '') +
-          '<span>首笔 <b>' + _w03PctText(firstEntryPct) + '%</b></span>' +
+      '<div class="w03-gate">' +
+        '<div class="w03-gate-primary">' +
+          '<div class="w03-kpi ' + (globallyBlocked ? 'danger' : 'info') + '">' + _w03PctText(totalCap) + '%</div>' +
+          '<div class="w03-caption">执行上限</div>' +
+        '</div>' +
+        '<div class="w03-cap-strip">' +
+          (positionMode === 'earned_mainline' ? '<span><i>账户</i><b>' + _w03PctText(accountCap) + '%</b></span>' : '') +
+          (positionMode === 'earned_mainline' ? '<span><i>机会</i><b>' + _w03PctText(opportunityCap) + '%</b></span>' : '') +
+          (positionMode === 'earned_mainline' ? '<span><i>盈利</i><b>' + _w03PctText(earnedCap) + '%</b></span>' : '') +
+          (positionMode !== 'earned_mainline' ? '<span><i>实时</i><b>' + _w03PctText(totalCap) + '%</b></span>' : '') +
         '</div>' +
       '</div>' +
-      (globallyBlocked ? '<div class="w03-note">全局阻断后执行上限归零</div>' : '<div class="w03-note">' + (positionMode === 'earned_mainline' ? '按账户硬上限 / 主线机会 / 盈利解锁取最小值' : '按实时规则引擎输出执行仓位') + '</div>') +
+      '<div class="w03-gate-reason">' + _w03Esc(gateReason) + '</div>' +
+      '<div class="w03-gate-meta">' +
+        '<span>基础 <b>' + _w03PctText(baseCap) + '%</b></span>' +
+        '<span>计划 <b>' + _w03PctText(planTotalCap) + '%</b></span>' +
+        '<span>首笔 <b>' + _w03PctText(firstEntryPct) + '%</b></span>' +
+        (singleStockCap ? '<span>单票 <b>' + _w03PctText(singleStockCap) + '%</b></span>' : '') +
+      '</div>' +
       '</section>';
 
     // ===== Layer 2: 风格分配 =====

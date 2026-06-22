@@ -1449,12 +1449,43 @@ html,body{
   white-space:nowrap;
 }
 .w03-layer-title{font-size:var(--fs-label);font-weight:700;color:var(--text-secondary);white-space:nowrap}
-.w03-layer-main{display:flex;align-items:flex-end;justify-content:space-between;gap:var(--sp-sm)}
 .w03-kpi{font-family:var(--font-mono);font-size:24px;font-weight:800;line-height:1}
 .w03-caption,.w03-note{font-size:var(--fs-label);color:var(--text-secondary)}
 .w03-note{margin-top:var(--sp-xs);line-height:1.35}
-.w03-metrics{display:flex;flex-direction:column;gap:2px;text-align:right;font-size:var(--fs-label);color:var(--text-secondary)}
-.w03-metrics b{font-family:var(--font-mono);color:var(--text-secondary)}
+.w03-gate{display:grid;grid-template-columns:auto minmax(0,1fr);gap:var(--sp-sm);align-items:end}
+.w03-gate-primary{min-width:54px}
+.w03-cap-strip{display:flex;align-items:stretch;gap:4px;min-width:0}
+.w03-cap-strip span{
+  flex:1 1 0;
+  min-width:0;
+  padding:4px 5px;
+  border-radius:var(--radius-sm);
+  background:rgba(255,255,255,.72);
+  border:1px solid var(--border-light);
+}
+.w03-cap-strip i{display:block;font-style:normal;font-size:var(--fs-micro);line-height:1.1;color:var(--text-disabled);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.w03-cap-strip b{display:block;font-family:var(--font-mono);font-size:var(--fs-label);line-height:1.2;color:var(--text-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.w03-layer-blocked .w03-cap-strip span{background:rgba(255,255,255,.48)}
+.w03-gate-reason{
+  margin-top:var(--sp-xs);
+  padding:5px 7px;
+  border-radius:var(--radius-sm);
+  background:rgba(15,23,42,.04);
+  color:var(--text-secondary);
+  font-size:var(--fs-label);
+  line-height:1.35;
+}
+.w03-layer-blocked .w03-gate-reason{background:rgba(220,38,38,.07);color:var(--danger)}
+.w03-gate-meta{
+  display:flex;
+  flex-wrap:wrap;
+  gap:4px 8px;
+  margin-top:var(--sp-xs);
+  color:var(--text-disabled);
+  font-size:var(--fs-micro);
+  line-height:1.25;
+}
+.w03-gate-meta b{font-family:var(--font-mono);font-weight:700;color:var(--text-secondary)}
 .w03-split-row,.w03-window-grid,.w03-money-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--sp-xs)}
 .w03-split-item,.w03-window{
   min-width:0;
