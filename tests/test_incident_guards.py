@@ -76,6 +76,25 @@ class BridgeGuardTests(unittest.TestCase):
         self.assertIn("002281", codes)
         self.assertIn("688017", codes)
 
+    def test_runtime_live_subscription_filters_non_stock_codes(self):
+        data = {
+            "lianban_pool": [{"代码": "中芯国际"}, {"代码": "002049"}],
+            "trend_pool": [{"代码": "~~300037~~"}],
+            "decision": {"锚定股状态": [{"代码": "寒武纪"}]},
+            "positions": [{"代码": "002409", "状态": "持有"}],
+        }
+        with patch("scripts.db.query_account_baseline", return_value={
+            "positions": [{"代码": "603011", "数量": 100}, {"代码": "合锻智能", "数量": 100}],
+        }), patch.object(bridge, "query_trades", return_value=[
+            {"trade_date": "2026-06-22", "code": "002056", "name": "横店东磁"},
+            {"trade_date": "2026-06-22", "code": "manual_backfill", "name": "坏值"},
+        ]), patch.object(bridge, "query_7day_closed_positions", return_value=[
+            {"code": "002261"}, {"code": "拓维信息"},
+        ]):
+            codes = bridge._collect_runtime_stock_codes(data, today="2026-06-22")
+
+        self.assertEqual(codes, ["002049", "002056", "002261", "002409", "603011"])
+
     def test_quote_coverage_counts_runtime_trade_codes(self):
         orig_data = bridge.DATA_FILE
         orig_cache = dict(bridge.CACHE)
@@ -96,7 +115,9 @@ class BridgeGuardTests(unittest.TestCase):
                 "688017": {"最新价": 422.0},
                 "_updated": "2026-06-09T10:30:00+08:00",
             }
-            with patch.object(bridge, "query_trades", return_value=[
+            with patch("scripts.db.query_account_baseline", return_value=None), \
+                 patch.object(bridge, "query_7day_closed_positions", return_value=[]), \
+                 patch.object(bridge, "query_trades", return_value=[
                 {"trade_date": "2026-06-09", "code": "688017", "name": "绿的谐波"},
             ]):
                 covered, total, missing = bridge._quotes_coverage(today="2026-06-09")

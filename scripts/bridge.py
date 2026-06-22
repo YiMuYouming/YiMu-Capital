@@ -129,14 +129,20 @@ def _dump_cache():
         pass
 
 
+def _normalize_stock_code(value):
+    code = str(value or "").strip()
+    return code if re.fullmatch(r"\d{6}", code) else None
+
+
 def _collect_stock_codes(data):
     """Collect all instruments that must stay subscribed to live quotes."""
-    return list(set(
+    raw_codes = (
         [s.get('代码') for s in data.get('lianban_pool', []) if s.get('代码')] +
         [s.get('代码') for s in data.get('trend_pool', []) if s.get('代码')] +
         [a.get('代码') for a in data.get('decision', {}).get('锚定股状态', []) if a.get('代码')] +
         [p.get('代码') for p in data.get('positions', []) if p.get('代码')]
-    ))
+    )
+    return list({code for code in (_normalize_stock_code(c) for c in raw_codes) if code})
 
 
 def _collect_runtime_stock_codes(data, today=None):
@@ -147,27 +153,27 @@ def _collect_runtime_stock_codes(data, today=None):
         from scripts.db import query_account_baseline
         anchor = query_account_baseline(trade_date)
         for position in (anchor or {}).get("positions") or []:
-            code = str(position.get("代码") or "")
+            code = _normalize_stock_code(position.get("代码"))
             qty_raw = str(position.get("数量") or 0).replace("股", "")
             try:
                 qty = int(float(qty_raw))
             except (TypeError, ValueError):
                 qty = 0
-            if len(code) == 6 and qty > 0:
+            if code and qty > 0:
                 codes.add(code)
     except Exception:
         pass
     try:
         for trade in query_trades(date_from=trade_date, date_to=trade_date, limit=10000):
-            code = str(trade.get("code") or "")
-            if len(code) == 6:
+            code = _normalize_stock_code(trade.get("code"))
+            if code:
                 codes.add(code)
     except Exception:
         pass
     try:
         for closed in query_7day_closed_positions(trade_date):
-            code = str(closed.get("code") or "")
-            if len(code) == 6:
+            code = _normalize_stock_code(closed.get("code"))
+            if code:
                 codes.add(code)
     except Exception:
         pass
