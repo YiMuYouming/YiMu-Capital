@@ -164,6 +164,24 @@ class PnlQueryZeroValueTests(unittest.TestCase):
         self.assertEqual(result["position"], [10, 20, 30, 40, 50], result)
         self.assertAlmostEqual(result["portfolio"][-1], 14.0, places=3, msg=result)
 
+    def test_query_pnl_month_returns_cumulative_nav_slice_not_window_rebased(self):
+        """月图展示累计TWR曲线的局部截取，首日不应按窗口前一日重新归零"""
+        rows = [
+            ("2026-05-25", 1.052385, 0.96),
+            ("2026-05-26", 1.04893, -0.17),
+            ("2026-05-27", 1.033765, 0.0),
+        ]
+        for date_str, nav, sh_pct in rows:
+            db._exec_write(
+                "INSERT INTO daily_summary (date,nav,pnl_pct,sh_pct,sz_pct,cy_pct,pos_pct,deposit) VALUES (?,?,?,?,?,?,?,?)",
+                (date_str, nav, 0.0, sh_pct, 0.0, 0.0, 30, 200000))
+
+        result = db.query_pnl("month", "sh")
+
+        self.assertEqual(result["dates"][-2:], ["2026-05-26", "2026-05-27"], result)
+        self.assertAlmostEqual(result["portfolio"][-2], 4.893, places=3, msg=result)
+        self.assertAlmostEqual(result["portfolio"][-1], 3.3765, places=3, msg=result)
+
     def test_query_pnl_all_overlays_today_benchmark_from_intraday(self):
         """日结 daily_summary 若今天指数为 0，应以最后一条日内快照补齐"""
         today = datetime.now().strftime("%Y-%m-%d")

@@ -1008,6 +1008,7 @@ def query_pnl(range='today', index='sh'):
     # 计算 from_date / limit
     now = datetime.now()
     limit = None
+    from_date = '2020-01-01'
     if range == 'week':
         limit = 5   # 最近5个交易日
     elif range == 'month':
@@ -1016,22 +1017,13 @@ def query_pnl(range='today', index='sh'):
         limit = 60  # 近3个月≈60个交易日
     elif range == 'year':
         limit = 250  # 近1年≈250个交易日
-    else:
-        from_date = '2020-01-01'
 
     # 图表用 → 累积 TWR；抽屉用(all) → 保持原始日收益
     if range in ('week', 'month', 'quarter', 'year', 'all'):
-        if limit:
-            rows = _exec(f"""
-                SELECT date, pnl_pct, {idx_field} AS bm_pct, pos_pct, nav
-                FROM daily_summary ORDER BY date DESC LIMIT ?
-            """, (limit + 1,))
-            rows = list(reversed(rows))  # 倒回日期升序
-        else:
-            rows = _exec(f"""
-                SELECT date, pnl_pct, {idx_field} AS bm_pct, pos_pct, nav
-                FROM daily_summary WHERE date >= ? ORDER BY date
-            """, (from_date,))
+        rows = _exec(f"""
+            SELECT date, pnl_pct, {idx_field} AS bm_pct, pos_pct, nav
+            FROM daily_summary WHERE date >= ? ORDER BY date
+        """, (from_date,))
         rows_list = [dict(r) for r in rows]
 
         # Daily rollup may be written before market fields are finalized.  For
@@ -1059,10 +1051,6 @@ def query_pnl(range='today', index='sh'):
                     'pos_pct': tr['pos_pct'] or 0.0,
                     'nav': tr['nav'] or 1.0,
                 })
-
-        # 维持 rolling 窗口大小（追加今天后去掉最早的）
-        if limit and len(rows_list) > limit + 1:
-            rows_list = rows_list[-(limit + 1):]
 
         display_rows = rows_list[-limit:] if limit else rows_list
         labels = [r['date'][-5:] for r in display_rows]
@@ -1106,11 +1094,14 @@ def query_pnl(range='today', index='sh'):
                 result.append(round((cum - 1) * 100, 4))
             return result
 
+        pnl_cumulative = [round((float(r.get('nav') or 1.0) - 1) * 100, 4) for r in display_rows]
+        bm_cumulative = to_cumulative([r['bm_pct'] for r in rows_list])
+        bm_cumulative = bm_cumulative[-len(display_rows):] if display_rows else []
         return {
             'type': 'daily',
             'labels': labels,
-            'portfolio': to_cumulative(pnl_raw),
-            'benchmark': to_cumulative(bm_raw),
+            'portfolio': pnl_cumulative,
+            'benchmark': bm_cumulative,
             'position': pos_vals,
             'nav': nav_vals,
             'dates': [r['date'] for r in display_rows],

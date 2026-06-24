@@ -328,6 +328,41 @@ console.log(JSON.stringify({
         self.assertEqual(result.get("pnl"), "+1.99%", result)
         self.assertEqual(result.get("pos"), "30%", result)
 
+    def test_period_kpi_prefers_chart_cumulative_twr_over_all_daily_fallback(self):
+        """月主图已是累计TWR截取时，KPI 不应被 all 缓存的兜底计算覆盖"""
+        script = r"""
+var inst = new PnLCurveWidget({id:'W22'});
+inst.id = 'W22';
+inst._state = {
+  period:'month', index:'sh', totalAsset:200000, totalDeposit:200000,
+  liveQ:{}, positions:[], pnlLive:{valuation_complete:true}
+};
+inst._allDailyData = {
+  dates:['2026-05-26','2026-06-01','2026-06-24'],
+  portfolio:[-0.33, -0.10, 3.59],
+  benchmark:[-0.17, -0.27, 0.05],
+  position:[67, 0, 50]
+};
+inst._updateKPI({
+  type:'daily',
+  labels:['05-26','06-24'],
+  dates:['2026-05-26','2026-06-24'],
+  portfolio:[4.89, 2.94],
+  benchmark:[-0.55, -0.33],
+  position:[67, 50],
+  nav:[1.04893, 1.029445]
+});
+console.log(JSON.stringify({
+  periodVal: document.getElementById('pnl_period_val').textContent,
+  periodSub: document.getElementById('pnl_period_sub').textContent,
+  alpha: document.getElementById('pnl_today_alpha').textContent
+}));
+"""
+        result = _run_node(script, files=["widgets/pnl-curve.js"])
+        self.assertEqual(result.get("periodVal"), "+2.94%", result)
+        self.assertIn("相对指数 +3.27%", result.get("periodSub", ""), result)
+        self.assertEqual(result.get("alpha"), "+3.27%", result)
+
     def test_today_fallback_uses_last_trading_day_return_not_summary_zero(self):
         """非交易日 today fallback 时，主收益 KPI 显示最近交易日收益，不显示 summary 0"""
         script = r"""

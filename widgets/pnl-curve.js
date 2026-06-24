@@ -175,13 +175,11 @@ class PnLCurveWidget extends YiMuWidget {
   // ===== Data helpers =====
   // 周期过滤（共用）
   _filterByPeriod(daily, period) {
+    var limitMap = { week:5, month:22, quarter:60, year:250 };
+    var limit = limitMap[period];
+    if (limit) return daily.slice(Math.max(0, daily.length - limit));
     var now = new Date();
-    var day = now.getDay() || 7;
     switch(period) {
-      case 'week': { var dow = now.getDay(); var diff = dow === 0 ? -6 : 1 - dow; var mon = new Date(now); mon.setDate(now.getDate() + diff); mon.setHours(0,0,0,0); return daily.filter(function(d){return new Date(d.date)>=mon;}); }
-      case 'month': return daily.filter(function(d){var dt=new Date(d.date); return dt.getMonth()===now.getMonth()&&dt.getFullYear()===now.getFullYear();});
-      case 'quarter': { var q = new Date(now); q.setMonth(now.getMonth()-3); return daily.filter(function(d){return new Date(d.date)>=q;}); }
-      case 'year': return daily.filter(function(d){return new Date(d.date).getFullYear()===now.getFullYear();});
       default: return daily.slice();
     }
   }
@@ -313,10 +311,20 @@ class PnLCurveWidget extends YiMuWidget {
     var limitMap = { week:5, month:22, quarter:60, year:250 };
     var limit = limitMap[period] || ad.portfolio.length;
     var start = Math.max(0, ad.portfolio.length - limit);
+    function cumulative(arr) {
+      var cum = 1.0;
+      return (arr || []).map(function(v) {
+        cum *= (1 + (parseFloat(v) || 0) / 100);
+        return (cum - 1) * 100;
+      });
+    }
+    var portfolio = cumulative(ad.portfolio);
+    var benchmark = cumulative(ad.benchmark);
     return {
-      portfolio: ad.portfolio.slice(start),
+      portfolio: portfolio.slice(start),
+      benchmark: benchmark.slice(start),
       position: ad.position ? ad.position.slice(start) : [],
-      rawDailyReturns: true
+      dates: ad.dates ? ad.dates.slice(start) : [],
     };
   }
 
@@ -610,43 +618,45 @@ class PnLCurveWidget extends YiMuWidget {
       }
     } else {
       if (isQuoteUnavailable) return;
-      var cache = this._allDailyData;
-      if (cache && cache.dates && cache.dates.length) {
-      var now = new Date();
-      var dmap = {
-        week: new Date(now.getFullYear(), now.getMonth(), now.getDate() - ((now.getDay()||7)-1)).toISOString().slice(0,10),
-        month: now.toISOString().slice(0,7) + '-01',
-        quarter: new Date(now.getFullYear(), now.getMonth()-3, 1).toISOString().slice(0,10),
-        year: now.getFullYear() + '-01-01'
-      };
-      var fd = dmap[s.period] || cache.dates[0];
-      var cP = 1.0, cB = 1.0, pk = -Infinity, md = 0, rp = 0;
-      for (var i = 0; i < cache.dates.length; i++) {
-        if (cache.dates[i] < fd) continue;
-        cP *= (1 + cache.portfolio[i] / 100);
-        cB *= (1 + cache.benchmark[i] / 100);
-        rp = (cP - 1) * 100;
-        if (rp > pk) pk = rp;
-        if (rp - pk < md) md = rp - pk;
+      var periodSrc = chartData && chartData.portfolio && chartData.portfolio.length
+        ? chartData
+        : this._periodSliceFromAllDaily(s.period);
+      if (periodSrc && periodSrc.portfolio && periodSrc.portfolio.length) {
+        var lastP = null, lastB = null, md = 0;
+        if (periodSrc.rawDailyReturns) {
+          var cP = 1.0, cB = 1.0, pk = -Infinity, rp = 0;
+          for (var i = 0; i < periodSrc.portfolio.length; i++) {
+            if (periodSrc.portfolio[i] == null) continue;
+            cP *= (1 + periodSrc.portfolio[i] / 100);
+            cB *= (1 + ((periodSrc.benchmark || [])[i] || 0) / 100);
+            rp = (cP - 1) * 100;
+            if (rp > pk) pk = rp;
+            if (rp - pk < md) md = rp - pk;
+          }
+          lastP = (cP - 1) * 100;
+          lastB = (cB - 1) * 100;
+        } else {
+          var lastValid = periodSrc.portfolio.length - 1;
+          while (lastValid >= 0 && periodSrc.portfolio[lastValid] == null) lastValid--;
+          lastP = lastValid >= 0 ? periodSrc.portfolio[lastValid] : null;
+          lastB = lastValid >= 0 && periodSrc.benchmark ? periodSrc.benchmark[lastValid] : null;
+          var ddI = this._calcDD(periodSrc);
+          md = ddI ? ddI.dd : 0;
+        }
+        if (lastP != null) {
+          document.getElementById('pnl_period_val').textContent = (lastP >= 0 ? '+' : '') + lastP.toFixed(2) + '%';
+          document.getElementById('pnl_period_val').style.color = lastP >= 0 ? 'var(--up)' : 'var(--down)';
+          var rel = lastB == null ? null : lastP - lastB;
+          document.getElementById('pnl_period_sub').textContent = rel == null ? '等待指数参考' : '相对指数 ' + (rel >= 0 ? '+' : '') + rel.toFixed(2) + '%';
+          document.getElementById('pnl_dd_val').textContent = md.toFixed(2) + '%';
+        }
       }
-      document.getElementById('pnl_period_val').textContent = ((cP-1)*100 >= 0 ? '+' : '') + ((cP-1)*100).toFixed(2) + '%';
-      document.getElementById('pnl_period_val').style.color = (cP-1)*100 >= 0 ? 'var(--up)' : 'var(--down)';
-      document.getElementById('pnl_period_sub').textContent = '相对指数 ' + (((cP-1)*100-(cB-1)*100) >= 0 ? '+' : '') + ((cP-1)*100-(cB-1)*100).toFixed(2) + '%';
-      document.getElementById('pnl_dd_val').textContent = md.toFixed(2) + '%';
-    } else if (chartData && chartData.portfolio && chartData.portfolio.length) {
-      var cp = chartData.portfolio, cb = chartData.benchmark;
-      var ddI = this._calcDD(chartData);
-      var lastP = cp[cp.length-1];
-      document.getElementById('pnl_period_val').textContent = (lastP >= 0 ? '+' : '') + lastP.toFixed(2) + '%';
-      document.getElementById('pnl_period_val').style.color = lastP >= 0 ? 'var(--up)' : 'var(--down)';
-      document.getElementById('pnl_period_sub').textContent = '相对指数 ' + (lastP-(cb[cb.length-1]) >= 0 ? '+' : '') + (lastP-cb[cb.length-1]).toFixed(2) + '%';
-      document.getElementById('pnl_dd_val').textContent = (ddI ? ddI.dd : 0).toFixed(2) + '%';
     }
     document.getElementById('pnl_dd_val').style.color = 'var(--down)';
 
     // 今日相对指数
     var todayAlphaEl = document.getElementById('pnl_today_alpha');
-    if (todayAlphaEl && chartData && chartData.portfolio && chartData.benchmark) {
+    if (!isQuoteUnavailable && todayAlphaEl && chartData && chartData.portfolio && chartData.benchmark) {
       var lastValid = chartData.portfolio.length - 1;
       while (lastValid >= 0 && chartData.portfolio[lastValid] == null) lastValid--;
       var lastP = lastValid >= 0 ? chartData.portfolio[lastValid] : null;
@@ -658,14 +668,12 @@ class PnLCurveWidget extends YiMuWidget {
       }
     }
     var taSub = document.getElementById('pnl_today_alpha_sub');
-    if (taSub) taSub.textContent = 'TWR−指数参考';
+    if (!isQuoteUnavailable && taSub && !(chartData && chartData.is_fallback && s.period === 'today')) taSub.textContent = 'TWR−指数参考';
 
     // Row 1 标签联动
     var idxName2 = {sh:'上证', sz:'深证', cy:'创业'}[s.index] || '上证';
     var bmSub2 = document.getElementById('pnl_bm_twr_sub');
     if (bmSub2) bmSub2.textContent = idxName2 + '指数同期';
-
-  }
 
   }
 
@@ -713,16 +721,18 @@ class PnLCurveWidget extends YiMuWidget {
     }
 
     var now = new Date();
-    // 周=最近5个交易日, 月=最近22个交易日
+    // 周/月/三月/一年都按最近交易日窗口，和 /api/pnl?range=* 主图一致。
     var dates = ad.dates || [];
     var weekStart = dates.length >= 5 ? dates[dates.length - 5] : (dates[0] || '2020-01-01');
     var monthStart = dates.length >= 22 ? dates[dates.length - 22] : (dates[0] || '2020-01-01');
+    var quarterStart = dates.length >= 60 ? dates[dates.length - 60] : (dates[0] || '2020-01-01');
+    var yearStart = dates.length >= 250 ? dates[dates.length - 250] : (dates[0] || '2020-01-01');
     var fromDates = {
       today:     now.toISOString().slice(0, 10),
       week:      weekStart,
       month:     monthStart,
-      quarter:   new Date(now.getFullYear(), now.getMonth() - 3, 1).toISOString().slice(0, 10),
-      year:      now.getFullYear() + '-01-01',
+      quarter:   quarterStart,
+      year:      yearStart,
     };
     var periods = ['today', 'week', 'month', 'quarter', 'year'];
     var labels  = ['日', '近一周', '近一月', '近三月', '近一年'];
