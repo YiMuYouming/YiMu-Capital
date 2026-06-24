@@ -18,6 +18,7 @@ import urllib.request
 ROOT = Path(__file__).resolve().parents[2]
 CLOUD_DATA_PATHS = {
     "/data/auction_snapshot.json",
+    "/data/dashboard_data.json",
     "/data/pnl_history.json",
     "/data/sentiment_auto.json",
     "/data/ymwm_report.json",

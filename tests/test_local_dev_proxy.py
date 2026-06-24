@@ -1,7 +1,9 @@
 import json
+import tempfile
 import threading
 import unittest
 import urllib.request
+from pathlib import Path
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from scripts.ops.local_dev_proxy import LocalDevProxyHandler
@@ -13,6 +15,21 @@ class _Cloud404Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", "application/json")
         self.end_headers()
         self.wfile.write(b'{"error":"not_found"}')
+
+    def log_message(self, *_args):
+        pass
+
+
+class _CloudDashboardDataHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        if self.path == "/data/dashboard_data.json":
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(b'{"meta":{"source":"cloud"}}')
+            return
+        self.send_response(404)
+        self.end_headers()
 
     def log_message(self, *_args):
         pass
@@ -42,6 +59,25 @@ class LocalDevProxyTicketFallbackTest(unittest.TestCase):
 
         self.assertEqual(resp.status, 200)
         self.assertEqual(body, {"tickets": []})
+
+    def test_dashboard_data_json_is_proxied_to_cloud_when_local_file_missing(self):
+        cloud = _start_server(_CloudDashboardDataHandler)
+        LocalDevProxyHandler.cloud_base = f"http://127.0.0.1:{cloud.server_port}"
+        proxy = _start_server(LocalDevProxyHandler)
+        self._servers = [proxy, cloud]
+
+        with tempfile.TemporaryDirectory() as tmp:
+            local_file = Path(tmp) / "data" / "dashboard_data.json"
+            self.assertFalse(local_file.exists())
+
+            with urllib.request.urlopen(
+                f"http://127.0.0.1:{proxy.server_port}/data/dashboard_data.json",
+                timeout=5,
+            ) as resp:
+                body = json.loads(resp.read().decode("utf-8"))
+
+        self.assertEqual(resp.status, 200)
+        self.assertEqual(body, {"meta": {"source": "cloud"}})
 
 
 if __name__ == "__main__":

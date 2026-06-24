@@ -2136,7 +2136,36 @@ def _build_live_quotes_payload(rule_state=None):
     }
 
 
-def _iwencai_live_payload():
+def _is_same_day_iwencai_close_snapshot(iwencai, now=None):
+    """Keep today's near-close iwencai snapshot visible after market close."""
+    from datetime import datetime as _dt, timezone as _tz, timedelta as _td
+    updated = (iwencai or {}).get("_updated")
+    if not updated:
+        return False
+    CST = _tz(_td(hours=8))
+    try:
+        fetched = _dt.fromisoformat(str(updated).replace("Z", "+00:00"))
+        if fetched.tzinfo is None:
+            fetched = fetched.replace(tzinfo=CST)
+        ref = now or _dt.now(CST)
+        if ref.tzinfo is None:
+            ref = ref.replace(tzinfo=CST)
+        fetched_cst = fetched.astimezone(CST)
+        ref_cst = ref.astimezone(CST)
+    except Exception:
+        return False
+
+    ref_minutes = ref_cst.hour * 60 + ref_cst.minute
+    fetched_minutes = fetched_cst.hour * 60 + fetched_cst.minute
+    return (
+        fetched_cst.date() == ref_cst.date()
+        and ref_minutes >= 15 * 60
+        and fetched_minutes >= 14 * 60 + 45
+        and (ref_cst - fetched_cst).total_seconds() <= 6 * 3600
+    )
+
+
+def _iwencai_live_payload(now=None):
     """Return iwencai live payload; stale/dead data carries metadata only."""
     iwencai = dict(_sanitize_iwencai_cache_entry(CACHE.get('iwencai', {}) or {}) or {})
     if not iwencai:
@@ -2144,6 +2173,13 @@ def _iwencai_live_payload():
     _add_freshness(iwencai, 'iwencai', iwencai.get('_updated'))
     level = ((iwencai.get('_freshness') or {}).get('level') or '').lower()
     if level not in ('stale', 'dead'):
+        return iwencai
+    if _is_same_day_iwencai_close_snapshot(iwencai, now=now):
+        freshness = iwencai.get('_freshness') or {}
+        freshness['level'] = 'stale'
+        iwencai['_freshness'] = freshness
+        iwencai['_close_snapshot'] = True
+        iwencai['_available'] = True
         return iwencai
     masked = {k: v for k, v in iwencai.items() if str(k).startswith('_')}
     masked['_stale'] = True

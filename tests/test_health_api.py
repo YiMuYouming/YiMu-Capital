@@ -190,6 +190,30 @@ class LiveIndexBaselineFallbackTests(unittest.TestCase):
         self.assertFalse(iwencai.get("_available"))
         self.assertIn((iwencai.get("_freshness") or {}).get("level"), ("stale", "dead"))
 
+    def test_live_payload_keeps_same_day_iwencai_close_snapshot_after_market(self):
+        from datetime import datetime, timedelta, timezone
+        tz = timezone(timedelta(hours=8))
+        now = datetime(2026, 6, 24, 16, 30, tzinfo=tz)
+        bridge.CACHE["iwencai"] = {
+            "情绪值": 27,
+            "涨停家数": 1399,
+            "跌停家数": 3815,
+            "昨日涨停收益": -2.4,
+            "连板收益": -1.2,
+            "炸板收益": -3.1,
+            "_updated": "2026-06-24T15:56:34+08:00",
+        }
+
+        iwencai = bridge._iwencai_live_payload(now=now)
+
+        self.assertEqual(iwencai.get("情绪值"), 27)
+        self.assertEqual(iwencai.get("涨停家数"), 1399)
+        self.assertEqual(iwencai.get("跌停家数"), 3815)
+        self.assertEqual(iwencai.get("昨日涨停收益"), -2.4)
+        self.assertTrue(iwencai.get("_available"))
+        self.assertTrue(iwencai.get("_close_snapshot"))
+        self.assertEqual((iwencai.get("_freshness") or {}).get("level"), "stale")
+
 
 if __name__ == "__main__":
     unittest.main()
