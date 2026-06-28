@@ -38,13 +38,19 @@ curl -s http://127.0.0.1:18088/api/ai/context | python3 -m json.tool
 9. `tickets`：看 pending/executable/blocked/completed 以及具体票据。
 10. `positions`、`candidates`、`alerts`：补充持仓、候选和提示。
 
+冰点 W1 黄灯专项口径：
+
+- `rule_state.windows.w1.manual_review_allowed=true` 只表示极化主线强回踩进入人工复核。
+- 仍以 `rule_state.windows.w1.buy_allowed` 判断是否可推进 W1 买入；黄灯不能等同于允许买入。
+- `/api/ai/context.alerts` 若出现 `WIN-ICE-POLAR-MAINLINE-001`，必须同步读 `human_required`，不能生成 executable ticket。
+
 ## 常见问题怎么答
 
 问“现在能不能操作？”
 
 - 先看 `situation.trade_entry_allowed`。
 - 如果是 `false`，回答阻断原因，并列出 `risks` 和 `human_required`。
-- 如果是 `true`，仍要确认 `freshness.quotes.status` 不是 stale/dead/missing，再看 `tickets.executable`。
+- 如果是 `true`，仍要确认 `freshness.quotes.status` 不是 stale/dead/missing，再看 `rule_state.windows.*.buy_allowed` 和 `tickets.executable`。
 
 问“现在最需要我看什么？”
 
@@ -55,8 +61,11 @@ curl -s http://127.0.0.1:18088/api/ai/context | python3 -m json.tool
 问“票据有没有要执行的？”
 
 - 看 `tickets.executable` 和 `tickets.items`。
-- `executable`、`audit_degraded`、`partially_filled`、`confirmed`、`draft` 都需要人工确认。
+- 盘中任务队列以 `/api/ai/context.tickets` 为主。
+- 需要直接查票据列表时必须传交易日：`GET /api/trade/tickets?date=YYYY-MM-DD`。裸 `/api/trade/tickets` 只默认当天，不代表历史全量。
+- `executable`、`audit_degraded`、`partially_filled`、`manual_review`、`confirmed`、`draft` 都需要人工确认。
 - 有 `blocked` 或 `TICKET_QUERY_ERROR` 时，不能假定“没有票据”。
+- 废票不要改 Markdown，也不要裸写 SQL；用 `POST /api/trade/tickets/{ticket_id}/close` 写入 `closed/cancelled/closed_with_conflict`、`close_reason` 和 `review_note`。`executable` / `blocked` 废票会污染 `/api/ai/context.tickets`，必须闭环。
 
 问“数据能不能信？”
 

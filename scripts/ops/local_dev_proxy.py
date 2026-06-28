@@ -9,9 +9,11 @@ can be used for UI/code preview without accidentally writing real trades.
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 import argparse
+from datetime import datetime
 import json
 import os
 import urllib.error
+import urllib.parse
 import urllib.request
 
 
@@ -68,7 +70,16 @@ class LocalDevProxyHandler(SimpleHTTPRequestHandler):
                 self.wfile.write(body)
         except urllib.error.HTTPError as exc:
             if self.path.split("?", 1)[0] == "/api/trade/tickets" and exc.code == 404:
-                self._write_json({"tickets": []}, status=200)
+                query = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query)
+                data_date = (query.get("date") or [None])[0]
+                source = "query_param" if data_date else "default_today"
+                data_date = data_date or datetime.now().strftime("%Y-%m-%d")
+                payload = {
+                    "tickets": [],
+                    "data_date": data_date,
+                    "date_source": source,
+                }
+                self._write_json(payload, status=200)
                 return
             body = exc.read()
             self.send_response(exc.code)

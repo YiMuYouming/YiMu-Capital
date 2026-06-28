@@ -45,7 +45,7 @@ def _setup(test):
         "rule_snapshot_hash": "hash-1",
         "today_execution_card_id": "EXEC-20260604",
     }
-    bridge.load_current_account_state = lambda live_quotes: {
+    bridge.load_current_account_state = lambda live_quotes, **kwargs: {
         "date": "2026-06-04",
         "pnl_pct": 0.5,
         "account_day_return_pct": 0.5,
@@ -201,6 +201,72 @@ class TicketApiTest(unittest.TestCase):
         self.assertEqual(body["ticket"]["status"], "executable")
         self.assertNotIn("WIN-ICE-W1-001", body["ticket"]["blocking_rule_ids"])
 
+    def test_prepare_w1_ice_polarized_mainline_ticket_requires_manual_review(self):
+        bridge._build_trade_context = lambda: {
+            "rule_state": {
+                "version": "g1a-v1",
+                "tradable": True,
+                "blocks": [
+                    {"code": "WIN-ICE-W1-001", "scope": "w1"},
+                    {"code": "W1_EMOTION", "scope": "w1"},
+                ],
+                "warnings": [{
+                    "code": "WIN-ICE-POLAR-MAINLINE-001",
+                    "scope": "w1",
+                    "message": "冰点 W1 极化主线强回踩仅人工复核",
+                }],
+                "windows": {
+                    "w1": {
+                        "blocks": ["WIN-ICE-W1-001", "W1_EMOTION"],
+                        "manual_review_allowed": True,
+                        "manual_review_rules": ["WIN-ICE-POLAR-MAINLINE-001"],
+                    },
+                    "w2": {"blocks": []},
+                },
+            },
+            "market_snapshot": {"iwencai": {"情绪值": 25.6}},
+            "account_snapshot": {"account_day_return_pct": 1.0},
+            "context_captured_at": "2026-06-04T09:58:00",
+            "context_status": "trusted",
+            "rule_pack_version": "test-pack",
+            "rule_snapshot_hash": "hash-1",
+            "today_execution_card_id": "EXEC-20260604",
+        }
+
+        status, body = _call("POST", "/api/trade/tickets/prepare", {
+            "intent_text": "冰点极化主线回踩，准备人工复核海光信息",
+            "action_type": "buy",
+            "code": "688041",
+            "name": "海光信息",
+            "window": "W1",
+        })
+
+        self.assertEqual(status, 200, body)
+        self.assertEqual(body["ticket"]["status"], "manual_review")
+        self.assertIn("WIN-ICE-W1-001", body["ticket"]["blocking_rule_ids"])
+        self.assertIn("W1_EMOTION", body["ticket"]["blocking_rule_ids"])
+
+    def test_manual_review_ticket_is_valid_but_cannot_accept_fills(self):
+        ticket_id = db.create_trade_ticket({
+            "trade_date": "2026-06-04",
+            "code": "688041",
+            "name": "海光信息",
+            "action_type": "buy",
+            "status": "manual_review",
+            "window": "W1",
+        })
+
+        with self.assertRaisesRegex(ValueError, "cannot accept fills"):
+            db.record_confirmed_fill({
+                "ticket_id": ticket_id,
+                "action": "买入",
+                "code": "688041",
+                "name": "海光信息",
+                "qty": 100,
+                "price": 318.78,
+                "trade_date": "2026-06-04",
+            })
+
     def test_reduce_ticket_is_not_blocked_by_lot_reconciliation_or_missing_rule_snapshot(self):
         bridge._build_trade_context = lambda: {
             "rule_state": {
@@ -218,7 +284,7 @@ class TicketApiTest(unittest.TestCase):
             "rule_snapshot_hash": None,
             "today_execution_card_id": None,
         }
-        bridge.load_current_account_state = lambda live_quotes: {
+        bridge.load_current_account_state = lambda live_quotes, **kwargs: {
             "date": "2026-06-05",
             "pnl_pct": 0.9,
             "account_day_return_pct": 0.9,
@@ -264,7 +330,7 @@ class TicketApiTest(unittest.TestCase):
             "rule_snapshot_hash": "hash-1",
             "today_execution_card_id": "EXEC-20260605",
         }
-        bridge.load_current_account_state = lambda live_quotes: {
+        bridge.load_current_account_state = lambda live_quotes, **kwargs: {
             "date": "2026-06-05",
             "pnl_pct": -1.2,
             "account_day_return_pct": -1.2,
@@ -304,7 +370,7 @@ class TicketApiTest(unittest.TestCase):
             "rule_snapshot_hash": None,
             "today_execution_card_id": None,
         }
-        bridge.load_current_account_state = lambda live_quotes: {
+        bridge.load_current_account_state = lambda live_quotes, **kwargs: {
             "date": "2026-06-09",
             "pnl_pct": 1.1,
             "account_day_return_pct": 1.1,
@@ -349,7 +415,7 @@ class TicketApiTest(unittest.TestCase):
             "rule_snapshot_hash": None,
             "today_execution_card_id": None,
         }
-        bridge.load_current_account_state = lambda live_quotes: {
+        bridge.load_current_account_state = lambda live_quotes, **kwargs: {
             "date": "2026-06-05",
             "pnl_pct": 0.9,
             "account_day_return_pct": 0.9,
@@ -446,10 +512,11 @@ class TicketApiTest(unittest.TestCase):
         runtime = rule_root / "daily-runtime"
         runtime.mkdir(parents=True)
         rule_snapshot = {"rules": [{"id": "ACCT-RISK-002", "requires_data": ["account_day_return_pct"]}]}
+        trade_date = datetime.now().strftime("%Y-%m-%d")
         card = {
             "schema_version": "1.0",
-            "generated_at": "2026-06-04T09:00:00+08:00",
-            "next_trade_date": "2026-06-04",
+            "generated_at": f"{trade_date}T09:00:00+08:00",
+            "next_trade_date": trade_date,
             "rule_snapshot": rule_snapshot,
         }
         (runtime / "today_execution_card.json").write_text(json.dumps(card, ensure_ascii=False), encoding="utf-8")
@@ -468,7 +535,26 @@ class TicketApiTest(unittest.TestCase):
         self.assertEqual(ctx["context_status"], "trusted")
         self.assertEqual(ctx["rule_snapshot_hash"], expected_hash)
         self.assertEqual(ctx["rule_pack_version"], "g1a-v1")
-        self.assertEqual(ctx["today_execution_card_id"], "EXEC-20260604-20260604T090000+0800")
+        self.assertEqual(ctx["today_execution_card_id"], f"EXEC-{trade_date.replace('-', '')}-{trade_date.replace('-', '')}T090000+0800")
+
+    def test_execution_card_metadata_rejects_wrong_trade_date(self):
+        rule_root = Path(self.tmp.name) / "ai-rule-system"
+        runtime = rule_root / "daily-runtime"
+        runtime.mkdir(parents=True)
+        card = {
+            "schema_version": "1.0",
+            "generated_at": "2026-06-05T09:00:00+08:00",
+            "next_trade_date": "2026-06-05",
+            "rule_snapshot": {"rules": [{"id": "OLD"}]},
+        }
+        (runtime / "today_execution_card.json").write_text(json.dumps(card), encoding="utf-8")
+        bridge.AI_RULE_SYSTEM_ROOT = rule_root
+
+        meta = bridge._execution_card_metadata(trade_date="2026-06-24")
+
+        self.assertTrue(meta["execution_card_stale"])
+        self.assertIsNone(meta.get("rule_snapshot_hash"))
+        self.assertIsNone(meta.get("today_execution_card_id"))
 
     def test_rule_inputs_reset_legacy_loss_streak_when_account_day_is_profitable(self):
         with mock.patch.object(bridge, "_load_dashboard_data", return_value={
@@ -625,7 +711,79 @@ class TicketApiTest(unittest.TestCase):
 
         self.assertEqual(status, 200, body)
         self.assertTrue(body["ok"])
+        self.assertEqual(body["data_date"], "2026-06-04")
+        self.assertEqual(body["date_source"], "query_param")
         self.assertEqual(len(body["tickets"]), 1)
+
+    def test_get_trade_tickets_without_date_defaults_to_today_only(self):
+        today = datetime.now().strftime("%Y-%m-%d")
+        db.create_trade_ticket({
+            "trade_date": today,
+            "code": "002281",
+            "name": "光迅科技",
+            "action_type": "buy",
+            "status": "executable",
+        })
+        db.create_trade_ticket({
+            "trade_date": "2026-06-04",
+            "code": "600030",
+            "name": "中信证券",
+            "action_type": "sell",
+            "status": "filled",
+        })
+
+        status, body = _call("GET", "/api/trade/tickets")
+
+        self.assertEqual(status, 200, body)
+        self.assertTrue(body["ok"])
+        self.assertEqual(body["data_date"], today)
+        self.assertEqual(body["date_source"], "default_today")
+        self.assertEqual([ticket["trade_date"] for ticket in body["tickets"]], [today])
+
+    def test_close_trade_ticket_marks_closed_with_audit_reason(self):
+        ticket_id = db.create_trade_ticket({
+            "trade_date": "2026-06-04",
+            "code": "002281",
+            "name": "光迅科技",
+            "action_type": "buy",
+            "status": "executable",
+        })
+
+        status, body = _call("POST", f"/api/trade/tickets/{ticket_id}/close", {
+            "status": "closed",
+            "close_reason": "方向误判废票，未使用",
+            "review_note": "人工关闭测试",
+        })
+
+        self.assertEqual(status, 200, body)
+        self.assertTrue(body["ok"])
+        self.assertEqual(body["ticket"]["status"], "closed")
+        self.assertEqual(body["ticket"]["close_reason"], "方向误判废票，未使用")
+        self.assertEqual(body["ticket"]["review_note"], "人工关闭测试")
+        self.assertEqual(db.query_trade_ticket(ticket_id)["status"], "closed")
+
+    def test_close_trade_ticket_requires_reason_and_rejects_non_terminal_status(self):
+        ticket_id = db.create_trade_ticket({
+            "trade_date": "2026-06-04",
+            "code": "002281",
+            "name": "光迅科技",
+            "action_type": "buy",
+            "status": "executable",
+        })
+
+        missing_reason_status, missing_reason_body = _call("POST", f"/api/trade/tickets/{ticket_id}/close", {
+            "status": "closed",
+        })
+        bad_status, bad_body = _call("POST", f"/api/trade/tickets/{ticket_id}/close", {
+            "status": "executable",
+            "close_reason": "bad",
+        })
+
+        self.assertEqual(missing_reason_status, 400)
+        self.assertIn("close_reason required", missing_reason_body["error"])
+        self.assertEqual(bad_status, 400)
+        self.assertIn("invalid close status", bad_body["error"])
+        self.assertEqual(db.query_trade_ticket(ticket_id)["status"], "executable")
 
     def test_fill_preview_persists_pending_without_writing_facts(self):
         ticket_id = db.create_trade_ticket({

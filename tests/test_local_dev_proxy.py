@@ -3,6 +3,7 @@ import tempfile
 import threading
 import unittest
 import urllib.request
+from datetime import datetime
 from pathlib import Path
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -54,11 +55,27 @@ class LocalDevProxyTicketFallbackTest(unittest.TestCase):
         proxy = _start_server(LocalDevProxyHandler)
         self._servers = [proxy, cloud]
 
+        with urllib.request.urlopen(f"http://127.0.0.1:{proxy.server_port}/api/trade/tickets?date=2026-06-28", timeout=5) as resp:
+            body = json.loads(resp.read().decode("utf-8"))
+
+        self.assertEqual(resp.status, 200)
+        self.assertEqual(body, {"tickets": [], "data_date": "2026-06-28", "date_source": "query_param"})
+
+    def test_ticket_endpoint_404_bare_request_defaults_to_today_metadata(self):
+        cloud = _start_server(_Cloud404Handler)
+        LocalDevProxyHandler.cloud_base = f"http://127.0.0.1:{cloud.server_port}"
+        proxy = _start_server(LocalDevProxyHandler)
+        self._servers = [proxy, cloud]
+
         with urllib.request.urlopen(f"http://127.0.0.1:{proxy.server_port}/api/trade/tickets", timeout=5) as resp:
             body = json.loads(resp.read().decode("utf-8"))
 
         self.assertEqual(resp.status, 200)
-        self.assertEqual(body, {"tickets": []})
+        self.assertEqual(body, {
+            "tickets": [],
+            "data_date": datetime.now().strftime("%Y-%m-%d"),
+            "date_source": "default_today",
+        })
 
     def test_dashboard_data_json_is_proxied_to_cloud_when_local_file_missing(self):
         cloud = _start_server(_CloudDashboardDataHandler)

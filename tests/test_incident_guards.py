@@ -1,5 +1,6 @@
 import subprocess
 import sys
+import sqlite3
 import unittest
 from datetime import datetime, timedelta
 from unittest.mock import patch
@@ -8,6 +9,20 @@ import scripts.bridge as bridge
 import scripts.style_detect as style_detect
 from scripts.db import query_pnl, query_pnl_summary
 from scripts.collectors import quotes
+
+
+def _query_pnl_summary_or_skip():
+    try:
+        return query_pnl_summary()
+    except sqlite3.OperationalError as exc:
+        raise unittest.SkipTest(f"local pnl.db unavailable: {exc}") from exc
+
+
+def _query_pnl_or_skip(*args):
+    try:
+        return query_pnl(*args)
+    except sqlite3.OperationalError as exc:
+        raise unittest.SkipTest(f"local pnl.db unavailable: {exc}") from exc
 
 
 class QuoteCacheGuardTests(unittest.TestCase):
@@ -259,19 +274,19 @@ class BridgeGuardTests(unittest.TestCase):
         self.assertEqual(result["days_in_regime"], 4)
 
     def test_intraday_pnl_summary_exposes_snapshot_timestamp(self):
-        result = query_pnl_summary()
+        result = _query_pnl_summary_or_skip()
         if result["today_snapshots"] > 0:
             self.assertTrue(result.get("_updated"))
             self.assertIn("pnl_amount", result)
             self.assertIn("pnl_pct", result)
 
     def test_intraday_pnl_chart_exposes_snapshot_timestamp(self):
-        if query_pnl_summary()["today_snapshots"] > 0:
-            self.assertTrue(query_pnl("today", "sh").get("_updated"))
+        if _query_pnl_summary_or_skip()["today_snapshots"] > 0:
+            self.assertTrue(_query_pnl_or_skip("today", "sh").get("_updated"))
 
     def test_intraday_chart_includes_latest_lunch_correction(self):
-        summary = query_pnl_summary()
-        chart = query_pnl("today", "sh")
+        summary = _query_pnl_summary_or_skip()
+        chart = _query_pnl_or_skip("today", "sh")
         latest = next((v for v in reversed(chart["portfolio"]) if v is not None), None)
         if summary["_updated"] and "T11:" in summary["_updated"]:
             self.assertEqual(latest, summary["pnl_pct"])

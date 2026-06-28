@@ -104,6 +104,13 @@ def run_review_source_packet(local_data, date_str, dry_run):
     return result
 
 
+def preview_review_source_packet(local_data, date_str):
+    out_path = Path(local_data) / "review_packets" / date_str / "review_source_packet.json"
+    print(f"  输出路径: {out_path}")
+    print("  [DRY-RUN] 跳过 source collection 和 packet 写入")
+    return {"path": str(out_path), "written": False}
+
+
 def rsync_remote_arg(remote, path):
     return f"{remote}:{shlex.quote(str(path))}"
 
@@ -142,6 +149,9 @@ def main():
     print(f"  云端数据目录: {REMOTE}:{remote_data}")
     print(f"  远程主机: {REMOTE}")
     print()
+
+    if not dry_run:
+        local_data.mkdir(parents=True, exist_ok=True)
 
     # 1. 云端 SQLite backup
     print("[STEP 1] 云端 SQLite 一致性备份")
@@ -230,11 +240,12 @@ def main():
     # 5. 生成交易票据复盘摘要
     print()
     print("[STEP 5] 生成交易票据复盘摘要")
-    summary = build_daily_ticket_review(date_str)
-    print(f"  Ticket review summary generated for {date_str}")
     if dry_run:
-        print("  [DRY-RUN] 跳过 Markdown 写入")
+        print(f"  输出路径: {local_data / 'reviews' / f'ticket_review_{date_str}.md'}")
+        print("  [DRY-RUN] 跳过票据复盘摘要生成")
     else:
+        summary = build_daily_ticket_review(date_str)
+        print(f"  Ticket review summary generated for {date_str}")
         review_dir = local_data / "reviews"
         review_dir.mkdir(parents=True, exist_ok=True)
         out_path = review_dir / f"ticket_review_{date_str}.md"
@@ -244,7 +255,10 @@ def main():
     # 6. 生成 WorkBuddy 复盘事实包
     print()
     print("[STEP 6] 生成 WorkBuddy review_source_packet")
-    run_review_source_packet(local_data, date_str, dry_run)
+    if dry_run:
+        preview_review_source_packet(local_data, date_str)
+    else:
+        run_review_source_packet(local_data, date_str, dry_run)
 
     # 7. 项目专用数据包备份
     print()

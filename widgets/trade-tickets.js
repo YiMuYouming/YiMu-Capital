@@ -30,6 +30,7 @@ function _ttStatusLabel(status) {
     draft: '待确认',
     confirmed: '待确认',
     conditional_pending: '待确认',
+    manual_review: '人工复核',
     executable: '可执行',
     blocked: '已阻断',
     audit_degraded: '审计降级',
@@ -153,6 +154,7 @@ class TradeTicketsWidget extends YiMuWidget {
     this._pendingPreview = null;
     this._lastBody = null;
     this._apiLoaded = false;
+    this._ticketMeta = null;
     this._auditDetailsOpen = false;
     this._cancelledDetailsOpen = false;
     this._emergencyDetailsOpen = false;
@@ -165,6 +167,7 @@ class TradeTicketsWidget extends YiMuWidget {
     this._lastBody = body;
     if (data && Array.isArray(data.trade_tickets) && data.trade_tickets.length) {
       this._tickets = data.trade_tickets;
+      this._ticketMeta = data.trade_tickets_meta || null;
       this._renderTicketBody(body);
       return;
     }
@@ -188,12 +191,16 @@ class TradeTicketsWidget extends YiMuWidget {
     if (!silent) {
       body.innerHTML = '<div class="ui-empty ui-empty-inline"><div class="ui-empty-title">加载票据</div></div>';
     }
-    fetch('/api/trade/tickets')
+    fetch('/api/trade/tickets?date=' + encodeURIComponent(_ttTodayDate()))
       .then(function(r){ return r.ok ? r.json() : Promise.reject(new Error('load failed')); })
       .then(function(d){
         self._loading = false;
         self._apiLoaded = true;
         self._tickets = (d && Array.isArray(d.tickets)) ? d.tickets : [];
+        self._ticketMeta = d ? {
+          data_date: d.data_date || null,
+          date_source: d.date_source || null
+        } : null;
         self._renderTicketBody(body);
       })
       .catch(function(){
@@ -458,8 +465,8 @@ class TradeTicketsWidget extends YiMuWidget {
       var selected = self._selectedTicketId && self._selectedTicketId === t.ticket_id;
       var qty = t.max_qty != null ? t.max_qty : (t.qty != null ? t.qty : '');
       var effectiveStatus = _ttEffectiveStatus(t);
-      var blockLabel = effectiveStatus === 'audit_degraded' ? '审计原因 ' : (effectiveStatus === 'conditional_pending' ? '待确认 ' : '阻断原因 ');
-      var blockTone = (effectiveStatus === 'audit_degraded' || effectiveStatus === 'conditional_pending') ? 'warn' : 'danger';
+      var blockLabel = effectiveStatus === 'audit_degraded' ? '审计原因 ' : (effectiveStatus === 'manual_review' ? '复核原因 ' : (effectiveStatus === 'conditional_pending' ? '待确认 ' : '阻断原因 '));
+      var blockTone = (effectiveStatus === 'audit_degraded' || effectiveStatus === 'conditional_pending' || effectiveStatus === 'manual_review') ? 'warn' : 'danger';
       var titleText = (t.name || t.code || '未命名') + '｜' + _ttActionLabel(t.action_type) + (qty ? ' ' + qty + '股' : '');
       html += '<button class="ticket-card' + (selected ? ' is-selected' : '') + '" data-tt-select="' + _ttEsc(t.ticket_id) + '" style="--ticket-tone:var(--' + tone + ')">' +
         '<div class="ticket-card-head">' +
@@ -511,6 +518,7 @@ class TradeTicketsWidget extends YiMuWidget {
       draft: 'info',
       confirmed: 'info',
       conditional_pending: 'info',
+      manual_review: 'warn',
       executable: 'up',
       audit_degraded: 'warn',
       blocked: 'danger',
@@ -531,7 +539,7 @@ class TradeTicketsWidget extends YiMuWidget {
     var missing = _ttList(t.missing_required_data || t.missing_data || []);
     var trades = _ttList(t.linked_trade_ids || t.trade_ids);
     var conflicts = _ttList(t.conflicts || t.ticket_conflict_log || t.conflict_log);
-    var reasonLabel = status === 'audit_degraded' ? '审计原因 ' : (status === 'conditional_pending' ? '待确认 ' : '阻断原因 ');
+    var reasonLabel = status === 'audit_degraded' ? '审计原因 ' : (status === 'manual_review' ? '复核原因 ' : (status === 'conditional_pending' ? '待确认 ' : '阻断原因 '));
     var reason = blocks.length ? reasonLabel + blocks.join(', ') : (missing.length ? ('缺数据 ' + missing.join(', ')) : (conflicts.length ? conflicts.length + '项冲突' : ''));
     var windowText = t.window ? t.window : (_ttTicketDate(t) || '-');
     return '<button class="ticket-row' + (selected ? ' is-selected' : '') + '" data-tt-select="' + _ttEsc(t.ticket_id) + '" data-ticket-status="' + _ttEsc(status) + '">' +
@@ -577,7 +585,7 @@ class TradeTicketsWidget extends YiMuWidget {
       var tail = (exp != null || act != null) ? ' ' + (exp == null ? '?' : exp) + ' vs ' + (act == null ? '?' : act) : '';
       return typ + tail;
     }).join(', ');
-    var reasonLabel = status === 'audit_degraded' ? '审计原因 ' : (status === 'conditional_pending' ? '待确认 ' : '阻断原因 ');
+    var reasonLabel = status === 'audit_degraded' ? '审计原因 ' : (status === 'manual_review' ? '复核原因 ' : (status === 'conditional_pending' ? '待确认 ' : '阻断原因 '));
     var reason = blocks.length ? reasonLabel + blocks.join(', ') : (missing.length ? '缺数据 ' + missing.join(', ') : '');
     return '<aside class="ticket-detail-panel">' +
       '<div class="ticket-detail-title"><span class="ticket-row-status tone-' + _ttEsc(this._statusTone(status)) + '">' + _ttEsc(_ttStatusLabel(status)) + '</span><b>' + _ttEsc(this._ticketTitle(t)) + '</b></div>' +
@@ -616,7 +624,7 @@ class TradeTicketsWidget extends YiMuWidget {
     }
     var allTickets = this._tickets || [];
     var tickets = allTickets.filter(function(t) { return !_ttIsSupersededAuditTicket(t, allTickets); });
-    var pending = tickets.filter(function(t){ var s = _ttEffectiveStatus(t); return s === 'confirmed' || s === 'draft' || s === 'conditional_pending'; });
+    var pending = tickets.filter(function(t){ var s = _ttEffectiveStatus(t); return s === 'confirmed' || s === 'draft' || s === 'conditional_pending' || s === 'manual_review'; });
     var exec = tickets.filter(function(t){ var s = _ttEffectiveStatus(t); return s === 'audit_degraded' || s === 'executable'; });
     var blocked = tickets.filter(function(t){ return _ttEffectiveStatus(t) === 'blocked'; });
     var done = tickets.filter(function(t){ return ['filled','partially_filled','closed','closed_with_conflict','cancelled'].indexOf(_ttEffectiveStatus(t)) >= 0; });

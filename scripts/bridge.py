@@ -277,9 +277,18 @@ def _merge_pnl_summary(snapshot_summary, account_state):
     return result
 
 
+def _load_current_account_state(live_quotes=None, now=None, create_anchor=True):
+    return load_current_account_state(
+        live_quotes if live_quotes is not None else CACHE.get('live_quotes', {}),
+        now=now,
+        data_file=DATA_FILE,
+        create_anchor=create_anchor,
+    )
+
+
 def _current_pnl_summary():
     legacy = query_pnl_summary()
-    state = load_current_account_state(CACHE.get('live_quotes', {}))
+    state = _load_current_account_state(CACHE.get('live_quotes', {}))
     return _merge_pnl_summary(legacy, state)
 
 
@@ -1158,6 +1167,31 @@ def _position_control_input(pnl_live, dash, score, lianban_pct, trend_pct, trend
     return result
 
 
+def _manual_review_context_input(pnl_live, dash, position_control, funds_raw):
+    raw = (dash or {}).get("manual_review_context") or (dash or {}).get("人工复核上下文") or {}
+    if not isinstance(raw, dict):
+        raw = {}
+    context = dict(raw)
+
+    def _first_present(*values):
+        for value in values:
+            if value not in (None, "", "—"):
+                return value
+        return None
+
+    context.setdefault("market_breadth_polarization", (position_control or {}).get("market_breadth_polarization"))
+    context.setdefault("mainline_confirmed", (position_control or {}).get("mainline_confirmed"))
+    context.setdefault("profitable_mainline_positions", (position_control or {}).get("profitable_mainline_positions"))
+    context.setdefault("account_day_return_pct", (pnl_live or {}).get("pnl_pct"))
+    context.setdefault("sector_fund_flow", _first_present(
+        (funds_raw or {}).get("sector_fund_flow"),
+        (funds_raw or {}).get("板块净流入"),
+        (funds_raw or {}).get("main_inflow"),
+        (funds_raw or {}).get("主力净流入"),
+    ))
+    return context
+
+
 def _build_rule_inputs(now=None, account_state=None):
     """从 CACHE / baseline / SSOT 构建符合 rule_engine v1 契约的输入 dict。
     纯适配函数：不对值做业务判断，只做单位转换和缺省填充。
@@ -1349,6 +1383,7 @@ def _build_rule_inputs(now=None, account_state=None):
     position_control = _position_control_input(
         pnl_live, dash, score, lianban_pct, trend_pct, trend_score, breadth, breadth_fresh
     )
+    manual_review_context = _manual_review_context_input(pnl_live, dash, position_control, funds_raw)
 
     return {
         "account": {
@@ -1398,6 +1433,7 @@ def _build_rule_inputs(now=None, account_state=None):
             "w2_status": time_window.get("W2状态"),
         },
         "position_control": position_control,
+        "manual_review_context": manual_review_context,
     }
 
 
@@ -1465,14 +1501,16 @@ def _compute_freshness(data_type, cache_entry, now=None):
     return "dead"
 
 
-def _build_rule_state(now=None, account_state=None):
+def _build_rule_state(now=None, account_state=None, manual_review_context=None):
     """构建 rule_state；account_state 已获取时传入避免重复查询 DB"""
     from scripts.rule_engine import evaluate_rule_state as _eval
     inputs = _build_rule_inputs(now=now, account_state=account_state)
+    if manual_review_context is not None:
+        inputs["manual_review_context"] = manual_review_context
     return _eval(inputs, now=now)
 
 
-def _execution_card_metadata():
+def _execution_card_metadata(trade_date=None):
     card_path = AI_RULE_SYSTEM_ROOT / "daily-runtime" / "today_execution_card.json"
     if not card_path.exists():
         return {}
@@ -1480,9 +1518,17 @@ def _execution_card_metadata():
         card = json.loads(card_path.read_text(encoding="utf-8"))
     except Exception:
         return {}
+    expected_trade_date = str(trade_date or datetime.now().strftime("%Y-%m-%d"))
+    card_trade_date = str(card.get("next_trade_date") or "").strip()
+    if card_trade_date and card_trade_date != expected_trade_date:
+        return {
+            "execution_card_stale": True,
+            "execution_card_trade_date": card_trade_date,
+            "expected_trade_date": expected_trade_date,
+        }
     snapshot = card.get("rule_snapshot") or card.get("rule_state") or card
     snapshot_hash = "sha256:" + hashlib.sha256(_canonical_json(snapshot).encode("utf-8")).hexdigest()
-    trade_date = str(card.get("next_trade_date") or datetime.now().strftime("%Y-%m-%d")).replace("-", "")
+    trade_date = str(card.get("next_trade_date") or expected_trade_date).replace("-", "")
     generated = str(card.get("generated_at") or "")
     try:
         generated_id = datetime.fromisoformat(generated.replace("Z", "+00:00")).strftime("%Y%m%dT%H%M%S%z")
@@ -1548,7 +1594,7 @@ def _build_trade_context():
         result['context_unavailable_reason'] = f'行情数据不可信 ({codes})'
         return result
 
-    card_meta = _execution_card_metadata()
+    card_meta = _execution_card_metadata(trade_date=datetime.now().strftime("%Y-%m-%d"))
 
     # 全部检查通过 → trusted
     captured = datetime.now().strftime('%Y-%m-%dT%H:%M:%S')
@@ -1611,7 +1657,7 @@ def _prepare_trade_ticket(payload):
     ctx = _build_trade_context()
     rule_state = ctx.get("rule_state") or {}
     market_snapshot = ctx.get("market_snapshot") or {}
-    account_state = load_current_account_state(CACHE.get("live_quotes", {}))
+    account_state = _load_current_account_state(CACHE.get("live_quotes", {}))
     trade_date = str(account_state.get("date") or datetime.now().strftime("%Y-%m-%d"))
     account_snapshot = ctx.get("account_snapshot") or {
         "account_day_return_pct": account_state.get("account_day_return_pct", account_state.get("pnl_pct")),
@@ -1712,15 +1758,27 @@ def _prepare_trade_ticket(payload):
         and not (context_degraded and code == "context_status")
     ]
     non_overridable_blocks = {"context_status", "rule_snapshot_hash", "sellable_qty", "lot_reconciliation"}
+    has_non_overridable_blocks = any(code in non_overridable_blocks for code in hard_blocks)
     override_to_audit = (
         audit_degraded
         and human_override_reason
         and hard_blocks
-        and not any(code in non_overridable_blocks for code in hard_blocks)
+        and not has_non_overridable_blocks
+    )
+    wkey = str(window or "").lower()
+    win_state = ((rule_state or {}).get("windows") or {}).get(wkey) or {}
+    manual_review_candidate = (
+        action_type in ("buy", "add")
+        and bool(hard_blocks)
+        and win_state.get("manual_review_allowed") is True
+        and not has_non_overridable_blocks
     )
     status = (
-        "blocked" if hard_blocks and not override_to_audit
-        else ("audit_degraded" if audit_degraded or context_degraded or override_to_audit else ("draft" if action_type == "observe" else "executable"))
+        "blocked" if hard_blocks and not (override_to_audit or manual_review_candidate)
+        else (
+            "audit_degraded" if audit_degraded or context_degraded or override_to_audit
+            else ("manual_review" if manual_review_candidate else ("draft" if action_type == "observe" else "executable"))
+        )
     )
 
     ticket_id = create_trade_ticket({
@@ -1751,6 +1809,37 @@ def _prepare_trade_ticket(payload):
     ticket = query_trade_ticket(ticket_id)
     ticket["leg_type"] = leg_type
     return ticket
+
+
+def _close_trade_ticket(ticket_id, payload):
+    from scripts.db import query_trade_ticket, update_trade_ticket_status
+
+    ticket_id = str(ticket_id or "").strip()
+    if not ticket_id:
+        raise ValueError("ticket_id required")
+    ticket = query_trade_ticket(ticket_id)
+    if not ticket:
+        raise LookupError(f"ticket not found: {ticket_id}")
+
+    status = str((payload or {}).get("status") or "closed").strip()
+    if status not in {"closed", "cancelled", "closed_with_conflict"}:
+        raise ValueError(f"invalid close status: {status}")
+    close_reason = str((payload or {}).get("close_reason") or "").strip()
+    if not close_reason:
+        raise ValueError("close_reason required")
+    review_note = str((payload or {}).get("review_note") or "").strip() or None
+
+    if str(ticket.get("status") or "") == "filled":
+        raise ValueError("filled ticket cannot be closed manually")
+    ok = update_trade_ticket_status(
+        ticket_id,
+        status,
+        close_reason=close_reason,
+        review_note=review_note,
+    )
+    if not ok:
+        raise LookupError(f"ticket not found: {ticket_id}")
+    return query_trade_ticket(ticket_id)
 
 
 def _snapshot_captured_after_trade(trade_date, trade_time, context_captured_at, grace_minutes=5):
@@ -2308,7 +2397,7 @@ def _ai_ticket_summary(date_str, limit=30):
         count_rows = []
         query_status = "error"
         error = str(e)[:160]
-    pending_statuses = {"draft", "confirmed"}
+    pending_statuses = {"draft", "confirmed", "manual_review"}
     executable_statuses = {"executable", "audit_degraded", "partially_filled"}
     completed_statuses = {"filled", "closed", "closed_with_conflict", "cancelled"}
     items = []
@@ -2424,6 +2513,22 @@ def _ai_context_risks_alerts_human(health, rule_state, freshness, tickets, confl
             "reason": block.get("reason") or block.get("message") or "",
         })
 
+    for warning in rule_state.get("warnings") or []:
+        if not isinstance(warning, dict):
+            continue
+        if warning.get("code") != "WIN-ICE-POLAR-MAINLINE-001":
+            continue
+        alerts.append({
+            "code": "WIN-ICE-POLAR-MAINLINE-001",
+            "title": "冰点主线人工复核",
+            "reason": warning.get("reason") or warning.get("message") or "W1 黄灯只允许人工复核",
+        })
+        human_required.append({
+            "code": "ICE_POLAR_MAINLINE_REVIEW",
+            "title": "复核极化主线强回踩",
+            "reason": "黄灯不等于买入授权，不能自动生成 executable ticket",
+        })
+
     if health.get("trade_entry_allowed") is False or rule_state.get("tradable") is False:
         human_required.append({
             "code": "TRADE_BLOCKED",
@@ -2477,7 +2582,7 @@ def _ai_context_risks_alerts_human(health, rule_state, freshness, tickets, confl
     actionable = [
         item for item in (tickets or {}).get("items") or []
         if str(item.get("status") or "") in {
-            "draft", "confirmed", "executable", "audit_degraded", "partially_filled"
+            "draft", "confirmed", "manual_review", "executable", "audit_degraded", "partially_filled"
         }
     ]
     for item in actionable[:5]:
@@ -2584,12 +2689,16 @@ def _build_ai_context(now=None):
     date_str = ref.strftime("%Y-%m-%d")
     dashboard_data = _load_dashboard_data()
     try:
-        account_state = load_current_account_state(CACHE.get("live_quotes", {}), now=ref, create_anchor=False)
+        account_state = _load_current_account_state(CACHE.get("live_quotes", {}), now=ref, create_anchor=False)
     except Exception as e:
         account_state = _ai_account_error_state(date_str, ref, e)
     health = _build_health(account_state=account_state, now=ref)
     rule_state = _build_rule_state(now=ref, account_state=account_state)
     trade_allowed, trade_reason = _trade_entry_gate(health, rule_state)
+    w1_state = ((rule_state or {}).get("windows") or {}).get("w1") or {}
+    if w1_state.get("manual_review_allowed") is True:
+        trade_allowed = False
+        trade_reason = "W1 黄灯人工复核，不允许自动推进买入票据"
     live_payload = _build_live_quotes_payload(rule_state=rule_state)
     iwencai = live_payload.get("iwencai") or {}
     tickets = _ai_ticket_summary(date_str)
@@ -2655,7 +2764,7 @@ def _build_ai_context(now=None):
         "situation": situation,
         "evidence": [
             {"id": "E1", "title": "账户持仓", "source": "/api/account/state"},
-            {"id": "E2", "title": "票据闭环", "source": "/api/trade/tickets"},
+            {"id": "E2", "title": "票据闭环", "source": f"/api/trade/tickets?date={date_str}"},
             {"id": "E3", "title": "市场情绪", "source": "/api/live/quotes"},
             {"id": "E4", "title": "账户收益", "source": "/api/pnl/summary"},
         ],
@@ -3076,7 +3185,11 @@ def _build_health(account_state=None, now=None):
 
     # account — 加载后同时修正 quotes status（收盘快照不应判dead）
     try:
-        state = account_state if account_state is not None else load_current_account_state(CACHE.get("live_quotes", {}), now=ref)
+        state = account_state if account_state is not None else _load_current_account_state(
+            CACHE.get("live_quotes", {}),
+            now=ref,
+            create_anchor=False,
+        )
         acct_quote_status = (state or {}).get("quote_status", "")
         if acct_quote_status == "close_snapshot":
             qr = result.setdefault("quotes", {})
@@ -3294,14 +3407,20 @@ class BridgeHandler(SimpleHTTPRequestHandler):
             try:
                 from scripts.db import query_trade_tickets
                 params = parse_qs(parsed.query)
-                date = (params.get('date') or [None])[0]
+                requested_date = (params.get('date') or [None])[0]
+                date = requested_date or datetime.now().strftime('%Y-%m-%d')
                 tickets = query_trade_tickets(
                     date_from=date,
                     date_to=date,
                     code=(params.get('code') or [None])[0],
                     status=(params.get('status') or [None])[0],
                 )
-                _send_json(self, 200, {'ok': True, 'tickets': tickets})
+                _send_json(self, 200, {
+                    'ok': True,
+                    'tickets': tickets,
+                    'data_date': date,
+                    'date_source': 'query_param' if requested_date else 'default_today',
+                })
             finally:
                 self._db_close()
             return
@@ -3378,7 +3497,7 @@ class BridgeHandler(SimpleHTTPRequestHandler):
         elif parsed.path == '/api/account/state':
             _ensure_db()
             try:
-                result = load_current_account_state(CACHE.get('live_quotes', {}))
+                result = _load_current_account_state(CACHE.get('live_quotes', {}))
                 result = _add_freshness(result, 'pnl', result.get('_updated'))
                 body = json.dumps(result, ensure_ascii=False).encode()
                 self.send_response(200)
@@ -3564,6 +3683,30 @@ class BridgeHandler(SimpleHTTPRequestHandler):
             try:
                 ticket = _prepare_trade_ticket(payload)
                 _send_json(self, 200, {'ok': True, 'ticket': ticket})
+            except ValueError as e:
+                _send_json(self, 400, {'ok': False, 'error': str(e)})
+            except Exception as e:
+                _send_json(self, 500, {'ok': False, 'error': str(e)})
+            finally:
+                self._db_close()
+            return
+
+        _re = __import__("re")
+        close_match = _re.fullmatch(r"/api/trade/tickets/([^/]+)/close", parsed.path)
+        if close_match:
+            length = int(self.headers.get('Content-Length', 0))
+            body = self.rfile.read(length)
+            try:
+                payload = json.loads(body or b'{}')
+            except Exception as e:
+                _send_json(self, 400, {'ok': False, 'error': str(e)})
+                return
+            _ensure_db()
+            try:
+                ticket = _close_trade_ticket(close_match.group(1), payload)
+                _send_json(self, 200, {'ok': True, 'ticket': ticket})
+            except LookupError as e:
+                _send_json(self, 404, {'ok': False, 'error': str(e)})
             except ValueError as e:
                 _send_json(self, 400, {'ok': False, 'error': str(e)})
             except Exception as e:

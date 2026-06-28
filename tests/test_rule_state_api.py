@@ -177,6 +177,10 @@ class RuleStateBridgeContractTest(unittest.TestCase):
         self.assertEqual(caps["total_pct"], 40)
         self.assertEqual(caps["available_add_pct"], 10)
         self.assertTrue(caps["market_breadth_polarization"])
+        self.assertEqual(
+            caps["profitable_mainline_position_details"],
+            [{"code": "000001", "name": "主线A", "pnl_pct": 20}],
+        )
 
     def test_rule_state_does_not_count_unmatched_profit_as_mainline_profit(self):
         """强主线环境下，未匹配主线池/锚定股的盈利持仓不得解锁主线仓位"""
@@ -211,6 +215,10 @@ class RuleStateBridgeContractTest(unittest.TestCase):
         self.assertEqual(caps["profitable_mainline_positions"], 0)
         self.assertEqual(caps["earned_cap_pct"], 20)
         self.assertEqual(caps["total_pct"], 20)
+        self.assertEqual(
+            caps["profitable_non_mainline_position_details"],
+            [{"code": "000001", "name": "非主线盈利", "pnl_pct": 20}],
+        )
 
     def test_vault_loss_streak_overrides_base_cap_to_zero(self):
         """Vault 第一层：连亏 >=2 天最终总仓位归零"""
@@ -232,6 +240,111 @@ class RuleStateBridgeContractTest(unittest.TestCase):
         self.assertEqual(state["caps"]["base_total_pct"], 20)
         self.assertEqual(state["caps"]["total_pct"], 0)
         self.assertIn("LOSS_STREAK", [b["code"] for b in state["blocks"]])
+
+    def test_ice_w1_polarized_mainline_only_enters_manual_review(self):
+        """情绪<35 的极化主线强回踩只给 W1 黄灯，不放开 buy_allowed"""
+        self.tmp_dashboard.write_text(
+            '{"meta":{"date":"2026-06-24"},"market":{},"sentiment":{},'
+            '"lianban_pool":[],"trend_pool":[{"代码":"688041","标的":"海光信息"}],'
+            '"positions":[],"decision":{},"sectors":[],"risk":{"连亏天数":0},"pnl":{},'
+            '"style":{"总分":62,"连板占比":0,"趋势占比":100,"dim3_趋势":18}}'
+        )
+        bridge.CACHE["iwencai"] = {
+            "情绪值": 25.6,
+            "昨日涨停收益": 3.0,
+            "晋级率": 0.20,
+            "炸板率": 0.20,
+            "_updated": "2026-06-24T09:58:00+08:00",
+        }
+        bridge.CACHE["live_quotes"] = {"_updated": "2026-06-24T09:58:00+08:00"}
+
+        state = bridge._build_rule_state(
+            now=datetime(2026, 6, 24, 9, 58),
+            account_state={"pnl_pct": 0.8, "valuation_complete": True, "mv": 30000, "total_asset": 100000},
+            manual_review_context={
+                "market_breadth_polarization": True,
+                "mainline_confirmed": True,
+                "mainline_strength": "strong",
+                "sector_fund_flow": 31300000000,
+                "core_stock_confirmation": True,
+                "profitable_mainline_positions": 1,
+                "pullback_confirmed": True,
+                "intraday_stabilization": True,
+                "current_price_distance_pct": 1.2,
+            },
+        )
+
+        w1 = state["windows"]["w1"]
+        self.assertIn("WIN-ICE-W1-001", w1["blocks"])
+        self.assertFalse(w1["buy_allowed"])
+        self.assertTrue(w1["manual_review_allowed"])
+        self.assertIn("WIN-ICE-POLAR-MAINLINE-001", w1["manual_review_rules"])
+        self.assertIn("WIN-ICE-POLAR-MAINLINE-001", [w["code"] for w in state["warnings"]])
+
+    def test_ice_w1_without_pullback_stays_blocked_without_manual_review(self):
+        """极化主线缺少回踩确认时，不进入 W1 黄灯"""
+        bridge.CACHE["iwencai"] = {
+            "情绪值": 25.6,
+            "昨日涨停收益": 3.0,
+            "晋级率": 0.20,
+            "炸板率": 0.20,
+            "_updated": "2026-06-24T09:58:00+08:00",
+        }
+        bridge.CACHE["live_quotes"] = {"_updated": "2026-06-24T09:58:00+08:00"}
+
+        state = bridge._build_rule_state(
+            now=datetime(2026, 6, 24, 9, 58),
+            account_state={"pnl_pct": 0.8, "valuation_complete": True, "mv": 30000, "total_asset": 100000},
+            manual_review_context={
+                "market_breadth_polarization": True,
+                "mainline_confirmed": True,
+                "core_stock_confirmation": True,
+                "pullback_confirmed": False,
+                "intraday_stabilization": True,
+                "current_price_distance_pct": 1.2,
+            },
+        )
+
+        w1 = state["windows"]["w1"]
+        self.assertIn("WIN-ICE-W1-001", w1["blocks"])
+        self.assertFalse(w1["buy_allowed"])
+        self.assertFalse(w1["manual_review_allowed"])
+        self.assertNotIn("WIN-ICE-POLAR-MAINLINE-001", w1["manual_review_rules"])
+
+    def test_ice_w1_manual_review_context_can_come_from_dashboard_data(self):
+        """生产路径从 dashboard_data manual_review_context 读取黄灯证据"""
+        self.tmp_dashboard.write_text(
+            '{"meta":{"date":"2026-06-24"},"market":{},"sentiment":{},'
+            '"lianban_pool":[],"trend_pool":[{"代码":"688041","标的":"海光信息"}],'
+            '"positions":[],"decision":{},"sectors":[],"risk":{"连亏天数":0},"pnl":{},'
+            '"style":{"总分":62,"连板占比":0,"趋势占比":100,"dim3_趋势":18},'
+            '"manual_review_context":{'
+            '"mainline_strength":"strong","core_stock_confirmation":true,'
+            '"pullback_confirmed":true,"intraday_stabilization":true,'
+            '"current_price_distance_pct":1.2}}'
+        )
+        bridge.CACHE["iwencai"] = {
+            "情绪值": 25.6,
+            "昨日涨停收益": 3.0,
+            "晋级率": 0.20,
+            "炸板率": 0.20,
+            "_updated": "2026-06-24T09:58:00+08:00",
+        }
+        bridge.CACHE["live_quotes"] = {"_updated": "2026-06-24T09:58:00+08:00"}
+        bridge.CACHE["breadth"] = {
+            "上涨家数": 1200,
+            "下跌家数": 3800,
+            "_source": "iwencai",
+            "_updated": "2026-06-24T09:58:00+08:00",
+        }
+
+        state = bridge._build_rule_state(
+            now=datetime(2026, 6, 24, 9, 58),
+            account_state={"pnl_pct": 0.8, "valuation_complete": True, "mv": 30000, "total_asset": 100000},
+        )
+
+        self.assertFalse(state["windows"]["w1"]["buy_allowed"])
+        self.assertTrue(state["windows"]["w1"]["manual_review_allowed"])
 
     def test_premarket_plan_turns_loss_streak_into_warning(self):
         """盘前预案明确给出仓位时，自动连亏计数只提示不覆盖预案"""

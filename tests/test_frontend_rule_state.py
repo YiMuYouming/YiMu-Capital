@@ -463,6 +463,8 @@ class TradeTicketsStatusGroupingTest(unittest.TestCase):
                 "single_stock_cap_pct": 25,
                 "position_control_mode": "earned_mainline",
                 "add_block_reason": "floating_loss",
+                "profitable_mainline_position_details": [{"code": "002409", "name": "雅克科技", "pnl_pct": 20.4}],
+                "profitable_non_mainline_position_details": [{"code": "600160", "name": "巨化股份", "pnl_pct": 2.3}],
                 "lianban_pct": 0,
                 "trend_pct": 100,
                 "first_entry_pct": 10,
@@ -476,6 +478,8 @@ class TradeTicketsStatusGroupingTest(unittest.TestCase):
         self.assertIn("盈利解锁 20%", w03, f"W03 应展示盈利解锁仓位: {w03[:900]}")
         self.assertIn("主线机会 60%", w03, f"W03 应展示主线机会仓位: {w03[:900]}")
         self.assertIn("浮亏不加仓", w03, f"W03 应展示浮亏不可加提示: {w03[:900]}")
+        self.assertIn("计入主线浮盈 雅克科技", w03, f"W03 应展示计入主线浮盈明细: {w03[:1200]}")
+        self.assertIn("未计入 巨化股份", w03, f"W03 应展示未计入主线浮盈明细: {w03[:1200]}")
 
         w14 = _render_widget("risk-panel.js", "W14", fixture).get("html", "")
         self.assertIn("盈利 20%", w14, f"W14 应展示盈利解锁仓位: {w14[:900]}")
@@ -783,6 +787,30 @@ class TradeTicketsWidgetRenderTest(unittest.TestCase):
         self.assertNotIn("AI验收台", html)
         self.assertNotIn(">buy<", html)
         self.assertNotIn(">filled<", html)
+
+    def test_w24_renders_manual_review_ticket_as_pending(self):
+        result = _render_widget("trade-tickets.js", "W24", {
+            "trade_tickets": [
+                {
+                    "ticket_id": "TICKET-MANUAL",
+                    "code": "688041",
+                    "name": "海光信息",
+                    "action_type": "buy",
+                    "status": "manual_review",
+                    "window": "W1",
+                    "max_qty": 200,
+                    "blocking_rule_ids": ["WIN-ICE-W1-001", "W1_EMOTION"],
+                }
+            ]
+        })
+        self.assertNotIn("_error", result)
+        html = result["html"]
+        self.assertIn("待处理", html)
+        self.assertIn("人工复核", html)
+        self.assertIn("复核原因", html)
+        self.assertIn('data-ticket-column="pending"', html)
+        self.assertIn(">待处理</span><b>1</b>", html)
+        self.assertIn(">可执行</span><b>0</b>", html)
 
     def test_w24_labels_cancelled_tickets_as_no_execute(self):
         result = _render_widget("trade-tickets.js", "W24", {
@@ -1135,8 +1163,12 @@ global.fetch = function(url, opts) {
   if (String(url) === '/api/trade/fills/confirm') {
     return Promise.resolve({ok:true, json:function(){ return Promise.resolve({ok:true, trade_id:49, ticket_id:'TICKET-UI-1'}); }});
   }
-  if (String(url) === '/api/trade/tickets') {
-    return Promise.resolve({ok:true, json:function(){ return Promise.resolve({tickets:[{ticket_id:'TICKET-UI-1', status:'filled', code:'002281', name:'光迅科技', linked_trade_ids:[49]}]}); }});
+  if (String(url).indexOf('/api/trade/tickets?date=') === 0) {
+    return Promise.resolve({ok:true, json:function(){ return Promise.resolve({
+      tickets:[{ticket_id:'TICKET-UI-1', status:'filled', code:'002281', name:'光迅科技', linked_trade_ids:[49]}],
+      data_date:'2026-06-26',
+      date_source:'query_param'
+    }); }});
   }
   return Promise.resolve({ok:false, json:function(){ return Promise.resolve({error:'unexpected'}); }});
 };
@@ -1153,7 +1185,7 @@ await inst._prepareTicket({intent_text:'准备 W2 买 光迅科技', action_type
 await inst._previewFill({ticket_id:'TICKET-UI-1', input_text:'已买 光迅科技 200股 222.38'});
 await inst._confirmFill({confirmed_by:'yimu'});
 await new Promise(function(r){ setTimeout(r, 20); });
-console.log(JSON.stringify({calls:calls, html:body.innerHTML.replace(/\s+/g, ' '), pending:inst._pendingPreview}));
+console.log(JSON.stringify({calls:calls, html:body.innerHTML.replace(/\s+/g, ' '), pending:inst._pendingPreview, meta:inst._ticketMeta}));
 })();
 """
         result = subprocess.run(
@@ -1166,12 +1198,15 @@ console.log(JSON.stringify({calls:calls, html:body.innerHTML.replace(/\s+/g, ' '
         urls = [c["url"] for c in resp["calls"]]
         self.assertLess(urls.index("/api/trade/tickets/prepare"), urls.index("/api/trade/fills/preview"))
         self.assertLess(urls.index("/api/trade/fills/preview"), urls.index("/api/trade/fills/confirm"))
-        self.assertIn("/api/trade/tickets", urls)
+        ticket_urls = [url for url in urls if url.startswith("/api/trade/tickets?date=")]
+        self.assertTrue(ticket_urls, urls)
         by_url = {c["url"]: c for c in resp["calls"] if c["body"]}
         self.assertEqual(by_url["/api/trade/tickets/prepare"]["body"]["window"], "W2")
         self.assertEqual(by_url["/api/trade/fills/preview"]["body"]["ticket_id"], "TICKET-UI-1")
         self.assertEqual(by_url["/api/trade/fills/confirm"]["body"]["preview_hash"], "sha256:abc")
         self.assertIsNone(resp["pending"])
+        self.assertEqual(resp["meta"]["data_date"], "2026-06-26")
+        self.assertEqual(resp["meta"]["date_source"], "query_param")
         self.assertIn("trade 49", resp["html"])
 
     def test_w24_fetches_api_when_datastore_ticket_list_is_empty(self):
@@ -1181,8 +1216,12 @@ console.log(JSON.stringify({calls:calls, html:body.innerHTML.replace(/\s+/g, ' '
 var calls = [];
 global.fetch = function(url) {
   calls.push(String(url));
-  if (String(url) === '/api/trade/tickets') {
-    return Promise.resolve({ok:true, json:function(){ return Promise.resolve({tickets:[{ticket_id:'TICKET-API-1', status:'blocked', code:'002281', name:'光迅科技', action_type:'reduce', blocking_rule_ids:['sellable_qty']} ]}); }});
+  if (String(url).indexOf('/api/trade/tickets?date=') === 0) {
+    return Promise.resolve({ok:true, json:function(){ return Promise.resolve({
+      tickets:[{ticket_id:'TICKET-API-1', status:'blocked', code:'002281', name:'光迅科技', action_type:'reduce', blocking_rule_ids:['sellable_qty']}],
+      data_date:'2026-06-26',
+      date_source:'query_param'
+    }); }});
   }
   return Promise.resolve({ok:false, json:function(){ return Promise.resolve({error:'unexpected'}); }});
 };
@@ -1196,7 +1235,7 @@ var inst = new cls({id:"W24"});
 inst.getBody = function() { this._body = body; return body; };
 inst.render({trade_tickets: []});
 await new Promise(function(r){ setTimeout(r, 20); });
-console.log(JSON.stringify({calls:calls, html:body.innerHTML.replace(/\s+/g, ' ')}));
+console.log(JSON.stringify({calls:calls, html:body.innerHTML.replace(/\s+/g, ' '), meta:inst._ticketMeta}));
 })();
 """
         result = subprocess.run(
@@ -1206,9 +1245,11 @@ console.log(JSON.stringify({calls:calls, html:body.innerHTML.replace(/\s+/g, ' '
         )
         self.assertEqual(result.returncode, 0, result.stderr)
         resp = json.loads(result.stdout.strip().split("\n")[-1])
-        self.assertIn("/api/trade/tickets", resp["calls"])
+        self.assertTrue(any(url.startswith("/api/trade/tickets?date=") for url in resp["calls"]), resp["calls"])
         self.assertIn("TICKET-API-1", resp["html"])
         self.assertIn("sellable_qty", resp["html"])
+        self.assertEqual(resp["meta"]["data_date"], "2026-06-26")
+        self.assertEqual(resp["meta"]["date_source"], "query_param")
 
     def test_w24_preview_without_selected_ticket_shows_friendly_message(self):
         widget_src = (ROOT / "widgets" / "trade-tickets.js").read_text(encoding="utf-8")
@@ -2111,14 +2152,22 @@ global.fetch = function(url) {
     return Promise.resolve({ ok: true, json: function() { return Promise.resolve({ total_asset: 100000 }); } });
   }
   if (u.indexOf('/api/trade/tickets') >= 0) {
-    return Promise.resolve({ ok: true, json: function() { return Promise.resolve({ tickets: [{ ticket_id: "T-1", status: "executable" }] }); } });
+    if (u.indexOf('/api/trade/tickets?date=') < 0) throw new Error('trade tickets request must include date: ' + u);
+    return Promise.resolve({ ok: true, json: function() { return Promise.resolve({
+      tickets: [{ ticket_id: "T-1", status: "executable" }],
+      data_date: "2026-06-26",
+      date_source: "query_param"
+    }); } });
   }
   return Promise.resolve({ ok: false, json: function() { return Promise.resolve(null); } });
 };
 """ + store_src + r"""
 await DataStore.fetchAll();
 await new Promise(function(r) { setTimeout(r, 20); });
-console.log(JSON.stringify({tickets: DataStore.merged && DataStore.merged.trade_tickets}));
+console.log(JSON.stringify({
+  tickets: DataStore.merged && DataStore.merged.trade_tickets,
+  meta: DataStore.merged && DataStore.merged.trade_tickets_meta
+}));
 })();
 """
         result = subprocess.run(
@@ -2129,6 +2178,8 @@ console.log(JSON.stringify({tickets: DataStore.merged && DataStore.merged.trade_
         self.assertEqual(result.returncode, 0, result.stderr)
         resp = json.loads(result.stdout.strip().split("\n")[-1])
         self.assertEqual(resp["tickets"][0]["ticket_id"], "T-1")
+        self.assertEqual(resp["meta"]["data_date"], "2026-06-26")
+        self.assertEqual(resp["meta"]["date_source"], "query_param")
 
 class W1TradeEntryGateTest(unittest.TestCase):
     """v3 Phase 4: W1 录入入口按 trade_entry_allowed 关闭"""
@@ -2148,6 +2199,43 @@ class W1TradeEntryGateTest(unittest.TestCase):
         html = result.get("html", "")
         self.assertIn("规则状态不可用", html, f"W1 缺失 rule_state 应显示不可用: {html[:200]}")
         self.assertIn("ui-degraded", html, f"W1 缺失 rule_state 应使用统一降级态: {html[:200]}")
+
+    def test_w1_ice_polarized_mainline_manual_review_does_not_show_entry_button(self):
+        """冰点极化主线黄灯只显示人工复核，不出现录入按钮"""
+        fixture = {
+            "rule_state": {
+                "version": "g1a-v1", "tradable": True,
+                "caps": {"base_total_pct": 60, "total_pct": 40},
+                "windows": {
+                    "w1": {
+                        "in_session": True,
+                        "buy_allowed": False,
+                        "manual_review_allowed": True,
+                        "manual_review_rules": ["WIN-ICE-POLAR-MAINLINE-001"],
+                        "blocks": ["WIN-ICE-W1-001", "W1_EMOTION"],
+                    },
+                    "w2": {"in_session": False, "buy_allowed": False},
+                },
+                "blocks": [
+                    {"code": "WIN-ICE-W1-001", "scope": "w1", "message": "冰点 W1 新买入默认关闭", "evidence": {}},
+                    {"code": "W1_EMOTION", "scope": "w1", "message": "W1 情绪不足", "evidence": {}},
+                ],
+                "warnings": [
+                    {"code": "WIN-ICE-POLAR-MAINLINE-001", "scope": "w1", "message": "仅人工复核", "evidence": {}},
+                ],
+            },
+            "sentiment": {"情绪值": 25.6},
+            "live_index": {}, "live_quotes": {},
+            "lianban_pool": [],
+            "trend_pool": [{"标的": "海光信息", "代码": "688041", "板块": "半导体", "窗口": "W1", "涨幅": "+2.0"}],
+            "trade_entry_allowed": True,
+        }
+        result = _render_widget("w1-check.js", "W08", fixture)
+        html = result.get("html", "")
+        self.assertIn("黄灯", html, f"W1 黄灯应明确展示: {html[:500]}")
+        self.assertIn("人工复核", html, f"W1 黄灯应说明人工复核: {html[:500]}")
+        self.assertIn("manual_review", html, f"W1 黄灯应保留机器状态文案: {html[:500]}")
+        self.assertNotIn(">录入<", html, f"W1 黄灯不得出现录入按钮: {html[:900]}")
 
     def test_w1_shows_candidates_when_trade_entry_allowed(self):
         """trade_entry_allowed=true 且 rule_state 正常 → W1 显示候选"""

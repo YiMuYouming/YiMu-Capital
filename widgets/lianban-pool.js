@@ -161,8 +161,8 @@ class LianbanPoolWidget extends YiMuWidget {
     // 排序：事件代理在 body，仅首次 render 绑定
     if (!this._sortBound) {
       this._sortBound = true;
-      var bind = this._on ? this._on.bind(this) : function(el, evt, fn){ if (el && el.addEventListener) el.addEventListener(evt, fn); };
-      bind(body, 'click', function(e) {
+      this._on = this._on || function(el, evt, fn){ if (el && el.addEventListener) el.addEventListener(evt, fn); };
+      this._on(body, 'click', function(e) {
         if (e.target && e.target.classList.contains('sortable')) {
           if (!self._sortDir) self._sortDir = 'desc';
           else if (self._sortDir === 'desc') self._sortDir = 'asc';

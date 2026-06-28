@@ -242,7 +242,7 @@ class AccountBasisAuditTest(unittest.TestCase):
     def test_account_audit_has_anchor_date_source(self):
         """audit 返回锚点日期和 source"""
         from scripts.account_ssot import load_current_account_state
-        state = load_current_account_state({})
+        state = load_current_account_state({}, data_file=bridge.DATA_FILE)
         anchor = state.get("anchor", {})
         self.assertIn("date", anchor)
         self.assertIn("source", anchor)
@@ -250,7 +250,7 @@ class AccountBasisAuditTest(unittest.TestCase):
     def test_account_audit_lists_overnight_positions(self):
         """audit 列出隔夜持仓数量和代码"""
         from scripts.account_ssot import load_current_account_state
-        state = load_current_account_state({})
+        state = load_current_account_state({}, data_file=bridge.DATA_FILE)
         positions = state.get("positions", [])
         self.assertGreaterEqual(len(positions), 1)
         codes = [p.get("代码") for p in positions]
@@ -259,7 +259,7 @@ class AccountBasisAuditTest(unittest.TestCase):
     def test_account_audit_day_start_coverage(self):
         """audit 报告 day_start_prices 覆盖率和缺失代码"""
         from scripts.account_ssot import load_current_account_state
-        state = load_current_account_state({})
+        state = load_current_account_state({}, data_file=bridge.DATA_FILE)
         anchor = state.get("anchor", {})
         # 通过 load_current_account_state 获取锚点 meta
         from scripts.db import query_account_baseline
@@ -443,6 +443,55 @@ class AIContextApiTest(unittest.TestCase):
         self.assertFalse(ctx["situation"]["trade_entry_allowed"])
         self.assertTrue(any(r.get("code") == "DATA_UNTRUSTED" for r in ctx["risks"]))
         self.assertTrue(any(h.get("code") == "TRADE_BLOCKED" for h in ctx["human_required"]))
+
+    def test_ai_context_surfaces_ice_polarized_mainline_manual_review(self):
+        original = bridge._build_rule_state
+        try:
+            bridge._build_rule_state = lambda now=None, account_state=None: {
+                "tradable": True,
+                "blocks": [{"code": "WIN-ICE-W1-001", "scope": "w1", "message": "冰点 W1 新买入默认关闭"}],
+                "warnings": [{
+                    "code": "WIN-ICE-POLAR-MAINLINE-001",
+                    "scope": "w1",
+                    "message": "冰点 W1 极化主线强回踩仅人工复核，不自动授权买入",
+                }],
+                "windows": {
+                    "w1": {
+                        "buy_allowed": False,
+                        "manual_review_allowed": True,
+                        "manual_review_rules": ["WIN-ICE-POLAR-MAINLINE-001"],
+                    },
+                },
+            }
+            ctx = bridge._build_ai_context()
+        finally:
+            bridge._build_rule_state = original
+
+        self.assertTrue(any(a.get("code") == "WIN-ICE-POLAR-MAINLINE-001" for a in ctx["alerts"]))
+        self.assertTrue(any(h.get("code") == "ICE_POLAR_MAINLINE_REVIEW" for h in ctx["human_required"]))
+        self.assertFalse(ctx["situation"]["trade_entry_allowed"])
+
+    def test_ai_context_manual_review_ticket_is_pending_and_human_required(self):
+        from datetime import datetime
+        today = datetime.now().strftime("%Y-%m-%d")
+        ticket_id = db.create_trade_ticket({
+            "trade_date": today,
+            "code": "688041",
+            "name": "海光信息",
+            "action_type": "buy",
+            "status": "manual_review",
+            "window": "W1",
+            "blocking_rule_ids_json": ["WIN-ICE-W1-001", "W1_EMOTION"],
+        })
+
+        ctx = bridge._build_ai_context()
+
+        self.assertEqual(ctx["tickets"]["pending"], 1)
+        self.assertEqual(ctx["tickets"]["executable"], 0)
+        self.assertTrue(any(
+            h.get("code") == "TICKET_REVIEW_REQUIRED" and h.get("ticket_id") == ticket_id
+            for h in ctx["human_required"]
+        ))
 
     def test_ai_context_stale_quotes_require_human_review_before_trading(self):
         from datetime import datetime

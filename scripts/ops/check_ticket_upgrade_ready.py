@@ -2,6 +2,7 @@
 """Read-only readiness checks for the trade ticket upgrade on a dashboard URL."""
 
 import argparse
+from datetime import datetime
 import json
 import sys
 import urllib.error
@@ -66,15 +67,25 @@ def check(base_url, opener=urllib.request.urlopen, timeout=5):
         "requires prepare/preview/confirm frontend flow",
     ))
 
-    tickets = _fetch_text(base + "/api/trade/tickets", opener=opener, timeout=timeout)
+    today = datetime.now().strftime("%Y-%m-%d")
+    tickets_url = base + f"/api/trade/tickets?date={today}"
+    tickets = _fetch_text(tickets_url, opener=opener, timeout=timeout)
     tickets_body = tickets.get("body", "")
     api_ok = False
     api_detail = f"status={tickets.get('status')}"
     if tickets.get("status") == 200:
         try:
             parsed = json.loads(tickets_body)
-            api_ok = isinstance(parsed.get("tickets"), list)
-            api_detail = "tickets list present" if api_ok else "missing tickets list"
+            api_ok = (
+                isinstance(parsed.get("tickets"), list)
+                and parsed.get("data_date") == today
+                and parsed.get("date_source") == "query_param"
+            )
+            api_detail = (
+                f"tickets list present for {today}"
+                if api_ok
+                else "missing tickets list or date metadata"
+            )
         except Exception as exc:
             api_detail = f"invalid json: {exc}"
     checks.append(_item("trade_tickets_api_json", api_ok, api_detail))

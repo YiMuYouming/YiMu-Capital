@@ -180,12 +180,13 @@ console.log(JSON.stringify({hasBtn:_body.innerHTML.indexOf('录入')>=0}));
         self.assertIn("收盘快照", _PROD_SCRIPT, "顶栏应显示收盘快照文案")
 
     def test_health_degrade_sets_critical_confirmed(self):
-        """所有降级路径统一清除 confirmed + 设置 critical"""
-        degrade_blocks = _PROD_SCRIPT.split("_healthCritical = true")
-        self.assertGreaterEqual(len(degrade_blocks), 3, "至少 3 处降级路径设 critical=true")
-        for block in degrade_blocks[1:]:
-            self.assertIn("_healthConfirmed = false", block[:200],
-                          "降级路径需同时设 confirmed=false")
+        """无响应/异常降级清除 confirmed；健康接口确认的风控阻断保留 confirmed=true"""
+        unconfirmed_paths = re.findall(
+            r"window\._healthCritical\s*=\s*true;\s*window\._healthConfirmed\s*=\s*false",
+            _PROD_SCRIPT,
+        )
+        self.assertGreaterEqual(len(unconfirmed_paths), 3)
+        self.assertIn("window._healthCritical = true; window._healthConfirmed = true", _PROD_SCRIPT)
 
 
 class PrefillTest(unittest.TestCase):

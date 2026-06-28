@@ -365,6 +365,7 @@ global.fetch = function(url) {
     return Promise.resolve({ ok: true, json: function() { return Promise.resolve({ total_asset: pnlAsset }); } });
   }
   if (u.indexOf('/api/trade/tickets') >= 0) {
+    if (u.indexOf('/api/trade/tickets?date=') < 0) throw new Error('trade tickets request must include date: ' + u);
     return Promise.resolve({ ok: true, json: function() { return Promise.resolve({ tickets: [{ ticket_id: ticketId, status: 'filled' }] }); } });
   }
   return Promise.resolve({ ok: false, json: function() { return Promise.resolve(null); } });
@@ -418,7 +419,7 @@ class W25AiContextDataStoreTest(unittest.TestCase):
 
     def test_refresh_fetches_ai_context_with_get_and_merges_it(self):
         script = BASE_MOCKS + r"""
-global._mockFetchResponses['/api/trade/tickets'] = { tickets: [] };
+	global._mockFetchResponses['/api/trade/tickets?date='] = { tickets: [] };
 global._mockFetchResponses['/api/ai/context'] = {
   schema_version: 'ai_context.v1',
   trade_entry_reason: '风险通过，等待执行窗口',
@@ -466,7 +467,7 @@ DataStore.fetchAll().then(function() {
 
     def test_tick_refresh_updates_ai_context_without_sse(self):
         script = BASE_MOCKS + r"""
-global._mockFetchResponses['/api/trade/tickets'] = { tickets: [] };
+	global._mockFetchResponses['/api/trade/tickets?date='] = { tickets: [] };
 global._mockFetchResponses['/api/ai/context'] = {
   schema_version: 'ai_context.v1',
   trade_entry_reason: '初始事实包',
@@ -516,7 +517,7 @@ DataStore.fetchAll().then(function() {
 
     def test_sse_open_tick_refreshes_ai_context(self):
         script = BASE_MOCKS + r"""
-global._mockFetchResponses['/api/trade/tickets'] = { tickets: [] };
+	global._mockFetchResponses['/api/trade/tickets?date='] = { tickets: [] };
 global._mockFetchResponses['/api/ai/context'] = {
   schema_version: 'ai_context.v1',
   trade_entry_reason: 'SSE 初始事实包',
@@ -569,7 +570,7 @@ DataStore.fetchAll().then(function() {
 
     def test_ai_context_fetch_failure_keeps_dashboard_merged(self):
         script = BASE_MOCKS + r"""
-global._mockFetchResponses['/api/trade/tickets'] = { tickets: [{ ticket_id: 'T-OK', status: 'filled' }] };
+	global._mockFetchResponses['/api/trade/tickets?date='] = { tickets: [{ ticket_id: 'T-OK', status: 'filled' }] };
 global._mockFetchResponses['auction_snapshot.json'] = {
   fetched: bjToday + 'T09:28:00+08:00', '指数竞价': [],
   '涨跌家数': {}, '高标竞价': [], '自选池竞价': [], '信号灯': {}
@@ -615,7 +616,7 @@ DataStore.fetchAll().then(function() {
 
     def test_tick_ai_context_failure_clears_previous_context(self):
         script = BASE_MOCKS + r"""
-global._mockFetchResponses['/api/trade/tickets'] = { tickets: [{ ticket_id: 'T-OK', status: 'filled' }] };
+	global._mockFetchResponses['/api/trade/tickets?date='] = { tickets: [{ ticket_id: 'T-OK', status: 'filled' }] };
 global._mockFetchResponses['/api/ai/context'] = {
   schema_version: 'ai_context.v1',
   trade_entry_reason: '旧裁决不得沿用',
@@ -674,7 +675,7 @@ DataStore.fetchAll().then(function() {
 
     def test_tick_empty_ai_context_clears_previous_context(self):
         script = BASE_MOCKS + r"""
-global._mockFetchResponses['/api/trade/tickets'] = { tickets: [{ ticket_id: 'T-OK', status: 'filled' }] };
+	global._mockFetchResponses['/api/trade/tickets?date='] = { tickets: [{ ticket_id: 'T-OK', status: 'filled' }] };
 global._mockFetchResponses['/api/ai/context'] = {
   schema_version: 'ai_context.v1',
   trade_entry_reason: '旧空包不得沿用',

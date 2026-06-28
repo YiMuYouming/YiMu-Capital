@@ -113,7 +113,7 @@ Dashboard 3.0 到 Phase 3 收口后，收盘流程会生成：
 data/review_packets/YYYY-MM-DD/review_source_packet.json
 ```
 
-这个文件给 WorkBuddy `daily-review` / `auto-review-fill` 读取，用于账户、PnL、持仓、成交、票据闭环、健康/新鲜度和 AI context 风险事实。它不进 git，也不是最终复盘 SSOT；最终日复盘与次日计划仍以 Vault 复盘笔记为准，W12/W13 仍读 Vault 复盘附录。
+这个文件给 Market Watch `market-watch-review` 和复盘自动填充流程读取，用于账户、PnL、持仓、成交、票据闭环、健康/新鲜度和 AI context 风险事实。它不进 git，也不是最终复盘 SSOT；最终日复盘与次日计划仍以 Vault 复盘笔记为准，W12/W13 仍读 Vault 复盘附录。
 
 紧急情况下可用 `python3 scripts/ops/close_day.py --apply --skip-data-backup` 跳过最后的数据包备份。
 需要临时补一份当前生产数据包时，再手动运行：
@@ -148,10 +148,11 @@ python3 scripts/check_runtime.py --preflight   # 启动前检查
 | `/api/pnl/summary` | GET | PnL 摘要（含 valuation_complete） | 实时 |
 | `/api/pnl?range=today&index=sh` | GET | PnL 曲线 | 5min/日结 |
 | `/api/live/quotes` | GET | 实时行情（含 iwencai、北向、热榜、W26 主攻方向） | 5s |
-| `/api/ai/context` | GET | Agent 只读事实包（健康/新鲜度/风险/票据/人审动作） | 按需 |
+| `/api/ai/context` | GET | Agent 只读事实包（健康/新鲜度/风险/票据/人审动作）；盘中票据优先读 `tickets` 字段 | 按需 |
 | `/api/baseline` | GET | dashboard_data.json | 60s |
 | `/api/sync` | POST | W15 单笔成交录入 | 随录 |
 | `/api/trades/review?date=YYYY-MM-DD` | GET | W23 逐笔复盘 | 按需 |
+| `/api/trade/tickets?date=YYYY-MM-DD` | GET | 只读票据列表；脚本/Agent 直接读取必须显式传当日日期，裸请求仅默认 today | 按需 |
 | `/api/llm` | POST | AI 研判 | 15min/manual |
 
 ## 故障排查

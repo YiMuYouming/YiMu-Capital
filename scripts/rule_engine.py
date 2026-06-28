@@ -127,6 +127,35 @@ def _profitable_mainline_count(position_control, mainline_confirmed):
     return count
 
 
+def _position_detail(position, pnl_pct):
+    value = round(pnl_pct, 2) if pnl_pct is not None else None
+    if value is not None and float(value).is_integer():
+        value = int(value)
+    return {
+        "code": str((position or {}).get("code") or ""),
+        "name": str((position or {}).get("name") or ""),
+        "pnl_pct": value,
+    }
+
+
+def _profitable_position_details(position_control, mainline_confirmed):
+    mainline = []
+    non_mainline = []
+    for position in (position_control or {}).get("positions") or []:
+        pnl_pct = _position_pnl_pct(position)
+        if pnl_pct is None or pnl_pct <= 0:
+            continue
+        is_mainline = position.get("is_mainline")
+        if is_mainline is False:
+            non_mainline.append(_position_detail(position, pnl_pct))
+            continue
+        if is_mainline is None and not mainline_confirmed:
+            non_mainline.append(_position_detail(position, pnl_pct))
+            continue
+        mainline.append(_position_detail(position, pnl_pct))
+    return mainline, non_mainline
+
+
 def _earned_cap(position_control, mainline_confirmed, profitable_count):
     explicit = _number((position_control or {}).get("earned_cap_pct"))
     if explicit is not None:
@@ -172,6 +201,34 @@ def _floating_loss_add_blocked(position_control, mainline_confirmed, profitable_
     return False
 
 
+def _ice_polar_manual_review_allowed(context, account_day_return_pct):
+    """冰点 W1 极化主线黄灯：只做人工复核，不改变 buy_allowed。"""
+    ctx = context or {}
+    distance = _number(ctx.get("current_price_distance_pct"))
+    profitable_mainline_positions = _number(ctx.get("profitable_mainline_positions")) or 0
+    sector_fund_flow = _number(ctx.get("sector_fund_flow"))
+    mainline_strength = str(ctx.get("mainline_strength") or "").strip().lower()
+    strong_mainline = (
+        mainline_strength in ("strong", "主线强", "强", "confirmed", "确认")
+        or (sector_fund_flow is not None and sector_fund_flow > 0)
+    )
+    account_or_position_verified = (
+        profitable_mainline_positions > 0
+        or (account_day_return_pct is not None and account_day_return_pct > 0)
+    )
+    return (
+        _boolish(ctx.get("market_breadth_polarization"))
+        and _boolish(ctx.get("mainline_confirmed"))
+        and strong_mainline
+        and _boolish(ctx.get("core_stock_confirmation"))
+        and account_or_position_verified
+        and _boolish(ctx.get("pullback_confirmed"))
+        and _boolish(ctx.get("intraday_stabilization"))
+        and distance is not None
+        and distance <= 3
+    )
+
+
 def _position_control_caps(position_control, base_cap, current_total_cap, globally_blocked):
     pc = position_control or {}
     enabled = _boolish(pc.get("enabled"))
@@ -189,6 +246,8 @@ def _position_control_caps(position_control, base_cap, current_total_cap, global
         "max_positions": int(_number(pc.get("max_positions")) or 3),
         "max_mixed_positions": int(_number(pc.get("max_mixed_positions")) or 5),
         "profitable_mainline_positions": 0,
+        "profitable_mainline_position_details": [],
+        "profitable_non_mainline_position_details": [],
         "mainline_confirmed": False,
         "market_breadth_polarization": _boolish(pc.get("market_breadth_polarization")),
         "add_allowed": False if globally_blocked else current_total_cap > current_position_pct,
@@ -200,6 +259,7 @@ def _position_control_caps(position_control, base_cap, current_total_cap, global
 
     mainline_confirmed = _boolish(pc.get("mainline_confirmed"))
     profitable_count = _profitable_mainline_count(pc, mainline_confirmed)
+    profitable_mainline_details, profitable_non_mainline_details = _profitable_position_details(pc, mainline_confirmed)
     earned_cap = 0 if globally_blocked else _earned_cap(pc, mainline_confirmed, profitable_count)
     account_cap = 0 if globally_blocked else _pct(pc.get("account_cap_pct"), 80)
     opportunity_cap = 0 if globally_blocked else _opportunity_cap(pc, base_cap, mainline_confirmed)
@@ -216,6 +276,8 @@ def _position_control_caps(position_control, base_cap, current_total_cap, global
         "available_add_pct": available_add,
         "single_stock_cap_pct": single_cap,
         "profitable_mainline_positions": profitable_count,
+        "profitable_mainline_position_details": profitable_mainline_details,
+        "profitable_non_mainline_position_details": profitable_non_mainline_details,
         "mainline_confirmed": mainline_confirmed,
         "add_allowed": available_add > 0,
         "add_block_reason": "floating_loss" if floating_loss_blocked else "",
@@ -234,6 +296,7 @@ def evaluate_rule_state(inputs, now=None):
     freshness = inputs.get("freshness") or {}
     time_window = inputs.get("time_window") or {}
     position_control = inputs.get("position_control") or {}
+    manual_review_context = inputs.get("manual_review_context") or {}
 
     legacy_pnl_pct = _number(account.get("pnl_pct"))
     account_day_return_pct = _number(account.get("account_day_return_pct"))
@@ -373,7 +436,7 @@ def evaluate_rule_state(inputs, now=None):
         blocks.append(_finding("LIANBAN_SIDE_CLOSED", "lianban", "连板侧仓位关闭",
                                emotion_pct=emotion, side_cap_pct=lb_side_cap))
     if emotion is not None and emotion < 35:
-        blocks.append(_finding("WIN-ICE-W1-001", "w1", "冰点禁止 W1 新开仓，附加条件不能重新开放",
+        blocks.append(_finding("WIN-ICE-W1-001", "w1", "冰点 W1 新买入默认关闭",
                                emotion_pct=emotion, max_pct=35,
                                main_inflow=main_inflow,
                                volume_ratio=funds.get("volume_ratio")))
@@ -412,6 +475,25 @@ def evaluate_rule_state(inputs, now=None):
         trend_pct = 0
     total_cap, position_caps = _position_control_caps(position_control, base_cap, total_cap, globally_blocked)
 
+    ice_manual_review_allowed = (
+        emotion is not None
+        and emotion < 35
+        and not globally_blocked
+        and _ice_polar_manual_review_allowed(manual_review_context, account_day_return_pct)
+    )
+    ice_manual_review_rules = ["WIN-ICE-POLAR-MAINLINE-001"] if ice_manual_review_allowed else []
+    if ice_manual_review_allowed:
+        warnings.append(_finding(
+            "WIN-ICE-POLAR-MAINLINE-001", "w1",
+            "冰点 W1 极化主线强回踩仅人工复核，不自动授权买入",
+            emotion_pct=emotion,
+            buy_allowed=False,
+            mainline_confirmed=manual_review_context.get("mainline_confirmed"),
+            market_breadth_polarization=manual_review_context.get("market_breadth_polarization"),
+            pullback_confirmed=manual_review_context.get("pullback_confirmed"),
+            current_price_distance_pct=manual_review_context.get("current_price_distance_pct"),
+        ))
+
     w1_blocks = [item["code"] for item in blocks if item["scope"] in ("all", "w1")]
     w2_blocks = [item["code"] for item in blocks if item["scope"] in ("all", "w2")]
 
@@ -441,7 +523,13 @@ def evaluate_rule_state(inputs, now=None):
             **position_caps,
         },
         "windows": {
-            "w1": {"in_session": in_w1, "buy_allowed": in_w1 and not w1_blocks, "blocks": w1_blocks},
+            "w1": {
+                "in_session": in_w1,
+                "buy_allowed": in_w1 and not w1_blocks,
+                "manual_review_allowed": ice_manual_review_allowed,
+                "manual_review_rules": ice_manual_review_rules,
+                "blocks": w1_blocks,
+            },
             "w2": {"in_session": in_w2, "buy_allowed": in_w2 and not w2_blocks, "blocks": w2_blocks},
         },
         "blocks": blocks,

@@ -20,6 +20,8 @@ function _w03RuleText(code) {
     CLIMAX_REDUCE: '高潮降仓',
     FRIDAY_W1: '旧周五W1提示',
     FRIDAY_TREND_CAP: '旧周五趋势提示',
+    'WIN-ICE-W1-001': '冰点W1关闭',
+    'WIN-ICE-POLAR-MAINLINE-001': '冰点主线人工复核',
     W1_EMOTION: 'W1情绪不足',
     W1_LIMIT_UP_PROFIT: 'W1涨停收益不足',
     W1_BROKEN_BOARD: 'W1炸板率过高',
@@ -97,6 +99,8 @@ class PositionCalcWidget extends YiMuWidget {
     var availableAddPct = _w03Num(rsCaps.available_add_pct != null ? rsCaps.available_add_pct : totalCap, totalCap);
     var positionMode = String(rsCaps.position_control_mode || 'legacy');
     var addBlockReason = String(rsCaps.add_block_reason || '');
+    var mainlineProfitDetails = Array.isArray(rsCaps.profitable_mainline_position_details) ? rsCaps.profitable_mainline_position_details : [];
+    var nonMainlineProfitDetails = Array.isArray(rsCaps.profitable_non_mainline_position_details) ? rsCaps.profitable_non_mainline_position_details : [];
     var lbPct = _w03Num(rsCaps.lianban_pct != null ? rsCaps.lianban_pct : ST['连板占比'], 0);
     var trPct = _w03Num(rsCaps.trend_pct != null ? rsCaps.trend_pct : ST['趋势占比'], 0);
     var baseLbPct = _w03Num(ST['连板占比'] != null ? ST['连板占比'] : lbPct, 0);
@@ -259,6 +263,7 @@ class PositionCalcWidget extends YiMuWidget {
       '</div>' +
       '<div class="w03-money-meta">执行上限 ' + _w03PctText(totalCap) + '% = ' + _w03Money(maxPosition) + ' / 已持仓 ' + _w03Money(currentPosVal) + ' / 当前可新开 ' + _w03Money(newCap) + '</div>' +
       (positionMode === 'earned_mainline' ? '<div class="w03-money-meta">盈利解锁 ' + _w03PctText(earnedCap) + '% / 主线机会 ' + _w03PctText(opportunityCap) + '% / 可加 ' + _w03PctText(availPct) + '%' + (addBlockReason === 'floating_loss' ? ' / 浮亏不加仓' : '') + '</div>' : '') +
+      (positionMode === 'earned_mainline' ? '<div class="w03-money-meta">计入主线浮盈 ' + _w03Esc(mainlineProfitDetails.map(function(p){ return p.name || p.code; }).join('、') || '无') + ' / 未计入 ' + _w03Esc(nonMainlineProfitDetails.map(function(p){ return p.name || p.code; }).join('、') || '无') + '</div>' : '') +
       '<div class="w03-money-meta">计划上限 ' + _w03PctText(planTotalCap) + '% = ' + _w03Money(planMaxPosition) + ' / 计划可新开 ' + _w03Money(planNewCap) + (w2RangeMoney ? ' / W2趋势上限 ' + w2RangeMoney : '') + '</div>' +
       '<div class="w03-money-grid">' +
         '<div><span>连板计划可新开</span><b class="up">' + _w03Money(planLbMoney) + '</b><em>' + _w03Money(planNewCap) + ' × ' + _w03PctText(baseLbPct) + '%</em></div>' +

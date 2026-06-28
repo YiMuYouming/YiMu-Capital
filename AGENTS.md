@@ -74,7 +74,9 @@ curl -s localhost:8088/api/ai/context | python3 -m json.tool
 
 - 顶栏"阻断"先查 `/api/health`，不要只看截图下结论。
 - 顶栏"降级"不是"阻断"，交易入口以 `/api/health.trade_entry_allowed` 为准。
+- 冰点 W1 黄灯只表示极化主线强回踩进入人工复核；`manual_review_allowed=true` 不能当作 `buy_allowed=true`，也不能生成 executable ticket。
 - 洋米读不到事实包先查 `/api/ai/context`，失败再查 `/api/health`。
+- 盘中票据队列优先读 `/api/ai/context.tickets`；如果直接 GET `/api/trade/tickets`，必须传 `?date=YYYY-MM-DD`，避免把历史票据误当今日票据。无 date 时服务端只默认返回当天。
 - 8088/18088 混淆、交易录入、数据同步问题先看 `docs/ops/2026-05-28-cloud-data-sync-runbook.md`。
 
 ## 禁止操作

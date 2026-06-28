@@ -116,6 +116,8 @@ class W1CheckWidget extends YiMuWidget {
         LOSS_STREAK: '连亏保护',
         DOUBLE_ICE: '连续冰点',
         LIANBAN_SIDE_CLOSED: '连板侧关闭',
+        'WIN-ICE-W1-001': '冰点W1关闭',
+        'WIN-ICE-POLAR-MAINLINE-001': '极化主线人工复核',
         W1_EMOTION: '情绪不足',
         W1_LIMIT_UP_PROFIT: '涨停收益不足',
         W1_PROMOTION: '晋级率不足',
@@ -144,6 +146,7 @@ class W1CheckWidget extends YiMuWidget {
     }
 
     var w1BuyAllowed = rsW1.buy_allowed;
+    var w1ManualReview = !!rsW1.manual_review_allowed;
     var w1Blocks = rsW1.blocks || [];
 
     // ===== 环境阻断（展示 rule_state blocks + 本地详情补充，结论一律服从 buy_allowed）=====
@@ -169,9 +172,9 @@ class W1CheckWidget extends YiMuWidget {
     // ===== 渲染 =====
     var html = '';
     var w1CandidateCount = lbPool.length + trPool.length;
-    var w1RuleState = w1BuyAllowed ? (rsW1.in_session ? '允许' : '待开') : '关闭';
+    var w1RuleState = w1BuyAllowed ? (rsW1.in_session ? '允许' : '待开') : (w1ManualReview ? '黄灯' : '关闭');
     var w1WindowLabel = rsW1.in_session ? '09:30-10:00' : '非W1时段';
-    var w1CommandClass = w1BuyAllowed ? (rsW1.in_session ? 'is-ready' : 'is-watch') : 'is-blocked';
+    var w1CommandClass = w1BuyAllowed ? (rsW1.in_session ? 'is-ready' : 'is-watch') : (w1ManualReview ? 'is-watch' : 'is-blocked');
 
     function windowCommandHtml(title, cls, state, windowLabel, candidateCount, blockCount, detail) {
       return '<div class="window-command ' + cls + '">' +
@@ -186,13 +189,14 @@ class W1CheckWidget extends YiMuWidget {
 
     // rule_state 结论：W1 不允许买入时展示阻断原因
     if (!w1BuyAllowed) {
-      html += windowCommandHtml('W1验收', w1CommandClass, w1RuleState, w1WindowLabel, w1CandidateCount, blocks.length, '早盘追涨入口暂不可用');
+      var blockedDetail = w1ManualReview ? '极化主线需人工复核' : '早盘追涨入口暂不可用';
+      html += windowCommandHtml('W1验收', w1CommandClass, w1RuleState, w1WindowLabel, w1CandidateCount, blocks.length, blockedDetail);
       html += '<div style="height:100%;display:flex;flex-direction:column;justify-content:center;padding:14px 18px">'+
         '<div style="display:flex;align-items:center;gap:12px;justify-content:center;margin-bottom:12px">'+
-          '<div style="width:42px;height:42px;border-radius:50%;background:var(--danger);box-shadow:0 8px 22px rgba(220,38,38,0.22);line-height:42px;font-size:22px;color:var(--text-inverse);text-align:center">✕</div>'+
+          '<div style="width:42px;height:42px;border-radius:50%;background:' + (w1ManualReview ? 'var(--warn)' : 'var(--danger)') + ';box-shadow:0 8px 22px ' + (w1ManualReview ? 'rgba(245,158,11,0.22)' : 'rgba(220,38,38,0.22)') + ';line-height:42px;font-size:22px;color:var(--text-inverse);text-align:center">' + (w1ManualReview ? '!' : '✕') + '</div>'+
           '<div style="text-align:left">'+
-            '<div style="font-size:15px;font-weight:800;color:var(--danger)">W1 关闭' + (rsW1.in_session ? '' : ' · 非W1时段') + '</div>'+
-            '<div style="font-size:11px;color:var(--text-secondary);margin-top:2px">早盘追涨入口暂不可用</div>'+
+            '<div style="font-size:15px;font-weight:800;color:' + (w1ManualReview ? 'var(--warn)' : 'var(--danger)') + '">' + (w1ManualReview ? 'W1 黄灯 · 极化主线需人工复核' : ('W1 关闭' + (rsW1.in_session ? '' : ' · 非W1时段'))) + '</div>'+
+            '<div style="font-size:11px;color:var(--text-secondary);margin-top:2px">' + (w1ManualReview ? 'manual_review，不等于买入授权' : '早盘追涨入口暂不可用') + '</div>'+
           '</div>'+
         '</div>'+
         '<div style="max-width:280px;margin:0 auto;display:flex;flex-direction:column;gap:5px">';

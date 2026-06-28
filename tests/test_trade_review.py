@@ -363,6 +363,12 @@ class AssetPnLParityTest(unittest.TestCase):
     def setUp(self):
         _setup_temp_db(self)
         today = '2026-05-27'
+        self.data_file = Path(self.tmp.name) / "dashboard_data.json"
+        self.data_file.write_text(json.dumps({
+            "meta": {"date": today},
+            "pnl": {"可用资金": 100000, "累计入金": 100000},
+            "positions": [],
+        }), encoding="utf-8")
         db.insert_account_baseline({
             'date': today, 'effective_at': f'{today}T09:30:00',
             'trade_id_cutoff': 0, 'cash': 100000, 'day_start_asset': 100000,
@@ -374,7 +380,11 @@ class AssetPnLParityTest(unittest.TestCase):
 
     def _baseline_state(self):
         from scripts.account_ssot import load_current_account_state
-        return load_current_account_state({})
+        return load_current_account_state(
+            {},
+            now="2026-05-27T10:00:00",
+            data_file=self.data_file,
+        )
 
     def _insert_and_check(self):
         """Insert trades with context, verify asset state unchanged vs plain insert"""

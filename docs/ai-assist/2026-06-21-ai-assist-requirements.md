@@ -83,7 +83,7 @@ live / delayed / stale / dead / baseline / manual / unknown
 以下内容属于 Live Dashboard 项目：
 
 - `/api/ai/context` 事实包。
-- `/api/health`、`/api/account/state`、`/api/trade/tickets` 等盘中状态接口。
+- `/api/health`、`/api/account/state`、`/api/trade/tickets?date=YYYY-MM-DD` 等盘中状态接口。
 - W25 盘中指挥台。
 - W24 票据工作台。
 - W15 持仓/成交入口。
@@ -455,6 +455,7 @@ F1 集中展示：
 - prepare ticket 时必须经过规则和健康上下文检查。
 - preview fill 和 confirm fill 必须分离。
 - confirm fill 必须有人审字段。
+- close ticket 必须通过受控端点写入终态和审计原因，不能把 Markdown 审计副本或裸 SQL 当作票据闭环入口。
 - 票据状态必须能被 `/api/ai/context.tickets` 汇总。
 - 冲突必须进入 alerts 或 human_required。
 

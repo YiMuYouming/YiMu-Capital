@@ -28,6 +28,8 @@ function _w14RuleText(code) {
     CLIMAX_REDUCE: '高潮降仓',
     FRIDAY_W1: '旧周五W1提示',
     FRIDAY_TREND_CAP: '旧周五趋势提示',
+    'WIN-ICE-W1-001': '冰点W1关闭',
+    'WIN-ICE-POLAR-MAINLINE-001': '冰点主线人工复核',
     W1_EMOTION: 'W1情绪不足',
     W1_LIMIT_UP_PROFIT: 'W1涨停收益不足',
     W1_BROKEN_BOARD: 'W1炸板率过高',

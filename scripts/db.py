@@ -370,6 +370,7 @@ TICKET_STATUSES = {
     "closed",
     "closed_with_conflict",
     "audit_degraded",
+    "manual_review",
 }
 
 TICKET_JSON_COLUMNS = {

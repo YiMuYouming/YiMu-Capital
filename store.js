@@ -351,6 +351,7 @@ const DataStore = (function() {
     }
 
     d.trade_tickets = Array.isArray(_tradeTickets) ? _tradeTickets : [];
+    d.trade_tickets_meta = _tradeTicketsMeta || null;
     if (_aiContext) d.ai_context = _aiContext;
 
     setMerged(d);
@@ -359,6 +360,7 @@ const DataStore = (function() {
 
   var _pnlLive = null;
   var _tradeTickets = null;
+  var _tradeTicketsMeta = null;
   var _aiContext = null;
 
   // === 内部持久化数据域（refresh 周期不丢失）===
@@ -396,12 +398,25 @@ const DataStore = (function() {
     return fetch('/api/pnl/summary').then(function(r) { return r.ok ? r.json() : null; }).catch(function() { return null; });
   }
 
+  function _todayTicketDate() {
+    var d = new Date();
+    var m = String(d.getMonth() + 1).padStart(2, '0');
+    var day = String(d.getDate()).padStart(2, '0');
+    return d.getFullYear() + '-' + m + '-' + day;
+  }
+
   function _fetchTradeTickets() {
     if (typeof location !== 'undefined' && location.protocol === 'file:') return Promise.resolve(null);
-    return fetch('/api/trade/tickets')
+    return fetch('/api/trade/tickets?date=' + encodeURIComponent(_todayTicketDate()))
       .then(function(r) { return r.ok ? r.json() : null; })
       .then(function(data) {
-        if (data && Array.isArray(data.tickets)) _tradeTickets = data.tickets;
+        if (data && Array.isArray(data.tickets)) {
+          _tradeTickets = data.tickets;
+          _tradeTicketsMeta = {
+            data_date: data.data_date || null,
+            date_source: data.date_source || null
+          };
+        }
         return data;
       })
       .catch(function() { return null; });

@@ -426,14 +426,15 @@ class TicketUpgradeReadinessTests(unittest.TestCase):
                 return Resp('<script src="widgets/trade-tickets.js?v=1"></script><button>W24</button>')
             if url.endswith("/widgets/trade-tickets.js"):
                 return Resp("function _prepareTicket(){} data-tt-prepare data-tt-confirm /api/trade/fills/confirm")
-            if url.endswith("/api/trade/tickets"):
-                return Resp('{"tickets":[]}', content_type="application/json")
+            if "/api/trade/tickets?date=" in url:
+                return Resp('{"tickets":[],"data_date":"%s","date_source":"query_param"}' % url.rsplit("date=", 1)[-1], content_type="application/json")
             raise AssertionError(url)
 
         result = check_ticket_upgrade_ready.check("http://127.0.0.1:8088", opener=fake_urlopen)
 
         self.assertTrue(result["ok"], result)
         self.assertTrue(all(method == "GET" for _, method in calls))
+        self.assertTrue(any("/api/trade/tickets?date=" in url for url, _ in calls), calls)
 
     def test_ticket_upgrade_readiness_fails_old_cloud_without_ticket_api(self):
         from scripts.ops import check_ticket_upgrade_ready
@@ -456,7 +457,7 @@ class TicketUpgradeReadinessTests(unittest.TestCase):
                 return Resp("<html>old dashboard</html>")
             if url.endswith("/widgets/trade-tickets.js"):
                 return Resp("<h1>404</h1>", status=404)
-            if url.endswith("/api/trade/tickets"):
+            if "/api/trade/tickets?date=" in url:
                 return Resp("<html>404</html>", status=404)
             raise AssertionError(url)
 
@@ -578,7 +579,7 @@ class CloseDayDryRunTests(unittest.TestCase):
                         local_data_dir="/tmp",
                     )
                     close_day.main()
-        mock_packet.assert_called_once()
+        mock_packet.assert_not_called()
         mock_run.assert_not_called()
 
     def test_main_orders_ticket_review_packet_then_project_backup(self):
@@ -642,14 +643,13 @@ class CloseDayDryRunTests(unittest.TestCase):
                             local_data_dir="/tmp",
                         )
                         close_day.main()
-        mock_packet.assert_called_once()
+        mock_packet.assert_not_called()
         mock_fetch.assert_not_called()
 
-    def test_dry_run_prints_ticket_review_summary(self):
+    def test_dry_run_previews_ticket_review_without_opening_db(self):
         from scripts.ops import close_day
         with patch("scripts.ops.common.subprocess.run"):
             with patch("scripts.ops.close_day.build_daily_ticket_review", create=True) as mock_review:
-                mock_review.return_value = {"review_markdown": "# review"}
                 with patch("scripts.ops.close_day.backup_live_dashboard_data.main") as mock_backup:
                     with patch("scripts.ops.close_day.run_review_source_packet"):
                         with patch("scripts.ops.close_day.argparse.ArgumentParser.parse_args") as mock_args:
@@ -662,8 +662,30 @@ class CloseDayDryRunTests(unittest.TestCase):
                             out = io.StringIO()
                             with redirect_stdout(out):
                                 close_day.main()
-        self.assertIn("Ticket review summary generated for 2026-06-03", out.getvalue())
+        self.assertIn("[DRY-RUN] 跳过票据复盘摘要生成", out.getvalue())
+        mock_review.assert_not_called()
         mock_backup.assert_not_called()
+
+    def test_dry_run_previews_review_source_packet_without_collecting_sources(self):
+        from scripts.ops import close_day
+        missing_data_dir = Path(tempfile.mkdtemp()) / "missing-data"
+        with patch("scripts.ops.common.subprocess.run"):
+            with patch("scripts.ops.close_day.build_daily_ticket_review", create=True) as mock_review:
+                with patch("scripts.ops.close_day.run_review_source_packet") as mock_packet:
+                    with patch("scripts.ops.close_day.argparse.ArgumentParser.parse_args") as mock_args:
+                        mock_args.return_value = MagicMock(
+                            dry_run=True, apply=False, date="2026-06-03",
+                            remote_data_dir="/home/agentuser/YiMu-Capital/data",
+                            local_data_dir=str(missing_data_dir),
+                            skip_data_backup=False,
+                        )
+                        out = io.StringIO()
+                        with redirect_stdout(out):
+                            close_day.main()
+
+        self.assertIn("review_packets/2026-06-03/review_source_packet.json", out.getvalue())
+        mock_review.assert_not_called()
+        mock_packet.assert_not_called()
 
     def test_apply_runs_project_data_backup_after_close_sync(self):
         from scripts.ops import close_day
@@ -709,6 +731,41 @@ class CloseDayDryRunTests(unittest.TestCase):
         self.assertIn(str(tmpdir), backup_args)
         self.assertIn("--output-dir", backup_args)
         self.assertIn(str(tmpdir / "backups" / "live-dashboard-data"), backup_args)
+
+    def test_apply_creates_local_data_dir_before_rsync(self):
+        from scripts.ops import close_day
+        missing_data_dir = Path(tempfile.mkdtemp()) / "missing-data"
+        commands_seen = []
+
+        def fake_run(cmd, **kw):
+            cmd_str = str(cmd)
+            commands_seen.append(cmd_str)
+            if "for f in dashboard_data.json" in cmd_str:
+                return subprocess.CompletedProcess(cmd, 0, "", "")
+            if "ls -t" in cmd_str:
+                return subprocess.CompletedProcess(cmd, 0, "data/pnl.db.backup-close-20260603-150530\n", "")
+            if "ssh" in cmd_str and "integrity_check" in cmd_str:
+                return subprocess.CompletedProcess(cmd, 0, "pnl.db.backup-close-20260603-150530\nintegrity_check: ok\n", "")
+            if "rsync" in cmd_str:
+                self.assertTrue(missing_data_dir.exists())
+            return subprocess.CompletedProcess(cmd, 0, "", "")
+
+        with patch("scripts.ops.common.subprocess.run", side_effect=fake_run):
+            with patch("scripts.ops.close_day.sqlite_integrity", return_value=(True, "ok")):
+                with patch("scripts.ops.close_day.build_daily_ticket_review", create=True) as mock_review:
+                    mock_review.return_value = {"review_markdown": "# ticket review"}
+                    with patch("scripts.ops.close_day.run_review_source_packet"):
+                        with patch("scripts.ops.close_day.argparse.ArgumentParser.parse_args") as mock_args:
+                            mock_args.return_value = MagicMock(
+                                dry_run=False, apply=True, date="2026-06-03",
+                                remote_data_dir="/home/agentuser/YiMu-Capital/data",
+                                local_data_dir=str(missing_data_dir),
+                                skip_data_backup=True,
+                            )
+                            close_day.main()
+
+        self.assertTrue(missing_data_dir.exists())
+        self.assertIn("rsync", " ".join(commands_seen))
 
     def test_apply_can_skip_project_data_backup(self):
         from scripts.ops import close_day
@@ -831,8 +888,10 @@ class CloseDayDryRunTests(unittest.TestCase):
                     local_data_dir=str(tmpdir),
                     skip_data_backup=True,
                 )
-                with patch("scripts.ops.close_day.run_review_source_packet"):
-                    close_day.main()
+                with patch("scripts.ops.close_day.build_daily_ticket_review", create=True) as mock_review:
+                    mock_review.return_value = {"review_markdown": "# ticket review"}
+                    with patch("scripts.ops.close_day.run_review_source_packet"):
+                        close_day.main()
         self.assertGreaterEqual(call_count, 1)
         all_cmds = " ".join(commands_seen)
         self.assertIn("ssh", all_cmds, "应调 ssh backup")

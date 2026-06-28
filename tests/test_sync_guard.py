@@ -339,8 +339,7 @@ class ConcurrentSellGuardTests(unittest.TestCase):
     def setUp(self):
         _setup(self)
         bridge.CACHE['live_quotes'] = {}
-        from datetime import datetime
-        self.today = datetime.now().strftime("%Y-%m-%d")
+        self.today = "2026-06-26"
 
     def tearDown(self): _teardown(self)
 

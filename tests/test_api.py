@@ -8,6 +8,9 @@ import socket
 import unittest
 import urllib.error
 import urllib.request
+from datetime import datetime
+
+from scripts.db import TRADING_HOUR_END, TRADING_HOUR_START, is_trading_day
 
 
 BASE = "http://localhost:8088"
@@ -49,7 +52,16 @@ class TestBridgeAPI(unittest.TestCase):
         self.assertIsInstance(data, dict)
         self.assertIn("meta", data)
         self.assertIn("_freshness", data)
-        self.assertIn(data["_freshness"]["level"], ("live", "delayed"))
+        level = data["_freshness"]["level"]
+        now = datetime.now()
+        in_session = (
+            is_trading_day(now.strftime("%Y-%m-%d"))
+            and TRADING_HOUR_START <= (now.hour, now.minute) <= TRADING_HOUR_END
+        )
+        if in_session:
+            self.assertIn(level, ("live", "delayed"))
+        else:
+            self.assertIn(level, ("live", "delayed", "stale", "dead"))
 
     def test_api_pnl(self):
         data = _get("/api/pnl?range=today")
