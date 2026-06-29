@@ -912,6 +912,10 @@ class PnLCurveWidget extends YiMuWidget {
     // Scale — 跳过 null (未到时间的空槽)
     var validP = pFilled.filter(function(v){return v != null;});
     var validB = bFilled.filter(function(v){return v != null;});
+    if (!validP.length) {
+      this._setChartEmpty(true, '等待收益快照服务返回有效采样点。');
+      return;
+    }
     var allVals = validP.concat(validB);
     if (!allVals.length) { allVals = [0, 0]; }
     var absMax = Math.max(Math.abs(Math.min.apply(null, allVals)), Math.abs(Math.max.apply(null, allVals)));
@@ -934,6 +938,25 @@ class PnLCurveWidget extends YiMuWidget {
         else { ctx.lineTo(xVal(segI), spy); }
       }
       ctx.strokeStyle = color; ctx.lineWidth = width || 2; ctx.stroke(); ctx.setLineDash([]);
+    }
+    function _drawSinglePoint(vals, color, radius) {
+      var pointCount = 0, pointIdx = -1;
+      for (var pi = 0; pi < n; pi++) {
+        if (vals[pi] == null) continue;
+        pointCount++;
+        pointIdx = pi;
+      }
+      if (pointCount !== 1) return;
+      var px = xVal(pointIdx);
+      var py = yVal(vals[pointIdx]);
+      if (py == null) return;
+      ctx.beginPath();
+      ctx.arc(px, py, radius || 4, 0, Math.PI * 2);
+      ctx.fillStyle = color;
+      ctx.fill();
+      ctx.strokeStyle = '#FFFFFF';
+      ctx.lineWidth = 2;
+      ctx.stroke();
     }
     // 面积填充（null 处断开）
     function _fillArea(vals, grad) {
@@ -1048,6 +1071,7 @@ class PnLCurveWidget extends YiMuWidget {
 
     // Benchmark line
     _drawSegments(bFilled, '#2563EB', 2, [6, 3]);
+    _drawSinglePoint(bFilled, '#2563EB', 3.5);
 
     // Area fill
     var grad = ctx.createLinearGradient(0, PAD.t, 0, PAD.t + ch);
@@ -1057,6 +1081,7 @@ class PnLCurveWidget extends YiMuWidget {
 
     // Portfolio line
     _drawSegments(pFilled, '#DC2626', 2.5);
+    _drawSinglePoint(pFilled, '#DC2626', 4.5);
 
     // End labels — 用最后一个有效值
     var lastValidI = n - 1;
@@ -1072,12 +1097,16 @@ class PnLCurveWidget extends YiMuWidget {
     ctx.textAlign = 'left';
     ctx.textBaseline = 'middle';
     ctx.fillStyle = '#DC2626';
-    ctx.fillText((lastP >= 0 ? '+' : '') + lastP.toFixed(2) + '%', lastPX + 4, yVal(lastP));
+    if (lastP != null) {
+      ctx.fillText((lastP >= 0 ? '+' : '') + lastP.toFixed(2) + '%', lastPX + 4, yVal(lastP));
+    }
 
     // 指数 — 放在收益率下方
     ctx.fillStyle = '#2563EB';
     ctx.font = '10px -apple-system,sans-serif';
-    ctx.fillText(idxName + ' ' + (lastB >= 0 ? '+' : '') + lastB.toFixed(2) + '%', lastPX + 4, yVal(lastB) + 15);
+    if (lastB != null) {
+      ctx.fillText(idxName + ' ' + (lastB >= 0 ? '+' : '') + lastB.toFixed(2) + '%', lastPX + 4, yVal(lastB) + 15);
+    }
 
     // 保存数据供 hover 使用
     this._lastChartData = chartData;

@@ -502,6 +502,44 @@ try {
         result = _run_node(script, files=["widgets/pnl-curve.js"])
         self.assertTrue(result.get("ok"), f"null slot draw 不应崩溃: {result}")
 
+    def test_draw_chart_with_single_valid_sample_marks_points(self):
+        script = r"""
+var inst = new PnLCurveWidget({id:'W22_SINGLE'});
+inst.id = 'W22_SINGLE';
+inst._state = { period:'today', index:'sh', totalAsset:200000, totalDeposit:200000, liveQ:{}, positions:[], pnlLive:{} };
+var calls = { arc:0, emptyVisible:null, labels:[] };
+var canvas = document.getElementById('pnl_canvas_W22_SINGLE');
+canvas.getBoundingClientRect = function(){ return { left:0, top:0, width:800, height:300 }; };
+canvas.getContext = function() {
+  return new Proxy({
+    measureText:function(){ return { width:50 }; },
+    createLinearGradient:function(){ return { addColorStop:function(){} }; }
+  }, {
+    get:function(target, prop) {
+      if (prop in target) return target[prop];
+      if (prop === 'arc') return function(){ calls.arc += 1; };
+      if (prop === 'fillText') return function(txt){ calls.labels.push(String(txt)); };
+      return function(){};
+    },
+    set:function(target, prop, value) { target[prop] = value; return true; }
+  });
+};
+var empty = document.getElementById('pnl_empty_W22_SINGLE');
+empty.classList = { toggle:function(cls, visible){ calls.emptyVisible = visible; } };
+empty.querySelector = function(){ return { textContent:'' }; };
+inst._drawChart({
+  type:'intraday', labels:['09:30','09:35','09:40'],
+  portfolio:[0.83, null, null], benchmark:[-0.19, null, null],
+  position:[49.5, null, null], nav:[1.043841, null, null]
+});
+console.log(JSON.stringify(calls));
+"""
+        result = _run_node(script, files=["widgets/pnl-curve.js"])
+        self.assertEqual(result.get("emptyVisible"), False, f"单点有效曲线不应显示空态: {result}")
+        self.assertGreaterEqual(result.get("arc", 0), 2, f"单点有效曲线应画账户点和指数点: {result}")
+        self.assertTrue(any("+0.83%" in s for s in result.get("labels", [])),
+            f"单点有效曲线应显示账户收益标签: {result}")
+
     def test_draw_chart_all_zero(self):
         script = r"""
 var inst = new PnLCurveWidget({id:'W22_D2'});
