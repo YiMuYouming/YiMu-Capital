@@ -950,6 +950,18 @@ class PnLCurveWidget extends YiMuWidget {
       var px = xVal(pointIdx);
       var py = yVal(vals[pointIdx]);
       if (py == null) return;
+      var span = Math.max(22, Math.min(56, cw / Math.max(n - 1, 1) * 2));
+      var x1 = px;
+      var x2 = Math.min(PAD.l + cw, px + span);
+      if (x2 === px) {
+        x1 = Math.max(PAD.l, px - span);
+      }
+      ctx.beginPath();
+      ctx.moveTo(x1, py);
+      ctx.lineTo(x2, py);
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 2.5;
+      ctx.stroke();
       ctx.beginPath();
       ctx.arc(px, py, radius || 4, 0, Math.PI * 2);
       ctx.fillStyle = color;

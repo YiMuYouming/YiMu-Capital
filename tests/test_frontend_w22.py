@@ -507,21 +507,33 @@ try {
 var inst = new PnLCurveWidget({id:'W22_SINGLE'});
 inst.id = 'W22_SINGLE';
 inst._state = { period:'today', index:'sh', totalAsset:200000, totalDeposit:200000, liveQ:{}, positions:[], pnlLive:{} };
-var calls = { arc:0, emptyVisible:null, labels:[] };
+var calls = { arc:0, redStrokeLineTo:0, blueStrokeLineTo:0, emptyVisible:null, labels:[] };
 var canvas = document.getElementById('pnl_canvas_W22_SINGLE');
 canvas.getBoundingClientRect = function(){ return { left:0, top:0, width:800, height:300 }; };
 canvas.getContext = function() {
+  var currentStroke = '';
+  var pathLineTo = 0;
   return new Proxy({
     measureText:function(){ return { width:50 }; },
     createLinearGradient:function(){ return { addColorStop:function(){} }; }
   }, {
     get:function(target, prop) {
       if (prop in target) return target[prop];
+      if (prop === 'beginPath') return function(){ pathLineTo = 0; };
       if (prop === 'arc') return function(){ calls.arc += 1; };
+      if (prop === 'lineTo') return function(){ pathLineTo += 1; };
+      if (prop === 'stroke') return function(){
+        if (currentStroke === '#DC2626') calls.redStrokeLineTo += pathLineTo;
+        if (currentStroke === '#2563EB') calls.blueStrokeLineTo += pathLineTo;
+      };
       if (prop === 'fillText') return function(txt){ calls.labels.push(String(txt)); };
       return function(){};
     },
-    set:function(target, prop, value) { target[prop] = value; return true; }
+    set:function(target, prop, value) {
+      if (prop === 'strokeStyle') currentStroke = value;
+      target[prop] = value;
+      return true;
+    }
   });
 };
 var empty = document.getElementById('pnl_empty_W22_SINGLE');
@@ -537,6 +549,8 @@ console.log(JSON.stringify(calls));
         result = _run_node(script, files=["widgets/pnl-curve.js"])
         self.assertEqual(result.get("emptyVisible"), False, f"单点有效曲线不应显示空态: {result}")
         self.assertGreaterEqual(result.get("arc", 0), 2, f"单点有效曲线应画账户点和指数点: {result}")
+        self.assertGreaterEqual(result.get("redStrokeLineTo", 0), 1, f"单点账户收益应画短线而不只是点: {result}")
+        self.assertGreaterEqual(result.get("blueStrokeLineTo", 0), 1, f"单点指数参考应画短线而不只是点: {result}")
         self.assertTrue(any("+0.83%" in s for s in result.get("labels", [])),
             f"单点有效曲线应显示账户收益标签: {result}")
 
