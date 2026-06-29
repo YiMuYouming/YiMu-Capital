@@ -1527,7 +1527,9 @@ def _execution_card_metadata(trade_date=None):
             "expected_trade_date": expected_trade_date,
         }
     snapshot = card.get("rule_snapshot") or card.get("rule_state") or card
-    snapshot_hash = "sha256:" + hashlib.sha256(_canonical_json(snapshot).encode("utf-8")).hexdigest()
+    snapshot_hash = card.get("rule_snapshot_hash") or (
+        "sha256:" + hashlib.sha256(_canonical_json(snapshot).encode("utf-8")).hexdigest()
+    )
     trade_date = str(card.get("next_trade_date") or expected_trade_date).replace("-", "")
     generated = str(card.get("generated_at") or "")
     try:
@@ -1536,7 +1538,7 @@ def _execution_card_metadata(trade_date=None):
         generated_id = datetime.fromtimestamp(card_path.stat().st_mtime).strftime("%Y%m%dT%H%M%S")
     return {
         "rule_snapshot_hash": snapshot_hash,
-        "today_execution_card_id": f"EXEC-{trade_date}-{generated_id}",
+        "today_execution_card_id": card.get("today_execution_card_id") or f"EXEC-{trade_date}-{generated_id}",
         "rule_pack_version": str((card.get("source_rule_pack") or {}).get("mtime") or ""),
     }
 

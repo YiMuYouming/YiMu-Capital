@@ -556,6 +556,27 @@ class TicketApiTest(unittest.TestCase):
         self.assertIsNone(meta.get("rule_snapshot_hash"))
         self.assertIsNone(meta.get("today_execution_card_id"))
 
+    def test_execution_card_metadata_prefers_explicit_hash_and_id(self):
+        rule_root = Path(self.tmp.name) / "ai-rule-system"
+        runtime = rule_root / "daily-runtime"
+        runtime.mkdir(parents=True)
+        trade_date = datetime.now().strftime("%Y-%m-%d")
+        card = {
+            "schema_version": "1.0",
+            "generated_at": f"{trade_date}T09:00:00+08:00",
+            "next_trade_date": trade_date,
+            "today_execution_card_id": "EXEC-CUSTOM",
+            "rule_snapshot_hash": "sha256:custom",
+            "rule_snapshot": {"rules": [{"id": "ACCT-RISK-002"}]},
+        }
+        (runtime / "today_execution_card.json").write_text(json.dumps(card), encoding="utf-8")
+        bridge.AI_RULE_SYSTEM_ROOT = rule_root
+
+        meta = bridge._execution_card_metadata(trade_date=trade_date)
+
+        self.assertEqual(meta["rule_snapshot_hash"], "sha256:custom")
+        self.assertEqual(meta["today_execution_card_id"], "EXEC-CUSTOM")
+
     def test_rule_inputs_reset_legacy_loss_streak_when_account_day_is_profitable(self):
         with mock.patch.object(bridge, "_load_dashboard_data", return_value={
             "risk": {"连亏天数": 2},
