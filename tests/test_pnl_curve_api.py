@@ -195,6 +195,40 @@ class PnlQueryZeroValueTests(unittest.TestCase):
         self.assertEqual(result["dates"][-1], today)
         self.assertEqual(result["benchmark"][-1], -1.25)
 
+    def test_query_pnl_week_overlays_zero_historical_benchmark_from_intraday(self):
+        """周线指数参考不能因 daily_summary 历史指数为 0 而画成平线。"""
+        rows = [
+            ("2026-06-23", 0.9938, 1.00, 2.00),
+            ("2026-06-24", 1.029445, -0.50, -1.00),
+            ("2026-06-25", 1.049853, 0.20, 0.80),
+            ("2026-06-26", 1.035207, -0.30, -0.60),
+            ("2026-06-29", 1.055575, 0.19, 0.54),
+        ]
+        for date_str, nav, sz_pct, cy_pct in rows:
+            db._exec_write(
+                "INSERT INTO daily_summary (date,nav,pnl_pct,sh_pct,sz_pct,cy_pct,pos_pct,deposit) VALUES (?,?,?,?,?,?,?,?)",
+                (date_str, nav, 0.0, 0.0, 0.0, 0.0, 30.0, 200000))
+            db._exec_write(
+                "INSERT INTO intraday_snapshots (ts,date,total_asset,mv,pnl_pct,nav,sh_pct,sz_pct,cy_pct,pos_pct) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                (f"{date_str}T14:55:00", date_str, nav * 200000, 60000, 0.0, nav, 0.0, sz_pct, cy_pct, 30.0))
+        class FrozenDatetime(datetime):
+            @classmethod
+            def now(cls):
+                return cls(2026, 6, 29, 16, 0, 0)
+        original_datetime = db.datetime
+        db.datetime = FrozenDatetime
+        try:
+            sz_result = db.query_pnl("week", "sz")
+            cy_result = db.query_pnl("week", "cy")
+        finally:
+            db.datetime = original_datetime
+
+        self.assertEqual(sz_result["dates"], [r[0] for r in rows], sz_result)
+        self.assertNotEqual(len(set(sz_result["benchmark"][:-1])), 1, sz_result)
+        self.assertNotEqual(len(set(cy_result["benchmark"][:-1])), 1, cy_result)
+        self.assertAlmostEqual(sz_result["benchmark"][0], 1.0, places=4, msg=sz_result)
+        self.assertAlmostEqual(cy_result["benchmark"][0], 2.0, places=4, msg=cy_result)
+
     def test_bridge_overlays_live_today_point_when_snapshots_are_missing(self):
         """今日快照缺失但 SSOT 有今日状态时，/api/pnl 可叠加临时实时点。"""
         chart = {

@@ -1027,6 +1027,31 @@ def query_pnl(range='today', index='sh'):
         """, (from_date,))
         rows_list = [dict(r) for r in rows]
 
+        # Closing-account rollup can persist daily_summary before index fields
+        # are finalized.  When daily index values are still zero, recover them
+        # from the same day's latest intraday snapshot so week/month benchmark
+        # curves do not flatten.
+        if rows_list:
+            row_dates = [r['date'] for r in rows_list]
+            placeholders = ",".join("?" for _ in row_dates)
+            intraday_rows = _exec(
+                f"""
+                SELECT date, {idx_field} AS bm_pct
+                FROM intraday_snapshots
+                WHERE date IN ({placeholders})
+                ORDER BY date, ts
+                """,
+                tuple(row_dates))
+            intraday_bm_by_date = {}
+            for r in intraday_rows:
+                intraday_bm_by_date[r['date']] = r['bm_pct']
+            for r in rows_list:
+                bm_from_intraday = intraday_bm_by_date.get(r['date'])
+                if bm_from_intraday is None:
+                    continue
+                if r['date'] == today or float(r.get('bm_pct') or 0.0) == 0.0:
+                    r['bm_pct'] = bm_from_intraday or 0.0
+
         # Daily rollup may be written before market fields are finalized.  For
         # today, prefer the latest intraday snapshot for index/position fields.
         today_rows = _exec(
