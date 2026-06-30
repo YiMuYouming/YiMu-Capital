@@ -72,6 +72,8 @@ python3 scripts/bridge.py 18089
 
 ## 每日开盘前流程
 
+开盘 baseline 是每日数据动作，不是代码部署动作。每个交易日前都要完成一次生成和上云同步；否则 8088 会继续服务旧的 `dashboard_data.json`，W18 锚定股、W12/W13 池子和 baseline 日期都会看起来像“组件解析错了”。
+
 推荐使用自动化脚本（默认 dry-run，加 `--apply` 才执行）：
 
 ```bash
@@ -93,8 +95,10 @@ python3 scripts/gen_dashboard_data.py
 验收重点：
 
 - `data/dashboard_data.json` 生成成功。
+- `meta.note` 指向今日 ReviewNote。
 - `meta.pools_note_date` 指向上一交易日复盘笔记。
 - W12/W13 自选池和上一交易日复盘笔记附件一致。
+- `decision.锚定股状态` 和昨日确定的锚定股一致。
 
 可用命令：
 
@@ -106,10 +110,12 @@ from pathlib import Path
 data = json.loads(Path("data/dashboard_data.json").read_text())
 meta = data.get("meta", {})
 print("generated_at:", meta.get("generated_at"))
+print("note:", meta.get("note"))
 print("pools_note:", meta.get("pools_note"))
 print("pools_note_date:", meta.get("pools_note_date"))
 print("lianban:", len(data.get("lianban_pool", [])))
 print("trend:", len(data.get("trend_pool", [])))
+print("anchor_stocks:", [x.get("标的") for x in (data.get("decision", {}).get("锚定股状态") or [])])
 PY
 ```
 
@@ -141,9 +147,12 @@ curl -s http://127.0.0.1:8088/api/pnl/summary'
 通过条件：
 
 - API 返回 JSON，不是空文件或错误页。
+- `/api/health.baseline` 为 `ok`，不是 `stale`。
+- `/api/baseline.meta.note` 指向今日 ReviewNote。
 - 持仓和现金与弈沐哥确认口径一致。
 - PnL summary 有日初锚点。
 - W12/W13 池子来自上一交易日复盘笔记。
+- W18 锚定股来自昨日确定的锚定股清单。
 
 ## 盘中操作流程
 

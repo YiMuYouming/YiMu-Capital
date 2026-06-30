@@ -6,6 +6,7 @@
 - 预览：`http://localhost:18088`，只读代理，只看效果，不录真实交易。
 - 诊断：`http://localhost:18089`，可选完整服务，只用于排障。
 - 代码走 Git：本地改代码 -> 测试 -> commit -> push -> Hermes `git pull --ff-only` -> 重启验收。
+- 开盘 baseline 每个交易日前必须刷新：本地 `open_day.py --apply --restart-cloud` 生成 `dashboard_data.json`/`pools.json` 并同步 Hermes；锚定股、连板池、趋势池不靠代码 push 自动更新。
 - 数据走收盘脚本：Hermes 生产生成 -> `close_day.py --apply` 拉回本地 -> 复盘事实包 -> 项目专用备份/OSS。
 
 ## 代码和数据分流
@@ -34,12 +35,16 @@ ssh agentuser@43.132.146.234 'sudo systemctl restart yimu-live-dashboard.service
 
 ### 数据流程
 
-盘中数据 SSOT 是 Hermes，不走 Git。成交、收益曲线、快照、运行 JSON 都不要 `git add`。
+盘中数据 SSOT 是 Hermes，不走 Git。成交、收益曲线、快照、运行 JSON 都不要 `git add`。代码三端同步不等于每日 baseline 已同步；若 W18 锚定股、W12/W13 池子或 baseline 日期像旧数据，先查 `/api/baseline.meta.note` 和 `meta.pools_note_date`，再跑开盘同步。
 
 ```bash
+python3 scripts/ops/open_day.py --dry-run
+python3 scripts/ops/open_day.py --apply --restart-cloud
 python3 scripts/ops/close_day.py --dry-run
 python3 scripts/ops/close_day.py --apply
 ```
+
+`open_day.py --apply --restart-cloud` 会从本地 Vault 复盘笔记生成 `data/dashboard_data.json` / `data/pools.json`，rsync 到 Hermes，并重启 8088。开盘验收至少确认 `/api/health.baseline=ok`、`/api/baseline.meta.note` 是当日 ReviewNote、`decision.锚定股状态` 与昨日确定的锚定股一致。
 
 `close_day.py --apply` 会在 Hermes 创建 SQLite 一致性备份，拉回本地 `pnl.db` 和关键 JSON，生成
 `data/review_packets/YYYY-MM-DD/review_source_packet.json`，再生成项目专用数据包并上传 OSS。

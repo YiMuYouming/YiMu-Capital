@@ -39,6 +39,8 @@ open_day.py/close_day.py → 开盘生成基线+rsync上云 / 收盘SQLite备份
 
 ## 开盘前
 
+每日开盘前必须刷新 baseline；这不是代码 push 的一部分。锚定股、连板池、趋势池来自复盘笔记生成的 `dashboard_data.json` / `pools.json`，不跑 `open_day.py` 就会继续显示旧数据。
+
 推荐使用自动化脚本（默认 dry-run）：
 
 ```bash
@@ -49,6 +51,20 @@ python3 scripts/ops/open_day.py --apply --restart-cloud  # 同步后重启云端
 ```
 
 手动备选：`python3 scripts/gen_dashboard_data.py` → `rsync` → `systemctl restart`。
+
+开盘验收至少确认：
+
+```bash
+curl -s http://127.0.0.1:8088/api/health | python3 -m json.tool
+python3 - <<'PY'
+import json
+from urllib.request import urlopen
+
+data = json.load(urlopen("http://127.0.0.1:8088/api/baseline", timeout=10))
+print(data.get("meta", {}).get("note"))
+print([x.get("标的") for x in (data.get("decision", {}).get("锚定股状态") or [])])
+PY
+```
 
 ## 收盘后
 
