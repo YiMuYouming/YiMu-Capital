@@ -328,8 +328,8 @@ console.log(JSON.stringify({
         self.assertEqual(result.get("pnl"), "+1.99%", result)
         self.assertEqual(result.get("pos"), "30%", result)
 
-    def test_period_kpi_prefers_chart_cumulative_twr_over_all_daily_fallback(self):
-        """月主图已是累计TWR截取时，KPI 不应被 all 缓存的兜底计算覆盖"""
+    def test_period_kpi_prefers_chart_window_twr_over_all_daily_fallback(self):
+        """月主图已是周期累计TWR时，KPI 不应被 all 缓存的兜底计算覆盖"""
         script = r"""
 var inst = new PnLCurveWidget({id:'W22'});
 inst.id = 'W22';

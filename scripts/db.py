@@ -1111,7 +1111,8 @@ def query_pnl(range='today', index='sh'):
                 'dates': [r['date'] for r in display_rows],
             }
 
-        # 其他 → 累积 TWR 曲线
+        # 其他 → 当前周期内累积 TWR 曲线。不要截取全历史累计 NAV，
+        # 否则周/月/三月 KPI 会都显示同一个累计收益终值。
         def to_cumulative(vals):
             cum = 1.0
             result = []
@@ -1120,9 +1121,8 @@ def query_pnl(range='today', index='sh'):
                 result.append(round((cum - 1) * 100, 4))
             return result
 
-        pnl_cumulative = [round((float(r.get('nav') or 1.0) - 1) * 100, 4) for r in display_rows]
-        bm_cumulative = to_cumulative([r['bm_pct'] for r in rows_list])
-        bm_cumulative = bm_cumulative[-len(display_rows):] if display_rows else []
+        pnl_cumulative = to_cumulative(pnl_raw)
+        bm_cumulative = to_cumulative(bm_raw)
         return {
             'type': 'daily',
             'labels': labels,

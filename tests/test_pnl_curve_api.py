@@ -164,8 +164,8 @@ class PnlQueryZeroValueTests(unittest.TestCase):
         self.assertEqual(result["position"], [10, 20, 30, 40, 50], result)
         self.assertAlmostEqual(result["portfolio"][-1], 14.0, places=3, msg=result)
 
-    def test_query_pnl_month_returns_cumulative_nav_slice_not_window_rebased(self):
-        """月图展示累计TWR曲线的局部截取，首日不应按窗口前一日重新归零"""
+    def test_query_pnl_month_returns_window_rebased_twr_not_inception_slice(self):
+        """月图展示近一月TWR，应按窗口内日收益复合，不能截取全历史累计曲线"""
         rows = [
             ("2026-05-25", 1.052385, 0.96),
             ("2026-05-26", 1.04893, -0.17),
@@ -179,8 +179,10 @@ class PnlQueryZeroValueTests(unittest.TestCase):
         result = db.query_pnl("month", "sh")
 
         self.assertEqual(result["dates"][-2:], ["2026-05-26", "2026-05-27"], result)
-        self.assertAlmostEqual(result["portfolio"][-2], 4.893, places=3, msg=result)
-        self.assertAlmostEqual(result["portfolio"][-1], 3.3765, places=3, msg=result)
+        self.assertAlmostEqual(result["portfolio"][0], 0.0, places=4, msg=result)
+        self.assertAlmostEqual(result["portfolio"][-2], -0.3283, places=3, msg=result)
+        self.assertAlmostEqual(result["portfolio"][-1], -1.7694, places=3, msg=result)
+        self.assertAlmostEqual(result["benchmark"][-1], 0.7884, places=3, msg=result)
 
     def test_query_pnl_all_overlays_today_benchmark_from_intraday(self):
         """日结 daily_summary 若今天指数为 0，应以最后一条日内快照补齐"""
