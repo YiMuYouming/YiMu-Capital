@@ -370,9 +370,6 @@ def _overlay_live_today_pnl_point(chart, live_summary, range_val, index_val,
     if pnl_pct is None:
         return chart
 
-    if chart.get('data_date') == today and not chart.get('is_fallback'):
-        return chart
-
     labels = list(chart.get('labels') or [])
     if not labels:
         return chart
@@ -389,6 +386,16 @@ def _overlay_live_today_pnl_point(chart, live_summary, range_val, index_val,
         if not past:
             return chart
         target_idx = past[-1][0]
+
+    chart_is_today = chart.get('data_date') == today and not chart.get('is_fallback')
+    if chart_is_today:
+        existing_portfolio = list(chart.get('portfolio') or [])
+        last_existing_idx = -1
+        for i, value in enumerate(existing_portfolio):
+            if value is not None:
+                last_existing_idx = i
+        if target_idx < last_existing_idx:
+            return chart
 
     idx_key = {'sh': '上证指数涨幅', 'sz': '深证指数涨幅', 'cy': '创业板指涨幅'}.get(index_val, '上证指数涨幅')
     live_index = live_index or {}
@@ -411,6 +418,17 @@ def _overlay_live_today_pnl_point(chart, live_summary, range_val, index_val,
         return [fill_value if i < target_idx else live_value if i == target_idx else None
                 for i in range(len(labels))]
 
+    def overlay_existing_series(values, live_value):
+        out = list(values or [])
+        if len(out) < len(labels):
+            out.extend([None] * (len(labels) - len(out)))
+        elif len(out) > len(labels):
+            out = out[:len(labels)]
+        out[target_idx] = live_value
+        for i in range(target_idx + 1, len(out)):
+            out[i] = None
+        return out
+
     result = dict(chart)
     result.update({
         'data_date': today,
@@ -420,10 +438,10 @@ def _overlay_live_today_pnl_point(chart, live_summary, range_val, index_val,
         'snapshot_authority': 'temporary_live_overlay',
         'valuation_complete': bool(live_summary.get('valuation_complete')),
         'quote_status': live_summary.get('quote_status'),
-        'portfolio': series(0.0, round(pnl_pct, 4)),
-        'benchmark': series(0.0, round(benchmark, 4)),
-        'position': series(0.0, round(pos_pct, 4)),
-        'nav': series(1.0, round(nav, 6)),
+        'portfolio': overlay_existing_series(chart.get('portfolio'), round(pnl_pct, 4)) if chart_is_today else series(0.0, round(pnl_pct, 4)),
+        'benchmark': overlay_existing_series(chart.get('benchmark'), round(benchmark, 4)) if chart_is_today else series(0.0, round(benchmark, 4)),
+        'position': overlay_existing_series(chart.get('position'), round(pos_pct, 4)) if chart_is_today else series(0.0, round(pos_pct, 4)),
+        'nav': overlay_existing_series(chart.get('nav'), round(nav, 6)) if chart_is_today else series(1.0, round(nav, 6)),
         '_updated': overlay_updated,
     })
     return result

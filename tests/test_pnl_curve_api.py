@@ -269,6 +269,43 @@ class PnlQueryZeroValueTests(unittest.TestCase):
         self.assertIsNone(result["portfolio"][idx + 1], result)
         self.assertFalse(result.get("valuation_complete"), result)
 
+    def test_bridge_overlays_newer_live_point_on_existing_today_chart(self):
+        """今日曲线已有首个快照时，更新的 SSOT 点应补到当前槽，避免日线只剩短横线。"""
+        chart = {
+            "type": "intraday",
+            "data_date": "2026-07-01",
+            "is_fallback": False,
+            "labels": ["09:30", "09:35", "09:40", "09:45"],
+            "portfolio": [0.50, None, None, None],
+            "benchmark": [-0.06, None, None, None],
+            "position": [44.9, None, None, None],
+            "nav": [1.065614, None, None, None],
+            "_updated": "2026-07-01T09:34:34",
+        }
+        summary = {
+            "pnl_pct": 0.21,
+            "pos_pct": 44.74,
+            "total_asset": 755563.47,
+            "total_deposit": 711059.2252961266,
+            "valuation_complete": True,
+            "quote_status": "live",
+            "_updated": "2026-07-01T09:37:09+08:00",
+        }
+        live_index = {"上证指数涨幅": "-0.08%"}
+
+        result = bridge._overlay_live_today_pnl_point(
+            chart, summary, "today", "sh", live_index=live_index,
+            now=datetime(2026, 7, 1, 9, 38, 0),
+        )
+
+        self.assertTrue(result.get("is_live_overlay"), result)
+        idx_0935 = result["labels"].index("09:35")
+        self.assertEqual(result["portfolio"][0], 0.50, result)
+        self.assertEqual(result["portfolio"][idx_0935], 0.21, result)
+        self.assertEqual(result["benchmark"][idx_0935], -0.08, result)
+        self.assertEqual(result["position"][idx_0935], 44.74, result)
+        self.assertIsNone(result["portfolio"][idx_0935 + 1], result)
+
     def test_bridge_overlays_today_trade_ledger_when_quotes_are_stale(self):
         """行情旧但今日成交已入账时，曲线展示今日账本临时点并保持估值不可信。"""
         chart = {
