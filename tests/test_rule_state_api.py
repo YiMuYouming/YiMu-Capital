@@ -95,6 +95,19 @@ class RuleStateBridgeContractTest(unittest.TestCase):
         self.assertNotIn("W1_PROMOTION", codes,
                          "晋级率 0.198 → 19.8% 应通过 ≥18 阈值")
 
+    def test_cache_string_rates_are_normalized_before_comparison(self):
+        """CACHE 中晋级率/炸板率可能是字符串，比较前必须先转数值"""
+        bridge.CACHE["iwencai"].update({
+            "晋级率": "0.198",
+            "炸板率": "75.8%",
+        })
+
+        state = bridge._build_rule_state(now=datetime(2026, 5, 27, 9, 40))
+        codes = [b["code"] for b in state["blocks"]]
+
+        self.assertIn("W1_BROKEN_BOARD", codes)
+        self.assertNotIn("W1_PROMOTION", codes)
+
     def test_zero_style_values_are_preserved(self):
         """总分=0、连板占比=0、趋势占比=0 不因 or 回退成 50"""
         self.tmp_dashboard.write_text(

@@ -14,6 +14,8 @@ data/*.json.bak*
 data/*~
 data/backups/
 data/cloud-backups/
+data/review_packets/
+data/reviews/
 data/ymwm_report.json
 data/zt_history.json
 

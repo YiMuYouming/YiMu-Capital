@@ -30,9 +30,17 @@ POOLS_FILE = ROOT_DIR / "data/pools.json"
 
 def find_latest_review():
     """找最新有实质内容的复盘笔记（跳过模板，回退到有数据的笔记）"""
-    md_files = sorted(REVIEW_DIR.glob("**/*ReviewNote.md"), reverse=True)
+    md_files = sorted(
+        REVIEW_DIR.glob("**/*ReviewNote.md"),
+        key=lambda path: (_review_note_date(path) or "", str(path)),
+        reverse=True,
+    )
     if not md_files:
-        md_files = sorted(REVIEW_DIR.glob("**/*.md"), reverse=True)
+        md_files = sorted(
+            REVIEW_DIR.glob("**/*.md"),
+            key=lambda path: (_review_note_date(path) or "", str(path)),
+            reverse=True,
+        )
 
     for f in md_files:
         try:

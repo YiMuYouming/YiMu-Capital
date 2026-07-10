@@ -2,6 +2,7 @@
 
 import json
 import io
+import shlex
 import sqlite3
 import subprocess
 import tarfile
@@ -566,6 +567,19 @@ class OpenDayDryRunTests(unittest.TestCase):
 
 
 class CloseDayDryRunTests(unittest.TestCase):
+    def test_remote_backup_command_quotes_embedded_python_script(self):
+        from scripts.ops import close_day
+
+        cmd = close_day.build_remote_backup_command("/tmp/data dir/with'quote")
+
+        self.assertEqual(cmd[:2], ["ssh", close_day.REMOTE])
+        parsed = shlex.split(cmd[2])
+        self.assertEqual(parsed[0], "cd")
+        self.assertEqual(parsed[1], close_day.REMOTE_PROJECT)
+        self.assertEqual(parsed[2], "&&")
+        self.assertEqual(parsed[3], close_day.REMOTE_VENV_PYTHON)
+        self.assertEqual(parsed[4], "-c")
+        self.assertIn("/tmp/data dir/with'quote", parsed[5])
 
     def test_dry_run_does_not_call_ssh_or_rsync(self):
         """close_day.py --dry-run 不应调用 ssh/rsync 写入"""

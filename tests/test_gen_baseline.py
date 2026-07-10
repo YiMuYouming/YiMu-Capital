@@ -528,6 +528,32 @@ weekday: 周四
 
         self.assertEqual(Path(selected).name, "2026_5_29_Friday_ReviewNote.md")
 
+    def test_find_latest_review_orders_non_zero_padded_days_by_date(self):
+        note = """---
+date: {date}
+---
+# review
+
+## 数据附录（机器解析用）
+
+### 趋势自选池
+| 标的 | 代码 | 板块 | 今日定位 | 窗口 | 今日检查 | 触发/失效 |
+|------|------|------|----------|------|----------|-----------|
+| 测试股 | 000001 | 测试 | 观察标 | 观察 | 强弱 | 转弱即失效 |
+"""
+        with tempfile.TemporaryDirectory() as td:
+            review_root = Path(td) / "复盘笔记" / "W28_第28周"
+            review_root.mkdir(parents=True)
+            day_9 = review_root / "2026_7_9_Thursday_ReviewNote.md"
+            day_10 = review_root / "2026_7_10_Friday_ReviewNote.md"
+            day_9.write_text(note.format(date="2026-07-09"))
+            day_10.write_text(note.format(date="2026-07-10"))
+
+            with mock.patch.object(_gen, "REVIEW_DIR", Path(td) / "复盘笔记"):
+                selected = find_latest_review()
+
+        self.assertEqual(Path(selected).name, "2026_7_10_Friday_ReviewNote.md")
+
     def test_dashboard_does_not_backfill_close_emotion_from_previous_or_auction(self):
         self.assertIsNotNone(build_dashboard_data)
         current_note = """---

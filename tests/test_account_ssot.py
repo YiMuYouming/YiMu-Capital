@@ -21,6 +21,69 @@ except ImportError:
     backfill_day_start_price = None
 
 
+class AccountBaselinePositionCorrectionTests(unittest.TestCase):
+    def test_late_buy_rebuilds_position_cash_and_day_start_asset(self):
+        import scripts.account_ssot as account_ssot_module
+
+        build_correction = getattr(
+            account_ssot_module,
+            "build_account_baseline_position_correction",
+            None,
+        )
+        self.assertIsNotNone(build_correction)
+
+        anchor = {
+            "date": "2026-07-10",
+            "effective_at": "2026-07-10T09:25:00",
+            "cash": 430179.47,
+            "day_start_asset": 716389.47,
+            "total_deposit": 711059.23,
+            "source": "previous_close",
+            "positions": [
+                {"标的": "徐工机械", "代码": "000425", "数量": 5000,
+                 "成本": 9.07, "现价": 8.35, "状态": "持有"},
+            ],
+            "_meta": {"day_start_prices": {"000425": 8.35}},
+        }
+        late_trade = {
+            "id": 127,
+            "trade_date": "2026-07-08",
+            "action": "买入",
+            "code": "000425",
+            "name": "徐工机械",
+            "price": 8.51,
+            "qty": 5000,
+            "fee": 0,
+        }
+        open_lots = [
+            {"open_qty": 5000, "cost_price": 9.07},
+            {"open_qty": 5000, "cost_price": 8.51},
+        ]
+
+        result = build_correction(
+            anchor=anchor,
+            late_trade=late_trade,
+            open_lots=open_lots,
+            expected_actual_qty=10000,
+            source="yimu_broker_confirmation",
+            reason="15:06 late backfill missed 15:05 closing anchor",
+            now="2026-07-10T10:45:00",
+        )
+
+        self.assertEqual(result["action"], "would_write")
+        corrected = result["corrected_anchor"]
+        self.assertEqual(corrected["source"], "manual_correction")
+        self.assertEqual(corrected["cash"], 387629.47)
+        self.assertEqual(corrected["day_start_asset"], 715589.47)
+        position = corrected["positions"][0]
+        self.assertEqual(position["数量"], 10000)
+        self.assertEqual(position["成本"], 8.79)
+        repair = corrected["_meta"]["account_position_repairs"][-1]
+        self.assertEqual(repair["late_trade_id"], 127)
+        self.assertEqual(repair["before_qty"], 5000)
+        self.assertEqual(repair["after_qty"], 10000)
+
+
 class AccountReducerTests(unittest.TestCase):
     def setUp(self):
         self.anchor = {

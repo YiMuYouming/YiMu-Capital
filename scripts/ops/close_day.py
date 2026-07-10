@@ -77,6 +77,15 @@ def build_remote_backup_script(remote_data_dir):
     )
 
 
+def build_remote_backup_command(remote_data_dir):
+    backup_script = build_remote_backup_script(remote_data_dir)
+    remote_cmd = (
+        f"cd {shlex.quote(REMOTE_PROJECT)} && "
+        f"{shlex.quote(REMOTE_VENV_PYTHON)} -c {shlex.quote(backup_script)}"
+    )
+    return ["ssh", REMOTE, remote_cmd]
+
+
 def run_project_data_backup(local_data, date_str):
     stamp = f"close-{date_str.replace('-', '')}-{datetime.now().strftime('%H%M%S')}"
     output_dir = Path(local_data) / "backups" / "live-dashboard-data"
@@ -155,13 +164,11 @@ def main():
 
     # 1. 云端 SQLite backup
     print("[STEP 1] 云端 SQLite 一致性备份")
-    backup_script = build_remote_backup_script(remote_data)
     if dry_run:
         print("  [DRY-RUN] 跳过云端备份")
         print(f"  ssh {REMOTE} '{REMOTE_VENV_PYTHON}' -c '... backup ...'")
     else:
-        ssh_cmd = ["ssh", REMOTE,
-                    f"cd {REMOTE_PROJECT} && {REMOTE_VENV_PYTHON} -c \"{backup_script}\""]
+        ssh_cmd = build_remote_backup_command(remote_data)
         r = run(ssh_cmd, dry_run=False, check=False, capture_output=True)
         _out = r.stdout.strip() if r and r.stdout else ""
         if r and "integrity_check: ok" in _out:

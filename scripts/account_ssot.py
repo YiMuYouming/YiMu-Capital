@@ -203,6 +203,149 @@ def _json_dict(value):
     return {}
 
 
+def build_account_baseline_position_correction(
+    anchor,
+    late_trade,
+    open_lots,
+    expected_actual_qty,
+    source,
+    reason,
+    now=None,
+):
+    """Build one narrow, auditable baseline repair for a missed late buy.
+
+    This does not write SQLite.  It only accepts the specific reconciliation
+    shape where the anchor quantity plus one persisted buy equals both the open
+    lots and the human-confirmed actual quantity.
+    """
+    anchor = deepcopy(anchor or {})
+    late_trade = deepcopy(late_trade or {})
+    source = str(source or "").strip()
+    reason = str(reason or "").strip()
+
+    def rejected(error):
+        return {
+            "action": "rejected",
+            "error": error,
+            "corrected_anchor": None,
+        }
+
+    if not anchor:
+        return rejected("account baseline is missing")
+    if not source or not reason:
+        return rejected("source and reason are required")
+    if str(anchor.get("source") or "") not in {"previous_close", "manual_correction"}:
+        return rejected("account baseline source is not trusted")
+
+    code = str(late_trade.get("code") or "").strip()
+    action = str(late_trade.get("action") or "")
+    late_qty = int(_number(late_trade.get("qty")))
+    late_price = _number(late_trade.get("price"))
+    fee = _number(late_trade.get("fee"))
+    expected_qty = int(_number(expected_actual_qty))
+    if not code or ("买入" not in action and "追涨" not in action):
+        return rejected("late trade must be a persisted buy")
+    if late_qty <= 0 or late_price <= 0 or expected_qty <= 0:
+        return rejected("late trade quantity, price and expected quantity must be positive")
+
+    positions = _open_positions(anchor.get("positions"))
+    matching = [p for p in positions if str(p.get("代码") or "") == code]
+    if len(matching) != 1:
+        return rejected("target position is missing or duplicated in account baseline")
+    target = matching[0]
+    before_qty = int(_number(target.get("数量")))
+    before_cost = _number(target.get("成本") or target.get("成本价"))
+    if before_qty <= 0 or before_cost <= 0:
+        return rejected("target position quantity and cost must be positive")
+
+    meta = _json_dict(anchor.get("_meta"))
+    repairs = _json_list(meta.get("account_position_repairs"))
+    trade_id = late_trade.get("id")
+    if any(
+        str(item.get("code") or "") == code
+        and str(item.get("late_trade_id")) == str(trade_id)
+        and int(_number(item.get("after_qty"))) == expected_qty
+        for item in repairs
+    ):
+        return {
+            "action": "already_correct",
+            "error": None,
+            "corrected_anchor": anchor,
+        }
+
+    lot_qty = sum(int(_number(lot.get("open_qty"))) for lot in (open_lots or []))
+    if lot_qty != expected_qty:
+        return rejected("open lots do not match expected actual quantity")
+    if before_qty + late_qty != expected_qty:
+        return rejected("baseline plus late trade does not match expected actual quantity")
+
+    day_start_prices = _json_dict(meta.get("day_start_prices"))
+    day_start_price = _number(day_start_prices.get(code))
+    if day_start_price <= 0:
+        return rejected("day-start price is missing for target position")
+
+    after_cost = round(
+        (before_qty * before_cost + late_qty * late_price) / expected_qty,
+        2,
+    )
+    cash_delta = trade_cash_effect(late_trade)
+    asset_delta = round((day_start_price - late_price) * late_qty - fee, 2)
+    before_cash = _number(anchor.get("cash"))
+    before_asset = _number(anchor.get("day_start_asset"))
+
+    corrected_positions = deepcopy(anchor.get("positions") or [])
+    corrected_target = next(
+        p for p in corrected_positions if str(p.get("代码") or "") == code
+    )
+    corrected_target["数量"] = expected_qty
+    corrected_target["成本"] = after_cost
+    if "成本价" in corrected_target:
+        corrected_target["成本价"] = after_cost
+    corrected_target["现价"] = round(day_start_price, 3)
+    corrected_target["市值"] = round(day_start_price * expected_qty, 2)
+    corrected_target["total_pnl"] = round(
+        (day_start_price - after_cost) * expected_qty,
+        2,
+    )
+    corrected_target["total_pnl_pct"] = round(
+        (day_start_price / after_cost - 1) * 100,
+        2,
+    )
+    corrected_target["today_pnl"] = 0.0
+    corrected_target["today_pnl_pct"] = 0.0
+    corrected_target["_day_start_price"] = round(day_start_price, 3)
+
+    repair = {
+        "code": code,
+        "name": str(late_trade.get("name") or corrected_target.get("标的") or ""),
+        "late_trade_id": trade_id,
+        "before_qty": before_qty,
+        "after_qty": expected_qty,
+        "before_cost": round(before_cost, 4),
+        "after_cost": after_cost,
+        "cash_delta": cash_delta,
+        "day_start_asset_delta": asset_delta,
+        "confirmation_source": source,
+        "reason": reason,
+        "corrected_at": str(now or datetime.now().isoformat(timespec="seconds")),
+    }
+    repairs.append(repair)
+    meta["account_position_repairs"] = repairs
+
+    corrected = deepcopy(anchor)
+    corrected["cash"] = round(before_cash + cash_delta, 2)
+    corrected["day_start_asset"] = round(before_asset + asset_delta, 2)
+    corrected["positions"] = corrected_positions
+    corrected["source"] = "manual_correction"
+    corrected["_meta"] = meta
+    return {
+        "action": "would_write",
+        "error": None,
+        "corrected_anchor": corrected,
+        "repair_entry": repair,
+    }
+
+
 def build_daily_ticket_review(date_str, eod_quotes=None):
     """Build a close-day ticket review from SQLite facts.
 
