@@ -1443,6 +1443,41 @@ console.log(JSON.stringify({html:body.innerHTML.replace(/\s+/g, ' ')}));
         self.assertIn('value="光迅科技"', html)
         self.assertIn('value="200"', html)
 
+    def test_w24_polling_render_does_not_replace_focused_manual_input(self):
+        widget_src = (ROOT / "widgets" / "trade-tickets.js").read_text(encoding="utf-8")
+        script = PREAMBLE + "\n" + widget_src + r"""
+var activeInput = {
+  value: '测试',
+  getAttribute: function(name) { return name === 'data-tt-draft-key' ? 'intent' : null; },
+  addEventListener: function() {}
+};
+global.document.activeElement = activeInput;
+var body = {
+  innerHTML: 'KEEP-ME',
+  contains: function(el) { return el === activeInput; },
+  querySelector: function(sel) {
+    if (sel === '[data-tt-intent]') return activeInput;
+    return null;
+  },
+  querySelectorAll: function(){ return []; }
+};
+var cls = WidgetRegistry._map["W24"];
+var inst = new cls({id:"W24"});
+inst.getBody = function() { this._body = body; return body; };
+inst._emergencyDetailsOpen = true;
+inst.render({trade_tickets: [{ticket_id:'TICKET-OLD', status:'filled', code:'002281', name:'光迅科技', action_type:'buy', max_qty:200}]});
+console.log(JSON.stringify({html:body.innerHTML, draft:inst._manualDraft.intent}));
+"""
+        result = subprocess.run(
+            ["node", "--no-warnings", "-e", script],
+            capture_output=True, text=True, timeout=10,
+            cwd=str(ROOT),
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        resp = json.loads(result.stdout.strip().split("\n")[-1])
+        self.assertEqual(resp["html"], "KEEP-ME")
+        self.assertEqual(resp["draft"], "测试")
+
     def test_w15_manual_backfill_copy_and_payload_metadata(self):
         src = (ROOT / "widgets" / "positions.js").read_text(encoding="utf-8")
         self.assertIn("手工补录成交", src)

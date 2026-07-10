@@ -296,6 +296,17 @@ class TradeTicketsWidget extends YiMuWidget {
     this._manualDraft[key] = value == null ? '' : String(value);
   }
 
+  _manualInputIsFocused(body) {
+    var doc = (typeof document !== 'undefined') ? document : null;
+    var active = doc && doc.activeElement;
+    if (!active || !active.getAttribute) return false;
+    var key = active.getAttribute('data-tt-draft-key');
+    if (!key) return false;
+    if (body && typeof body.contains === 'function' && !body.contains(active)) return false;
+    this._setManualDraftValue(key, active.value);
+    return true;
+  }
+
   _refreshTickets() {
     if (this._lastBody) this._fetch(this._lastBody);
   }
@@ -750,6 +761,10 @@ class TradeTicketsWidget extends YiMuWidget {
 
   _renderTicketBody(body) {
     this._captureManualDraft(body);
+    if (this._manualInputIsFocused(body)) {
+      this.updateTimestamp();
+      return;
+    }
     if (this._error) {
       body.innerHTML = '<div class="ticket-brief-head"><span><span class="evidence-inline-ref">E2</span>票据闭环</span><span>降级</span></div>' +
         '<div class="ticket-degraded ui-degraded"><strong>票据接口不可达</strong><span>' + _ttEsc(this._error) + '，当前只读态势保留，真实操作请先复核 8088 服务。</span></div>';
