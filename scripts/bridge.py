@@ -1315,14 +1315,16 @@ def _build_rule_inputs(now=None, account_state=None):
     _broken_raw = iwencai.get("炸板率") if sentiment_usable else None
     if _broken_raw is None:
         _broken_raw = base_market.get("炸板率") if sentiment_usable else None
-    if _promotion_raw is not None and _promotion_raw <= 1:
-        promotion_pct = float(_promotion_raw) * 100
+    _promotion_num = _rule_num(_promotion_raw)
+    _broken_num = _rule_num(_broken_raw)
+    if _promotion_num is not None and _promotion_num <= 1:
+        promotion_pct = _promotion_num * 100
     else:
-        promotion_pct = float(_promotion_raw) if _promotion_raw is not None else None
-    if _broken_raw is not None and _broken_raw <= 1:
-        broken_board_pct = float(_broken_raw) * 100
+        promotion_pct = _promotion_num
+    if _broken_num is not None and _broken_num <= 1:
+        broken_board_pct = _broken_num * 100
     else:
-        broken_board_pct = float(_broken_raw) if _broken_raw is not None else None
+        broken_board_pct = _broken_num
 
     limit_up_profit_raw = iwencai.get("昨日涨停收益") if sentiment_usable else None
     if limit_up_profit_raw is None:
@@ -1881,6 +1883,36 @@ def _canonical_json(data):
     return json.dumps(data, ensure_ascii=False, sort_keys=True, separators=(',', ':'))
 
 
+def _ticket_live_price(ticket):
+    code = str((ticket or {}).get("code") or "")
+    quote = (CACHE.get("live_quotes") or {}).get(code) or {}
+    for key in ("最新价", "现价", "price"):
+        try:
+            price = float(quote.get(key) or 0)
+        except (TypeError, ValueError):
+            price = 0
+        if price > 0:
+            return price
+    return None
+
+
+def _auto_fill_input_from_ticket(ticket):
+    action_type = str((ticket or {}).get("action_type") or "")
+    qty = (ticket or {}).get("max_qty") or (ticket or {}).get("qty")
+    try:
+        qty = int(qty)
+    except (TypeError, ValueError):
+        qty = 0
+    if qty <= 0:
+        raise ValueError("ticket qty required for automatic fill preview")
+    price = _ticket_live_price(ticket)
+    if not price:
+        raise ValueError("live quote price required for automatic fill preview")
+    verb = "已卖" if action_type in {"sell", "reduce", "clear"} else "已买"
+    name = (ticket or {}).get("name") or (ticket or {}).get("code") or ""
+    return f"{verb} {name} {qty}股 {price:.2f}", "auto_from_ticket_live_quote"
+
+
 def _parse_fill_input(input_text, ticket):
     import re
     text = str(input_text or "")
@@ -1942,12 +1974,17 @@ def _create_fill_preview(payload):
 
     ticket_id = str((payload or {}).get("ticket_id") or "")
     input_text = str((payload or {}).get("input_text") or "")
+    input_source = "spoken_confirmed"
     ticket = query_trade_ticket(ticket_id)
     if not ticket:
         raise ValueError(f"ticket not found: {ticket_id}")
     if not _ticket_can_accept_fills(ticket):
         raise ValueError(f"ticket {ticket_id} cannot accept fills in status {ticket.get('status')}")
+    if not input_text.strip():
+        input_text, input_source = _auto_fill_input_from_ticket(ticket)
     parsed = _parse_fill_input(input_text, ticket)
+    parsed["input_source"] = input_source
+    parsed["input_text"] = input_text
     confirmation_id = f"CONFIRM-{datetime.now().strftime('%Y%m%d')}-{uuid.uuid4().hex[:10]}"
     preview_token = secrets.token_urlsafe(24)
     preview_hash = "sha256:" + hashlib.sha256(
@@ -1973,6 +2010,7 @@ def _create_fill_preview(payload):
             "price": parsed["价格"],
             "qty": parsed["数量"],
             "leg_type": parsed["leg_type"],
+            "input_source": parsed.get("input_source"),
             **({"target_lot_id": parsed["target_lot_id"]} if parsed.get("target_lot_id") else {}),
             **({"account_effect": parsed["account_effect"]} if parsed.get("account_effect") else {}),
         },

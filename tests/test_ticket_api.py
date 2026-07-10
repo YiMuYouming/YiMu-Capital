@@ -825,6 +825,32 @@ class TicketApiTest(unittest.TestCase):
         self.assertEqual(len(db._exec("SELECT * FROM pending_fill_confirmations")), 1)
         self.assertEqual(len(db._exec("SELECT * FROM trade_records")), 0)
 
+    def test_fill_preview_can_use_ticket_qty_and_live_quote_without_spoken_input(self):
+        bridge.CACHE["live_quotes"] = {
+            "002281": {"最新价": 232.30},
+            "_updated": datetime.now().astimezone().isoformat(),
+        }
+        ticket_id = db.create_trade_ticket({
+            "trade_date": "2026-06-04",
+            "code": "002281",
+            "name": "光迅科技",
+            "action_type": "buy",
+            "status": "executable",
+            "max_qty": 200,
+        })
+
+        status, body = _call("POST", "/api/trade/fills/preview", {
+            "ticket_id": ticket_id,
+        })
+
+        self.assertEqual(status, 200, body)
+        self.assertTrue(body["requires_confirmation"])
+        self.assertEqual(body["parsed"]["qty"], 200)
+        self.assertEqual(body["parsed"]["price"], 232.30)
+        self.assertIn("auto_from_ticket", body["parsed"]["input_source"])
+        self.assertEqual(len(db._exec("SELECT * FROM pending_fill_confirmations")), 1)
+        self.assertEqual(len(db._exec("SELECT * FROM trade_records")), 0)
+
     def test_blocked_ticket_cannot_create_fill_preview(self):
         ticket_id = db.create_trade_ticket({
             "trade_date": "2026-06-04", "code": "002281", "name": "光迅科技",

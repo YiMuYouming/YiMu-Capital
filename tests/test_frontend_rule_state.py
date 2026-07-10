@@ -1209,6 +1209,64 @@ console.log(JSON.stringify({calls:calls, html:body.innerHTML.replace(/\s+/g, ' '
         self.assertEqual(resp["meta"]["date_source"], "query_param")
         self.assertIn("trade 49", resp["html"])
 
+    def test_w24_auto_execute_selected_ticket_without_manual_fill_text(self):
+        widget_src = (ROOT / "widgets" / "trade-tickets.js").read_text(encoding="utf-8")
+        script = PREAMBLE + "\n" + widget_src + r"""
+(async function() {
+var calls = [];
+global.fetch = function(url, opts) {
+  calls.push({url: String(url), method: (opts && opts.method) || 'GET', body: opts && opts.body ? JSON.parse(opts.body) : null});
+  if (String(url) === '/api/trade/fills/preview') {
+    return Promise.resolve({ok:true, json:function(){ return Promise.resolve({
+      ok:true,
+      requires_confirmation:true,
+      confirmation_id:'CONFIRM-AUTO-1',
+      preview_token:'tok-auto',
+      preview_hash:'sha256:auto',
+      parsed:{action:'买入', code:'002281', name:'光迅科技', price:232.3, qty:200, leg_type:'buy_add', input_source:'auto_from_ticket'}
+    }); }});
+  }
+  if (String(url) === '/api/trade/fills/confirm') {
+    return Promise.resolve({ok:true, json:function(){ return Promise.resolve({ok:true, trade_id:51, ticket_id:'TICKET-AUTO-1'}); }});
+  }
+  if (String(url).indexOf('/api/trade/tickets?date=') === 0) {
+    return Promise.resolve({ok:true, json:function(){ return Promise.resolve({
+      tickets:[{ticket_id:'TICKET-AUTO-1', status:'filled', code:'002281', name:'光迅科技', action_type:'buy', max_qty:200, linked_trade_ids:[51]}]
+    }); }});
+  }
+  return Promise.resolve({ok:false, json:function(){ return Promise.resolve({error:'unexpected'}); }});
+};
+var body = {
+  innerHTML: '',
+  querySelector: function(){ return null; },
+  querySelectorAll: function(){ return []; }
+};
+var cls = WidgetRegistry._map["W24"];
+var inst = new cls({id:"W24"});
+inst.getBody = function() { this._body = body; return body; };
+inst.render({trade_tickets: [{ticket_id:'TICKET-AUTO-1', status:'executable', code:'002281', name:'光迅科技', action_type:'buy', max_qty:200}]});
+var initialHtml = body.innerHTML.replace(/\s+/g, ' ');
+await inst._previewSelectedTicket();
+var previewHtml = body.innerHTML.replace(/\s+/g, ' ');
+await inst._confirmFill({confirmed_by:'yimu'});
+await new Promise(function(r){ setTimeout(r, 20); });
+console.log(JSON.stringify({calls:calls, initialHtml:initialHtml, previewHtml:previewHtml, finalHtml:body.innerHTML.replace(/\s+/g, ' ')}));
+})();
+"""
+        result = subprocess.run(
+            ["node", "--no-warnings", "-e", script],
+            capture_output=True, text=True, timeout=10,
+            cwd=str(ROOT),
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        resp = json.loads(result.stdout.strip().split("\n")[-1])
+        self.assertIn("data-tt-auto-preview", resp["initialHtml"])
+        self.assertIn("成交预览", resp["previewHtml"])
+        by_url = {c["url"]: c for c in resp["calls"] if c["body"]}
+        self.assertEqual({"ticket_id": "TICKET-AUTO-1"}, by_url["/api/trade/fills/preview"]["body"])
+        self.assertEqual("sha256:auto", by_url["/api/trade/fills/confirm"]["body"]["preview_hash"])
+        self.assertIn("trade 51", resp["finalHtml"])
+
     def test_w24_fetches_api_when_datastore_ticket_list_is_empty(self):
         widget_src = (ROOT / "widgets" / "trade-tickets.js").read_text(encoding="utf-8")
         script = PREAMBLE + "\n" + widget_src + r"""
@@ -1314,6 +1372,76 @@ console.log(JSON.stringify({html:body.innerHTML.replace(/\s+/g, ' '), action:for
         resp = json.loads(result.stdout.strip().split("\n")[-1])
         self.assertEqual(resp["action"], "reduce")
         self.assertIn('value="reduce"', resp["html"])
+
+    def test_w24_manual_inputs_survive_refresh_rerender(self):
+        widget_src = (ROOT / "widgets" / "trade-tickets.js").read_text(encoding="utf-8")
+        script = PREAMBLE + "\n" + widget_src + r"""
+var values = {
+  '[data-tt-intent]': '准备 W2 买 光迅科技 200股',
+  '[data-tt-code]': '002281',
+  '[data-tt-name]': '光迅科技',
+  '[data-tt-window]': 'W2',
+  '[data-tt-qty]': '200',
+  '[data-tt-fill]': '已买 光迅科技 200股 232.30',
+  '[data-tt-action]': 'buy'
+};
+var body = {
+  innerHTML: '',
+  querySelector: function(sel){
+    if (Object.prototype.hasOwnProperty.call(values, sel)) return {value: values[sel], addEventListener:function(){}};
+    return null;
+  },
+  querySelectorAll: function(){ return []; }
+};
+var cls = WidgetRegistry._map["W24"];
+var inst = new cls({id:"W24"});
+inst.getBody = function() { this._body = body; return body; };
+inst._emergencyDetailsOpen = true;
+inst.render({trade_tickets: [{ticket_id:'TICKET-OLD', status:'filled', code:'002281', name:'光迅科技', action_type:'buy', max_qty:200}]});
+console.log(JSON.stringify({html:body.innerHTML.replace(/\s+/g, ' ')}));
+"""
+        result = subprocess.run(
+            ["node", "--no-warnings", "-e", script],
+            capture_output=True, text=True, timeout=10,
+            cwd=str(ROOT),
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        html = json.loads(result.stdout.strip().split("\n")[-1])["html"]
+        self.assertIn('value="准备 W2 买 光迅科技 200股"', html)
+        self.assertIn('value="002281"', html)
+        self.assertIn('value="光迅科技"', html)
+        self.assertIn('value="已买 光迅科技 200股 232.30"', html)
+
+    def test_w24_manual_input_event_is_saved_before_polling_rerender(self):
+        widget_src = (ROOT / "widgets" / "trade-tickets.js").read_text(encoding="utf-8")
+        script = PREAMBLE + "\n" + widget_src + r"""
+var body = {
+  innerHTML: '',
+  querySelector: function(){ return null; },
+  querySelectorAll: function(){ return []; }
+};
+var cls = WidgetRegistry._map["W24"];
+var inst = new cls({id:"W24"});
+inst.getBody = function() { this._body = body; return body; };
+inst._emergencyDetailsOpen = true;
+inst._setManualDraftValue('intent', '出票据 光迅科技');
+inst._setManualDraftValue('code', '002281');
+inst._setManualDraftValue('name', '光迅科技');
+inst._setManualDraftValue('qty', '200');
+inst.render({trade_tickets: [{ticket_id:'TICKET-OLD', status:'filled', code:'002281', name:'光迅科技', action_type:'buy', max_qty:200}]});
+console.log(JSON.stringify({html:body.innerHTML.replace(/\s+/g, ' ')}));
+"""
+        result = subprocess.run(
+            ["node", "--no-warnings", "-e", script],
+            capture_output=True, text=True, timeout=10,
+            cwd=str(ROOT),
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        html = json.loads(result.stdout.strip().split("\n")[-1])["html"]
+        self.assertIn('value="出票据 光迅科技"', html)
+        self.assertIn('value="002281"', html)
+        self.assertIn('value="光迅科技"', html)
+        self.assertIn('value="200"', html)
 
     def test_w15_manual_backfill_copy_and_payload_metadata(self):
         src = (ROOT / "widgets" / "positions.js").read_text(encoding="utf-8")

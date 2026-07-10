@@ -120,6 +120,8 @@ function _ttFriendlyError(message) {
   var text = String(message || '');
   if (/ticket not found/i.test(text)) return '请先选择一张票据，或先出票据再预览成交。';
   if (/preview|confirmation/i.test(text)) return '还没有可确认的成交预览，请先点“预览成交”。';
+  if (/live quote price required/i.test(text)) return '当前票据缺少实时价，切到手工模式补价格后再预览。';
+  if (/ticket qty required/i.test(text)) return '当前票据缺少股数，切到手工模式补股数后再预览。';
   return text || '操作失败，请稍后重试。';
 }
 
@@ -142,6 +144,15 @@ function _ttWriteGate(action) {
   return { canWrite: true, reason: '' };
 }
 
+function _ttCanAutoPreview(t) {
+  var status = _ttEffectiveStatus(t || {});
+  return status === 'executable' || status === 'audit_degraded';
+}
+
+function _ttValueAttr(value) {
+  return value == null || value === '' ? '' : ' value="' + _ttEsc(value) + '"';
+}
+
 class TradeTicketsWidget extends YiMuWidget {
   constructor(config) {
     super(config);
@@ -159,6 +170,7 @@ class TradeTicketsWidget extends YiMuWidget {
     this._cancelledDetailsOpen = false;
     this._emergencyDetailsOpen = false;
     this._boardCollapsed = { pending: false, executable: false, completed: false };
+    this._manualDraft = {};
   }
 
   render(data) {
@@ -254,6 +266,36 @@ class TradeTicketsWidget extends YiMuWidget {
     };
   }
 
+  _captureManualDraft(body) {
+    if (!body || !body.querySelector) return;
+    var map = {
+      intent: '[data-tt-intent]',
+      code: '[data-tt-code]',
+      name: '[data-tt-name]',
+      window: '[data-tt-window]',
+      qty: '[data-tt-qty]',
+      fill: '[data-tt-fill]',
+      action: '[data-tt-action]'
+    };
+    var draft = Object.assign({}, this._manualDraft || {});
+    Object.keys(map).forEach(function(key) {
+      var el = body.querySelector(map[key]);
+      if (el && el.value != null) draft[key] = String(el.value);
+    });
+    this._manualDraft = draft;
+  }
+
+  _manualDraftValue(key, fallback) {
+    var draft = this._manualDraft || {};
+    if (draft[key] !== undefined && draft[key] !== null) return draft[key];
+    return fallback == null ? '' : fallback;
+  }
+
+  _setManualDraftValue(key, value) {
+    this._manualDraft = Object.assign({}, this._manualDraft || {});
+    this._manualDraft[key] = value == null ? '' : String(value);
+  }
+
   _refreshTickets() {
     if (this._lastBody) this._fetch(this._lastBody);
   }
@@ -265,6 +307,9 @@ class TradeTicketsWidget extends YiMuWidget {
       self._selectedTicketId = ticket.ticket_id || '';
       self._statusMessage = self._selectedTicketId ? '票据已生成 ' + self._selectedTicketId : '票据已生成';
       self._refreshTickets();
+      if (ticket.ticket_id && _ttCanAutoPreview(ticket)) {
+        self._previewFill({ ticket_id: ticket.ticket_id }).catch(function(){});
+      }
       return d;
     }).catch(function(e) {
       self._statusMessage = _ttFriendlyError(e.message || String(e));
@@ -298,6 +343,30 @@ class TradeTicketsWidget extends YiMuWidget {
       if (self._lastBody) self._renderTicketBody(self._lastBody);
       throw e;
     });
+  }
+
+  _selectedTicket() {
+    var selectedId = this._selectedTicketId;
+    var tickets = this._tickets || [];
+    for (var i = 0; i < tickets.length; i++) {
+      if (selectedId && String(tickets[i].ticket_id || '') === String(selectedId)) return tickets[i];
+    }
+    for (var j = 0; j < tickets.length; j++) {
+      if (_ttCanAutoPreview(tickets[j])) return tickets[j];
+    }
+    return tickets[0] || null;
+  }
+
+  _previewSelectedTicket() {
+    var ticket = this._selectedTicket();
+    if (!ticket || !ticket.ticket_id) {
+      var msg = '请先选择一张可执行票据。';
+      this._statusMessage = msg;
+      if (this._lastBody) this._renderTicketBody(this._lastBody);
+      return Promise.reject(new Error(msg));
+    }
+    this._selectedTicketId = ticket.ticket_id;
+    return this._previewFill({ ticket_id: ticket.ticket_id });
   }
 
   _confirmFill(payload) {
@@ -346,13 +415,43 @@ class TradeTicketsWidget extends YiMuWidget {
       }).catch(function(){});
     });
     if (confirm) confirm.addEventListener('click', function() {
+      self._captureManualDraft(body);
       self._confirmFill({confirmed_by: 'yimu'}).catch(function(){});
+    });
+    var draftInputs = body.querySelectorAll ? body.querySelectorAll('[data-tt-draft-key]') : [];
+    Array.prototype.forEach.call(draftInputs, function(input) {
+      var key = input.getAttribute('data-tt-draft-key') || '';
+      if (!key) return;
+      input.addEventListener('input', function() {
+        self._setManualDraftValue(key, input.value);
+      });
+      input.addEventListener('change', function() {
+        self._setManualDraftValue(key, input.value);
+      });
+      input.addEventListener('compositionend', function() {
+        self._setManualDraftValue(key, input.value);
+      });
+    });
+    var autoPreviewBtns = body.querySelectorAll ? body.querySelectorAll('[data-tt-auto-preview]') : [];
+    Array.prototype.forEach.call(autoPreviewBtns, function(btn) {
+      btn.addEventListener('click', function() {
+        var ticketId = btn.getAttribute('data-tt-auto-preview') || self._selectedTicketId || '';
+        if (ticketId) self._selectedTicketId = ticketId;
+        self._previewSelectedTicket().catch(function(){});
+      });
+    });
+    var autoConfirmBtns = body.querySelectorAll ? body.querySelectorAll('[data-tt-auto-confirm]') : [];
+    Array.prototype.forEach.call(autoConfirmBtns, function(btn) {
+      btn.addEventListener('click', function() {
+        self._confirmFill({confirmed_by: 'yimu'}).catch(function(){});
+      });
     });
     var actionBtns = body.querySelectorAll ? body.querySelectorAll('[data-tt-action-set]') : [];
     Array.prototype.forEach.call(actionBtns, function(btn) {
       btn.addEventListener('click', function() {
         var action = btn.getAttribute('data-tt-action-set') || 'buy';
         self._selectedAction = action;
+        self._setManualDraftValue('action', action);
         var input = body.querySelector('[data-tt-action]');
         if (input) input.value = action;
         self._statusMessage = '已选择动作：' + _ttActionLabel(action);
@@ -600,6 +699,40 @@ class TradeTicketsWidget extends YiMuWidget {
     '</aside>';
   }
 
+  _autoActionPanel(selected, writeGate) {
+    var pending = this._pendingPreview || null;
+    var parsed = pending && pending.parsed ? pending.parsed : null;
+    var canPreview = selected && _ttCanAutoPreview(selected) && writeGate.canWrite;
+    var title = selected ? this._ticketTitle(selected) : '暂无可执行票据';
+    var status = selected ? _ttStatusLabel(_ttEffectiveStatus(selected)) : '等待票据';
+    var previewHtml = parsed ? (
+      '<div class="ticket-preview-modal">' +
+        '<div class="ticket-preview-head"><span>成交预览</span><b>' + _ttEsc(pending.confirmation_id || '') + '</b></div>' +
+        '<div class="ticket-preview-grid">' +
+          this._detailLine('动作', parsed.action || '-') +
+          this._detailLine('标的', (parsed.name || '-') + (parsed.code ? ' ' + parsed.code : '')) +
+          this._detailLine('数量', parsed.qty != null ? parsed.qty + '股' : '-') +
+          this._detailLine('价格', parsed.price != null ? parsed.price : '-') +
+          this._detailLine('类型', parsed.leg_type || '-') +
+        '</div>' +
+        '<div class="ticket-preview-actions">' +
+          '<button class="ticket-command-btn primary" type="button" data-tt-auto-confirm>确认成交</button>' +
+        '</div>' +
+      '</div>'
+    ) : '';
+    return '<div class="ticket-auto-panel">' +
+      '<div class="ticket-auto-copy">' +
+        '<span>自动执行</span>' +
+        '<b>' + _ttEsc(title) + '</b>' +
+        '<em>' + _ttEsc(canPreview ? '点预览，确认后自动写入成交并闭环票据' : (writeGate.canWrite ? status : writeGate.reason)) + '</em>' +
+      '</div>' +
+      '<div class="ticket-auto-actions">' +
+        '<button class="ticket-command-btn primary" type="button" data-tt-auto-preview="' + _ttEsc(selected && selected.ticket_id || '') + '"' + (canPreview ? '' : ' disabled') + '>预览成交</button>' +
+      '</div>' +
+      previewHtml +
+    '</div>';
+  }
+
   _inboxTab(label, count, active) {
     return '<button class="ticket-inbox-tab' + (active ? ' is-active' : '') + '" type="button"><span>' + _ttEsc(label) + '</span><b>' + _ttEsc(count) + '</b></button>';
   }
@@ -616,6 +749,7 @@ class TradeTicketsWidget extends YiMuWidget {
   }
 
   _renderTicketBody(body) {
+    this._captureManualDraft(body);
     if (this._error) {
       body.innerHTML = '<div class="ticket-brief-head"><span><span class="evidence-inline-ref">E2</span>票据闭环</span><span>降级</span></div>' +
         '<div class="ticket-degraded ui-degraded"><strong>票据接口不可达</strong><span>' + _ttEsc(this._error) + '，当前只读态势保留，真实操作请先复核 8088 服务。</span></div>';
@@ -677,13 +811,13 @@ class TradeTicketsWidget extends YiMuWidget {
         '</div>' +
         '<input data-tt-action value="' + _ttEsc(activeAction) + '" type="hidden">' +
         '<div class="ticket-prepare-grid">' +
-          '<input class="ticket-input" data-tt-intent placeholder="准备 W2 买 光迅科技 200股">' +
-          '<input class="ticket-input" data-tt-code placeholder="代码">' +
-          '<input class="ticket-input" data-tt-name placeholder="名称">' +
-          '<input class="ticket-input" data-tt-window placeholder="W2" value="W2">' +
-          '<input class="ticket-input" data-tt-qty placeholder="股数">' +
+          '<input class="ticket-input" data-tt-intent data-tt-draft-key="intent" placeholder="准备 W2 买 光迅科技 200股"' + _ttValueAttr(this._manualDraftValue('intent', '')) + '>' +
+          '<input class="ticket-input" data-tt-code data-tt-draft-key="code" placeholder="代码"' + _ttValueAttr(this._manualDraftValue('code', '')) + '>' +
+          '<input class="ticket-input" data-tt-name data-tt-draft-key="name" placeholder="名称"' + _ttValueAttr(this._manualDraftValue('name', '')) + '>' +
+          '<input class="ticket-input" data-tt-window data-tt-draft-key="window" placeholder="W2"' + _ttValueAttr(this._manualDraftValue('window', 'W2')) + '>' +
+          '<input class="ticket-input" data-tt-qty data-tt-draft-key="qty" placeholder="股数"' + _ttValueAttr(this._manualDraftValue('qty', '')) + '>' +
         '</div>' +
-        '<input class="ticket-input ticket-fill-input" data-tt-fill placeholder="成交口令：已买/已卖 光迅科技 200股 232.30">' +
+        '<input class="ticket-input ticket-fill-input" data-tt-fill data-tt-draft-key="fill" placeholder="成交口令：已买/已卖 光迅科技 200股 232.30"' + _ttValueAttr(this._manualDraftValue('fill', '')) + '>' +
       '</div>' +
       '<div class="ticket-entry-actions">' +
         '<button class="ticket-command-btn" data-tt-prepare>出票据</button>' +
@@ -703,6 +837,7 @@ class TradeTicketsWidget extends YiMuWidget {
         '<div><span class="evidence-inline-ref">E2</span><b>票据 Inbox</b><em>下一步：' + _ttEsc(nextAction) + '</em></div>' +
         '<div class="ticket-inbox-counts">已成交 ' + filled.length + ' / 不执行 ' + cancelled.length + '</div>' +
       '</div>' +
+      this._autoActionPanel(selected, writeGate) +
       '<div class="ticket-board-columns">' +
         this._boardColumn('pending', '待处理', pending, 'info') +
         this._boardColumn('executable', '可执行', exec, 'up') +

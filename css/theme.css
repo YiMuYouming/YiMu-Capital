@@ -3463,6 +3463,23 @@ body.cockpit-mode .evidence-tone-danger{
 .ticket-inbox-head b{display:block;font-size:14px;line-height:1.2;color:var(--text-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .ticket-inbox-head em{display:block;margin-top:2px;font-style:normal;font-size:11px;color:var(--text-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .ticket-inbox-counts{flex:0 0 auto;font-family:var(--font-mono);font-size:11px;font-weight:800;color:var(--text-disabled);line-height:20px}
+.ticket-auto-panel{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:center;border:1px solid var(--border-light);border-radius:var(--radius-sm);background:var(--bg-base);padding:8px}
+.ticket-auto-copy{min-width:0}
+.ticket-auto-copy span{display:block;font-size:10px;font-weight:850;color:var(--text-disabled);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ticket-auto-copy b{display:block;margin-top:2px;font-size:13px;line-height:1.2;color:var(--text-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ticket-auto-copy em{display:block;margin-top:2px;font-style:normal;font-size:11px;color:var(--text-secondary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ticket-auto-actions{display:flex;gap:6px;align-items:center}
+.ticket-command-btn.primary{border-color:rgba(22,163,74,.32);background:rgba(22,163,74,.08);color:var(--up)}
+.ticket-command-btn:disabled{opacity:.45;cursor:not-allowed}
+.ticket-preview-modal{grid-column:1/-1;border-top:1px solid var(--border-light);padding-top:8px;margin-top:2px}
+.ticket-preview-head{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px}
+.ticket-preview-head span{font-size:12px;font-weight:850;color:var(--text-primary)}
+.ticket-preview-head b{font-family:var(--font-mono);font-size:10px;color:var(--text-disabled);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ticket-preview-grid{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:6px;margin-bottom:8px}
+.ticket-preview-grid div{min-width:0;border:1px solid var(--border-light);border-radius:var(--radius-sm);background:var(--bg-card);padding:6px 8px}
+.ticket-preview-grid span{display:block;font-size:10px;font-weight:850;color:var(--text-disabled);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ticket-preview-grid b{display:block;margin-top:2px;font-size:12px;line-height:1.2;color:var(--text-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.ticket-preview-actions{display:flex;justify-content:flex-end}
 .ticket-inbox-tabs{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:4px}
 .ticket-inbox-tab{min-width:0;border:1px solid var(--border-light);border-radius:var(--radius-sm);background:var(--bg-card);padding:5px 7px;text-align:left;color:var(--text-secondary)}
 .ticket-inbox-tab.is-active{border-color:var(--info);background:var(--bg-soft);color:var(--text-primary)}
@@ -3521,6 +3538,10 @@ body.cockpit-mode .evidence-tone-danger{
   .ticket-layout{grid-template-columns:1fr}
   .ticket-primary-sections{grid-template-columns:1fr}
   .ticket-board-columns{grid-template-columns:1fr}
+  .ticket-auto-panel{grid-template-columns:1fr}
+  .ticket-auto-actions,.ticket-preview-actions{justify-content:stretch}
+  .ticket-auto-actions .ticket-command-btn,.ticket-preview-actions .ticket-command-btn{width:100%}
+  .ticket-preview-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
   .ticket-inbox-main{grid-template-columns:1fr}
   .ticket-row{grid-template-columns:58px minmax(0,1fr) 48px}
   .ticket-row-reason{grid-column:2/-1}
