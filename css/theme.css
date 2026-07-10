@@ -3485,7 +3485,7 @@ body.cockpit-mode .evidence-tone-danger{
 .ticket-inbox-tab.is-active{border-color:var(--info);background:var(--bg-soft);color:var(--text-primary)}
 .ticket-inbox-tab span{display:block;font-size:10px;font-weight:800;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .ticket-inbox-tab b{display:block;margin-top:1px;font-family:var(--font-mono);font-size:14px;line-height:1.1}
-.ticket-board-columns{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;align-items:start}
+.ticket-board-columns{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;align-items:start}
 .ticket-board-column{min-width:0}
 .ticket-board-toggle{width:100%;display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px;padding:6px 8px;border:1px solid var(--border-light);border-radius:var(--radius-sm);background:var(--bg-card);color:var(--text-secondary);font-size:var(--fs-label);font-weight:850;text-align:left;cursor:pointer}
 .ticket-board-toggle::before{content:'▾';font-size:10px;color:var(--text-disabled);transition:transform .16s}
@@ -3507,6 +3507,7 @@ body.cockpit-mode .evidence-tone-danger{
 .ticket-row[data-ticket-status="draft"],.ticket-row[data-ticket-status="confirmed"],.ticket-row[data-ticket-status="conditional_pending"]{border-left-color:var(--info)}
 .ticket-row[data-ticket-status="executable"]{border-left-color:var(--up)}
 .ticket-row[data-ticket-status="audit_degraded"]{border-left-color:var(--warn)}
+.ticket-row[data-ticket-status="reconciliation_ready"]{border-left-color:var(--warn)}
 .ticket-row[data-ticket-status="blocked"]{border-left-color:var(--danger)}
 .ticket-row:hover,.ticket-row.is-selected{background:var(--bg-soft)}
 .ticket-row-status{grid-area:status;display:inline-flex;align-items:center;justify-content:center;min-width:0;border-radius:999px;padding:2px 7px;font-size:10px;font-weight:850;white-space:nowrap;background:var(--bg-soft);border:1px solid var(--border-light)}
@@ -3547,7 +3548,7 @@ body.cockpit-mode .evidence-tone-danger{
   .ticket-row-reason{grid-column:2/-1}
 }
 @container (min-width: 760px){
-  .ticket-board-columns{grid-template-columns:repeat(3,minmax(220px,1fr))}
+  .ticket-board-columns{grid-template-columns:repeat(4,minmax(180px,1fr))}
   .ticket-inbox-main{grid-template-columns:minmax(0,1.18fr) minmax(280px,.82fr)}
   .ticket-queue-list{grid-template-columns:repeat(2,minmax(220px,1fr))}
   .ticket-detail-panel{position:sticky;top:8px}

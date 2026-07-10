@@ -29,11 +29,14 @@ def read_baseline_summary(path):
     with open(path, encoding="utf-8") as f:
         data = json.load(f)
     meta = data.get("meta", {})
+    field_sources = meta.get("field_sources") or {}
+    today_operations_source = field_sources.get("今日操作") or {}
     return {
         "generated_at": meta.get("updated") or meta.get("generated_at", "?"),
         "note": meta.get("note", "?"),
         "pools_note": meta.get("pools_note", "?"),
         "pools_note_date": meta.get("pools_note_date", "?"),
+        "today_operations_source_date": today_operations_source.get("source_date", "?"),
         "lianban_count": len(data.get("lianban_pool", [])),
         "trend_count": len(data.get("trend_pool", [])),
     }

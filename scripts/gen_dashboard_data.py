@@ -1428,20 +1428,32 @@ def build_dashboard_data(review_path):
             "source": "gen_dashboard_data.py",
             "note": f"自动生成自 {os.path.basename(review_path)}",
             "pools_note": pools_payload.get("source_note"),
-            "pools_note_date": pools_payload.get("source_note_date")
+            "pools_note_date": pools_payload.get("source_note_date"),
+            "field_sources": {
+                "今日操作": {
+                    "source_note": os.path.basename(review_path),
+                    "source_date": date_str,
+                    "fallback": False,
+                },
+                "market": {
+                    "source_note": os.path.basename(review_path),
+                    "source_date": date_str,
+                    "fallback": False,
+                },
+            },
         },
         # === market 域：T1(实时)/T2(阶段) 优先，frontmatter 仅做收盘校验回退 ===
         "market": {
             # T1: PyTDX 5s 实时 → live_index / live_breadth
-            "上证指数": fm_val("上证指数"),
-            "上证涨幅": fm_val("上证涨幅"),
-            "市场量能": fm_val("市场量能"),
-            "涨跌比": fm_val("涨跌比"),
-            "涨停家数": fm_val("涨停家数") or iw.get("涨停家数"),
-            "跌停家数": fm_val("跌停家数"),
+            "上证指数": fm_current_val("上证指数"),
+            "上证涨幅": fm_current_val("上证涨幅"),
+            "市场量能": fm_current_val("市场量能"),
+            "涨跌比": fm_current_val("涨跌比"),
+            "涨停家数": fm_current_val("涨停家数") or iw_current.get("涨停家数"),
+            "跌停家数": fm_current_val("跌停家数"),
             # T2: iwencai 2min → frontmatter 仅做收盘校验
-            "炸板率": fm_val("炸板率") or iw.get("炸板率"),
-            "封板率": fm_val("封板率") or iw.get("封板率"),
+            "炸板率": fm_current_val("炸板率") or iw_current.get("炸板率"),
+            "封板率": fm_current_val("封板率") or iw_current.get("封板率"),
         },
         # === sentiment 域：T3(实时计算)/T2(校验) 优先，frontmatter 仅做回退 ===
         "sentiment": {
@@ -1504,7 +1516,8 @@ def build_dashboard_data(review_path):
             "竞价": appendix.get("竞价") or {},
             "早盘": appendix.get("早盘") or {},
             "盘中": appendix.get("盘中") or {},
-            "今日操作": appendix.get("今日操作", []) or _fallback_appendix(review_path, "今日操作"),
+            # 今日操作是日期绑定事实，空值必须保持为空，禁止静默继承历史成交。
+            "今日操作": appendix.get("今日操作", []),
             "锚定股状态": anchor_a or appendix.get("锚定股状态", []) or _fallback_appendix(review_path, "锚定股状态"),
         }
     }

@@ -350,6 +350,10 @@ class AIContextApiTest(unittest.TestCase):
         self.assertGreaterEqual(len(ctx["candidates"]), 2)
         self.assertEqual(ctx["candidates"][0]["source"], "lianban")
         self.assertEqual(ctx["candidates"][1]["source"], "trend")
+        self.assertEqual("decision_gate.v1", ctx["decision_gate"]["schema_version"])
+        self.assertEqual(ctx["situation"]["trade_entry_allowed"], ctx["decision_gate"]["allowed"])
+        self.assertEqual(ctx["situation"]["trade_entry_reason"], ctx["decision_gate"]["reason"])
+        self.assertEqual("/api/ai/context", ctx["decision_gate"]["source"])
 
     def test_ai_context_includes_freshness_for_quotes_iwencai_account_and_baseline(self):
         ctx = bridge._build_ai_context()
@@ -365,6 +369,7 @@ class AIContextApiTest(unittest.TestCase):
             ("executable", "sell"),
             ("blocked", "buy"),
             ("filled", "sell"),
+            ("reconciliation_ready", "buy"),
         ]:
             db.create_trade_ticket({
                 "trade_date": today,
@@ -372,6 +377,9 @@ class AIContextApiTest(unittest.TestCase):
                 "name": status.upper(),
                 "action_type": action_type,
                 "status": status,
+                "ticket_purpose": (
+                    "post_trade_reconciliation" if status == "reconciliation_ready" else "execution"
+                ),
             })
 
         ctx = bridge._build_ai_context()
@@ -381,12 +389,14 @@ class AIContextApiTest(unittest.TestCase):
         for key in ["quotes", "iwencai", "account", "baseline"]:
             self.assertIn(key, ctx["freshness"])
             self.assertIn("status", ctx["freshness"][key])
-        for key in ["pending", "executable", "blocked", "completed", "items"]:
+        for key in ["pending", "executable", "reconciliation", "blocked", "completed", "items"]:
             self.assertIn(key, ctx["tickets"])
         self.assertEqual(ctx["tickets"]["pending"], 1)
         self.assertEqual(ctx["tickets"]["executable"], 1)
         self.assertEqual(ctx["tickets"]["blocked"], 1)
         self.assertEqual(ctx["tickets"]["completed"], 1)
+        self.assertEqual(ctx["tickets"]["reconciliation"], 1)
+        self.assertTrue(any(item.get("ticket_purpose") == "post_trade_reconciliation" for item in ctx["tickets"]["items"]))
         self.assertIsInstance(ctx["tickets"]["items"], list)
         self.assertIsInstance(ctx["next_actions"], list)
         self.assertGreaterEqual(len(ctx["next_actions"]), 1)
@@ -690,6 +700,9 @@ class AIContextApiTest(unittest.TestCase):
                     "risks", "alerts", "tickets", "positions", "candidates", "next_actions", "human_required"]:
             self.assertIn(key, body)
         self.assertFalse(body["situation"]["trade_entry_allowed"])
+        self.assertEqual("decision_gate.v1", body["decision_gate"]["schema_version"])
+        self.assertFalse(body["decision_gate"]["allowed"])
+        self.assertEqual(0, body["tickets"]["reconciliation"])
         self.assertTrue(any(r.get("code") == "AI_CONTEXT_BUILD_ERROR" for r in body["risks"]))
 
 

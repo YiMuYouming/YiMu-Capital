@@ -1667,6 +1667,9 @@ def _prepare_trade_ticket(payload):
     allowed = {"buy", "sell", "add", "reduce", "do_t", "clear", "observe"}
     exit_actions = {"sell", "reduce", "clear"}
     action_type = str((payload or {}).get("action_type") or "").strip()
+    ticket_purpose = str((payload or {}).get("ticket_purpose") or "execution").strip()
+    if ticket_purpose not in {"execution", "post_trade_reconciliation"}:
+        raise ValueError(f"invalid ticket_purpose: {ticket_purpose}")
     if action_type == "t":
         raise ValueError("action_type=t is not accepted; use do_t")
     if action_type not in allowed:
@@ -1774,14 +1777,21 @@ def _prepare_trade_ticket(payload):
 
     blocking_rule_ids = list(dict.fromkeys(blocking_rule_ids))
     human_override_reason = str((payload or {}).get("human_override_reason") or "").strip()
+    if ticket_purpose == "post_trade_reconciliation":
+        if not trade_time:
+            raise ValueError("post_trade_reconciliation requires trade_time")
+        if not human_override_reason:
+            raise ValueError("post_trade_reconciliation requires human_override_reason")
     hard_blocks = [
         code for code in blocking_rule_ids
-        if code != "snapshot_captured_after_trade"
+        if not (ticket_purpose == "post_trade_reconciliation" and code == "snapshot_captured_after_trade")
         and not (context_degraded and code == "context_status")
     ]
     non_overridable_blocks = {"context_status", "rule_snapshot_hash", "sellable_qty", "lot_reconciliation"}
     has_non_overridable_blocks = any(code in non_overridable_blocks for code in hard_blocks)
     override_to_audit = (
+        ticket_purpose == "post_trade_reconciliation"
+        and
         audit_degraded
         and human_override_reason
         and hard_blocks
@@ -1795,19 +1805,23 @@ def _prepare_trade_ticket(payload):
         and win_state.get("manual_review_allowed") is True
         and not has_non_overridable_blocks
     )
-    status = (
-        "blocked" if hard_blocks and not (override_to_audit or manual_review_candidate)
-        else (
-            "audit_degraded" if audit_degraded or context_degraded or override_to_audit
-            else ("manual_review" if manual_review_candidate else ("draft" if action_type == "observe" else "executable"))
+    if ticket_purpose == "post_trade_reconciliation":
+        status = "reconciliation_ready"
+    else:
+        status = (
+            "blocked" if hard_blocks and not (override_to_audit or manual_review_candidate)
+            else (
+                "audit_degraded" if audit_degraded or context_degraded or override_to_audit
+                else ("manual_review" if manual_review_candidate else ("draft" if action_type == "observe" else "executable"))
+            )
         )
-    )
 
     ticket_id = create_trade_ticket({
         "trade_date": trade_date,
         "code": code,
         "name": name,
         "action_type": action_type,
+        "ticket_purpose": ticket_purpose,
         "status": status,
         "window": window,
         "intent_text": (payload or {}).get("intent_text"),
@@ -1963,7 +1977,21 @@ def _parse_fill_input(input_text, ticket):
 
 
 def _ticket_can_accept_fills(ticket):
-    return str((ticket or {}).get("status") or "") in {"executable", "confirmed", "partially_filled", "audit_degraded"}
+    return str((ticket or {}).get("status") or "") in {
+        "executable", "confirmed", "partially_filled", "audit_degraded", "reconciliation_ready"
+    }
+
+
+def _ticket_fill_gate(ticket):
+    purpose = str((ticket or {}).get("ticket_purpose") or "execution")
+    action_type = str((ticket or {}).get("action_type") or "")
+    if purpose == "post_trade_reconciliation" or action_type not in {"buy", "add", "do_t"}:
+        return True, None, None
+    context = _build_ai_context()
+    gate = (context or {}).get("decision_gate") or {}
+    allowed = gate.get("allowed") is True
+    reason = gate.get("reason") or "final decision gate is not available"
+    return allowed, reason, gate
 
 
 def _create_fill_preview(payload):
@@ -1980,11 +2008,16 @@ def _create_fill_preview(payload):
         raise ValueError(f"ticket not found: {ticket_id}")
     if not _ticket_can_accept_fills(ticket):
         raise ValueError(f"ticket {ticket_id} cannot accept fills in status {ticket.get('status')}")
+    gate_allowed, gate_reason, _ = _ticket_fill_gate(ticket)
+    if not gate_allowed:
+        raise ValueError(f"decision gate blocked: {gate_reason}")
     if not input_text.strip():
         input_text, input_source = _auto_fill_input_from_ticket(ticket)
     parsed = _parse_fill_input(input_text, ticket)
     parsed["input_source"] = input_source
     parsed["input_text"] = input_text
+    if str(ticket.get("ticket_purpose") or "execution") == "post_trade_reconciliation":
+        parsed["input_source"] = "post_trade_reconciliation"
     confirmation_id = f"CONFIRM-{datetime.now().strftime('%Y%m%d')}-{uuid.uuid4().hex[:10]}"
     preview_token = secrets.token_urlsafe(24)
     preview_hash = "sha256:" + hashlib.sha256(
@@ -2059,6 +2092,16 @@ def _confirm_fill(payload, headers):
     ticket = dict(ticket_row) if ticket_row else None
     if not ticket or not _ticket_can_accept_fills(ticket):
         return 409, {"ok": False, "error": "ticket cannot accept fills"}
+    purpose = str(ticket.get("ticket_purpose") or "execution")
+    if purpose == "post_trade_reconciliation" and confirmed_by != "yimu":
+        return 403, {"ok": False, "error": "post_trade_reconciliation requires confirmed_by=yimu"}
+    gate_allowed, gate_reason, gate = _ticket_fill_gate(ticket)
+    if not gate_allowed:
+        return 409, {
+            "ok": False,
+            "error": f"decision gate blocked: {gate_reason}",
+            "decision_gate": gate,
+        }
     parsed = json.loads(pending.get("parsed_entry_json") or "{}")
     parsed["confirmed_by"] = confirmed_by
     parsed["audit_note"] = f"confirmed via {confirmation_id}"
@@ -2354,6 +2397,17 @@ def _trade_entry_gate(health, rule_state):
     return True, None
 
 
+def _decision_gate_payload(allowed, reason, evaluated_at):
+    """Canonical final trade-decision contract for every consumer."""
+    return {
+        "schema_version": "decision_gate.v1",
+        "allowed": bool(allowed),
+        "reason": reason,
+        "evaluated_at": evaluated_at.isoformat() if hasattr(evaluated_at, "isoformat") else str(evaluated_at),
+        "source": "/api/ai/context",
+    }
+
+
 def _ai_current_mode(now=None):
     ref = now or datetime.now()
     t = ref.time()
@@ -2457,9 +2511,10 @@ def _ai_ticket_summary(date_str, limit=30):
         error = str(e)[:160]
     pending_statuses = {"draft", "confirmed", "manual_review"}
     executable_statuses = {"executable", "audit_degraded", "partially_filled"}
+    reconciliation_statuses = {"reconciliation_ready"}
     completed_statuses = {"filled", "closed", "closed_with_conflict", "cancelled"}
     items = []
-    counts = {"pending": 0, "executable": 0, "completed": 0, "blocked": 0, "other": 0}
+    counts = {"pending": 0, "executable": 0, "reconciliation": 0, "completed": 0, "blocked": 0, "other": 0}
     total = 0
     for row in count_rows:
         status = str(row["status"] if hasattr(row, "__getitem__") else row.get("status") or "")
@@ -2471,6 +2526,8 @@ def _ai_ticket_summary(date_str, limit=30):
             counts["pending"] += n
         elif status in executable_statuses:
             counts["executable"] += n
+        elif status in reconciliation_statuses:
+            counts["reconciliation"] += n
         elif status in completed_statuses:
             counts["completed"] += n
         else:
@@ -2481,6 +2538,7 @@ def _ai_ticket_summary(date_str, limit=30):
             "ticket_id": ticket.get("ticket_id"),
             "status": status,
             "action_type": ticket.get("action_type"),
+            "ticket_purpose": ticket.get("ticket_purpose") or "execution",
             "window": ticket.get("window"),
             "code": ticket.get("code"),
             "name": ticket.get("name"),
@@ -2490,6 +2548,7 @@ def _ai_ticket_summary(date_str, limit=30):
         "error": error,
         "pending": counts["pending"],
         "executable": counts["executable"],
+        "reconciliation": counts["reconciliation"],
         "completed": counts["completed"],
         "blocked": counts["blocked"],
         "other": counts["other"],
@@ -2640,7 +2699,8 @@ def _ai_context_risks_alerts_human(health, rule_state, freshness, tickets, confl
     actionable = [
         item for item in (tickets or {}).get("items") or []
         if str(item.get("status") or "") in {
-            "draft", "confirmed", "manual_review", "executable", "audit_degraded", "partially_filled"
+            "draft", "confirmed", "manual_review", "executable", "audit_degraded", "partially_filled",
+            "reconciliation_ready"
         }
     ]
     for item in actionable[:5]:
@@ -2663,6 +2723,9 @@ def _ai_context_error_payload(error, now=None):
         "generated_at": ref.isoformat(),
         "date": date_str,
         "mode": _ai_current_mode(ref),
+        "decision_gate": _decision_gate_payload(False, f"AI context build error: {reason}", ref),
+        "trade_entry_allowed": False,
+        "trade_entry_reason": f"AI context build error: {reason}",
         "situation": {
             "health": {
                 "status": "unhealthy",
@@ -2707,6 +2770,7 @@ def _ai_context_error_payload(error, now=None):
             "error": "context build failed before ticket summary completed",
             "pending": 0,
             "executable": 0,
+            "reconciliation": 0,
             "completed": 0,
             "blocked": 0,
             "other": 0,
@@ -2819,6 +2883,10 @@ def _build_ai_context(now=None):
         "generated_at": ref.isoformat(),
         "date": date_str,
         "mode": _ai_current_mode(ref),
+        "decision_gate": _decision_gate_payload(trade_allowed, trade_reason, ref),
+        # Compatibility mirrors. New consumers must read decision_gate.v1.
+        "trade_entry_allowed": bool(trade_allowed),
+        "trade_entry_reason": trade_reason,
         "situation": situation,
         "evidence": [
             {"id": "E1", "title": "账户持仓", "source": "/api/account/state"},
@@ -3993,6 +4061,7 @@ class BridgeHandler(SimpleHTTPRequestHandler):
                                 'code': entry.get('代码', ''),
                                 'name': entry.get('标的', ''),
                                 'action_type': action_type,
+                                'ticket_purpose': 'post_trade_reconciliation',
                                 'status': 'confirmed',
                                 'intent_text': entry.get('原因', ''),
                                 'human_override_reason': entry.get('原因', ''),

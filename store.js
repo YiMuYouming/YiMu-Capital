@@ -354,6 +354,38 @@ const DataStore = (function() {
     d.trade_tickets_meta = _tradeTicketsMeta || null;
     if (_aiContext) d.ai_context = _aiContext;
 
+    // decision_gate.v1 is the only final trade gate. Health/live fields remain
+    // compatibility diagnostics and may never grant a trade action by themselves.
+    var gate = null;
+    if (_aiContext && _aiContext.decision_gate) {
+      gate = _aiContext.decision_gate;
+    } else if (_aiContext && _aiContext.situation) {
+      gate = {
+        schema_version: 'decision_gate.v1',
+        allowed: _aiContext.situation.trade_entry_allowed === true,
+        reason: _aiContext.situation.trade_entry_reason || null,
+        source: '/api/ai/context'
+      };
+    } else if (_aiContext && typeof _aiContext.trade_entry_allowed === 'boolean') {
+      gate = {
+        schema_version: 'decision_gate.v1',
+        allowed: _aiContext.trade_entry_allowed === true,
+        reason: _aiContext.trade_entry_reason || null,
+        source: '/api/ai/context'
+      };
+    } else {
+      gate = {
+        schema_version: 'decision_gate.v1',
+        allowed: false,
+        reason: 'AI context unavailable; trade entry fails closed',
+        source: '/api/ai/context'
+      };
+    }
+    d.decision_gate = gate;
+    d.trade_entry_allowed = gate.allowed === true;
+    d.trade_entry_reason = gate.reason || null;
+    if (typeof globalThis !== 'undefined') globalThis._tradeEntryAllowed = d.trade_entry_allowed;
+
     setMerged(d);
     return d;
   }

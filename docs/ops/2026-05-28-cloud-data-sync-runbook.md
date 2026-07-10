@@ -96,6 +96,7 @@ python3 scripts/gen_dashboard_data.py
 
 - `data/dashboard_data.json` 生成成功。
 - `meta.note` 指向今日 ReviewNote。
+- `meta.field_sources.今日操作.source_date` 指向今日；若今日表格为空，`decision.今日操作` 保持空，不得从旧 ReviewNote 回填。
 - `meta.pools_note_date` 指向上一交易日复盘笔记。
 - W12/W13 自选池和上一交易日复盘笔记附件一致。
 - `decision.锚定股状态` 和昨日确定的锚定股一致。
@@ -149,6 +150,7 @@ curl -s http://127.0.0.1:8088/api/pnl/summary'
 - API 返回 JSON，不是空文件或错误页。
 - `/api/health.baseline` 为 `ok`，不是 `stale`。
 - `/api/baseline.meta.note` 指向今日 ReviewNote。
+- `/api/baseline.meta.field_sources.今日操作.source_date` 指向今日，`fallback=false`。
 - 持仓和现金与弈沐哥确认口径一致。
 - PnL summary 有日初锚点。
 - W12/W13 池子来自上一交易日复盘笔记。
@@ -159,7 +161,7 @@ curl -s http://127.0.0.1:8088/api/pnl/summary'
 ### 弈沐哥做买卖
 
 1. 浏览器使用 `http://localhost:8088`。
-2. 在 W15/W17 的既有入口录入成交。
+2. 正常交易使用 `ticket_purpose=execution`，preview 与 confirm 都会重新校验 `/api/ai/context.decision_gate`。若是券商已成交后的补录，必须使用 `ticket_purpose=post_trade_reconciliation`，在 W24 “成交补录”列核对，并由弈沐本人确认；补录不构成交易授权。
 3. 录完立即验收云端账户：
 
 ```bash

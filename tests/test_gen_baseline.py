@@ -392,6 +392,87 @@ date: 2026-05-27
         selfEqual(pools["lianban_pool"], [])
         selfEqual([s.get("标的") for s in pools["trend_pool"]], ["紫光国微", "三安光电"])
 
+    def test_current_day_operations_never_fallback_to_historical_note(self):
+        self.assertIsNotNone(build_dashboard_data)
+        current_note = """---
+date: 2026-07-10
+weekday: 周五
+---
+# 今日开工版
+
+## 数据附录（机器解析用）
+
+### 今日操作
+| 时间 | 动作 | 标的 | 价格 | 盈亏 | 原因 |
+|------|------|------|------|------|------|
+| — | — | — | — | — | — |
+"""
+        previous_note = """---
+date: 2026-07-09
+weekday: 周四
+情绪值: 60
+---
+# 昨日复盘
+
+## 数据附录（机器解析用）
+
+### 今日操作
+| 时间 | 动作 | 标的 | 价格 | 盈亏 | 原因 |
+|------|------|------|------|------|------|
+| 14:50 | 买入5000 | 徐工机械 | 8.51 | — | 昨日成交 |
+"""
+        with tempfile.TemporaryDirectory() as td:
+            review_root = Path(td) / "复盘笔记" / "W28_第28周"
+            review_root.mkdir(parents=True)
+            current = review_root / "2026_7_10_Friday_ReviewNote.md"
+            previous = review_root / "2026_7_9_Thursday_ReviewNote.md"
+            current.write_text(current_note, encoding="utf-8")
+            previous.write_text(previous_note, encoding="utf-8")
+
+            data = build_dashboard_data(str(current))
+
+        self.assertEqual([], data["decision"]["今日操作"])
+        self.assertEqual(
+            {"source_note": current.name, "source_date": "2026-07-10", "fallback": False},
+            data["meta"]["field_sources"]["今日操作"],
+        )
+
+    def test_current_market_fields_never_masquerade_as_historical_fallback(self):
+        current_note = """---
+date: 2026-07-10
+weekday: 周五
+---
+# 今日开工版
+"""
+        previous_note = """---
+date: 2026-07-09
+weekday: 周四
+上证指数: 4050.12
+上证涨幅: 1.25
+市场量能: 3.10
+涨停家数: 88
+跌停家数: 2
+情绪值: 66
+---
+# 昨日复盘
+"""
+        with tempfile.TemporaryDirectory() as td:
+            review_root = Path(td) / "复盘笔记" / "W28_第28周"
+            review_root.mkdir(parents=True)
+            current = review_root / "2026_7_10_Friday_ReviewNote.md"
+            previous = review_root / "2026_7_9_Thursday_ReviewNote.md"
+            current.write_text(current_note, encoding="utf-8")
+            previous.write_text(previous_note, encoding="utf-8")
+
+            data = build_dashboard_data(str(current))
+
+        self.assertIsNone(data["market"]["上证指数"])
+        self.assertIsNone(data["market"]["上证涨幅"])
+        self.assertIsNone(data["market"]["市场量能"])
+        self.assertIsNone(data["market"]["涨停家数"])
+        self.assertEqual("2026-07-10", data["meta"]["field_sources"]["market"]["source_date"])
+        self.assertFalse(data["meta"]["field_sources"]["market"]["fallback"])
+
     def test_dashboard_adds_yesterday_baseline_from_previous_review(self):
         self.assertIsNotNone(build_dashboard_data)
         current_note = """---

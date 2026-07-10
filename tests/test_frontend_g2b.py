@@ -417,6 +417,72 @@ DataStore.fetchAll().then(function() {
 
 class W25AiContextDataStoreTest(unittest.TestCase):
 
+    def test_health_poll_does_not_grant_final_trade_entry(self):
+        index = (ROOT / "index.html").read_text(encoding="utf-8")
+
+        self.assertNotIn("window._tradeEntryAllowed = te !== false", index)
+
+    def test_decision_gate_overrides_health_and_live_compatibility_fields(self):
+        script = BASE_MOCKS + r"""
+global._mockFetchResponses['/api/live/quotes'].trade_entry_allowed = true;
+global._mockFetchResponses['/api/live/quotes'].trade_entry_reason = '粗粒度健康允许';
+global._mockFetchResponses['/api/trade/tickets?date='] = { tickets: [] };
+global._mockFetchResponses['/api/ai/context'] = {
+  schema_version: 'ai_context.v1',
+  decision_gate: {
+    schema_version: 'decision_gate.v1',
+    allowed: false,
+    reason: 'SENTIMENT_STALE',
+    source: '/api/ai/context'
+  },
+  situation: { trade_entry_allowed: false, trade_entry_reason: 'SENTIMENT_STALE' }
+};
+global._mockFetchResponses['auction_snapshot.json'] = {
+  fetched: bjToday + 'T09:28:00+08:00', '指数竞价': [],
+  '涨跌家数': {}, '高标竞价': [], '自选池竞价': [], '信号灯': {}
+};
+global._mockFetchResponses['sentiment_auto.json'] = {};
+
+DataStore.fetchAll().then(function() {
+  var m = DataStore.merged || {};
+  console.log(JSON.stringify({
+    mergedAllowed: m.trade_entry_allowed,
+    mergedReason: m.trade_entry_reason,
+    globalAllowed: globalThis._tradeEntryAllowed,
+    gateSource: m.decision_gate && m.decision_gate.source
+  }));
+}).catch(function(e) { console.log(JSON.stringify({ _error: String(e).slice(0,200) })); });
+"""
+        result = _run_node(script, files=["store.js"])
+        self.assertFalse(result.get("mergedAllowed"), f"最终门禁必须覆盖粗粒度健康值: {result}")
+        self.assertFalse(result.get("globalAllowed"), f"写入口全局门禁必须关闭: {result}")
+        self.assertEqual("SENTIMENT_STALE", result.get("mergedReason"), f"必须保留最终原因: {result}")
+        self.assertEqual("/api/ai/context", result.get("gateSource"), f"必须标明最终门禁来源: {result}")
+
+    def test_missing_ai_context_fails_closed_for_trade_consumers(self):
+        script = BASE_MOCKS + r"""
+global._mockFetchResponses['/api/live/quotes'].trade_entry_allowed = true;
+global._mockFetchResponses['/api/trade/tickets?date='] = { tickets: [] };
+global._mockFetchResponses['auction_snapshot.json'] = {
+  fetched: bjToday + 'T09:28:00+08:00', '指数竞价': [],
+  '涨跌家数': {}, '高标竞价': [], '自选池竞价': [], '信号灯': {}
+};
+global._mockFetchResponses['sentiment_auto.json'] = {};
+
+DataStore.fetchAll().then(function() {
+  var m = DataStore.merged || {};
+  console.log(JSON.stringify({
+    mergedAllowed: m.trade_entry_allowed,
+    mergedReason: m.trade_entry_reason,
+    globalAllowed: globalThis._tradeEntryAllowed
+  }));
+}).catch(function(e) { console.log(JSON.stringify({ _error: String(e).slice(0,200) })); });
+"""
+        result = _run_node(script, files=["store.js"])
+        self.assertFalse(result.get("mergedAllowed"), f"AI context 缺失必须 fail closed: {result}")
+        self.assertFalse(result.get("globalAllowed"), f"写入口必须 fail closed: {result}")
+        self.assertIn("AI context", result.get("mergedReason", ""))
+
     def test_refresh_fetches_ai_context_with_get_and_merges_it(self):
         script = BASE_MOCKS + r"""
 	global._mockFetchResponses['/api/trade/tickets?date='] = { tickets: [] };

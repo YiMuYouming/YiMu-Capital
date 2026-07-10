@@ -20,6 +20,7 @@ def _setup(test):
     test.orig_inited = bridge._db_inited
     test.orig_cache = dict(bridge.CACHE)
     test.orig_ctx = bridge._build_trade_context
+    test.orig_ai_context = bridge._build_ai_context
     test.orig_load_state = bridge.load_current_account_state
     test.orig_rule_state = bridge._build_rule_state
     test.orig_rule_root = getattr(bridge, "AI_RULE_SYSTEM_ROOT", None)
@@ -45,6 +46,15 @@ def _setup(test):
         "rule_snapshot_hash": "hash-1",
         "today_execution_card_id": "EXEC-20260604",
     }
+    bridge._build_ai_context = lambda: {
+        "schema_version": "ai_context.v1",
+        "decision_gate": {
+            "schema_version": "decision_gate.v1",
+            "allowed": True,
+            "reason": None,
+            "source": "/api/ai/context",
+        },
+    }
     bridge.load_current_account_state = lambda live_quotes, **kwargs: {
         "date": "2026-06-04",
         "pnl_pct": 0.5,
@@ -69,6 +79,7 @@ def _teardown(test):
     bridge.CACHE.clear()
     bridge.CACHE.update(test.orig_cache)
     bridge._build_trade_context = test.orig_ctx
+    bridge._build_ai_context = test.orig_ai_context
     bridge.load_current_account_state = test.orig_load_state
     bridge._build_rule_state = test.orig_rule_state
     if test.orig_rule_root is None and hasattr(bridge, "AI_RULE_SYSTEM_ROOT"):
@@ -139,8 +150,35 @@ class TicketApiTest(unittest.TestCase):
         self.assertEqual(body["ticket"]["code"], "002281")
         self.assertEqual(body["ticket"]["action_type"], "buy")
         self.assertIn(body["ticket"]["status"], ("executable", "blocked"))
+        self.assertEqual(body["ticket"]["ticket_purpose"], "execution")
 
-    def test_prepare_posthoc_trade_with_late_snapshot_is_audit_degraded(self):
+    def test_prepare_post_trade_reconciliation_never_returns_executable(self):
+        bridge._build_ai_context = lambda: {
+            "decision_gate": {
+                "schema_version": "decision_gate.v1",
+                "allowed": False,
+                "reason": "SENTIMENT_STALE",
+                "source": "/api/ai/context",
+            }
+        }
+
+        status, body = _call("POST", "/api/trade/tickets/prepare", {
+            "intent_text": "已买 瑞芯微 200股 220.58",
+            "action_type": "buy",
+            "code": "603893",
+            "name": "瑞芯微",
+            "window": "W2",
+            "trade_time": "11:00",
+            "ticket_purpose": "post_trade_reconciliation",
+            "human_override_reason": "券商已成交，仅补录事实",
+        })
+
+        self.assertEqual(200, status, body)
+        self.assertEqual("post_trade_reconciliation", body["ticket"]["ticket_purpose"])
+        self.assertEqual("reconciliation_ready", body["ticket"]["status"])
+        self.assertNotEqual("executable", body["ticket"]["status"])
+
+    def test_legacy_posthoc_trade_without_reconciliation_purpose_is_blocked(self):
         bridge._build_trade_context = lambda: {
             "rule_state": {
                 "version": "g1a-v1",
@@ -168,7 +206,7 @@ class TicketApiTest(unittest.TestCase):
         })
 
         self.assertEqual(status, 200, body)
-        self.assertEqual(body["ticket"]["status"], "audit_degraded")
+        self.assertEqual(body["ticket"]["status"], "blocked")
         self.assertIn("snapshot_captured_after_trade", body["ticket"]["blocking_rule_ids"])
 
     def test_w1_emotion_block_does_not_block_w2_ticket(self):
@@ -473,7 +511,7 @@ class TicketApiTest(unittest.TestCase):
         self.assertEqual(body["parsed"]["target_lot_id"], "trade:49")
         self.assertEqual(body["parsed"]["leg_type"], "sell_target_lot_realized_pnl_only")
 
-    def test_posthoc_human_override_preserves_hard_blocks_as_audit_degraded(self):
+    def test_legacy_posthoc_human_override_cannot_impersonate_reconciliation(self):
         bridge._build_trade_context = lambda: {
             "rule_state": {
                 "version": "g1a-v1",
@@ -502,7 +540,7 @@ class TicketApiTest(unittest.TestCase):
         })
 
         self.assertEqual(status, 200, body)
-        self.assertEqual(body["ticket"]["status"], "audit_degraded")
+        self.assertEqual(body["ticket"]["status"], "blocked")
         self.assertIn("LOSS_STREAK", body["ticket"]["blocking_rule_ids"])
         self.assertIn("snapshot_captured_after_trade", body["ticket"]["blocking_rule_ids"])
         self.assertEqual(body["ticket"]["human_override_reason"], "实盘已成交，盘后按执行卡补票据")
@@ -868,6 +906,29 @@ class TicketApiTest(unittest.TestCase):
         self.assertEqual(len(db._exec("SELECT * FROM pending_fill_confirmations")), 0)
         self.assertEqual(len(db._exec("SELECT * FROM trade_records")), 0)
 
+    def test_execution_buy_preview_rechecks_decision_gate(self):
+        ticket_id = db.create_trade_ticket({
+            "trade_date": "2026-06-04", "code": "002281", "name": "光迅科技",
+            "action_type": "buy", "status": "executable", "ticket_purpose": "execution",
+        })
+        bridge._build_ai_context = lambda: {
+            "decision_gate": {
+                "schema_version": "decision_gate.v1",
+                "allowed": False,
+                "reason": "SENTIMENT_STALE",
+                "source": "/api/ai/context",
+            }
+        }
+
+        status, body = _call("POST", "/api/trade/fills/preview", {
+            "input_text": "已买 光迅科技 100股 225.78",
+            "ticket_id": ticket_id,
+        })
+
+        self.assertEqual(400, status, body)
+        self.assertIn("decision gate blocked", body["error"])
+        self.assertEqual(0, len(db._exec("SELECT * FROM pending_fill_confirmations")))
+
     def test_fill_confirm_writes_trade_once(self):
         ticket_id = db.create_trade_ticket({
             "trade_date": "2026-06-04", "code": "002281", "name": "光迅科技",
@@ -895,6 +956,93 @@ class TicketApiTest(unittest.TestCase):
         self.assertEqual(replay_status, 409, replay_body)
         self.assertEqual(len(db._exec("SELECT * FROM trade_records")), 1)
         self.assertEqual(len(db.query_position_lots(code="002281")), 1)
+
+    def test_execution_buy_confirm_rechecks_decision_gate(self):
+        ticket_id = db.create_trade_ticket({
+            "trade_date": "2026-06-04", "code": "002281", "name": "光迅科技",
+            "action_type": "buy", "status": "executable", "ticket_purpose": "execution",
+        })
+        preview = _call("POST", "/api/trade/fills/preview", {
+            "input_text": "已买 光迅科技 100股 225.78",
+            "ticket_id": ticket_id,
+        })[1]
+        bridge._build_ai_context = lambda: {
+            "decision_gate": {
+                "schema_version": "decision_gate.v1",
+                "allowed": False,
+                "reason": "SENTIMENT_STALE",
+                "source": "/api/ai/context",
+            }
+        }
+
+        status, body = _call("POST", "/api/trade/fills/confirm", {
+            "confirmation_id": preview["confirmation_id"],
+            "preview_token": preview["preview_token"],
+            "preview_hash": preview["preview_hash"],
+            "confirmed_by": "yimu",
+        })
+
+        self.assertEqual(409, status, body)
+        self.assertIn("decision gate blocked", body["error"])
+        self.assertEqual(0, len(db._exec("SELECT * FROM trade_records")))
+
+    def test_reconciliation_fill_can_record_user_confirmed_broker_fact_when_gate_closed(self):
+        ticket_id = db.create_trade_ticket({
+            "trade_date": "2026-06-04", "code": "002281", "name": "光迅科技",
+            "action_type": "buy", "status": "reconciliation_ready",
+            "ticket_purpose": "post_trade_reconciliation",
+        })
+        bridge._build_ai_context = lambda: {
+            "decision_gate": {
+                "schema_version": "decision_gate.v1",
+                "allowed": False,
+                "reason": "SENTIMENT_STALE",
+                "source": "/api/ai/context",
+            }
+        }
+        preview = _call("POST", "/api/trade/fills/preview", {
+            "input_text": "已买 光迅科技 100股 225.78",
+            "ticket_id": ticket_id,
+        })[1]
+
+        status, body = _call("POST", "/api/trade/fills/confirm", {
+            "confirmation_id": preview["confirmation_id"],
+            "preview_token": preview["preview_token"],
+            "preview_hash": preview["preview_hash"],
+            "confirmed_by": "yimu",
+        })
+
+        self.assertEqual(200, status, body)
+        self.assertEqual(1, len(db._exec("SELECT * FROM trade_records")))
+        trade = dict(db._exec("SELECT * FROM trade_records")[0])
+        self.assertEqual("post_trade_reconciliation", trade["input_source"])
+
+    def test_reconciliation_fill_rejects_agent_confirmation(self):
+        ticket_id = db.create_trade_ticket({
+            "trade_date": "2026-06-04", "code": "002281", "name": "光迅科技",
+            "action_type": "buy", "status": "reconciliation_ready",
+            "ticket_purpose": "post_trade_reconciliation",
+        })
+        preview = _call("POST", "/api/trade/fills/preview", {
+            "input_text": "已买 光迅科技 100股 225.78",
+            "ticket_id": ticket_id,
+        })[1]
+
+        status, body = _call(
+            "POST",
+            "/api/trade/fills/confirm",
+            {
+                "confirmation_id": preview["confirmation_id"],
+                "preview_token": preview["preview_token"],
+                "preview_hash": preview["preview_hash"],
+                "confirmed_by": "agent:oumi",
+            },
+            headers_extra={"X-YM-Confirm-Actor": "agent:oumi"},
+        )
+
+        self.assertEqual(403, status, body)
+        self.assertIn("requires confirmed_by=yimu", body["error"])
+        self.assertEqual(0, len(db._exec("SELECT * FROM trade_records")))
 
     def test_fill_confirm_closes_target_lot_instead_of_fifo(self):
         ticket_id = db.create_trade_ticket({

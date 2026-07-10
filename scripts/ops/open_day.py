@@ -53,6 +53,7 @@ def print_baseline_summary(path):
     print(f"  生成/更新时间: {summary['generated_at']}")
     print(f"  来源: {summary['note']}")
     print(f"  自选池来源: {summary['pools_note']} ({summary['pools_note_date']})")
+    print(f"  今日操作来源日期: {summary['today_operations_source_date']}")
     print(f"  连板池: {summary['lianban_count']} 只")
     print(f"  趋势池: {summary['trend_count']} 只")
 

@@ -32,6 +32,7 @@ function _ttStatusLabel(status) {
     conditional_pending: '待确认',
     manual_review: '人工复核',
     executable: '可执行',
+    reconciliation_ready: '成交补录',
     blocked: '已阻断',
     audit_degraded: '审计降级',
     filled: '已成交',
@@ -45,6 +46,10 @@ function _ttStatusLabel(status) {
 
 function _ttIsExitAction(action) {
   return ['sell', 'reduce', 'clear'].indexOf(String(action || '').toLowerCase()) >= 0;
+}
+
+function _ttIsReconciliationPurpose(purpose) {
+  return String(purpose || '').toLowerCase() === 'post_trade_reconciliation';
 }
 
 function _ttContextOnlyBlocks(blocks) {
@@ -125,7 +130,7 @@ function _ttFriendlyError(message) {
   return text || '操作失败，请稍后重试。';
 }
 
-function _ttWriteGate(action) {
+function _ttWriteGate(action, ticketPurpose) {
   var w = (typeof window !== 'undefined') ? window : null;
   var loc = (typeof location !== 'undefined') ? location : null;
   var exitAction = _ttIsExitAction(action);
@@ -138,6 +143,9 @@ function _ttWriteGate(action) {
   if (readonly) return { canWrite: false, reason: '本地预览只读，不发起写入' };
   if (w) {
     if (w._healthConfirmed !== true) return { canWrite: false, reason: '健康状态未确认' };
+    if (_ttIsReconciliationPurpose(ticketPurpose)) {
+      return { canWrite: true, reason: '仅记录已发生的券商成交事实' };
+    }
     if (w._healthCritical === true && !exitAction) return { canWrite: false, reason: '健康门禁阻断' };
     if (w._tradeEntryAllowed === false && !exitAction) return { canWrite: false, reason: '交易录入已关闭' };
   }
@@ -146,7 +154,7 @@ function _ttWriteGate(action) {
 
 function _ttCanAutoPreview(t) {
   var status = _ttEffectiveStatus(t || {});
-  return status === 'executable' || status === 'audit_degraded';
+  return status === 'executable' || status === 'audit_degraded' || status === 'reconciliation_ready';
 }
 
 function _ttValueAttr(value) {
@@ -169,7 +177,7 @@ class TradeTicketsWidget extends YiMuWidget {
     this._auditDetailsOpen = false;
     this._cancelledDetailsOpen = false;
     this._emergencyDetailsOpen = false;
-    this._boardCollapsed = { pending: false, executable: false, completed: false };
+    this._boardCollapsed = { pending: false, executable: false, reconciliation: false, completed: false };
     this._manualDraft = {};
   }
 
@@ -232,8 +240,18 @@ class TradeTicketsWidget extends YiMuWidget {
     return '';
   }
 
-  _postJson(url, payload, actionType) {
-    var gate = _ttWriteGate(actionType || (payload && payload.action_type));
+  _ticketPurpose(ticketId) {
+    var tickets = this._tickets || [];
+    for (var i = 0; i < tickets.length; i++) {
+      if (String(tickets[i].ticket_id || '') === String(ticketId || '')) {
+        return tickets[i].ticket_purpose || 'execution';
+      }
+    }
+    return 'execution';
+  }
+
+  _postJson(url, payload, actionType, ticketPurpose) {
+    var gate = _ttWriteGate(actionType || (payload && payload.action_type), ticketPurpose || (payload && payload.ticket_purpose));
     if (!gate.canWrite) return Promise.reject(new Error(gate.reason));
     return fetch(url, {
       method: 'POST',
@@ -339,7 +357,7 @@ class TradeTicketsWidget extends YiMuWidget {
       if (this._lastBody) this._renderTicketBody(this._lastBody);
       return Promise.reject(new Error(msg));
     }
-    return this._postJson('/api/trade/fills/preview', payload, this._ticketAction(payload.ticket_id)).then(function(d) {
+    return this._postJson('/api/trade/fills/preview', payload, this._ticketAction(payload.ticket_id), this._ticketPurpose(payload.ticket_id)).then(function(d) {
       self._pendingPreview = {
         confirmation_id: d.confirmation_id,
         preview_token: d.preview_token,
@@ -389,7 +407,7 @@ class TradeTicketsWidget extends YiMuWidget {
       preview_hash: pending.preview_hash,
       confirmed_by: 'yimu'
     }, payload || {});
-    return this._postJson('/api/trade/fills/confirm', payload, this._ticketAction(this._selectedTicketId)).then(function(d) {
+    return this._postJson('/api/trade/fills/confirm', payload, this._ticketAction(this._selectedTicketId), this._ticketPurpose(this._selectedTicketId)).then(function(d) {
       self._pendingPreview = null;
       self._statusMessage = d.trade_id ? '成交已写入 trade ' + d.trade_id : '成交已写入';
       self._refreshTickets();
@@ -630,6 +648,7 @@ class TradeTicketsWidget extends YiMuWidget {
       conditional_pending: 'info',
       manual_review: 'warn',
       executable: 'up',
+      reconciliation_ready: 'warn',
       audit_degraded: 'warn',
       blocked: 'danger',
       filled: 'text-secondary',
@@ -714,8 +733,11 @@ class TradeTicketsWidget extends YiMuWidget {
     var pending = this._pendingPreview || null;
     var parsed = pending && pending.parsed ? pending.parsed : null;
     var canPreview = selected && _ttCanAutoPreview(selected) && writeGate.canWrite;
+    var reconciliation = selected && _ttIsReconciliationPurpose(selected.ticket_purpose);
+    var panelLabel = reconciliation ? '成交补录' : '自动执行';
     var title = selected ? this._ticketTitle(selected) : '暂无可执行票据';
     var status = selected ? _ttStatusLabel(_ttEffectiveStatus(selected)) : '等待票据';
+    var actionHint = reconciliation ? '只记录已发生的券商成交；确认人必须是弈沐' : '点预览，确认后自动写入成交并闭环票据';
     var previewHtml = parsed ? (
       '<div class="ticket-preview-modal">' +
         '<div class="ticket-preview-head"><span>成交预览</span><b>' + _ttEsc(pending.confirmation_id || '') + '</b></div>' +
@@ -727,15 +749,15 @@ class TradeTicketsWidget extends YiMuWidget {
           this._detailLine('类型', parsed.leg_type || '-') +
         '</div>' +
         '<div class="ticket-preview-actions">' +
-          '<button class="ticket-command-btn primary" type="button" data-tt-auto-confirm>确认成交</button>' +
+          '<button class="ticket-command-btn primary" type="button" data-tt-auto-confirm>' + (reconciliation ? '确认补录' : '确认成交') + '</button>' +
         '</div>' +
       '</div>'
     ) : '';
     return '<div class="ticket-auto-panel">' +
       '<div class="ticket-auto-copy">' +
-        '<span>自动执行</span>' +
+        '<span>' + _ttEsc(panelLabel) + '</span>' +
         '<b>' + _ttEsc(title) + '</b>' +
-        '<em>' + _ttEsc(canPreview ? '点预览，确认后自动写入成交并闭环票据' : (writeGate.canWrite ? status : writeGate.reason)) + '</em>' +
+        '<em>' + _ttEsc(canPreview ? actionHint : (writeGate.canWrite ? status : writeGate.reason)) + '</em>' +
       '</div>' +
       '<div class="ticket-auto-actions">' +
         '<button class="ticket-command-btn primary" type="button" data-tt-auto-preview="' + _ttEsc(selected && selected.ticket_id || '') + '"' + (canPreview ? '' : ' disabled') + '>预览成交</button>' +
@@ -775,6 +797,7 @@ class TradeTicketsWidget extends YiMuWidget {
     var tickets = allTickets.filter(function(t) { return !_ttIsSupersededAuditTicket(t, allTickets); });
     var pending = tickets.filter(function(t){ var s = _ttEffectiveStatus(t); return s === 'confirmed' || s === 'draft' || s === 'conditional_pending' || s === 'manual_review'; });
     var exec = tickets.filter(function(t){ var s = _ttEffectiveStatus(t); return s === 'audit_degraded' || s === 'executable'; });
+    var reconciliation = tickets.filter(function(t){ return _ttEffectiveStatus(t) === 'reconciliation_ready'; });
     var blocked = tickets.filter(function(t){ return _ttEffectiveStatus(t) === 'blocked'; });
     var done = tickets.filter(function(t){ return ['filled','partially_filled','closed','closed_with_conflict','cancelled'].indexOf(_ttEffectiveStatus(t)) >= 0; });
     var filled = done.filter(function(t){ return ['filled','partially_filled','closed','closed_with_conflict'].indexOf(_ttEffectiveStatus(t)) >= 0; });
@@ -805,6 +828,7 @@ class TradeTicketsWidget extends YiMuWidget {
     };
     var nextAction = pending.length ? '复核待确认票据' :
       exec.length ? '等待终端执行回填' :
+      reconciliation.length ? '核对并补录已发生成交' :
       filled.length ? '核对已成交闭环' : '暂无票据动作';
     function actionButton(action, label) {
       var active = activeAction === action;
@@ -843,19 +867,21 @@ class TradeTicketsWidget extends YiMuWidget {
     '</div></details></div>' :
       '<div class="ticket-readonly-lock ui-empty ui-empty-inline"><div class="ui-empty-title">只读闭环</div><div class="ui-empty-detail">' + _ttEsc(writeGate.reason) + '，票据状态仅用于核对。</div></div>';
     var completed = filled.concat(cancelled);
-    var queue = pending.concat(exec);
+    var queue = pending.concat(exec).concat(reconciliation);
     var currentSelectedId = this._selectedTicketId;
     var selected = tickets.filter(function(t) { return currentSelectedId && currentSelectedId === t.ticket_id; })[0] || queue[0] || completed[0] || blocked[0] || tickets[0] || null;
+    var selectedWriteGate = selected ? _ttWriteGate(selected.action_type, selected.ticket_purpose) : writeGate;
     if (selected && !this._selectedTicketId) this._selectedTicketId = selected.ticket_id || '';
     body.innerHTML = '<div class="ticket-inbox-shell">' +
       '<div class="ticket-inbox-head">' +
         '<div><span class="evidence-inline-ref">E2</span><b>票据 Inbox</b><em>下一步：' + _ttEsc(nextAction) + '</em></div>' +
         '<div class="ticket-inbox-counts">已成交 ' + filled.length + ' / 不执行 ' + cancelled.length + '</div>' +
       '</div>' +
-      this._autoActionPanel(selected, writeGate) +
+      this._autoActionPanel(selected, selectedWriteGate) +
       '<div class="ticket-board-columns">' +
         this._boardColumn('pending', '待处理', pending, 'info') +
         this._boardColumn('executable', '可执行', exec, 'up') +
+        this._boardColumn('reconciliation', '成交补录', reconciliation, 'warn') +
         this._boardColumn('completed', '已完成', completed, 'text-secondary') +
       '</div>' +
       '<div class="ticket-board-history">' +

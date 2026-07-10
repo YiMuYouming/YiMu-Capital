@@ -60,7 +60,7 @@ class TradeTicketsSchemaTest(unittest.TestCase):
             "style_adjustment_approver", "style_script_version", "rule_pack_version",
             "rule_snapshot_hash", "today_execution_card_id", "funds_source_freshness",
             "funds_query_time", "funds_unit", "eod_outcome_json", "linked_ticket_id",
-            "close_reason", "review_note",
+            "close_reason", "review_note", "ticket_purpose",
         }
         self.assertTrue(expected <= cols, f"missing columns: {sorted(expected - cols)}")
 
@@ -116,6 +116,7 @@ class TradeTicketsSchemaTest(unittest.TestCase):
             "triggered_rule_ids_json": ["WIN-W2-001"],
             "today_execution_card_id": "EXEC-20260603",
             "rule_snapshot_hash": "hash-1",
+            "ticket_purpose": "post_trade_reconciliation",
         })
 
         self.assertTrue(ticket_id.startswith("TICKET-20260603-002281"))
@@ -124,6 +125,7 @@ class TradeTicketsSchemaTest(unittest.TestCase):
         self.assertEqual(ticket["code"], "002281")
         self.assertEqual(ticket["rule_state"], {"tradable": True})
         self.assertEqual(ticket["triggered_rule_ids"], ["WIN-W2-001"])
+        self.assertEqual(ticket["ticket_purpose"], "post_trade_reconciliation")
 
     def test_query_update_and_link_ticket(self):
         ticket_id = db.create_trade_ticket({

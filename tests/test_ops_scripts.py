@@ -45,7 +45,18 @@ class CommonTests(unittest.TestCase):
         self.assertIsNone(result)
 
     def test_read_baseline_summary_parses_correctly(self):
-        data = _make_fixture_baseline()
+        data = _make_fixture_baseline({
+            "meta": {
+                **_make_fixture_baseline()["meta"],
+                "field_sources": {
+                    "今日操作": {
+                        "source_note": "2026_5_28_Thursday_ReviewNote.md",
+                        "source_date": "2026-05-28",
+                        "fallback": False,
+                    }
+                },
+            }
+        })
         with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False,
                                          encoding="utf-8") as f:
             json.dump(data, f)
@@ -57,6 +68,7 @@ class CommonTests(unittest.TestCase):
             self.assertEqual(summary["pools_note"], "2026-05-27 收盘自选池")
             self.assertEqual(summary["lianban_count"], 1)
             self.assertEqual(summary["trend_count"], 2)
+            self.assertEqual("2026-05-28", summary["today_operations_source_date"])
         finally:
             Path(p).unlink(missing_ok=True)
 

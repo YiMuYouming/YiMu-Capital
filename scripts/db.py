@@ -176,6 +176,7 @@ def init_db():
             code                        TEXT NOT NULL,
             name                        TEXT,
             action_type                 TEXT NOT NULL,
+            ticket_purpose              TEXT NOT NULL DEFAULT 'execution',
             status                      TEXT NOT NULL DEFAULT 'draft',
             window                      TEXT,
             intent_text                 TEXT,
@@ -308,6 +309,9 @@ def init_db():
     ]:
         if col not in trade_cols:
             conn.execute(f"ALTER TABLE trade_records ADD COLUMN {col} {col_type}")
+    ticket_cols = {row['name'] for row in conn.execute("PRAGMA table_info(trade_tickets)").fetchall()}
+    if 'ticket_purpose' not in ticket_cols:
+        conn.execute("ALTER TABLE trade_tickets ADD COLUMN ticket_purpose TEXT NOT NULL DEFAULT 'execution'")
     # Drop old unconditional unique index; replace with conditional ones
     conn.execute("DROP INDEX IF EXISTS idx_tr_uniq")
     conn.execute("""CREATE UNIQUE INDEX IF NOT EXISTS idx_tr_uniq
@@ -371,7 +375,10 @@ TICKET_STATUSES = {
     "closed_with_conflict",
     "audit_degraded",
     "manual_review",
+    "reconciliation_ready",
 }
+
+TICKET_PURPOSES = {"execution", "post_trade_reconciliation"}
 
 TICKET_JSON_COLUMNS = {
     "rule_state_json",
@@ -434,6 +441,10 @@ def create_trade_ticket(data):
     if status not in TICKET_STATUSES:
         raise ValueError(f"invalid ticket status: {status}")
     payload["status"] = status
+    purpose = payload.get("ticket_purpose", "execution")
+    if purpose not in TICKET_PURPOSES:
+        raise ValueError(f"invalid ticket purpose: {purpose}")
+    payload["ticket_purpose"] = purpose
     payload.setdefault("ticket_id", _generate_ticket_id(conn, payload["trade_date"], payload["code"]))
 
     insert_cols = []
@@ -754,7 +765,9 @@ def record_confirmed_fill(entry, rule_state=None, market_snapshot=None, confirma
     ticket = conn.execute("SELECT * FROM trade_tickets WHERE ticket_id = ?", (ticket_id,)).fetchone()
     if not ticket:
         raise ValueError(f"ticket not found: {ticket_id}")
-    if str(ticket["status"]) not in {"executable", "confirmed", "partially_filled", "audit_degraded"}:
+    if str(ticket["status"]) not in {
+        "executable", "confirmed", "partially_filled", "audit_degraded", "reconciliation_ready"
+    }:
         raise ValueError(f"ticket {ticket_id} cannot accept fills in status {ticket['status']}")
 
     action = str(_entry_get(entry, "action", "动作") or "")

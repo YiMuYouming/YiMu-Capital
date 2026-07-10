@@ -241,6 +241,34 @@ class TradeTicketsStatusGroupingTest(unittest.TestCase):
             "audit_degraded 应与可执行票据同列展示",
         )
 
+    def test_reconciliation_ticket_is_separate_and_not_presented_as_execution_authority(self):
+        result = _render_widget(
+            "trade-tickets.js",
+            "W24",
+            {
+                "trade_tickets": [
+                    {
+                        "ticket_id": "TICKET-RECON-1",
+                        "ticket_purpose": "post_trade_reconciliation",
+                        "status": "reconciliation_ready",
+                        "action_type": "buy",
+                        "code": "000001",
+                        "name": "平安银行",
+                        "max_qty": 100,
+                    }
+                ]
+            },
+            extra_js="global.window = {_healthConfirmed:true,_healthCritical:true,_tradeEntryAllowed:false};",
+        )
+        self.assertNotIn("_error", result)
+        html = result["html"]
+        self.assertIn('data-ticket-column="reconciliation"', html)
+        self.assertIn(">成交补录</span><b>1</b>", html)
+        self.assertIn("成交补录", html)
+        self.assertIn('data-tt-auto-preview="TICKET-RECON-1"', html)
+        self.assertNotIn('data-tt-auto-preview="TICKET-RECON-1" disabled', html)
+        self.assertIn(">可执行</span><b>0</b>", html)
+
     def test_legacy_context_blocked_exit_ticket_is_displayed_as_audit_degraded(self):
         fixture = {
             "trade_tickets": [

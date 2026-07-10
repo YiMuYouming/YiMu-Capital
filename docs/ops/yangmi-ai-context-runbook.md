@@ -32,10 +32,10 @@ curl -s http://127.0.0.1:18088/api/ai/context | python3 -m json.tool
 3. 再读 `/Users/yimu/Documents/YM_Capital/ai-rule-system/RULE_GATE.md` 和 `docs/trade-ticket-workflow.md`，确认当前规则门与票据写入边界。
 4. 再读 `/api/ai/context` 的 `schema_version` 和 `generated_at`：确认拿到的是当前契约和新鲜事实包。
 5. `freshness`：确认行情、账户、情绪、基线是否 live/delayed/stale/dead。
-6. `situation.trade_entry_allowed` 和 `situation.trade_entry_reason`：先判断能不能生成或推进 ticket。
+6. `decision_gate.allowed` 和 `decision_gate.reason`：这是唯一最终交易入口；兼容字段 `situation.trade_entry_allowed` 只用于旧消费者，不得反向覆盖 decision gate。
 7. `risks`：所有阻断和关键风险先报出来。
 8. `human_required`：这里列出的事项必须让主人确认或复核。
-9. `tickets`：看 pending/executable/blocked/completed 以及具体票据。
+9. `tickets`：看 pending/executable/reconciliation/blocked/completed 以及具体票据和 `ticket_purpose`。
 10. `positions`、`candidates`、`alerts`：补充持仓、候选和提示。
 
 冰点 W1 黄灯专项口径：
@@ -48,7 +48,7 @@ curl -s http://127.0.0.1:18088/api/ai/context | python3 -m json.tool
 
 问“现在能不能操作？”
 
-- 先看 `situation.trade_entry_allowed`。
+- 先看 `decision_gate.allowed`；字段缺失或 AI context 不可用时 fail closed。
 - 如果是 `false`，回答阻断原因，并列出 `risks` 和 `human_required`。
 - 如果是 `true`，仍要确认 `freshness.quotes.status` 不是 stale/dead/missing，再看 `rule_state.windows.*.buy_allowed` 和 `tickets.executable`。
 
@@ -60,10 +60,12 @@ curl -s http://127.0.0.1:18088/api/ai/context | python3 -m json.tool
 
 问“票据有没有要执行的？”
 
-- 看 `tickets.executable` 和 `tickets.items`。
+- 看 `tickets.executable`、`tickets.reconciliation` 和 `tickets.items`。
 - 盘中任务队列以 `/api/ai/context.tickets` 为主。
 - 需要直接查票据列表时必须传交易日：`GET /api/trade/tickets?date=YYYY-MM-DD`。裸 `/api/trade/tickets` 只默认当天，不代表历史全量。
 - `executable`、`audit_degraded`、`partially_filled`、`manual_review`、`confirmed`、`draft` 都需要人工确认。
+- `ticket_purpose=execution` 才是执行票；买入/加仓/做T会在 preview 和 confirm 时重新校验当前 `decision_gate`，不能凭旧票据绕过新门禁。
+- `ticket_purpose=post_trade_reconciliation` 只记录已经发生的券商成交，状态 `reconciliation_ready`，不得描述为“可执行”，且必须由 `confirmed_by=yimu` 确认。
 - 有 `blocked` 或 `TICKET_QUERY_ERROR` 时，不能假定“没有票据”。
 - 废票不要改 Markdown，也不要裸写 SQL；用 `POST /api/trade/tickets/{ticket_id}/close` 写入 `closed/cancelled/closed_with_conflict`、`close_reason` 和 `review_note`。`executable` / `blocked` 废票会污染 `/api/ai/context.tickets`，必须闭环。
 
@@ -83,7 +85,7 @@ curl -s http://127.0.0.1:18088/api/ai/context | python3 -m json.tool
 
 外查后也要回到本事实包复核：
 
-- 外查不能绕过 `trade_entry_allowed=false`。
+- 外查不能绕过 `decision_gate.allowed=false`。
 - 外查不能替代 `human_required`。
 - 外查结论如果和仪表盘冲突，先报冲突，不直接行动。
 - 外查不能授权下单、调用券商接口或直接 confirm 成交。
@@ -96,7 +98,7 @@ import json, urllib.request
 
 ctx = json.load(urllib.request.urlopen("http://127.0.0.1:8088/api/ai/context", timeout=5))
 print("generated_at:", ctx.get("generated_at"))
-print("trade_allowed:", (ctx.get("situation") or {}).get("trade_entry_allowed"))
+print("decision_gate:", ctx.get("decision_gate", {}))
 print("risks:", [r.get("code") for r in ctx.get("risks", [])])
 print("human_required:", [h.get("code") for h in ctx.get("human_required", [])])
 print("tickets:", ctx.get("tickets", {}))
@@ -109,7 +111,7 @@ PY
 
 ```text
 我先读了 /api/ai/context。
-当前：trade_entry_allowed=<true/false>，行情=<status>，账户=<status>。
+当前：decision_gate.allowed=<true/false>，行情=<status>，账户=<status>。
 阻断/风险：...
 需要你确认：...
 下一步建议：...

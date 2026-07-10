@@ -148,6 +148,7 @@ class TicketAwareSyncTest(unittest.TestCase):
         self.assertEqual(status, 200, body)
         self.assertTrue(body["ticket_id"].startswith("TICKET-"))
         ticket = db.query_trade_ticket(body["ticket_id"])
+        self.assertEqual(ticket["ticket_purpose"], "post_trade_reconciliation")
         self.assertEqual(ticket["rule_snapshot_hash"], "hash-1")
         self.assertEqual(ticket["today_execution_card_id"], "EXEC-20260604")
         self.assertEqual(len(db._exec("SELECT * FROM trade_records")), 1)

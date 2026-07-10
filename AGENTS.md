@@ -19,10 +19,12 @@
 
 ```bash
 git status --short
-PYTHONDONTWRITEBYTECODE=1 python3 -m unittest <相关测试> -v
-PYTHONDONTWRITEBYTECODE=1 python3 -m compileall -q scripts tests
+PYTHONDONTWRITEBYTECODE=1 /opt/homebrew/bin/python3 -m unittest <相关测试> -v
+PYTHONDONTWRITEBYTECODE=1 /opt/homebrew/bin/python3 -m compileall -q scripts tests
 git diff --check
 ```
+
+本机代码与测试统一使用 Python 3.10+，当前入口 `/opt/homebrew/bin/python3`；Hermes 生产命令仍使用服务器自己的 `python3`。
 
 部署到 Hermes：
 
@@ -44,7 +46,7 @@ python3 scripts/ops/close_day.py --dry-run
 python3 scripts/ops/close_day.py --apply
 ```
 
-`open_day.py --apply --restart-cloud` 会从本地 Vault 复盘笔记生成 `data/dashboard_data.json` / `data/pools.json`，rsync 到 Hermes，并重启 8088。开盘验收至少确认 `/api/health.baseline=ok`、`/api/baseline.meta.note` 是当日 ReviewNote、`decision.锚定股状态` 与昨日确定的锚定股一致。
+`open_day.py --apply --restart-cloud` 会从本地 Vault 复盘笔记生成 `data/dashboard_data.json` / `data/pools.json`，rsync 到 Hermes，并重启 8088。开盘验收至少确认 `/api/health.baseline=ok`、`/api/baseline.meta.note` 是当日 ReviewNote、`meta.field_sources.今日操作.source_date` 与今日一致、`decision.锚定股状态` 与昨日确定的锚定股一致。日期绑定字段缺失时保持空值并显式暴露来源，不得从历史 ReviewNote 匿名回填；仅 W12/W13 池子按 `pools_note_date=上一交易日` 有意读取昨日终稿。
 
 `close_day.py --apply` 会在 Hermes 创建 SQLite 一致性备份，拉回本地 `pnl.db` 和关键 JSON，生成
 `data/review_packets/YYYY-MM-DD/review_source_packet.json`，再生成项目专用数据包并上传 OSS。
@@ -77,11 +79,12 @@ curl -s localhost:8088/api/pnl/summary | python3 -m json.tool
 curl -s localhost:8088/api/ai/context | python3 -m json.tool
 ```
 
-- 顶栏"阻断"先查 `/api/health`，不要只看截图下结论。
-- 顶栏"降级"不是"阻断"，交易入口以 `/api/health.trade_entry_allowed` 为准。
+- 顶栏"阻断"先查 `/api/ai/context.decision_gate`，再用 `/api/health` 拆解服务健康与 freshness；不要只看截图下结论。
+- 顶栏"降级"不是"阻断"。交易入口唯一最终口径是 `/api/ai/context.decision_gate.allowed`；`/api/health.trade_entry_allowed` 仅保留兼容/诊断，不能授予交易入口。AI context 缺失时 fail closed。
 - 冰点 W1 黄灯只表示极化主线强回踩进入人工复核；`manual_review_allowed=true` 不能当作 `buy_allowed=true`，也不能生成 executable ticket。
 - 洋米读不到事实包先查 `/api/ai/context`，失败再查 `/api/health`。
 - 盘中票据队列优先读 `/api/ai/context.tickets`；如果直接 GET `/api/trade/tickets`，必须传 `?date=YYYY-MM-DD`，避免把历史票据误当今日票据。无 date 时服务端只默认返回当天。
+- `ticket_purpose=execution` 是交易执行票，买入/加仓/做T在 preview 和 confirm 两次重新校验当前 `decision_gate`。`ticket_purpose=post_trade_reconciliation` 是已发生成交补录，状态 `reconciliation_ready`，不构成 executable 授权，只允许 `confirmed_by=yimu`。
 - 8088/18088 混淆、交易录入、数据同步问题先看 `docs/ops/2026-05-28-cloud-data-sync-runbook.md`。
 
 ## 禁止操作

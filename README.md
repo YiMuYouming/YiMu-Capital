@@ -52,7 +52,7 @@ python3 scripts/ops/open_day.py --apply --restart-cloud  # 同步后重启云端
 
 手动备选：`python3 scripts/gen_dashboard_data.py` → `rsync` → `systemctl restart`。
 
-开盘验收至少确认：
+开盘验收至少确认（日期绑定字段不允许从历史 ReviewNote 静默回填；只有 W12/W13 池子通过 `pools_note_date` 有意读取上一交易日终稿）：
 
 ```bash
 curl -s http://127.0.0.1:8088/api/health | python3 -m json.tool
@@ -62,6 +62,7 @@ from urllib.request import urlopen
 
 data = json.load(urlopen("http://127.0.0.1:8088/api/baseline", timeout=10))
 print(data.get("meta", {}).get("note"))
+print((data.get("meta", {}).get("field_sources") or {}).get("今日操作"))
 print([x.get("标的") for x in (data.get("decision", {}).get("锚定股状态") or [])])
 PY
 ```
@@ -90,7 +91,9 @@ python3 scripts/ops/close_day.py --apply     # 云端备份 + 拉回本地 + rev
 | 阻断 | critical 故障（行情 dead/账户 error/锚点缺失），交易录入关闭 |
 | 无响应 | API 不可达（云端服务或 SSH tunnel 中断） |
 
-交易入口以 `/api/health.trade_entry_allowed` 为准；不要把“降级”误判成“阻断”。
+交易入口以 `/api/ai/context.decision_gate.allowed` 为唯一最终口径；`/api/health` 只说明服务健康与 freshness，不能授予交易权限。AI context 缺失时按阻断处理。不要把“降级”误判成“阻断”。
+
+票据分两类：`ticket_purpose=execution` 才是执行票，并在成交 preview/confirm 两次重新校验当前 `decision_gate`；`ticket_purpose=post_trade_reconciliation` 只记录已发生的券商成交，状态是 `reconciliation_ready`，在 W24 单列为“成交补录”，永远不显示为“可执行”，且只能由弈沐确认。
 
 ## 代码 vs 数据
 
@@ -164,7 +167,7 @@ python3 scripts/check_runtime.py --preflight   # 启动前检查
 | `/api/pnl/summary` | GET | PnL 摘要（含 valuation_complete） | 实时 |
 | `/api/pnl?range=today&index=sh` | GET | PnL 曲线 | 5min/日结 |
 | `/api/live/quotes` | GET | 实时行情（含 iwencai、北向、热榜、W26 主攻方向） | 5s |
-| `/api/ai/context` | GET | Agent 只读事实包（健康/新鲜度/风险/票据/人审动作）；盘中票据优先读 `tickets` 字段 | 按需 |
+| `/api/ai/context` | GET | Agent 只读事实包（含唯一最终门禁 `decision_gate.v1`、健康/新鲜度/风险/票据/人审动作）；盘中票据优先读 `tickets` 字段 | 按需 |
 | `/api/baseline` | GET | dashboard_data.json | 60s |
 | `/api/sync` | POST | W15 单笔成交录入 | 随录 |
 | `/api/trades/review?date=YYYY-MM-DD` | GET | W23 逐笔复盘 | 按需 |
@@ -176,7 +179,7 @@ python3 scripts/check_runtime.py --preflight   # 启动前检查
 | 症状 | 排查 |
 |------|------|
 | 看板白屏 | `curl localhost:8088/api/pnl/summary` |
-| 顶栏显示"阻断" | `curl localhost:8088/api/health` 查 `critical_ok` / `trade_entry_allowed` |
+| 顶栏显示"阻断" | `curl localhost:8088/api/ai/context` 查 `decision_gate`，再用 `/api/health` 拆解健康原因 |
 | 顶栏显示"无响应" | 检查 SSH tunnel: `lsof -i :8088 \| grep ssh`；检查 hermes 服务: `systemctl is-active yimu-live-dashboard.service` |
 | 洋米读不到事实包 | `curl -s localhost:8088/api/ai/context \| python3 -m json.tool`；失败再查 `/api/health` |
 | 情绪数据空 | `/api/live/quotes` 是否有 `iwencai` 字段，iwencai collector 是否在跑 |

@@ -1489,7 +1489,8 @@ window._healthConfirmed = false;
       var degraded = (h.degraded_reasons || []).length > 0;
       window._quoteHealthStatus = h.quotes && h.quotes.status === 'close_snapshot' ? 'close_snapshot' : null;
       _renderConnectionStatus(DataStore.getConnectionStatus());
-      window._tradeEntryAllowed = te !== false;
+      // Final trade entry comes from DataStore decision_gate.v1. Health only
+      // controls system-health rendering and must never grant an action.
       if (te === false) {
         hDot.className = 'health-dot dead'; hLabel.textContent = '阻断'; hLabel.style.color = 'var(--danger)';
         window._healthCritical = true; window._healthConfirmed = true;
