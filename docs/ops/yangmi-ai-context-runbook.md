@@ -27,7 +27,7 @@ curl -s http://127.0.0.1:18088/api/ai/context | python3 -m json.tool
 
 洋米回答盯盘问题时，先按这个顺序读：
 
-1. 先读 `/Users/yimu/Documents/YM_Capital/ai-rule-system/AGENT_QUICKSTART.md`，确认 Rule 2.0 四层边界和不得下单/不得 confirm 的红线。
+1. 先读 `/Users/yimu/Documents/YM_Capital/ai-rule-system/AGENT_QUICKSTART.md`，确认 Rule 2.0 四层边界：不得向券商下单、不得自签 confirm；但弈沐在当前对话中的自然语言明确授权可由 Agent 代执行正式 ticket API。完整的已成交事实或“确认票据 <id>”指令允许 `preview → confirm → 四项回读`，无需重复确认。
 2. 再读 `/Users/yimu/Documents/YM_Capital/ai-rule-system/compiled/rules.v1.json`，确认当前执行规则机器包可用。
 3. 再读 `/Users/yimu/Documents/YM_Capital/ai-rule-system/RULE_GATE.md` 和 `docs/trade-ticket-workflow.md`，确认当前规则门与票据写入边界。
 4. 再读 `/api/ai/context` 的 `schema_version` 和 `generated_at`：确认拿到的是当前契约和新鲜事实包。
