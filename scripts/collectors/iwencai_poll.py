@@ -47,6 +47,9 @@ def _iwencai_query(*args, **kwargs):
 
 CACHE = {}
 
+_BREADTH_UP_KEYS = ("涨停", ">7%", "5~7%", "3~5%", "0~3%")
+_BREADTH_DOWN_KEYS = ("-0~-3%", "-3~-5%", "-5~-7%", "<-7%", "跌停")
+
 
 def is_trading_time():
     now = datetime.now()
@@ -271,11 +274,43 @@ def _preserve_same_day_iwencai_fields(results):
     return results
 
 
+def _pytdx_core_market():
+    """Return zero-auth core market facts already collected by PyTDX breadth.
+
+    The live-index fallback intentionally exposes the same bucket shape with
+    zero limit counts, so it must not be treated as an exact PyTDX breadth
+    sample.
+    """
+    breadth = CACHE.get("breadth") or {}
+    if not isinstance(breadth, dict):
+        return {}
+    if breadth.get("_source") == "live_index_fallback":
+        return {}
+    try:
+        total = int(float(breadth.get("_total") or 0))
+        up = sum(int(float(breadth.get(key) or 0)) for key in _BREADTH_UP_KEYS)
+        down = sum(int(float(breadth.get(key) or 0)) for key in _BREADTH_DOWN_KEYS)
+        limit_up = int(float(breadth.get("涨停") or 0))
+        limit_down = int(float(breadth.get("跌停") or 0))
+    except (TypeError, ValueError):
+        return {}
+    if total <= 0 or up + down <= 0:
+        return {}
+    return {
+        "up": up,
+        "down": down,
+        "limit_up": limit_up,
+        "limit_down": limit_down,
+        "source": "pytdx_breadth",
+    }
+
+
 def poll_iwencai_sentiment(force=False):
     if not force and not is_trading_time():
         return
 
     results = {}
+    core_market = _pytdx_core_market()
     try:
         # === 涨停收益 + 赚钱效应 ===
         r = _iwencai_query("昨日涨停 今日涨跌幅 非st", limit=100)
@@ -311,17 +346,13 @@ def poll_iwencai_sentiment(force=False):
         if avg is not None:
             results["炸板收益"] = avg
 
-        # === 实时情绪值：iwencai 上涨/下跌家数，不使用 live_index_fallback ===
-        try:
-            up_cnt = len(_iwencai_query("今日上涨 非st", limit=6000).get("datas", []))
-            down_cnt = len(_iwencai_query("今日下跌 非st", limit=6000).get("datas", []))
-            total_cnt = up_cnt + down_cnt
-            if up_cnt > 0 and down_cnt > 0 and total_cnt > 0:
-                results["情绪值"] = round(up_cnt / total_cnt * 100, 1)
-                results["_emotion_source"] = "iwencai_up_down"
-                results["_emotion_counts"] = {"up": up_cnt, "down": down_cnt}
-        except Exception:
-            pass
+        # === 实时情绪值：PyTDX 全市场 breadth，零鉴权且已由 30s collector 维护 ===
+        up_cnt = core_market.get("up")
+        down_cnt = core_market.get("down")
+        if up_cnt and down_cnt:
+            results["情绪值"] = round(up_cnt / (up_cnt + down_cnt) * 100, 1)
+            results["_emotion_source"] = core_market["source"]
+            results["_emotion_counts"] = {"up": up_cnt, "down": down_cnt}
 
         # === 最高板 + 次高板 + 连板股列表 ===
         r = _iwencai_query("连续涨停天数>=2 非st 连续涨停天数 所属行业 封板时间 换手率", limit=50)
@@ -378,20 +409,24 @@ def poll_iwencai_sentiment(force=False):
         if lb_stocks:
             results["连板股列表"] = lb_stocks
 
-        # === 封板率 + 炸板率 + 跌停家数 ===
+        # === 封板率 + 炸板率；涨跌停核心计数优先 PyTDX ===
         r = _iwencai_query("今日触及涨停 非st", limit=200)
         touch_cnt = len(r.get("datas", []))
-        r = _iwencai_query("今日涨停 非st", limit=200)
-        close_cnt = len(r.get("datas", []))
-        r = _iwencai_query("今日跌停 非st", limit=200)
-        dt_cnt = len(r.get("datas", []))
-        if close_cnt == 0:
+        close_cnt = core_market.get("limit_up")
+        dt_cnt = core_market.get("limit_down")
+        counts_verified = bool(core_market)
+        if close_cnt is not None and dt_cnt is not None:
+            results["_limit_source"] = core_market["source"]
+        else:
             em_counts = _eastmoney_limit_counts()
-            close_cnt = em_counts.get("涨停家数", close_cnt)
-            dt_cnt = em_counts.get("跌停家数", dt_cnt)
+            close_cnt = em_counts.get("涨停家数")
+            dt_cnt = em_counts.get("跌停家数")
             if em_counts:
+                counts_verified = True
                 results["_limit_source"] = "eastmoney_zt_pool"
-        limit_counts_valid = touch_cnt > 0 or close_cnt > 0 or dt_cnt > 0
+        close_cnt = int(close_cnt or 0)
+        dt_cnt = int(dt_cnt or 0)
+        limit_counts_valid = counts_verified or touch_cnt > 0 or close_cnt > 0 or dt_cnt > 0
         if touch_cnt > 0 or close_cnt > 0:
             base = max(touch_cnt, close_cnt)
             results["封板率"] = round(min(close_cnt / base, 1.0), 4) if base > 0 else 0

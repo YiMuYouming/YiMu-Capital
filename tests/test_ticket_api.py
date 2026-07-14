@@ -178,6 +178,36 @@ class TicketApiTest(unittest.TestCase):
         self.assertEqual("reconciliation_ready", body["ticket"]["status"])
         self.assertNotEqual("executable", body["ticket"]["status"])
 
+    def test_reconciliation_fill_preserves_declared_trade_time(self):
+        status, prepared = _call("POST", "/api/trade/tickets/prepare", {
+            "intent_text": "已买 瑞芯微 100股 223.18",
+            "action_type": "buy",
+            "code": "603893",
+            "name": "瑞芯微",
+            "window": "W2",
+            "trade_time": "14:50",
+            "ticket_purpose": "post_trade_reconciliation",
+            "human_override_reason": "券商已成交，仅补录事实",
+        })
+        self.assertEqual(200, status, prepared)
+
+        ticket = prepared["ticket"]
+        preview_status, preview = _call("POST", "/api/trade/fills/preview", {
+            "input_text": "已买 瑞芯微 100股 223.18",
+            "ticket_id": ticket["ticket_id"],
+        })
+        self.assertEqual(200, preview_status, preview)
+
+        confirm_status, confirmed = _call("POST", "/api/trade/fills/confirm", {
+            "confirmation_id": preview["confirmation_id"],
+            "preview_token": preview["preview_token"],
+            "preview_hash": preview["preview_hash"],
+            "confirmed_by": "yimu",
+        })
+        self.assertEqual(200, confirm_status, confirmed)
+        trade = dict(db._exec("SELECT * FROM trade_records")[0])
+        self.assertEqual("14:50", trade["trade_time"])
+
     def test_legacy_posthoc_trade_without_reconciliation_purpose_is_blocked(self):
         bridge._build_trade_context = lambda: {
             "rule_state": {

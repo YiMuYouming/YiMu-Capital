@@ -669,6 +669,37 @@ class CorrectionTradeTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             db.insert_correction_trade(999, None, None, None, "no such trade")
 
+    def test_reversing_sell_restores_quantity_without_repricing_position(self):
+        anchor = {
+            "date": "2026-07-13",
+            "effective_at": "2026-07-13T09:25:00",
+            "cash": 388947.47,
+            "day_start_asset": 0,
+            "source": "previous_close",
+            "positions": [{
+                "标的": "海兰信", "代码": "300065", "数量": 8000,
+                "成本": 22.40, "现价": 25.64, "状态": "持有",
+            }],
+        }
+        trades = [
+            {"id": 137, "trade_date": "2026-07-13", "trade_time": "14:50",
+             "action": "卖出", "code": "300065", "name": "海兰信",
+             "price": 26.11, "qty": 3000, "fee": 0},
+            {"id": 134, "trade_date": "2026-07-13", "trade_time": "17:28:57",
+             "action": "卖出", "code": "300065", "name": "海兰信",
+             "price": 25.64, "qty": 3000, "fee": 0},
+            {"id": 136, "trade_date": "2026-07-13", "trade_time": "17:49:35",
+             "action": "买入", "code": "300065", "name": "海兰信",
+             "price": 25.64, "qty": 3000, "fee": 0,
+             "is_reversal": 1, "reversal_of_id": 134},
+        ]
+
+        state = reduce_account_state(anchor, trades, {}, now="2026-07-13T18:00:00")
+
+        self.assertEqual(467277.47, state["cash"])
+        self.assertEqual(5000, state["positions"][0]["数量"])
+        self.assertEqual(22.40, state["positions"][0]["成本"])
+
 
 class FullLifecycleReplayTests(unittest.TestCase):
     """完整生命周期回放：日初锚点 → 盘中交易 → 重复提交幂等 → 冲销纠错 → bridge 重启 → 收盘日结 → 次日启动"""

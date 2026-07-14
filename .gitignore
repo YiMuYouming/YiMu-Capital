@@ -16,8 +16,10 @@ data/backups/
 data/cloud-backups/
 data/review_packets/
 data/reviews/
+data/limitboard_reports/
 data/ymwm_report.json
 data/zt_history.json
+output/limitboard_report_*.html
 
 # OS files
 .DS_Store

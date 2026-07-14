@@ -58,6 +58,12 @@ except ImportError:
         def build_attack_direction(*_args, **_kwargs):
             return {}
 
+try:
+    from scripts.limitboard_report import load_latest_limitboard_report
+except ImportError:
+    def load_latest_limitboard_report():
+        return {}
+
 # 内存缓存（APScheduler 采集线程写入，HTTP handler 读取）
 CACHE = {}
 CACHE_FILE = ROOT / "data" / "cache_dump.json"
@@ -1824,6 +1830,7 @@ def _prepare_trade_ticket(payload):
         "ticket_purpose": ticket_purpose,
         "status": status,
         "window": window,
+        "trade_time": trade_time or None,
         "intent_text": (payload or {}).get("intent_text"),
         "rule_state_json": rule_state,
         "market_snapshot_json": market_snapshot,
@@ -1953,8 +1960,13 @@ def _parse_fill_input(input_text, ticket):
             leg_type = "sell_t_old_lot" if action_type in ("do_t", "reduce", "sell") else "sell"
     else:
         leg_type = "buy_add" if action_type in ("add", "buy") else "buy"
+    trade_time = datetime.now().strftime("%H:%M:%S")
+    if str(ticket.get("ticket_purpose") or "") == "post_trade_reconciliation":
+        declared_trade_time = str(ticket.get("trade_time") or "").strip()
+        if declared_trade_time:
+            trade_time = declared_trade_time
     parsed = {
-        "时间": datetime.now().strftime("%H:%M:%S"),
+        "时间": trade_time,
         "动作": action,
         "代码": ticket.get("code"),
         "标的": ticket.get("name"),
@@ -2315,6 +2327,7 @@ def _build_live_quotes_payload(rule_state=None):
         'live_sectors': live_sectors,
         'hot_list': hot_list,
         'limit_up_detail': limit_up_detail,
+        'limitboard_report': load_latest_limitboard_report(),
         'sector_inflow': sector_inflow,
         'attack_direction': build_attack_direction(hot_list, sector_inflow, live_sectors, limit_up_detail=limit_up_detail),
         'northbound': CACHE.get('northbound', {}),
@@ -3481,6 +3494,24 @@ def _build_health(account_state=None, now=None):
     return result
 
 
+def _sentiment_history_payload(day):
+    """Return one trading day's node snapshots instead of the 90-day file."""
+    snap_file = ROOT / "data" / "sentiment_auto.json"
+    rows = []
+    if snap_file.exists():
+        try:
+            payload = json.loads(snap_file.read_text(encoding="utf-8"))
+            if isinstance(payload, dict) and isinstance(payload.get(day), list):
+                rows = payload[day]
+        except (OSError, json.JSONDecodeError):
+            rows = []
+    return {
+        "date": day,
+        "rows": rows,
+        "source": "sentiment_auto",
+    }
+
+
 class BridgeHandler(SimpleHTTPRequestHandler):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=str(ROOT), **kwargs)
@@ -3561,6 +3592,12 @@ class BridgeHandler(SimpleHTTPRequestHandler):
                 self.wfile.write(body)
             finally:
                 self._db_close()
+            return
+        elif parsed.path == '/api/sentiment/history':
+            params = parse_qs(parsed.query)
+            requested_date = (params.get('date') or [None])[0]
+            day = requested_date or datetime.now().strftime('%Y-%m-%d')
+            _send_json(self, 200, _sentiment_history_payload(day))
             return
         elif parsed.path == '/api/baseline':
             _ensure_db()
@@ -4584,7 +4621,7 @@ if __name__ == '__main__':
     scheduler.add_job(quotes.log_pnl_snapshot, 'interval', seconds=300, id='pnl_snap_300s',
                       max_instances=1, misfire_grace_time=600)
     # T2 阶段（2min-5min）
-    # iwencai 10min轮询（仅涨停收益/连板收益/炸板收益，PyTDX不可替代）
+    # iwencai 10min 只补收益/晋级/连板等语义指标；情绪值和涨跌停核心计数由 PyTDX breadth 提供
     scheduler.add_job(iwencai_poll.poll_iwencai_sentiment, 'interval', minutes=10, id='iwencai_10min',
                       max_instances=1, misfire_grace_time=300)
     scheduler.add_job(market_data.poll_sector_inflow, 'interval', minutes=5, id='sector_inflow_5min',

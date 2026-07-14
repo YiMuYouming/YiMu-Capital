@@ -2268,6 +2268,89 @@ global.localStorage = { getItem: function() { return null; }, setItem: function(
         self.assertIn("zt-empty", html)
         self.assertIn("今日确认涨停源暂不可用", html)
 
+    def test_w21_uses_confirmed_limit_up_detail_before_post_close_report(self):
+        extra_js = """
+var RealDate = Date;
+global.Date = class extends RealDate {
+  constructor() {
+    if (arguments.length === 0) return new RealDate('2026-07-14T15:20:00+08:00');
+    return new RealDate(...arguments);
+  }
+  static now() { return new RealDate('2026-07-14T15:20:00+08:00').getTime(); }
+  static parse(v) { return RealDate.parse(v); }
+  static UTC() { return RealDate.UTC.apply(RealDate, arguments); }
+};
+global.localStorage = { getItem: function() { return null; }, setItem: function() {} };
+"""
+        result = _render_widget("zt-echelon.js", "W21", {
+            "hot_list": {
+                "date": "2026-07-14", "stocks": [], "zt_stocks": [],
+                "reason_stats": {}, "zt_history": {},
+            },
+            "limit_up_detail": {
+                "_source": "iwencai_limit_up_detail",
+                "_updated": "2026-07-14T15:06:52+08:00",
+                "stocks": [
+                    {"code": "600664", "name": "哈药股份", "board_count": 3,
+                     "reason": "业绩预增", "change_pct": 9.97},
+                    {"code": "001388", "name": "信通电子", "board_count": 2,
+                     "reason": "PCB", "change_pct": 10.0},
+                ],
+            },
+            "limitboard_report": {
+                "schema_version": "limitboard-report.v1",
+                "date": "2026-07-14", "market_phase": "post_close",
+                "summary": {"limit_up": 92, "limit_down": 29, "broken": 21},
+                "limit_up_stocks": [
+                    {"code": "600664", "name": "哈药股份", "board_count": 3},
+                    {"code": "999999", "name": "日报独有样本", "board_count": 1},
+                ],
+                "quality": {"status": "degraded", "warnings": ["跨源数量不一致"]},
+            },
+            "iwencai": {"连板股列表": []},
+        }, extra_js=extra_js)
+        html = result.get("html", "")
+        self.assertIn("确认涨停明细", html)
+        self.assertIn("哈药股份", html)
+        self.assertIn("信通电子", html)
+        self.assertIn("3板", html)
+        self.assertIn("日报 92 / 炸板 21 / 跌停 29", html)
+        self.assertNotIn("日报独有样本", html)
+
+    def test_w21_uses_same_day_post_close_report_only_when_live_confirmed_sources_are_empty(self):
+        extra_js = """
+var RealDate = Date;
+global.Date = class extends RealDate {
+  constructor() {
+    if (arguments.length === 0) return new RealDate('2026-07-14T18:00:00+08:00');
+    return new RealDate(...arguments);
+  }
+  static now() { return new RealDate('2026-07-14T18:00:00+08:00').getTime(); }
+  static parse(v) { return RealDate.parse(v); }
+  static UTC() { return RealDate.UTC.apply(RealDate, arguments); }
+};
+global.localStorage = { getItem: function() { return null; }, setItem: function() {} };
+"""
+        result = _render_widget("zt-echelon.js", "W21", {
+            "hot_list": {"date": "2026-07-14", "stocks": [], "zt_stocks": [], "zt_history": {}},
+            "limit_up_detail": {"stocks": []},
+            "limitboard_report": {
+                "schema_version": "limitboard-report.v1",
+                "date": "2026-07-14", "market_phase": "post_close",
+                "summary": {"limit_up": 1, "limit_down": 0, "broken": 0},
+                "limit_up_stocks": [
+                    {"code": "600664", "name": "哈药股份", "board_count": 3,
+                     "change_pct": 9.97, "reason": "业绩预增"},
+                ],
+                "quality": {"status": "ok", "warnings": []},
+            },
+            "iwencai": {"连板股列表": []},
+        }, extra_js=extra_js)
+        html = result.get("html", "")
+        self.assertIn("涨停日报", html)
+        self.assertIn("哈药股份", html)
+        self.assertIn("3板", html)
+
 
 class StoreMergeRuleStateTest(unittest.TestCase):
     """store.js 真实 DataStore 流程可取得 rule_state"""

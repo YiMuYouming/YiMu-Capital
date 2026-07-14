@@ -18,9 +18,9 @@
       ↓ SSH tunnel (-L 8088:127.0.0.1:8088)
 hermes 43.132.146.234
    └─ systemd: yimu-live-dashboard.service
-      └─ bridge.py 8088 (云端, PyTDX dead 已知限制)
-         ├─ 持仓估值/W22 → Tencent/EM fallback
-         ├─ 情绪节点 → iwencai
+      └─ bridge.py 8088
+         ├─ 实时行情/市场广度/涨跌停核心计数 → PyTDX（失败才走 Tencent/EM）
+         ├─ 情绪值 → PyTDX 广度；收益/晋级/连板明细 → iwencai 语义增强
          ├─ 热榜/涨停梯队/W26 → hot_list + limit_up_detail
          └─ 竞价 → snapshot_auction 9:28
 ```
@@ -29,9 +29,10 @@ hermes 43.132.146.234
 
 ```text
 复盘笔记(SSOT, D-1) → gen_dashboard_data.py → dashboard_data.json(每日基线)
-Tencent/EM fallback → bridge CACHE → /api/live/quotes + live_index
-iwencai pywencai → CACHE["iwencai"] → 情绪指标
+PyTDX → bridge CACHE → /api/live/quotes + live_index + breadth
+iwencai/pywencai → CACHE["iwencai"] → 仅补收益、晋级、连板等语义指标
 hot_list + limit_up_detail → 涨停梯队 + W26 主攻方向
+Codex 涨跌停日报 → data/limitboard_reports/latest.json → /api/live/quotes.limitboard_report → W21 盘后补充
 account_baselines + trade_records + live quote → /api/account/state (账户 SSOT)
 dashboard facts + health + tickets + freshness → /api/ai/context (Agent 只读事实包)
 open_day.py/close_day.py → 开盘生成基线+rsync上云 / 收盘SQLite备份+拉回+review_source_packet+项目数据包备份
@@ -75,12 +76,18 @@ python3 scripts/ops/close_day.py --dry-run   # 预览步骤
 python3 scripts/ops/close_day.py --apply     # 云端备份 + 拉回本地 + review_source_packet + 项目专用数据包备份
 ```
 
+需要生成涨跌停盘后日报并接入 W21 时，调用 Codex Skill
+`$a-share-limitboard-report`。它从 8088 的 `limit_up_detail`、`limit_counts`、
+`iwencai` 与 `hot_list` 生成 HTML，并写入独立的
+`data/limitboard_reports/latest.json`。W21 始终优先使用盘中确认明细；日报只作盘后
+汇总与历史补充，数量冲突时显式显示口径差异，不覆盖实时事实。
+
 ## 盘中
 
 - **真实成交**只在 `http://localhost:8088`（云端生产）录入。
 - **组件调试**在 `http://localhost:18088`（本地预览）看效果，只读不录。
 - **监控**：顶栏健康标签表示 `正常 / 降级 / 阻断 / 无响应`。
-- **数据源**：云端 PyTDX 不可用（已知限制），行情走 Tencent/EM fallback，情绪 iwencai。
+- **数据源**：生产优先 PyTDX；实时情绪值、涨跌家数和涨跌停核心计数不调用问财。问财只补收益、晋级、连板等语义指标，失败时不覆盖 PyTDX 核心事实。
 
 ### 健康语义
 

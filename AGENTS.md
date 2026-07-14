@@ -51,6 +51,11 @@ python3 scripts/ops/close_day.py --apply
 `close_day.py --apply` 会在 Hermes 创建 SQLite 一致性备份，拉回本地 `pnl.db` 和关键 JSON，生成
 `data/review_packets/YYYY-MM-DD/review_source_packet.json`，再生成项目专用数据包并上传 OSS。
 
+盘后需要涨跌停日报时，使用 Codex Skill `$a-share-limitboard-report`。它读取 8088
+只读事实，输出 `output/limitboard_report_YYYYMMDD.html`，并将 W21 可消费的
+`limitboard-report.v1` 快照写到 `data/limitboard_reports/latest.json`。该快照属于运行
+数据，不进 Git；W21 仍以 `limit_up_detail` 等盘中确认源优先，日报不得覆盖实时事实。
+
 ## Agent 协作倾向
 
 这不是硬分工，主人可以随时调整；当前只是默认倾向：

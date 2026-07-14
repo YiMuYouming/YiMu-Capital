@@ -115,14 +115,25 @@ class QuotesCollectorTests(unittest.TestCase):
         self.assertEqual(quotes.CACHE["hot_list"]["dt_count"], 12)
         self.assertEqual(quotes.CACHE["hot_list"]["_limit_source"], "eastmoney_zt_pool")
 
-    def test_iwencai_poll_writes_realtime_emotion_from_up_down_counts(self):
+    def test_iwencai_poll_uses_pytdx_breadth_without_up_down_queries(self):
+        iwencai_poll.CACHE["breadth"] = {
+            "涨停": 1,
+            ">7%": 2,
+            "5~7%": 3,
+            "3~5%": 4,
+            "0~3%": 28,
+            "-0~-3%": 58,
+            "-3~-5%": 2,
+            "-5~-7%": 1,
+            "<-7%": 1,
+            "跌停": 0,
+            "_total": 100,
+            "_source": "pytdx",
+        }
+
         def fake_query(query, limit=100):
-            if query == "今日上涨 非st":
-                return {"datas": [{} for _ in range(38)]}
-            if query == "今日下跌 非st":
-                return {"datas": [{} for _ in range(62)]}
-            if query == "今日涨停 非st":
-                return {"datas": [{} for _ in range(12)]}
+            if query in {"今日上涨 非st", "今日下跌 非st", "今日涨停 非st", "今日跌停 非st"}:
+                raise AssertionError(f"core market query should not use iwencai: {query}")
             return {"datas": []}
 
         with patch("scripts.collectors.iwencai_poll._iwencai_query", side_effect=fake_query), \
@@ -132,7 +143,10 @@ class QuotesCollectorTests(unittest.TestCase):
 
         iw = iwencai_poll.CACHE["iwencai"]
         self.assertEqual(iw["情绪值"], 38.0)
-        self.assertEqual(iw["_emotion_source"], "iwencai_up_down")
+        self.assertEqual(iw["_emotion_source"], "pytdx_breadth")
+        self.assertEqual(iw["涨停家数"], 1)
+        self.assertEqual(iw["跌停家数"], 0)
+        self.assertEqual(iw["_limit_source"], "pytdx_breadth")
 
     def test_iwencai_poll_does_not_write_zero_sided_emotion(self):
         def fake_query(query, limit=100):
@@ -152,6 +166,31 @@ class QuotesCollectorTests(unittest.TestCase):
         iw = iwencai_poll.CACHE["iwencai"]
         self.assertNotIn("情绪值", iw)
         self.assertNotIn("_emotion_source", iw)
+
+    def test_iwencai_poll_keeps_verified_pytdx_zero_limit_counts(self):
+        iwencai_poll.CACHE["breadth"] = {
+            "涨停": 0,
+            ">7%": 1,
+            "5~7%": 1,
+            "3~5%": 1,
+            "0~3%": 47,
+            "-0~-3%": 47,
+            "-3~-5%": 1,
+            "-5~-7%": 1,
+            "<-7%": 1,
+            "跌停": 0,
+            "_total": 100,
+        }
+
+        with patch("scripts.collectors.iwencai_poll._iwencai_query", return_value={"datas": []}), \
+             patch("scripts.collectors.iwencai_poll._eastmoney_limit_counts") as eastmoney:
+            iwencai_poll.poll_iwencai_sentiment(force=True)
+
+        iw = iwencai_poll.CACHE["iwencai"]
+        self.assertEqual(0, iw["涨停家数"])
+        self.assertEqual(0, iw["跌停家数"])
+        self.assertEqual("pytdx_breadth", iw["_limit_source"])
+        eastmoney.assert_not_called()
 
     def test_iwencai_partial_poll_preserves_same_day_realtime_return_fields(self):
         iwencai_poll.CACHE["iwencai"] = {

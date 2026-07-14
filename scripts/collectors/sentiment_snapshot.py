@@ -28,6 +28,8 @@ def _current_node():
     now = datetime.now()
     h = now.hour
     m = now.minute
+    if h == 9 and 25 <= m < 45:
+        return "竞价"
     # 找最近的半小时节点
     m_rounded = (m // 30) * 30
     return NODE_NAMES.get((h, m_rounded), f"{h:02d}:{m_rounded:02d}")
@@ -42,6 +44,7 @@ def take_sentiment_snapshot(force=False):
     iwencai = CACHE.get("iwencai", {})
     live_index = CACHE.get("live_index", {})
     breadth = CACHE.get("breadth", {})
+    limit_counts = CACHE.get("limit_counts", {})
 
     # baseline 兜底：iwencai 轮询关闭时用 dashboard_data.json 的 sentiment/market
     baseline = {}
@@ -65,6 +68,26 @@ def take_sentiment_snapshot(force=False):
     dn = live_index.get("下跌家数", 0) or 0
     emotion_val = round(up / (up + dn) * 100, 1) if (up + dn) > 0 else None
 
+    breadth_is_pytdx = (
+        isinstance(breadth, dict)
+        and breadth.get("_source") != "live_index_fallback"
+        and int(breadth.get("_total") or 0) > 0
+    )
+    if breadth_is_pytdx:
+        limit_up = breadth.get("涨停")
+        limit_down = breadth.get("跌停")
+        core_source = "pytdx_breadth"
+    elif isinstance(limit_counts, dict) and (
+        limit_counts.get("涨停家数") is not None or limit_counts.get("跌停家数") is not None
+    ):
+        limit_up = limit_counts.get("涨停家数")
+        limit_down = limit_counts.get("跌停家数")
+        core_source = limit_counts.get("_source") or "limit_counts"
+    else:
+        limit_up = _v("涨停家数")
+        limit_down = _v("跌停家数")
+        core_source = iwencai.get("_limit_source") or "iwencai_or_baseline"
+
     # 炸板率：从封板率反推
     fbr = _v("封板率")
     zbr = round(1 - fbr, 4) if fbr is not None else None
@@ -75,8 +98,9 @@ def take_sentiment_snapshot(force=False):
         "node": _current_node(),
         # 情绪核心
         "情绪值": emotion_val,
-        "涨停家数": _v("涨停家数") or (breadth.get("涨停") if breadth else None),
-        "跌停家数": _v("跌停家数") or (breadth.get("跌停") if breadth else None),
+        "涨停家数": limit_up,
+        "跌停家数": limit_down,
+        "核心行情源": core_source,
         "涨停收益": _v("昨日涨停收益"),
         "封板率": fbr,
         "炸板率": zbr,

@@ -530,9 +530,37 @@ def reduce_account_state(anchor, trades, quotes, now=None, fund_events=None):
     bought_qty = {}    # code -> remaining bought qty (shrinks on sells, FIFO after overnight)
     bought_cost = {}   # code -> remaining bought cost basis
 
+    trade_list = list(trades or [])
+    trades_by_id = {
+        int(trade.get("id")): trade
+        for trade in trade_list
+        if trade.get("id") is not None
+    }
+    fully_reversed_trade_ids = set()
+    for reversal in trade_list:
+        if int(reversal.get("is_reversal") or 0) != 1:
+            continue
+        original = trades_by_id.get(int(reversal.get("reversal_of_id") or 0))
+        if not original:
+            continue
+        original_action = str(original.get("action") or "")
+        reversal_action = str(reversal.get("action") or "")
+        is_opposite = (
+            ("卖" in original_action and "买" in reversal_action)
+            or ("买" in original_action and "卖" in reversal_action)
+        )
+        if is_opposite and int(_number(reversal.get("qty"))) >= int(_number(original.get("qty"))):
+            fully_reversed_trade_ids.add(int(original.get("id")))
+
     # 1. 重放交易流水（含逐股日内收益）
     ledger_errors = []
-    for trade in sorted(trades or [], key=event_order_trade):
+    for trade in sorted(trade_list, key=event_order_trade):
+        trade_id = int(trade.get("id") or 0)
+        reversal_of_id = int(trade.get("reversal_of_id") or 0)
+        if trade_id in fully_reversed_trade_ids:
+            continue
+        if int(trade.get("is_reversal") or 0) == 1 and reversal_of_id in fully_reversed_trade_ids:
+            continue
         if trade_id_cutoff is not None and trade.get("id") is not None:
             if int(trade["id"]) <= int(trade_id_cutoff):
                 continue

@@ -179,6 +179,7 @@ def init_db():
             ticket_purpose              TEXT NOT NULL DEFAULT 'execution',
             status                      TEXT NOT NULL DEFAULT 'draft',
             window                      TEXT,
+            trade_time                  TEXT,
             intent_text                 TEXT,
             rule_state_json             TEXT,
             market_snapshot_json        TEXT,
@@ -312,6 +313,8 @@ def init_db():
     ticket_cols = {row['name'] for row in conn.execute("PRAGMA table_info(trade_tickets)").fetchall()}
     if 'ticket_purpose' not in ticket_cols:
         conn.execute("ALTER TABLE trade_tickets ADD COLUMN ticket_purpose TEXT NOT NULL DEFAULT 'execution'")
+    if 'trade_time' not in ticket_cols:
+        conn.execute("ALTER TABLE trade_tickets ADD COLUMN trade_time TEXT")
     # Drop old unconditional unique index; replace with conditional ones
     conn.execute("DROP INDEX IF EXISTS idx_tr_uniq")
     conn.execute("""CREATE UNIQUE INDEX IF NOT EXISTS idx_tr_uniq

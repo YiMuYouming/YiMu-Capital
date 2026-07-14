@@ -136,23 +136,29 @@ class ZtEchelonWidget extends YiMuWidget {
     if (!body) return;
 
     var hotList = (data && data.hot_list) || {};
+    var limitDetail = (data && data.limit_up_detail) || {};
+    var report = (data && data.limitboard_report) || {};
     var reasonStats = hotList.reason_stats || {};
     var today = this._today();
-    var confirmedZt = this._normalizeHotStocks(hotList.zt_stocks || [], 'ths');
+    var detailStocks = this._normalizeLimitDetail(limitDetail.stocks || []);
+    var hotConfirmed = this._normalizeHotStocks(hotList.zt_stocks || [], 'ths');
+    var confirmedZt = detailStocks.length > 0 ? detailStocks : hotConfirmed;
+    var reportStocks = this._normalizeReportStocks(report.limit_up_stocks || []);
+    var reportDate = String(report.date || '');
     var hotStocks = this._normalizeHotStocks(hotList.stocks || [], 'hot');
     var iwencaiStocks = this._normalizeIwencaiStocks((data && data.iwencai && data.iwencai['连板股列表']) || []);
     var ztHistory = hotList.zt_history || {};
     if (confirmedZt.length > 0) self._saveLocalHistory(confirmedZt);
 
     // Build date list
-    var dates = this._buildDateList(confirmedZt, ztHistory, iwencaiStocks);
+    var dates = this._buildDateList(confirmedZt, ztHistory, iwencaiStocks, reportDate);
     if (!this._selectedDate || dates.indexOf(this._selectedDate) < 0) {
       this._selectedDate = dates[0];
     }
 
     var isToday = (this._selectedDate === today);
     var displayStocks = this._getConfirmedStocksForDate(
-      this._selectedDate, confirmedZt, iwencaiStocks, ztHistory
+      this._selectedDate, confirmedZt, iwencaiStocks, ztHistory, reportDate, reportStocks
     );
     displayStocks.forEach(function(s) {
       var computed = s._boardLevel > 0 ? s._boardLevel + '板' : self._computeNature(s.code, self._selectedDate, ztHistory);
@@ -198,11 +204,13 @@ class ZtEchelonWidget extends YiMuWidget {
 
     var stats = this._buildStats(displayStocks);
     var hasFullZtSource = confirmedZt.length > 0;
+    var hasDetailSource = detailStocks.length > 0;
     var hasIwcSource = iwencaiStocks.length > 0;
+    var usesReportFallback = !hasFullZtSource && !hasIwcSource && reportDate === this._selectedDate && reportStocks.length > 0;
     var sourceLabel = isToday
-      ? (hasIwcSource ? '问财连板' : (hasFullZtSource ? '同花顺涨停' : '涨停源待确认'))
-      : '历史快照';
-    var updated = this._formatUpdated(hotList._updated);
+      ? (hasDetailSource ? '确认涨停明细' : (hasIwcSource ? '问财连板' : (hasFullZtSource ? '同花顺涨停' : (usesReportFallback ? '涨停日报' : '涨停源待确认'))))
+      : (reportDate === this._selectedDate && reportStocks.length > 0 ? '涨停日报' : '历史快照');
+    var updated = this._formatUpdated(hasDetailSource ? limitDetail._updated : hotList._updated);
 
     // === Render ===
     var html = '';
@@ -220,6 +228,15 @@ class ZtEchelonWidget extends YiMuWidget {
     html += '<span class="zt-source-chip primary">' + this._esc(sourceLabel) + '</span>';
     html += '<span class="zt-source-chip">热榜实时 ' + (hotList.total || hotStocks.length || 0) + '只</span>';
     if (updated) html += '<span class="zt-source-chip muted">更新 ' + this._esc(updated) + '</span>';
+    var reportSummary = report.summary || {};
+    if (reportDate === this._selectedDate && reportSummary.limit_up != null) {
+      html += '<span class="zt-source-chip muted">日报 ' + this._esc(reportSummary.limit_up) +
+        ' / 炸板 ' + this._esc(reportSummary.broken == null ? '—' : reportSummary.broken) +
+        ' / 跌停 ' + this._esc(reportSummary.limit_down == null ? '—' : reportSummary.limit_down) + '</span>';
+      if (report.quality && report.quality.status && report.quality.status !== 'ok') {
+        html += '<span class="zt-source-chip warn">日报口径有差异</span>';
+      }
+    }
     if (isToday && !hasFullZtSource) {
       html += '<span class="zt-source-chip warn">首板源未确认</span>';
     }
@@ -344,13 +361,54 @@ class ZtEchelonWidget extends YiMuWidget {
     });
   }
 
-  _buildDateList(ztStocks, ztHistory, iwencaiStocks) {
+  _normalizeLimitDetail(list) {
+    var self = this;
+    return (list || []).filter(function(s) {
+      return !/ST/.test(s.name || s['名称'] || '');
+    }).map(function(s) {
+      var board = parseInt(s.board_count || s['连板数'] || s['连续涨停天数'] || 1, 10);
+      if (!board || board < 1) board = 1;
+      return {
+        code: String(s.code || s['代码'] || ''),
+        name: s.name || s['名称'] || '—',
+        zhangfu: self._toNum(s.change_pct != null ? s.change_pct : (s.zhangfu != null ? s.zhangfu : s['涨幅'])),
+        huanshou: self._toNum(s.turnover_rate != null ? s.turnover_rate : (s.huanshou != null ? s.huanshou : s['换手率'])),
+        chengjiaoe: self._toNum(s.amount != null ? s.amount : (s.chengjiaoe != null ? s.chengjiaoe : s['成交额'])),
+        reason: s.reason || s['涨停原因'] || s.industry || s.concepts || '',
+        _source: 'limit_up_detail',
+        _boardLevel: board,
+      };
+    });
+  }
+
+  _normalizeReportStocks(list) {
+    var self = this;
+    return (list || []).filter(function(s) {
+      return !/ST/.test(s.name || s['名称'] || '');
+    }).map(function(s) {
+      var board = parseInt(s.board_count || s['连板数'] || 1, 10);
+      if (!board || board < 1) board = 1;
+      return {
+        code: String(s.code || s['代码'] || '').replace(/^(sh|sz|bj)/i, ''),
+        name: s.name || s['名称'] || '—',
+        zhangfu: self._toNum(s.change_pct != null ? s.change_pct : s['涨幅']),
+        huanshou: self._toNum(s.turnover_rate != null ? s.turnover_rate : s['换手率']),
+        chengjiaoe: self._toNum(s.amount != null ? s.amount : s['成交额']),
+        reason: s.reason || s['涨停原因'] || '',
+        _source: 'limitboard_report',
+        _boardLevel: board,
+      };
+    });
+  }
+
+  _buildDateList(ztStocks, ztHistory, iwencaiStocks, reportDate) {
     var today = this._today();
     ztStocks = ztStocks || [];
     iwencaiStocks = iwencaiStocks || [];
     ztHistory = ztHistory || {};
 
     var allDates = Object.keys(ztHistory);
+    if (reportDate) allDates.push(reportDate);
     if (ztStocks.length > 0 || iwencaiStocks.length > 0 || allDates.length === 0) {
       allDates.push(today);
     }
@@ -363,7 +421,7 @@ class ZtEchelonWidget extends YiMuWidget {
     return result.slice(0, 5);
   }
 
-  _getConfirmedStocksForDate(dateStr, ztStocks, iwencaiStocks, ztHistory) {
+  _getConfirmedStocksForDate(dateStr, ztStocks, iwencaiStocks, ztHistory, reportDate, reportStocks) {
     if (!dateStr) return [];
     var today = this._today();
     var merged = [];
@@ -376,6 +434,11 @@ class ZtEchelonWidget extends YiMuWidget {
     if (dateStr === today) {
       (iwencaiStocks || []).forEach(add);
       (ztStocks || []).forEach(add);
+      if (merged.length === 0 && reportDate === dateStr) (reportStocks || []).forEach(add);
+      return merged;
+    }
+    if (reportDate === dateStr && (reportStocks || []).length > 0) {
+      (reportStocks || []).forEach(add);
       return merged;
     }
     return this._normalizeHotStocks((ztHistory && ztHistory[dateStr]) || [], 'history');
