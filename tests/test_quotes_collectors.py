@@ -1,6 +1,8 @@
 """Regression tests for live quote collectors."""
+import json
 import re
 import unittest
+from datetime import datetime
 from pathlib import Path
 from unittest.mock import patch
 
@@ -328,10 +330,11 @@ class QuotesCollectorTests(unittest.TestCase):
         }
 
         with patch("scripts.collectors.quotes._pytdx_disabled", return_value=True), \
+             patch("scripts.collectors.quotes._eastmoney_minute_trends", return_value=[]), \
              patch("scripts.collectors.quotes._eastmoney_15m_klines",
                    side_effect=lambda secid, now=None: rows[secid]), \
-             patch("scripts.collectors.quotes._current_15m_cutoff",
-                   return_value="10:00"):
+             patch("scripts.collectors.quotes.datetime") as fake_dt:
+            fake_dt.now.return_value = datetime(2026, 6, 3, 10, 0)
             quotes.collect_yesterday_compare(force=True)
 
         live_index = quotes.CACHE["live_index"]
@@ -339,6 +342,59 @@ class QuotesCollectorTests(unittest.TestCase):
         self.assertEqual(live_index["深证昨成交额"], "3000.00亿")
         self.assertEqual(live_index["上证成交额差"], "+5303.40亿")
         self.assertEqual(live_index["深证成交额差"], "+6330.03亿")
+
+    def test_collect_yesterday_compare_uses_eastmoney_when_pytdx_is_unavailable(self):
+        with patch("scripts.collectors.quotes._get_tdx_api", return_value=None), \
+             patch("scripts.collectors.quotes._collect_yesterday_compare_eastmoney") as eastmoney, \
+             patch("scripts.collectors.quotes._collect_yesterday_compare_cached_15m") as cached:
+            quotes.collect_yesterday_compare(force=True)
+
+        eastmoney.assert_called_once()
+        cached.assert_not_called()
+
+    def test_eastmoney_compare_uses_previous_trading_day_one_minute_turnover(self):
+        quotes.CACHE["live_index"] = {
+            "上证指数成交额": "1500.00亿",
+            "深证指数成交额": "2300.00亿",
+        }
+        trends = {
+            "1.000001": [
+                "2026-05-29 09:30,1,1,1,1,1,9000000000.00,0",
+                "2026-06-01 09:30,1,1,1,1,1,10000000000.00,0",
+                "2026-06-01 09:31,1,1,1,1,1,20000000000.00,0",
+                "2026-06-01 09:32,1,1,1,1,1,30000000000.00,0",
+                "2026-06-02 09:31,1,1,1,1,1,40000000000.00,0",
+            ],
+            "0.399001": [
+                "2026-05-29 09:30,1,1,1,1,1,8000000000.00,0",
+                "2026-06-01 09:30,1,1,1,1,1,40000000000.00,0",
+                "2026-06-01 09:31,1,1,1,1,1,50000000000.00,0",
+                "2026-06-01 09:32,1,1,1,1,1,60000000000.00,0",
+                "2026-06-02 09:31,1,1,1,1,1,70000000000.00,0",
+            ],
+        }
+
+        class FakeResponse:
+            def __init__(self, payload):
+                self.payload = payload
+
+            def read(self):
+                return json.dumps(self.payload).encode("utf-8")
+
+        def fake_urlopen(req, timeout=8):
+            secid = "1.000001" if "secid=1.000001" in req.full_url else "0.399001"
+            return FakeResponse({"data": {"trends": trends[secid]}})
+
+        now = datetime(2026, 6, 2, 9, 31, 30)
+        with patch("scripts.collectors.quotes.urllib.request.urlopen", side_effect=fake_urlopen):
+            quotes._collect_yesterday_compare_eastmoney(now=now)
+
+        live_index = quotes.CACHE["live_index"]
+        self.assertEqual(live_index.get("上证昨成交额"), "300.00亿")
+        self.assertEqual(live_index.get("深证昨成交额"), "900.00亿")
+        self.assertEqual(live_index.get("上证成交额差"), "+1200.00亿")
+        self.assertEqual(live_index.get("深证成交额差"), "+1400.00亿")
+        self.assertEqual(live_index.get("_turnover_compare_source"), "eastmoney_previous_1m")
 
     def test_collect_yesterday_compare_falls_back_to_cached_previous_15m_rows(self):
         quotes.CACHE["live_index"] = {
@@ -356,9 +412,9 @@ class QuotesCollectorTests(unittest.TestCase):
             {"t": "累计", "amount": 2000 * 1e8, "_cum": True},
         ]
 
-        with patch("scripts.collectors.quotes._get_tdx_api", return_value=None), \
-             patch("scripts.collectors.quotes._current_15m_cutoff", return_value="10:00"):
-            quotes.collect_yesterday_compare(force=True)
+        quotes._collect_yesterday_compare_cached_15m(
+            now=datetime(2026, 7, 15, 10, 0)
+        )
 
         live_index = quotes.CACHE["live_index"]
         self.assertEqual(live_index["上证昨成交额"], "1000.00亿")
@@ -382,15 +438,39 @@ class QuotesCollectorTests(unittest.TestCase):
             {"t": "累计", "amount": 2000 * 1e8, "cumYesterdayAmt": 2200 * 1e8, "_cum": True},
         ]
 
-        with patch("scripts.collectors.quotes._get_tdx_api", return_value=None), \
-             patch("scripts.collectors.quotes._current_15m_cutoff", return_value="10:00"):
-            quotes.collect_yesterday_compare(force=True)
+        quotes._collect_yesterday_compare_cached_15m(
+            now=datetime(2026, 7, 15, 10, 0)
+        )
 
         live_index = quotes.CACHE["live_index"]
         self.assertEqual(live_index["上证昨成交额"], "1200.00亿")
         self.assertEqual(live_index["深证昨成交额"], "2200.00亿")
         self.assertEqual(live_index["上证成交额差"], "+300.00亿")
         self.assertEqual(live_index["深证成交额差"], "+100.00亿")
+
+    def test_cached_15m_compare_prorates_the_incomplete_current_slot(self):
+        quotes.CACHE["live_index"] = {
+            "上证指数成交额": "1500.00亿",
+            "深证指数成交额": "2300.00亿",
+        }
+        quotes.CACHE["上证15min"] = [
+            {"t": "09:45", "amount": 400 * 1e8, "yesterdayAmt": 500 * 1e8},
+            {"t": "10:00", "amount": 600 * 1e8, "yesterdayAmt": 700 * 1e8},
+        ]
+        quotes.CACHE["深证15min"] = [
+            {"t": "09:45", "amount": 900 * 1e8, "yesterdayAmt": 1000 * 1e8},
+            {"t": "10:00", "amount": 1100 * 1e8, "yesterdayAmt": 1200 * 1e8},
+        ]
+
+        quotes._collect_yesterday_compare_cached_15m(
+            now=datetime(2026, 7, 15, 9, 58)
+        )
+
+        live_index = quotes.CACHE["live_index"]
+        self.assertEqual(live_index["上证昨成交额"], "1106.67亿")
+        self.assertEqual(live_index["深证昨成交额"], "2040.00亿")
+        self.assertEqual(live_index["上证成交额差"], "+393.33亿")
+        self.assertEqual(live_index["深证成交额差"], "+260.00亿")
 
     def test_collect_kline_15m_marks_today_date_when_rows_update(self):
         rows = {

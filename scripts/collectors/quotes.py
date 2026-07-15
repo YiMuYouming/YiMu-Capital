@@ -155,15 +155,11 @@ def collect_yesterday_compare(force=False):
     try:
         from datetime import datetime as _dt
         now = _dt.now()
-        # 已交易分钟数（从9:30算起）
-        market_open = now.replace(hour=9, minute=30, second=0, microsecond=0)
-        minutes_traded = max(1, min(240, (now - market_open).total_seconds() / 60))
-        slot_count = int(minutes_traded / 15) + 1  # 多少个15分钟槽
 
         # 从 PyTDX 获取昨日15分钟K线
         api = _get_tdx_api()
         if not api:
-            _collect_yesterday_compare_cached_15m(now=now)
+            _collect_yesterday_compare_eastmoney(now=now)
             return
 
         result = {}
@@ -173,11 +169,15 @@ def collect_yesterday_compare(force=False):
                 if not bars:
                     continue
                 today_str = now.strftime("%Y-%m-%d")
-                current_min = now.hour * 60 + now.minute
 
-                # 找到昨天日期
-                from datetime import timedelta
-                yesterday = (now - timedelta(days=1)).strftime("%Y-%m-%d")
+                prior_dates = sorted({
+                    str(b.get("datetime", ""))[:10]
+                    for b in bars
+                    if str(b.get("datetime", ""))[:10] < today_str
+                })
+                if not prior_dates:
+                    continue
+                yesterday = prior_dates[-1]
 
                 yesterday_amt = 0
                 for b in bars:
@@ -187,10 +187,8 @@ def collect_yesterday_compare(force=False):
                     # 解析时间，只取到当前时刻对应的时段
                     try:
                         bar_time = dt.split(" ")[-1] if " " in dt else dt[-5:]
-                        h, m = bar_time.split(":")[0], bar_time.split(":")[1]
-                        bar_min = int(h) * 60 + int(m)
-                        if bar_min <= current_min:
-                            yesterday_amt += b.get("amount", 0)
+                        weight = _same_period_15m_weight(bar_time, now)
+                        yesterday_amt += float(b.get("amount", 0) or 0) * weight
                     except (ValueError, IndexError):
                         continue
                 yesterday_amt_yi = yesterday_amt / 1e8
@@ -224,6 +222,7 @@ def collect_yesterday_compare(force=False):
             li = CACHE.get("live_index", {})
             li.update(result)
             li["_turnover_compare_updated"] = datetime.now().strftime("%Y-%m-%dT%H:%M:%S+08:00")
+            li["_turnover_compare_source"] = "pytdx_previous_15m_estimate"
             CACHE["live_index"] = li
         else:
             _collect_yesterday_compare_cached_15m(now=now)
@@ -233,15 +232,20 @@ def collect_yesterday_compare(force=False):
 
 def _collect_yesterday_compare_eastmoney(now=None):
     now = now or datetime.now()
-    cutoff = _current_15m_cutoff(now)
-    if not cutoff:
+    if _trading_elapsed_minutes(now) <= 0:
         return
     result = {}
+    exact_count = 0
     li = CACHE.get("live_index", {})
     for name, secid in [("上证", "1.000001"), ("深证", "0.399001")]:
         try:
-            rows = _eastmoney_15m_klines(secid, now=now)
-            yesterday_amt_yi = _eastmoney_yesterday_same_period_yi(rows, now, cutoff)
+            minute_rows = _eastmoney_minute_trends(secid)
+            yesterday_amt_yi = _eastmoney_yesterday_same_minute_yi(minute_rows, now)
+            if yesterday_amt_yi > 0:
+                exact_count += 1
+            else:
+                rows = _eastmoney_15m_klines(secid, now=now)
+                yesterday_amt_yi = _eastmoney_yesterday_same_period_yi(rows, now)
             today_amt_yi = _amount_str_to_yi(li.get(f"{name}指数成交额"))
             if yesterday_amt_yi > 0 and today_amt_yi > 0:
                 diff = today_amt_yi - yesterday_amt_yi
@@ -254,16 +258,21 @@ def _collect_yesterday_compare_eastmoney(now=None):
     if result:
         li.update(result)
         li["_turnover_compare_updated"] = now.strftime("%Y-%m-%dT%H:%M:%S+08:00")
+        li["_turnover_compare_source"] = (
+            "eastmoney_previous_1m"
+            if exact_count == len(result) // 3
+            else "eastmoney_previous_15m_estimate"
+        )
         CACHE["live_index"] = li
+        return True
     else:
-        _collect_yesterday_compare_cached_15m(now=now)
+        return _collect_yesterday_compare_cached_15m(now=now)
 
 
 def _collect_yesterday_compare_cached_15m(now=None):
     """Fallback: use restored previous-day 15min rows as yesterday same-period basis."""
     now = now or datetime.now()
-    cutoff = _current_15m_cutoff(now)
-    if not cutoff:
+    if _trading_elapsed_minutes(now) <= 0:
         return False
     li = CACHE.get("live_index", {})
     result = {}
@@ -274,12 +283,13 @@ def _collect_yesterday_compare_cached_15m(now=None):
             if not isinstance(row, dict) or row.get("_cum"):
                 continue
             slot = str(row.get("t") or "")
-            if slot and slot <= cutoff:
+            if slot:
                 try:
                     basis = row.get("yesterdayAmt")
                     if basis in (None, "", 0):
                         basis = row.get("amount")
-                    yesterday_amt += float(basis or 0)
+                    weight = _same_period_15m_weight(slot, now)
+                    yesterday_amt += float(basis or 0) * weight
                 except (TypeError, ValueError):
                     continue
         today_amt_yi = _amount_str_to_yi(li.get(f"{name}指数成交额"))
@@ -293,36 +303,48 @@ def _collect_yesterday_compare_cached_15m(now=None):
     if result:
         li.update(result)
         li["_turnover_compare_updated"] = now.strftime("%Y-%m-%dT%H:%M:%S+08:00")
-        li["_turnover_compare_source"] = "cached_previous_15m"
+        li["_turnover_compare_source"] = "cached_previous_15m_estimate"
         CACHE["live_index"] = li
         return True
     return False
 
 
-def _current_15m_cutoff(now=None):
-    now = now or datetime.now()
-    minutes = now.hour * 60 + now.minute
-    open_min = 9 * 60 + 30
-    morning_close = 11 * 60 + 30
-    afternoon_open = 13 * 60
-    close_min = 15 * 60
+def _eastmoney_minute_trends(secid):
+    params = {
+        "secid": secid,
+        "fields1": "f1,f2,f3,f4,f5,f6,f7,f8,f9,f10,f11,f12,f13",
+        "fields2": "f51,f52,f53,f54,f55,f56,f57,f58",
+        "ndays": 5,
+        "iscr": 0,
+    }
+    url = "https://push2his.eastmoney.com/api/qt/stock/trends2/get?" + urllib.parse.urlencode(params)
+    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+    payload = json.loads(urllib.request.urlopen(req, timeout=8).read().decode("utf-8"))
+    return ((payload or {}).get("data") or {}).get("trends") or []
 
-    def fmt(total_min):
-        return f"{total_min // 60:02d}:{total_min % 60:02d}"
 
-    if minutes < open_min:
-        return None
-    if minutes <= morning_close:
-        elapsed = max(1, minutes - open_min)
-        slot_end = open_min + max(15, (elapsed // 15) * 15)
-        return fmt(min(slot_end, morning_close))
-    if minutes < afternoon_open:
-        return "11:30"
-    if minutes <= close_min:
-        elapsed = max(1, minutes - afternoon_open)
-        slot_end = afternoon_open + max(15, (elapsed // 15) * 15)
-        return fmt(min(slot_end, close_min))
-    return "15:00"
+def _eastmoney_yesterday_same_minute_yi(rows, now):
+    today = now.strftime("%Y-%m-%d")
+    prior_dates = sorted({
+        str(row).split(",", 1)[0][:10]
+        for row in rows
+        if str(row).split(",", 1)[0][:10] < today
+    })
+    if not prior_dates:
+        return 0
+    ydate = prior_dates[-1]
+    cutoff = now.strftime("%H:%M")
+    total = 0.0
+    for row in rows:
+        parts = str(row).split(",")
+        if len(parts) < 7 or not parts[0].startswith(ydate):
+            continue
+        if parts[0][-5:] <= cutoff:
+            try:
+                total += float(parts[6])
+            except ValueError:
+                pass
+    return total / 1e8
 
 
 def _eastmoney_15m_klines(secid, now=None):
@@ -344,7 +366,7 @@ def _eastmoney_15m_klines(secid, now=None):
     return ((payload or {}).get("data") or {}).get("klines") or []
 
 
-def _eastmoney_yesterday_same_period_yi(rows, now, cutoff):
+def _eastmoney_yesterday_same_period_yi(rows, now, cutoff=None):
     today = now.strftime("%Y-%m-%d")
     prior_dates = sorted({
         str(row).split(",", 1)[0][:10]
@@ -362,13 +384,44 @@ def _eastmoney_yesterday_same_period_yi(rows, now, cutoff):
         dt = parts[0]
         if not dt.startswith(ydate):
             continue
-        time_key = dt[-5:]
-        if time_key <= cutoff:
-            try:
-                total += float(parts[6])
-            except ValueError:
-                pass
+        try:
+            total += float(parts[6]) * _same_period_15m_weight(dt[-5:], now)
+        except ValueError:
+            pass
     return total / 1e8
+
+
+def _trading_elapsed_minutes(now):
+    clock = now.hour * 60 + now.minute + now.second / 60
+    market_open = 9 * 60 + 30
+    morning_close = 11 * 60 + 30
+    afternoon_open = 13 * 60
+    close = 15 * 60
+    if clock <= market_open:
+        return 0.0
+    if clock <= morning_close:
+        return clock - market_open
+    if clock < afternoon_open:
+        return 120.0
+    if clock <= close:
+        return 120.0 + clock - afternoon_open
+    return 240.0
+
+
+def _same_period_15m_weight(slot, now):
+    try:
+        hour, minute = (int(part) for part in str(slot).split(":")[:2])
+    except (TypeError, ValueError):
+        return 0.0
+    slot_clock = hour * 60 + minute
+    if slot_clock <= 11 * 60 + 30:
+        slot_end = slot_clock - (9 * 60 + 30)
+    elif slot_clock >= 13 * 60 + 15:
+        slot_end = 120 + slot_clock - 13 * 60
+    else:
+        return 0.0
+    elapsed = _trading_elapsed_minutes(now)
+    return max(0.0, min(1.0, (elapsed - (slot_end - 15)) / 15))
 
 
 def _eastmoney_kline_15m_rows(secid, now=None):
