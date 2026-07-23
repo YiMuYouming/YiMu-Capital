@@ -510,6 +510,8 @@ def reduce_account_state(anchor, trades, quotes, now=None, fund_events=None):
     # Today PnL tracking per code
     today_pnl_map = {}      # code -> realized PnL from sells
     today_basis_map = {}    # code -> denominator (day-start basis + buy amounts, never shrinks on sells)
+    realized_pnl_map = {}   # code -> realized PnL accumulated across the current position lifecycle
+    realized_pnl_complete = {}  # code -> whether every sell leg has a usable realized PnL
     closed_list = []        # fully-sold positions
 
     # Per-code overnight tracking (keyed by code from anchor open positions)
@@ -599,13 +601,20 @@ def reduce_account_state(anchor, trades, quotes, now=None, fund_events=None):
                 new_qty = max(0, old_qty - remaining_sell)
                 sell_price = _number(trade.get("price"))
                 trade_realized = trade.get("realized_pnl")
-                total_realized_pnl = None
+                trade_total_realized_pnl = None
                 if trade_realized not in (None, ""):
-                    total_realized_pnl = round(_number(trade_realized), 2)
+                    trade_total_realized_pnl = round(_number(trade_realized), 2)
                 else:
                     avg_cost = _number(position.get("成本"))
                     if avg_cost > 0:
-                        total_realized_pnl = round((sell_price - avg_cost) * remaining_sell, 2)
+                        trade_total_realized_pnl = round((sell_price - avg_cost) * remaining_sell, 2)
+                if code not in realized_pnl_complete:
+                    realized_pnl_complete[code] = True
+                if trade_total_realized_pnl is None:
+                    realized_pnl_complete[code] = False
+                else:
+                    realized_pnl_map[code] = round(
+                        realized_pnl_map.get(code, 0) + trade_total_realized_pnl, 2)
                 position["数量"] = new_qty
 
                 # FIFO: deduct overnight first, then bought
@@ -639,6 +648,11 @@ def reduce_account_state(anchor, trades, quotes, now=None, fund_events=None):
                         rpnl = None  # 缺日初基准，收益不可用
                     else:
                         rpnl = today_pnl_map.get(code, 0)
+                    total_realized_pnl = (
+                        realized_pnl_map.get(code)
+                        if realized_pnl_complete.get(code, False)
+                        else None
+                    )
                     closed_list.append({
                         "name": position.get("标的", trade.get("name", "")),
                         "code": code,
@@ -676,6 +690,8 @@ def reduce_account_state(anchor, trades, quotes, now=None, fund_events=None):
             # 若之前已标记为清仓，买入重新开仓后移除 stale closed entry
             if old_qty == 0:
                 closed_list[:] = [c for c in closed_list if c.get("code") != code]
+                realized_pnl_map.pop(code, None)
+                realized_pnl_complete.pop(code, None)
             # Track bought
             bought_qty[code] = bought_qty.get(code, 0) + qty
             bought_cost[code] = bought_cost.get(code, 0) + round(trade_price * qty, 2)

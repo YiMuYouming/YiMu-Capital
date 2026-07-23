@@ -1493,6 +1493,67 @@ class ClosedPositionsTest(unittest.TestCase):
         self.assertEqual(closed[0]["realized_today_pnl"], -100)
         self.assertEqual(closed[0]["realized_pnl"], 100)
 
+    def test_closed_position_sums_realized_pnl_across_partial_sells(self):
+        """分批卖出后清仓时，展示整个持仓周期的累计已实现盈亏。"""
+        db.insert_account_baseline({
+            "date": "2026-07-22", "effective_at": "2026-07-22T09:25:00",
+            "trade_id_cutoff": 0, "cash": 100000, "day_start_asset": 200000,
+            "total_deposit": 100000,
+            "positions": [{"标的": "紫光股份", "代码": "000938", "数量": 2000,
+                           "成本": 38.68, "状态": "持有"}],
+            "source": "previous_close",
+        })
+        for trade_time, price, qty, realized_pnl in [
+            ("13:34", 45.61, 500, 3465),
+            ("14:38", 45.25, 500, 3285),
+            ("14:58", 45.09, 1000, 6410),
+        ]:
+            db.insert_trade({
+                "trade_date": "2026-07-22", "trade_time": trade_time,
+                "action": "卖出", "code": "000938", "name": "紫光股份",
+                "price": price, "qty": qty, "realized_pnl": realized_pnl,
+            })
+
+        state = reduce_account_state(
+            db.query_account_baseline("2026-07-22"),
+            db.query_trades(date_from="2026-07-22", date_to="2026-07-22", limit=100),
+            {}, now="2026-07-22T15:00:00")
+
+        closed = state.get("closed_positions", [])
+        self.assertEqual(len(closed), 1)
+        self.assertEqual(closed[0]["realized_pnl"], 13160)
+
+    def test_closed_position_resets_realized_pnl_after_reopening(self):
+        """同日清仓后重新开仓，第二轮清仓不得混入第一轮已实现盈亏。"""
+        anchor = {
+            "date": "2026-07-22", "effective_at": "2026-07-22T09:25:00",
+            "trade_id_cutoff": 0, "cash": 100000, "day_start_asset": 200000,
+            "total_deposit": 100000,
+            "positions": [{"标的": "TEST", "代码": "000012", "数量": 100,
+                           "成本": 10, "状态": "持有"}],
+            "source": "previous_close",
+        }
+        trades = [
+            {"id": 1, "trade_date": "2026-07-22", "trade_time": "10:00",
+             "action": "卖出", "code": "000012", "name": "TEST",
+             "price": 11, "qty": 100, "realized_pnl": 100},
+            {"id": 2, "trade_date": "2026-07-22", "trade_time": "10:30",
+             "action": "买入", "code": "000012", "name": "TEST",
+             "price": 20, "qty": 100},
+            {"id": 3, "trade_date": "2026-07-22", "trade_time": "14:00",
+             "action": "卖出", "code": "000012", "name": "TEST",
+             "price": 20.4, "qty": 50, "realized_pnl": 20},
+            {"id": 4, "trade_date": "2026-07-22", "trade_time": "14:30",
+             "action": "卖出", "code": "000012", "name": "TEST",
+             "price": 21.6, "qty": 50, "realized_pnl": 80},
+        ]
+
+        state = reduce_account_state(anchor, trades, {}, now="2026-07-22T15:00:00")
+
+        closed = state.get("closed_positions", [])
+        self.assertEqual(len(closed), 1)
+        self.assertEqual(closed[0]["realized_pnl"], 100)
+
 
 class SevenDayClosedPositionsTests(unittest.TestCase):
     """YM-W15-02: 7日内清仓来自 SSOT 账本，昨日/6日前可显示，8日前不可"""
