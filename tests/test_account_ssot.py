@@ -83,6 +83,62 @@ class AccountBaselinePositionCorrectionTests(unittest.TestCase):
         self.assertEqual(repair["before_qty"], 5000)
         self.assertEqual(repair["after_qty"], 10000)
 
+    def test_late_sell_rebuilds_position_cash_cost_and_day_start_asset(self):
+        import scripts.account_ssot as account_ssot_module
+
+        build_correction = account_ssot_module.build_account_baseline_position_correction
+        anchor = {
+            "date": "2026-07-24",
+            "effective_at": "2026-07-24T09:25:00",
+            "cash": 469947.47,
+            "day_start_asset": 702707.47,
+            "source": "previous_close",
+            "positions": [
+                {"标的": "中科曙光", "代码": "603019", "数量": 1000,
+                 "成本": 100.88, "成本价": 100.88, "现价": 97.82,
+                 "状态": "持有", "市值": 97820.0},
+            ],
+            "_meta": {"day_start_prices": {"603019": 97.82}},
+        }
+        late_trade = {
+            "id": 156,
+            "trade_date": "2026-07-23",
+            "action": "卖出",
+            "code": "603019",
+            "name": "中科曙光",
+            "price": 97.41,
+            "qty": 300,
+            "fee": 0,
+        }
+        open_lots = [
+            {"open_qty": 200, "cost_price": 99.89},
+            {"open_qty": 200, "cost_price": 101.28},
+            {"open_qty": 300, "cost_price": 102.27},
+        ]
+
+        result = build_correction(
+            anchor=anchor,
+            late_trade=late_trade,
+            open_lots=open_lots,
+            expected_actual_qty=700,
+            source="yimu_broker_confirmation",
+            reason="confirmed broker holding is 700 shares",
+            now="2026-07-27T12:38:27",
+        )
+
+        self.assertEqual(result["action"], "would_write")
+        corrected = result["corrected_anchor"]
+        self.assertEqual(corrected["cash"], 499170.47)
+        self.assertEqual(corrected["day_start_asset"], 702584.47)
+        position = corrected["positions"][0]
+        self.assertEqual(position["数量"], 700)
+        self.assertEqual(position["成本"], 101.31)
+        self.assertEqual(position["市值"], 68474.0)
+        repair = corrected["_meta"]["account_position_repairs"][-1]
+        self.assertEqual(repair["late_trade_id"], 156)
+        self.assertEqual(repair["before_qty"], 1000)
+        self.assertEqual(repair["after_qty"], 700)
+
 
 class AccountReducerTests(unittest.TestCase):
     def setUp(self):

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Controlled repair for one account baseline position missed by a late buy.
+"""Controlled repair for one account baseline position missed by a late trade.
 
 Dry-run is the default.  ``--apply`` creates and verifies an SQLite online
 backup before updating only the selected ``account_baselines`` row.  Trade and
@@ -187,12 +187,12 @@ def _position_summary(anchor, code):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="受控修复被晚补成交漏掉的账户持仓基线",
+        description="受控修复被晚补买入或卖出漏掉的账户持仓基线",
     )
     parser.add_argument("--date", required=True, help="锚点日期 YYYY-MM-DD")
     parser.add_argument("--code", required=True, help="股票代码")
     parser.add_argument("--late-trade-id", required=True, type=int,
-                        help="被收盘锚点漏掉的已落库买入记录 ID")
+                        help="被收盘锚点漏掉的已落库成交记录 ID")
     parser.add_argument("--expected-actual-qty", required=True, type=int,
                         help="券商确认的实际持仓数量")
     parser.add_argument("--source", required=True, help="人工确认来源")

@@ -212,11 +212,11 @@ def build_account_baseline_position_correction(
     reason,
     now=None,
 ):
-    """Build one narrow, auditable baseline repair for a missed late buy.
+    """Build one narrow, auditable baseline repair for one missed trade.
 
     This does not write SQLite.  It only accepts the specific reconciliation
-    shape where the anchor quantity plus one persisted buy equals both the open
-    lots and the human-confirmed actual quantity.
+    shape where applying one persisted buy or sell to the anchor quantity
+    equals both the open lots and the human-confirmed actual quantity.
     """
     anchor = deepcopy(anchor or {})
     late_trade = deepcopy(late_trade or {})
@@ -239,12 +239,14 @@ def build_account_baseline_position_correction(
 
     code = str(late_trade.get("code") or "").strip()
     action = str(late_trade.get("action") or "")
+    is_buy = "买入" in action or "追涨" in action
+    is_sell = "卖" in action
     late_qty = int(_number(late_trade.get("qty")))
     late_price = _number(late_trade.get("price"))
     fee = _number(late_trade.get("fee"))
     expected_qty = int(_number(expected_actual_qty))
-    if not code or ("买入" not in action and "追涨" not in action):
-        return rejected("late trade must be a persisted buy")
+    if not code or not (is_buy or is_sell):
+        return rejected("late trade must be a persisted buy or sell")
     if late_qty <= 0 or late_price <= 0 or expected_qty <= 0:
         return rejected("late trade quantity, price and expected quantity must be positive")
 
@@ -276,20 +278,30 @@ def build_account_baseline_position_correction(
     lot_qty = sum(int(_number(lot.get("open_qty"))) for lot in (open_lots or []))
     if lot_qty != expected_qty:
         return rejected("open lots do not match expected actual quantity")
-    if before_qty + late_qty != expected_qty:
-        return rejected("baseline plus late trade does not match expected actual quantity")
+    quantity_delta = late_qty if is_buy else -late_qty
+    if before_qty + quantity_delta != expected_qty:
+        return rejected("baseline adjusted by late trade does not match expected actual quantity")
 
     day_start_prices = _json_dict(meta.get("day_start_prices"))
     day_start_price = _number(day_start_prices.get(code))
     if day_start_price <= 0:
         return rejected("day-start price is missing for target position")
 
-    after_cost = round(
-        (before_qty * before_cost + late_qty * late_price) / expected_qty,
-        2,
-    )
+    if is_buy:
+        after_cost = round(
+            (before_qty * before_cost + late_qty * late_price) / expected_qty,
+            2,
+        )
+    else:
+        remaining_cost = sum(
+            int(_number(lot.get("open_qty"))) * _number(lot.get("cost_price"))
+            for lot in (open_lots or [])
+        )
+        if remaining_cost <= 0:
+            return rejected("open lot costs are required for a late sell correction")
+        after_cost = round(remaining_cost / expected_qty, 2)
     cash_delta = trade_cash_effect(late_trade)
-    asset_delta = round((day_start_price - late_price) * late_qty - fee, 2)
+    asset_delta = round((day_start_price - late_price) * quantity_delta - fee, 2)
     before_cash = _number(anchor.get("cash"))
     before_asset = _number(anchor.get("day_start_asset"))
 
@@ -319,6 +331,7 @@ def build_account_baseline_position_correction(
         "code": code,
         "name": str(late_trade.get("name") or corrected_target.get("标的") or ""),
         "late_trade_id": trade_id,
+        "late_trade_action": action,
         "before_qty": before_qty,
         "after_qty": expected_qty,
         "before_cost": round(before_cost, 4),
