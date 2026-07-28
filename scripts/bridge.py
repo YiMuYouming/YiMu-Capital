@@ -1670,6 +1670,7 @@ def _execution_card_metadata(trade_date=None):
         })
     rules = (compiled_meta or {}).get("rules") if isinstance(compiled_meta, dict) else None
     compiled_root = compiled_path.parent.parent
+    unavailable_source_paths = []
     for rule in rules or []:
         for source in rule.get("source_doc_hashes") or []:
             path = Path(str(source.get("path") or ""))
@@ -1685,12 +1686,25 @@ def _execution_card_metadata(trade_date=None):
                 actual = hashlib.sha256(physical_path.read_bytes()).hexdigest()
             except OSError:
                 actual = None
+            if expected and actual is None:
+                # Hermes deliberately deploys the immutable compiled bundle and
+                # execution card, not the private Vault checkout. The compiled
+                # artifact hash above authenticates its embedded source-hash
+                # manifest; absent builder-only source paths are therefore a
+                # provenance mode, not a stale runtime snapshot.
+                unavailable_source_paths.append(str(path))
+                continue
             if expected and actual != expected:
                 stale_details.append({
                     "kind": "source_hash", "path": str(physical_path),
                     "canonical_path": str(path),
                     "expected": expected, "actual": actual,
                 })
+    if unavailable_source_paths:
+        result.update({
+            "source_verification": "compiled_bundle_hash_only",
+            "unavailable_source_paths": sorted(set(unavailable_source_paths)),
+        })
     if stale_details:
         result.update({
             "execution_card_stale": True,

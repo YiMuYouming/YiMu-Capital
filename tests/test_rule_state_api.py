@@ -733,6 +733,52 @@ class RuleStateBridgeContractTest(unittest.TestCase):
         self.assertFalse(meta.get("execution_card_stale"), meta)
         self.assertEqual(str(declared), meta["compiled_rules_path"])
 
+    def test_execution_card_metadata_accepts_deployed_compiled_bundle_without_vault_checkout(self):
+        original_root = bridge.AI_RULE_SYSTEM_ROOT
+        try:
+            rule_root = self.tmp_dir / "deployed-ai-rule-system"
+            runtime = rule_root / "daily-runtime"
+            compiled_dir = rule_root / "compiled"
+            runtime.mkdir(parents=True)
+            compiled_dir.mkdir(parents=True)
+            canonical_source = "/Users/yimu/Documents/YouMingVault/rules/trading-core.md"
+            rules = [{
+                "rule_id": "STYLE-SCORE-001",
+                "source_doc_hashes": [{
+                    "path": canonical_source,
+                    "sha256": "a" * 64,
+                }],
+            }]
+            compiled = compiled_dir / "rules.v1.json"
+            compiled.write_text(
+                json.dumps({"schema_version": "rules.v1", "rules": rules}),
+                encoding="utf-8",
+            )
+            compiled_hash = hashlib.sha256(compiled.read_bytes()).hexdigest()
+            card = {
+                "next_trade_date": "2026-07-28",
+                "generated_at": "2026-07-28T09:00:00+08:00",
+                "rule_snapshot_hash": "sha256:card",
+                "rule_snapshot": {
+                    "compiled_rules": {
+                        "path": "/Users/canonical-builder/YM_Capital/ai-rule-system/compiled/rules.v1.json",
+                        "sha256": compiled_hash,
+                        "rules": rules,
+                    },
+                },
+            }
+            (runtime / "today_execution_card.json").write_text(
+                json.dumps(card), encoding="utf-8"
+            )
+            bridge.AI_RULE_SYSTEM_ROOT = rule_root
+
+            meta = bridge._execution_card_metadata(trade_date="2026-07-28")
+        finally:
+            bridge.AI_RULE_SYSTEM_ROOT = original_root
+
+        self.assertFalse(meta.get("execution_card_stale"), meta)
+        self.assertEqual(str(compiled), meta["compiled_rules_path"])
+
 
 class FreshnessBoundaryTest(unittest.TestCase):
     """验证 freshness stale/dead 在 rule_state 中正确传播"""
