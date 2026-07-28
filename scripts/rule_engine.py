@@ -6,6 +6,21 @@ from datetime import datetime
 
 RULE_VERSION = "g1a-v1"
 
+POS_SIZE_008_FIELDS = (
+    "entry_leg",
+    "first_entry_trade_date",
+    "trading_days_since_first_entry",
+    "leg1_or_leg2_floating_pnl",
+    "leg2_already_used",
+    "volume_ratio",
+    "pullback_ma_status",
+    "sector_inflow_status",
+    "sector_inflow_query_time",
+    "planned_single_stock_cap_pct",
+    "current_single_stock_pct",
+    "acceleration_segment_confirmed",
+)
+
 
 def _number(value):
     try:
@@ -15,6 +30,7 @@ def _number(value):
 
 
 def base_total_cap(score):
+    """Legacy display helper; never use this table as final position authority."""
     score = _number(score)
     if score is not None and score >= 80:
         return 60
@@ -39,12 +55,10 @@ def lianban_side_cap(emotion):
     return 0
 
 
-def trend_side_cap(trend_score=None, score=None):
-    """Vault Core-趋势 §T7.1 的简化映射。
-
-    当前管线没有完整的板块20日线/方向确认结构化字段，先用风格检测
-    维度三分数近似趋势强度：弱=20，中=40，强=60。
-    """
+def trend_side_cap(market_trend_20d_direction, trend_score=None, score=None):
+    """Vault Core-趋势 §T1/T7.1：方向先行，向下或缺失时趋势侧为零。"""
+    if market_trend_20d_direction not in {"向上", "走平"}:
+        return 0
     trend_score = _number(trend_score)
     if trend_score is not None:
         if trend_score >= 18:
@@ -85,6 +99,160 @@ def _pct(value, default=0, low=0, high=100):
         number = default
     number = max(low, min(high, number))
     return int(number) if float(number).is_integer() else round(number, 2)
+
+
+def evaluate_position_evidence(action_type, evidence):
+    """Evaluate POS-SIZE-008 evidence for entry actions without inventing facts."""
+    action = str(action_type or "").strip().lower()
+    if action not in {"buy", "add", "do_t"}:
+        return {"allowed": True, "code": None, "missing_fields": [], "blocking_reasons": []}
+    evidence = evidence if isinstance(evidence, dict) else {}
+    missing = [field for field in POS_SIZE_008_FIELDS if evidence.get(field) is None or evidence.get(field) == ""]
+    reasons = []
+    if missing:
+        return {
+            "allowed": False,
+            "code": "POS-SIZE-008",
+            "missing_fields": missing,
+            "blocking_reasons": ["missing_evidence"],
+        }
+
+    leg = int(_number(evidence.get("entry_leg")) or 0)
+    days = _number(evidence.get("trading_days_since_first_entry"))
+    pnl = _number(evidence.get("leg1_or_leg2_floating_pnl"))
+    volume_ratio = _number(evidence.get("volume_ratio"))
+    planned_cap = _number(evidence.get("planned_single_stock_cap_pct"))
+    current_pct = _number(evidence.get("current_single_stock_pct"))
+    pullback = str(evidence.get("pullback_ma_status") or "").strip().lower()
+    sector = str(evidence.get("sector_inflow_status") or "").strip().lower()
+
+    if leg not in {1, 2, 3}:
+        reasons.append("entry_leg_invalid")
+    if action == "add" and leg == 1:
+        reasons.append("add_cannot_be_leg1")
+    if planned_cap is None or current_pct is None or current_pct >= planned_cap:
+        reasons.append("single_stock_cap_reached")
+    if _boolish(evidence.get("acceleration_segment_confirmed")) and leg in {2, 3}:
+        reasons.append("acceleration_segment_no_add")
+    if leg == 2:
+        if _boolish(evidence.get("leg2_already_used")):
+            reasons.append("leg2_already_used")
+        if days is None or days < 0 or days > 2:
+            reasons.append("leg2_outside_0_2_trading_days")
+        if volume_ratio is None or volume_ratio >= 1:
+            reasons.append("leg2_not_volume_contracted")
+        if not any(token in pullback for token in ("support", "supported", "企稳", "不破", "ma5", "ma10")):
+            reasons.append("leg2_pullback_ma_unconfirmed")
+        if sector in {"large_outflow", "大额流出", "outflow", "missing", "unknown", "n"}:
+            reasons.append("leg2_sector_inflow_failed")
+    if leg == 3 and (pnl is None or pnl <= 0):
+        reasons.append("leg3_requires_floating_profit")
+
+    return {
+        "allowed": not reasons,
+        "code": None if not reasons else "POS-SIZE-008",
+        "missing_fields": [],
+        "blocking_reasons": reasons,
+    }
+
+
+def _role_side(role):
+    text = str(role or "").strip().lower()
+    if any(token in text for token in ("lianban", "limit", "leader", "dragon", "连板", "龙头", "高度")):
+        return "lianban"
+    if any(token in text for token in ("trend", "capacity", "middle", "core", "趋势", "容量", "中军", "核心")):
+        return "trend"
+    return None
+
+
+def _role_lianban_layer(role):
+    text = str(role or "").strip().lower().replace("→", "to")
+    compact = text.replace("_", "").replace("-", "").replace(" ", "")
+    for layer, tokens in {
+        "1_to_2": ("1to2", "1进2", "一进二"),
+        "2_to_3": ("2to3", "2进3", "二进三"),
+        "3_to_4": ("3to4", "3进4", "三进四"),
+    }.items():
+        if any(token in compact for token in tokens):
+            return layer
+    return None
+
+
+def evaluate_decision_gate(action_type, window_name, role, entry_leg, health, rule_state):
+    """Final action-specific gate. Exit/risk handling ignores buy-only blocks."""
+    action = str(action_type or "").strip().lower()
+    exits = {"sell", "reduce", "close", "clear"}
+    if action in exits:
+        return {"allowed": True, "reason": None, "blocking_codes": [], "action_type": action}
+
+    entry_actions = {"buy", "add", "do_t"}
+    if action not in entry_actions:
+        return {"allowed": True, "reason": None, "blocking_codes": [], "action_type": action}
+
+    rule = rule_state or {}
+    codes = []
+    if not bool((health or {}).get("trade_entry_allowed", False)):
+        codes.append("HEALTH_TRADE_ENTRY_BLOCKED")
+    for gap in rule.get("source_gaps") or []:
+        code = str(gap)
+        if code.startswith("missing_rule_input:"):
+            continue
+        codes.append("RULE_SNAPSHOT_STALE" if "RULE_SNAPSHOT_STALE" in code else code)
+    for block in rule.get("blocks") or []:
+        if not isinstance(block, dict):
+            continue
+        if block.get("scope") in {"all", "entry"} and block.get("code"):
+            codes.append(str(block["code"]))
+    if rule.get("tradable") is False and not codes:
+        codes.append("RULE_STATE_BLOCKED")
+
+    wkey = str(window_name or "").strip().lower()
+    window = ((rule.get("windows") or {}).get(wkey) or {}) if wkey else {}
+    if not wkey:
+        codes.append("WINDOW_REQUIRED")
+    else:
+        if window.get("in_session") is not True:
+            codes.append("WINDOW_CLOSED")
+        side = _role_side(role)
+        side_allowed = window.get("side_buy_allowed") or {}
+        if side and side in side_allowed:
+            if side_allowed.get(side) is not True:
+                side_blocks = (window.get("side_blocks") or {}).get(side) or []
+                codes.extend(str(code) for code in side_blocks)
+                if not side_blocks:
+                    codes.append(f"{wkey.upper()}_{side.upper()}_BLOCKED")
+            if side == "lianban":
+                layer = _role_lianban_layer(role)
+                layer_allowed = window.get("lianban_layer_buy_allowed") or {}
+                if layer and layer_allowed.get(layer) is not True:
+                    layer_blocks = (window.get("lianban_layer_blocks") or {}).get(layer) or []
+                    codes.extend(str(code) for code in layer_blocks)
+                    if not layer_blocks:
+                        codes.append(f"{wkey.upper()}_LIANBAN_{layer.upper()}_BLOCKED")
+        elif window.get("buy_allowed") is not True:
+            codes.extend(str(code) for code in window.get("blocks") or [])
+            if not window.get("blocks"):
+                codes.append(f"{wkey.upper()}_BUY_BLOCKED")
+
+    if action in {"add", "do_t"} and (rule.get("caps") or {}).get("add_allowed") is False:
+        codes.append("POSITION_ADD_BLOCKED")
+    position_result = rule.get("position_evidence") or {}
+    if position_result.get("allowed") is False:
+        codes.append(position_result.get("code") or "POS-SIZE-008")
+    if entry_leg is not None and position_result.get("entry_leg") not in (None, entry_leg):
+        codes.append("POS_SIZE_ENTRY_LEG_MISMATCH")
+    codes.extend(str(code) for code in ((rule.get("t1") or {}).get("blocking_codes") or []))
+
+    codes = list(dict.fromkeys(code for code in codes if code))
+    return {
+        "allowed": not codes,
+        "reason": None if not codes else ",".join(codes),
+        "blocking_codes": codes,
+        "action_type": action,
+        "window_name": wkey or None,
+        "role": role,
+        "entry_leg": entry_leg,
+    }
 
 
 def _position_pnl_pct(position):
@@ -297,6 +465,9 @@ def evaluate_rule_state(inputs, now=None):
     time_window = inputs.get("time_window") or {}
     position_control = inputs.get("position_control") or {}
     manual_review_context = inputs.get("manual_review_context") or {}
+    source_gaps = list(dict.fromkeys(
+        list(inputs.get("source_gaps") or []) + list(style.get("source_gaps") or [])
+    ))
 
     legacy_pnl_pct = _number(account.get("pnl_pct"))
     account_day_return_pct = _number(account.get("account_day_return_pct"))
@@ -317,22 +488,62 @@ def evaluate_rule_state(inputs, now=None):
     adjustment_reason = str(style.get("adjustment_reason") or "").strip()
     style_approver = str(style.get("approver") or "").strip()
     style_script_version = str(style.get("script_version") or "").strip()
-    lianban_pct = _number(style.get("lianban_pct")) or 0
-    trend_pct = _number(style.get("trend_pct")) or 0
+    lianban_pct_raw = _number(style.get("lianban_pct"))
+    trend_pct_raw = _number(style.get("trend_pct"))
+    lianban_pct = lianban_pct_raw if lianban_pct_raw is not None else 0
+    trend_pct = trend_pct_raw if trend_pct_raw is not None else 0
+    previous_lianban_pct = _number(style.get("previous_lianban_pct"))
+    style_shift_same_direction_days = int(_number(style.get("style_shift_same_direction_days")) or 0)
     trend_score = _number(style.get("trend_score"))
+    market_trend_20d_direction = str(
+        style.get("market_trend_20d_direction") or ""
+    ).strip() or None
     emotion = _number(sentiment.get("emotion_pct"))
     previous_emotion = _number(sentiment.get("previous_emotion_pct"))
     limit_up_profit = _number(sentiment.get("limit_up_profit_pct"))
     broken_board = _number(sentiment.get("broken_board_pct"))
     promotion = _number(sentiment.get("promotion_pct"))
+    promotion_2_to_3_avg_3d = _number(sentiment.get("promotion_2_to_3_avg_3d"))
+    highest_board = _number(sentiment.get("highest_board"))
+    limit_up_count_avg_3d = _number(sentiment.get("limit_up_count_avg_3d"))
+    promotion_1_to_2_pct = _number(sentiment.get("promotion_1_to_2_pct"))
+    promotion_2_to_3_pct = _number(sentiment.get("promotion_2_to_3_pct"))
+    promotion_3_to_4_pct = _number(sentiment.get("promotion_3_to_4_pct"))
+    emotion_regime = str(sentiment.get("emotion_regime") or "").strip() or None
+    auction_emotion = _number(sentiment.get("auction_emotion_pct"))
     lianban_risk = _number(sentiment.get("lianban_risk"))
     main_inflow = _number(funds.get("main_inflow"))
     dde_big_order_net = _number(funds.get("dde_big_order_net"))
 
     blocks = []
     warnings = []
+    if source_gaps:
+        blocks.append(_finding(
+            "SOURCE_GAP", "entry", "关键规则事实缺失，买入侧 fail-closed",
+            source_gaps=source_gaps,
+        ))
+    style_shift_buffer = {"active": False}
+    if (
+        previous_lianban_pct is not None
+        and abs(lianban_pct - previous_lianban_pct) > 30
+        and style_shift_same_direction_days < 3
+    ):
+        original_lianban_pct = lianban_pct
+        lianban_pct = round((previous_lianban_pct + lianban_pct) / 2, 6)
+        trend_pct = round(100 - lianban_pct, 6)
+        style_shift_buffer = {
+            "active": True,
+            "previous_lianban_pct": previous_lianban_pct,
+            "current_lianban_pct": original_lianban_pct,
+            "buffered_lianban_pct": lianban_pct,
+            "buffered_trend_pct": trend_pct,
+        }
+        blocks.append(_finding(
+            "STYLE_SHIFT_BUFFER", "entry", "风格单日变化超过30pp，缓冲期只减仓不新开",
+            **style_shift_buffer,
+        ))
     lb_side_cap = lianban_side_cap(emotion)
-    tr_side_cap = trend_side_cap(trend_score, score)
+    tr_side_cap = trend_side_cap(market_trend_20d_direction, trend_score, score)
     base_cap = max(lb_side_cap, tr_side_cap)
     total_cap = base_cap
 
@@ -355,7 +566,6 @@ def evaluate_rule_state(inputs, now=None):
         "emotion_pct": emotion,
         "limit_up_profit_pct": limit_up_profit,
         "broken_board_pct": broken_board,
-        "promotion_pct": promotion,
     }
     missing_sentiment = sorted(key for key, value in required_sentiment.items() if value is None)
     if missing_sentiment:
@@ -423,15 +633,88 @@ def evaluate_rule_state(inputs, now=None):
     if emotion is not None and previous_emotion is not None and emotion < 20 and previous_emotion < 20:
         blocks.append(_finding("DOUBLE_ICE", "all", "连续双冰禁止新开仓",
                                emotion_pct=emotion, previous_emotion_pct=previous_emotion, max_pct=20))
-    if emotion is not None and emotion >= 85:
-        blocks.append(_finding("CLIMAX_STOP", "all", "极端高潮禁止新开仓",
-                               emotion_pct=emotion, min_pct=85))
-    elif emotion is not None and emotion >= 80:
-        total_cap = base_cap // 2
-        warnings.append(_finding("CLIMAX_REDUCE", "position", "高潮保护降半仓",
-                                 emotion_pct=emotion, min_pct=80, reduced_total_pct=total_cap))
+    if emotion is not None and emotion > 80:
+        blocks.append(_finding("CLIMAX_STOP", "entry", "当前/收盘情绪高潮，只卖不买",
+                               emotion_pct=emotion, min_exclusive_pct=80))
+
+    lianban_environment_required = {
+        "promotion_2_to_3_avg_3d": promotion_2_to_3_avg_3d,
+        "highest_board": highest_board,
+        "limit_up_count_avg_3d": limit_up_count_avg_3d,
+    }
+    missing_lianban_environment = sorted(
+        field for field, value in lianban_environment_required.items() if value is None
+    )
+    if missing_lianban_environment:
+        source_gaps.extend(
+            f"missing_rule_input:{field}" for field in missing_lianban_environment
+        )
+        source_gaps = list(dict.fromkeys(source_gaps))
+        blocks.append(_finding(
+            "LIANBAN_GATE_SOURCE_GAP", "lianban",
+            "连板环境关键字段缺失，连板买入侧 fail-closed",
+            missing=missing_lianban_environment,
+        ))
+
+    lianban_strategy_required = {
+        "1_to_2": {
+            "promotion_1_to_2_pct": promotion_1_to_2_pct,
+            "emotion_regime": emotion_regime,
+        },
+        "2_to_3": {"promotion_2_to_3_pct": promotion_2_to_3_pct},
+        "3_to_4": {"promotion_3_to_4_pct": promotion_3_to_4_pct},
+    }
+    for layer, fields in lianban_strategy_required.items():
+        missing = sorted(field for field, value in fields.items() if value is None)
+        if not missing:
+            continue
+        source_gaps.extend(f"missing_rule_input:{field}" for field in missing)
+        source_gaps = list(dict.fromkeys(source_gaps))
+        blocks.append(_finding(
+            f"LIANBAN_{layer.upper()}_SOURCE_GAP", f"lianban_{layer}",
+            "连板策略关键字段缺失，对应板层买入 fail-closed",
+            missing=missing,
+            layer=layer,
+        ))
+
+    environment_triggers = []
+    if promotion_2_to_3_avg_3d is not None and promotion_2_to_3_avg_3d < 20:
+        environment_triggers.append("promotion_2_to_3_avg_3d<20")
+    if highest_board is not None and highest_board <= 2:
+        environment_triggers.append("highest_board<=2")
+    if limit_up_count_avg_3d is not None and limit_up_count_avg_3d < 30:
+        environment_triggers.append("limit_up_count_avg_3d<30")
+    if environment_triggers:
+        blocks.append(_finding(
+            "LIANBAN_ENV_CLOSED", "lianban", "连板环境硬卡触发，关闭连板买入侧",
+            promotion_2_to_3_avg_3d=promotion_2_to_3_avg_3d,
+            highest_board=highest_board,
+            limit_up_count_avg_3d=limit_up_count_avg_3d,
+            triggers=environment_triggers,
+        ))
+
+    if market_trend_20d_direction == "向下":
+        blocks.append(_finding(
+            "TREND_DIRECTION_DOWN", "trend", "上证20日线向下，仅关闭趋势买入侧",
+            market_trend_20d_direction=market_trend_20d_direction,
+        ))
+    elif market_trend_20d_direction not in {"向上", "走平"}:
+        gap = "missing_rule_input:market_trend_20d_direction"
+        if gap not in source_gaps:
+            source_gaps.append(gap)
+        blocks.append(_finding(
+            "TREND_DIRECTION_SOURCE_GAP", "trend",
+            "市场20日趋势方向缺失，趋势买入侧 fail-closed",
+            market_trend_20d_direction=market_trend_20d_direction,
+        ))
 
     # ── W1 窗口 ──
+    if str(time_window.get("w1_status") or "").strip() in {"关闭", "closed", "blocked"}:
+        blocks.append(_finding("PLAN_W1_CLOSED", "w1", "执行卡/开盘指令关闭 W1 买入",
+                               w1_status=time_window.get("w1_status")))
+    if str(time_window.get("w2_status") or "").strip() in {"关闭", "closed", "blocked"}:
+        blocks.append(_finding("PLAN_W2_CLOSED", "w2", "执行卡/开盘指令关闭 W2 买入",
+                               w2_status=time_window.get("w2_status")))
     if lb_side_cap == 0 and lianban_pct > 0:
         blocks.append(_finding("LIANBAN_SIDE_CLOSED", "lianban", "连板侧仓位关闭",
                                emotion_pct=emotion, side_cap_pct=lb_side_cap))
@@ -440,35 +723,103 @@ def evaluate_rule_state(inputs, now=None):
                                emotion_pct=emotion, max_pct=35,
                                main_inflow=main_inflow,
                                volume_ratio=funds.get("volume_ratio")))
-    if emotion is not None and emotion < 60:
-        blocks.append(_finding("W1_EMOTION", "w1", "W1 情绪不足",
-                               emotion_pct=emotion, min_pct=60))
     if limit_up_profit is not None and limit_up_profit <= 2:
-        blocks.append(_finding("W1_LIMIT_UP_PROFIT", "w1", "W1 涨停收益不足",
+        blocks.append(_finding("W1_LIMIT_UP_PROFIT", "w1_lianban", "W1 连板涨停收益不足",
                                limit_up_profit_pct=limit_up_profit, min_pct=2))
     if broken_board is not None and broken_board > 30:
-        blocks.append(_finding("W1_BROKEN_BOARD", "w1", "炸板率超过 W1 上限",
+        blocks.append(_finding("W1_BROKEN_BOARD", "w1_lianban", "炸板率超过连板 W1 上限",
                                broken_board_pct=broken_board, max_pct=30))
-    if emotion is not None and promotion is not None:
-        promotion_min = 15 if emotion < 40 else 18
-        if promotion < promotion_min:
-            blocks.append(_finding("W1_PROMOTION", "w1", "W1 晋级率不足",
-                                   promotion_pct=promotion, min_pct=promotion_min))
+    one_to_two_threshold = {"低迷": 15, "主升": 18}.get(emotion_regime)
+    if (
+        one_to_two_threshold is not None
+        and promotion_1_to_2_pct is not None
+        and promotion_1_to_2_pct <= one_to_two_threshold
+    ):
+        blocks.append(_finding(
+            "LIANBAN_1_TO_2_STRATEGY", "lianban_1_to_2",
+            "一进二当日晋级率未严格通过当前情绪档位阈值",
+            emotion_regime=emotion_regime,
+            promotion_1_to_2_pct=promotion_1_to_2_pct,
+            min_exclusive_pct=one_to_two_threshold,
+        ))
+    if promotion_2_to_3_pct is not None and promotion_2_to_3_pct <= 25:
+        blocks.append(_finding(
+            "LIANBAN_2_TO_3_STRATEGY", "lianban_2_to_3", "二进三当日晋级率未严格大于25%",
+            promotion_2_to_3_pct=promotion_2_to_3_pct,
+            min_exclusive_pct=25,
+        ))
+    if promotion_3_to_4_pct is not None and promotion_3_to_4_pct <= 35:
+        blocks.append(_finding(
+            "LIANBAN_3_TO_4_STRATEGY", "lianban_3_to_4", "三进四当日晋级率未严格大于35%",
+            promotion_3_to_4_pct=promotion_3_to_4_pct,
+            min_exclusive_pct=35,
+        ))
 
     # ── W2 窗口 ──
     if emotion is not None and emotion < 20 and (lianban_risk is None or lianban_risk >= 0.5):
         blocks.append(_finding("W2_ICE_RISK", "w2", "W2 冰点风险过高",
                                emotion_pct=emotion, lianban_risk=lianban_risk, max_risk=0.5))
     if broken_board is not None and broken_board > 40:
-        blocks.append(_finding("W2_BROKEN_BOARD", "w2", "炸板率超过 W2 上限",
+        blocks.append(_finding("W2_BROKEN_BOARD", "w2_lianban", "炸板率超过连板 W2 上限",
                                broken_board_pct=broken_board, max_pct=40))
+
+    auction_factors = {
+        "w1": {"lianban": 1.0, "trend": 1.0},
+        "w2": {"lianban": 1.0, "trend": 1.0},
+    }
+    if auction_emotion is not None and auction_emotion >= 90:
+        auction_factors["w1"]["lianban"] = 0.0
+        auction_factors["w1"]["trend"] = 0.0
+        auction_factors["w2"]["lianban"] = 0.0
+        auction_factors["w2"]["trend"] = 0.0
+        blocks.append(_finding("AUCTION_CLIMAX_90", "entry", "竞价情绪>=90%，全天只卖不买",
+                               auction_emotion_pct=auction_emotion))
+    elif auction_emotion is not None and auction_emotion >= 85:
+        auction_factors["w1"]["lianban"] = 0.0
+        auction_factors["w2"]["trend"] = 0.5
+        blocks.append(_finding("AUCTION_CLIMAX_W1_LIANBAN", "w1_lianban", "竞价情绪85-90%，连板W1全关",
+                               auction_emotion_pct=auction_emotion))
+    elif auction_emotion is not None and auction_emotion >= 80:
+        auction_factors["w1"]["lianban"] = 0.5
+        warnings.append(_finding("AUCTION_CLIMAX_W1_HALF", "w1_lianban", "竞价情绪80-85%，连板W1半仓",
+                                 auction_emotion_pct=auction_emotion))
 
     # ── 整理输出 ──
     globally_blocked = any(item["scope"] == "all" for item in blocks)
+    entry_blocked = any(item["scope"] == "entry" for item in blocks)
     lianban_closed = any(item["scope"] == "lianban" for item in blocks)
-    if lianban_closed and not globally_blocked and lianban_pct > 0:
+    applicable_lianban_layers = {
+        "1_to_2": emotion_regime in {"低迷", "主升"} or emotion_regime is None,
+        "2_to_3": True,
+        "3_to_4": True,
+    }
+    lianban_layer_scopes = {
+        "1_to_2": "lianban_1_to_2",
+        "2_to_3": "lianban_2_to_3",
+        "3_to_4": "lianban_3_to_4",
+    }
+    lianban_layer_block_codes = {
+        layer: [
+            item["code"] for item in blocks
+            if item["scope"] == scope
+        ]
+        for layer, scope in lianban_layer_scopes.items()
+    }
+    lianban_strategy_all_blocked = all(
+        not applicable_lianban_layers[layer] or lianban_layer_block_codes[layer]
+        for layer in applicable_lianban_layers
+    )
+    lianban_closed = lianban_closed or lianban_strategy_all_blocked
+    trend_closed = any(item["scope"] == "trend" for item in blocks)
+    if lianban_closed and trend_closed and not globally_blocked:
+        trend_pct = 0
+        lianban_pct = 0
+    elif lianban_closed and not globally_blocked and lianban_pct > 0:
         trend_pct = 100
         lianban_pct = 0
+    elif trend_closed and not globally_blocked and trend_pct > 0:
+        lianban_pct = 100
+        trend_pct = 0
     if globally_blocked:
         total_cap = 0
         lianban_pct = 0
@@ -494,18 +845,81 @@ def evaluate_rule_state(inputs, now=None):
             current_price_distance_pct=manual_review_context.get("current_price_distance_pct"),
         ))
 
-    w1_blocks = [item["code"] for item in blocks if item["scope"] in ("all", "w1")]
-    w2_blocks = [item["code"] for item in blocks if item["scope"] in ("all", "w2")]
-
     in_w1 = (now.replace(hour=9, minute=30, second=0, microsecond=0) <= now <
              now.replace(hour=10, minute=1, second=0, microsecond=0))
     in_w2 = (now.replace(hour=14, minute=0, second=0, microsecond=0) <= now <
              now.replace(hour=14, minute=51, second=0, microsecond=0))
 
+    w1_blocks = [item["code"] for item in blocks if item["scope"] in ("all", "entry", "w1")]
+    w2_blocks = [item["code"] for item in blocks if item["scope"] in ("all", "entry", "w2")]
+    w1_side_blocks = {
+        "lianban": w1_blocks + [item["code"] for item in blocks if item["scope"] in ("lianban", "w1_lianban")],
+        "trend": w1_blocks + [item["code"] for item in blocks if item["scope"] in ("trend", "w1_trend")],
+    }
+    w2_side_blocks = {
+        "lianban": w2_blocks + [item["code"] for item in blocks if item["scope"] in ("lianban", "w2_lianban")],
+        "trend": w2_blocks + [item["code"] for item in blocks if item["scope"] in ("trend", "w2_trend")],
+    }
+    if auction_factors["w1"]["lianban"] == 0:
+        w1_side_blocks["lianban"].append("AUCTION_CLIMAX_W1_LIANBAN")
+    if auction_factors["w1"]["trend"] == 0:
+        w1_side_blocks["trend"].append("AUCTION_CLIMAX_90")
+    if auction_factors["w2"]["lianban"] == 0:
+        w2_side_blocks["lianban"].append("AUCTION_CLIMAX_90")
+    if auction_factors["w2"]["trend"] == 0:
+        w2_side_blocks["trend"].append("AUCTION_CLIMAX_90")
+
+    def _window_lianban_layers(window_blocks, side_blocks, in_session):
+        layer_blocks = {
+            layer: list(dict.fromkeys(
+                side_blocks + lianban_layer_block_codes[layer]
+            ))
+            for layer in lianban_layer_scopes
+        }
+        allowed = {
+            layer: bool(
+                in_session
+                and applicable_lianban_layers[layer]
+                and not layer_blocks[layer]
+            )
+            for layer in lianban_layer_scopes
+        }
+        any_layer_available = any(
+            applicable_lianban_layers[layer] and not layer_blocks[layer]
+            for layer in lianban_layer_scopes
+        )
+        summary_blocks = list(side_blocks)
+        if not any_layer_available:
+            summary_blocks.extend(
+                code for codes in lianban_layer_block_codes.values() for code in codes
+            )
+            if not summary_blocks:
+                summary_blocks.append("LIANBAN_STRATEGIES_CLOSED")
+        return (
+            {layer: list(dict.fromkeys(codes)) for layer, codes in layer_blocks.items()},
+            allowed,
+            list(dict.fromkeys(summary_blocks)),
+        )
+
+    w1_lianban_layer_blocks, w1_lianban_layer_allowed, w1_side_blocks["lianban"] = (
+        _window_lianban_layers(w1_blocks, w1_side_blocks["lianban"], in_w1)
+    )
+    w2_lianban_layer_blocks, w2_lianban_layer_allowed, w2_side_blocks["lianban"] = (
+        _window_lianban_layers(w2_blocks, w2_side_blocks["lianban"], in_w2)
+    )
+
     regime = "unknown" if emotion is None else (
         "冰点" if emotion < 20 else "低迷" if emotion < 40 else
         "主升" if emotion < 60 else "强势" if emotion < 80 else "高潮"
     )
+
+    position_evidence = evaluate_position_evidence(
+        inputs.get("action_type"), inputs.get("position_evidence")
+    ) if inputs.get("action_type") in {"buy", "add", "do_t"} else {
+        "allowed": True, "code": None, "missing_fields": [], "blocking_reasons": []
+    }
+    if inputs.get("position_evidence") and isinstance(position_evidence, dict):
+        position_evidence["entry_leg"] = (inputs.get("position_evidence") or {}).get("entry_leg")
 
     return {
         "version": RULE_VERSION,
@@ -525,13 +939,36 @@ def evaluate_rule_state(inputs, now=None):
         "windows": {
             "w1": {
                 "in_session": in_w1,
-                "buy_allowed": in_w1 and not w1_blocks,
+                "buy_allowed": in_w1 and not w1_blocks and not any(w1_side_blocks.values()),
+                "side_buy_allowed": {
+                    side: in_w1 and not side_blocks
+                    for side, side_blocks in w1_side_blocks.items()
+                },
+                "lianban_layer_buy_allowed": w1_lianban_layer_allowed,
+                "lianban_layer_blocks": w1_lianban_layer_blocks,
+                "side_blocks": w1_side_blocks,
+                "side_cap_factor": auction_factors["w1"],
                 "manual_review_allowed": ice_manual_review_allowed,
                 "manual_review_rules": ice_manual_review_rules,
                 "blocks": w1_blocks,
             },
-            "w2": {"in_session": in_w2, "buy_allowed": in_w2 and not w2_blocks, "blocks": w2_blocks},
+            "w2": {
+                "in_session": in_w2,
+                "buy_allowed": in_w2 and not w2_blocks and not any(w2_side_blocks.values()),
+                "side_buy_allowed": {
+                    side: in_w2 and not side_blocks
+                    for side, side_blocks in w2_side_blocks.items()
+                },
+                "lianban_layer_buy_allowed": w2_lianban_layer_allowed,
+                "lianban_layer_blocks": w2_lianban_layer_blocks,
+                "side_blocks": w2_side_blocks,
+                "side_cap_factor": auction_factors["w2"],
+                "blocks": w2_blocks,
+            },
         },
+        "style_shift_buffer": style_shift_buffer,
+        "source_gaps": source_gaps,
+        "position_evidence": position_evidence,
         "blocks": blocks,
         "warnings": warnings,
     }

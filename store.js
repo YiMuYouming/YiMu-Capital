@@ -280,16 +280,19 @@ const DataStore = (function() {
     var manualEmotion = manualData && manualData['情绪值'] || '';
     var isManualOverride = manualEmotion && manualData && manualData['_情绪值_手动覆盖'] === 'true';
 
-    var finalEmotion = isManualOverride ? parseFloat(manualEmotion)
+    var rawEmotion = isManualOverride ? manualEmotion
       : autoEmotion != null ? autoEmotion
-      : iwencaiEmotion != null ? parseFloat(iwencaiEmotion)
-      : (d.sentiment && d.sentiment['情绪值']) || 0;
+      : iwencaiEmotion != null ? iwencaiEmotion
+      : d.sentiment && d.sentiment['情绪值'];
+    var parsedEmotion = rawEmotion != null && rawEmotion !== '' ? parseFloat(rawEmotion) : NaN;
+    var finalEmotion = isFinite(parsedEmotion) ? parsedEmotion : null;
 
     if (isManualOverride) emotionSource = 'T4:manual_override';
 
     d.sentiment = d.sentiment || {};
     d.sentiment['情绪值'] = finalEmotion;
-    d.sentiment['情绪区间'] = finalEmotion < 20 ? '冰点' : finalEmotion < 40 ? '低迷'
+    d.sentiment['情绪区间'] = finalEmotion == null ? '未知'
+      : finalEmotion < 20 ? '冰点' : finalEmotion < 40 ? '低迷'
       : finalEmotion < 60 ? '主升' : finalEmotion < 80 ? '强势' : '高潮';
     d.sentiment['_emotion_source'] = emotionSource;
 

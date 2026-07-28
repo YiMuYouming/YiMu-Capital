@@ -6,6 +6,7 @@ _build_full_snapshot 含 rule_state、小数百分数转换、
 全量隔离：tempfile + mock CACHE，不读/写真实 data/。
 """
 import io
+import hashlib
 import json
 import threading
 import tempfile
@@ -37,7 +38,7 @@ class RuleStateBridgeContractTest(unittest.TestCase):
         # 隔离所有真实文件路径
         self.tmp_dashboard = self.tmp_dir / "dashboard_data.json"
         self.tmp_dashboard.write_text(
-            '{"meta":{"date":"2026-05-27"},"market":{},"sentiment":{},'
+            '{"meta":{"date":"2026-05-27"},"market":{},"sentiment":{"二进三晋级率近3日均值":26.966667},'
             '"lianban_pool":[],"trend_pool":[],"positions":[],"decision":{},'
             '"sectors":[],"risk":{},"pnl":{},"style":{"总分":59,"连板占比":54,"趋势占比":46}}'
         )
@@ -111,7 +112,7 @@ class RuleStateBridgeContractTest(unittest.TestCase):
     def test_zero_style_values_are_preserved(self):
         """总分=0、连板占比=0、趋势占比=0 不因 or 回退成 50"""
         self.tmp_dashboard.write_text(
-            '{"meta":{"date":"2026-05-27"},"market":{},"sentiment":{},'
+            '{"meta":{"date":"2026-05-27"},"market":{},"sentiment":{"二进三晋级率近3日均值":26.966667},'
             '"lianban_pool":[],"trend_pool":[],"positions":[],"decision":{},'
             '"sectors":[],"risk":{},"pnl":{},"style":{"总分":0,"连板占比":0,"趋势占比":0}}'
         )
@@ -124,10 +125,11 @@ class RuleStateBridgeContractTest(unittest.TestCase):
     def test_vault_three_layer_caps_release_ice_lianban_to_trend(self):
         """Vault 三层：冰点连板侧关闭，趋势侧弱趋势 20%，连板资金释放给趋势"""
         self.tmp_dashboard.write_text(
-            '{"meta":{"date":"2026-05-27"},"market":{},"sentiment":{},'
+            '{"meta":{"date":"2026-05-27"},"market":{},"sentiment":{"二进三晋级率近3日均值":26.966667},'
             '"lianban_pool":[],"trend_pool":[],"positions":[],"decision":{},'
             '"sectors":[],"risk":{"连亏天数":0},"pnl":{},'
-            '"style":{"总分":42,"连板占比":12,"趋势占比":88,"dim3_趋势":9}}'
+            '"style":{"总分":42,"连板占比":12,"趋势占比":88,"dim3_趋势":9,'
+            '"market_trend_20d_direction":"走平"}}'
         )
         bridge.CACHE["iwencai"] = {
             "情绪值": 17.1, "昨日涨停收益": 1.03,
@@ -146,7 +148,7 @@ class RuleStateBridgeContractTest(unittest.TestCase):
     def test_rule_state_builds_earned_cap_from_account_positions(self):
         """_build_rule_state 应从账户 SSOT 持仓浮盈推导盈利解锁仓位"""
         self.tmp_dashboard.write_text(
-            '{"meta":{"date":"2026-05-27"},"market":{},"sentiment":{},'
+            '{"meta":{"date":"2026-05-27"},"market":{},"sentiment":{"二进三晋级率近3日均值":26.966667},'
             '"lianban_pool":[],"trend_pool":[{"代码":"000001","标的":"主线A"}],"positions":[],"decision":{},'
             '"sectors":[],"risk":{"连亏天数":0},"pnl":{},'
             '"style":{"总分":62,"连板占比":0,"趋势占比":100,"dim3_趋势":18}}'
@@ -198,7 +200,7 @@ class RuleStateBridgeContractTest(unittest.TestCase):
     def test_rule_state_does_not_count_unmatched_profit_as_mainline_profit(self):
         """强主线环境下，未匹配主线池/锚定股的盈利持仓不得解锁主线仓位"""
         self.tmp_dashboard.write_text(
-            '{"meta":{"date":"2026-05-27"},"market":{},"sentiment":{},'
+            '{"meta":{"date":"2026-05-27"},"market":{},"sentiment":{"二进三晋级率近3日均值":26.966667},'
             '"lianban_pool":[],"trend_pool":[{"代码":"000777","标的":"真正主线"}],"positions":[],"decision":{},'
             '"sectors":[],"risk":{"连亏天数":0},"pnl":{},'
             '"style":{"总分":62,"连板占比":0,"趋势占比":100,"dim3_趋势":18}}'
@@ -236,10 +238,11 @@ class RuleStateBridgeContractTest(unittest.TestCase):
     def test_vault_loss_streak_overrides_base_cap_to_zero(self):
         """Vault 第一层：连亏 >=2 天最终总仓位归零"""
         self.tmp_dashboard.write_text(
-            '{"meta":{"date":"2026-05-27"},"market":{},"sentiment":{},'
+            '{"meta":{"date":"2026-05-27"},"market":{},"sentiment":{"二进三晋级率近3日均值":26.966667},'
             '"lianban_pool":[],"trend_pool":[],"positions":[],"decision":{},'
             '"sectors":[],"risk":{"连亏天数":2},"pnl":{},'
-            '"style":{"总分":42,"连板占比":12,"趋势占比":88,"dim3_趋势":9}}'
+            '"style":{"总分":42,"连板占比":12,"趋势占比":88,"dim3_趋势":9,'
+            '"market_trend_20d_direction":"走平"}}'
         )
         bridge.CACHE["iwencai"] = {
             "情绪值": 17.1, "昨日涨停收益": 1.03,
@@ -257,7 +260,7 @@ class RuleStateBridgeContractTest(unittest.TestCase):
     def test_ice_w1_polarized_mainline_only_enters_manual_review(self):
         """情绪<35 的极化主线强回踩只给 W1 黄灯，不放开 buy_allowed"""
         self.tmp_dashboard.write_text(
-            '{"meta":{"date":"2026-06-24"},"market":{},"sentiment":{},'
+            '{"meta":{"date":"2026-06-24"},"market":{},"sentiment":{"二进三晋级率近3日均值":26.966667},'
             '"lianban_pool":[],"trend_pool":[{"代码":"688041","标的":"海光信息"}],'
             '"positions":[],"decision":{},"sectors":[],"risk":{"连亏天数":0},"pnl":{},'
             '"style":{"总分":62,"连板占比":0,"趋势占比":100,"dim3_趋势":18}}'
@@ -327,7 +330,7 @@ class RuleStateBridgeContractTest(unittest.TestCase):
     def test_ice_w1_manual_review_context_can_come_from_dashboard_data(self):
         """生产路径从 dashboard_data manual_review_context 读取黄灯证据"""
         self.tmp_dashboard.write_text(
-            '{"meta":{"date":"2026-06-24"},"market":{},"sentiment":{},'
+            '{"meta":{"date":"2026-06-24"},"market":{},"sentiment":{"二进三晋级率近3日均值":26.966667},'
             '"lianban_pool":[],"trend_pool":[{"代码":"688041","标的":"海光信息"}],'
             '"positions":[],"decision":{},"sectors":[],"risk":{"连亏天数":0},"pnl":{},'
             '"style":{"总分":62,"连板占比":0,"趋势占比":100,"dim3_趋势":18},'
@@ -363,7 +366,7 @@ class RuleStateBridgeContractTest(unittest.TestCase):
         """盘前预案明确给出仓位时，自动连亏计数只提示不覆盖预案"""
         self.tmp_dashboard.write_text(
             '{"meta":{"date":"2026-05-29"},"market":{"炸板率":20},"sentiment":{'
-            '"情绪值":65,"昨日涨停收益":3.0,"晋级率":25},'
+            '"情绪值":65,"昨日涨停收益":3.0,"晋级率":25,"二进三晋级率近3日均值":26.966667},'
             '"lianban_pool":[],"trend_pool":[],"positions":[],"decision":{},'
             '"sectors":[],"risk":{"连亏天数":2},"pnl":{},'
             '"time_window":{"W1状态":"开放","W2状态":"开放"},'
@@ -443,7 +446,7 @@ class RuleStateBridgeContractTest(unittest.TestCase):
         """实时 iwencai 情绪值优先于 live_index_fallback 涨跌家数回退"""
         self.tmp_dashboard.write_text(
             '{"meta":{"date":"2026-06-09"},"market":{"炸板率":0},"sentiment":{'
-            '"情绪值":12.2,"昨日涨停收益":1.84,"晋级率":19.18},'
+            '"情绪值":12.2,"昨日涨停收益":1.84,"晋级率":19.18,"二进三晋级率近3日均值":26.966667},'
             '"lianban_pool":[],"trend_pool":[],"positions":[],"decision":{},'
             '"sectors":[],"risk":{"连亏天数":0},"pnl":{},'
             '"style":{"总分":41,"连板占比":51,"趋势占比":49,"dim3_趋势":10}}'
@@ -467,14 +470,13 @@ class RuleStateBridgeContractTest(unittest.TestCase):
 
         self.assertNotIn("DOUBLE_ICE", [b["code"] for b in state["blocks"]])
         self.assertEqual(state["market_regime"], "低迷")
-        w1_emotion = [b for b in state["blocks"] if b["code"] == "W1_EMOTION"]
-        self.assertTrue(w1_emotion, f"W1 情绪硬卡应保留: {state}")
-        self.assertEqual(w1_emotion[0]["evidence"].get("emotion_pct"), 38.0)
+        self.assertNotIn("SENTIMENT_STALE", [b["code"] for b in state["blocks"]])
+        self.assertNotIn("W1_EMOTION", [b["code"] for b in state["blocks"]])
 
     def test_live_index_breadth_derives_emotion_when_iwencai_emotion_missing(self):
         """云端无 PyTDX 时，fresh live_index 上涨/下跌家数可作为实时情绪主源兜底"""
         self.tmp_dashboard.write_text(
-            '{"meta":{"date":"2026-06-10"},"market":{},"sentiment":{},'
+            '{"meta":{"date":"2026-06-10"},"market":{},"sentiment":{"二进三晋级率近3日均值":26.966667},'
             '"lianban_pool":[],"trend_pool":[],"positions":[],"decision":{},'
             '"sectors":[],"risk":{"连亏天数":0},"pnl":{},'
             '"style":{"总分":59,"连板占比":0,"趋势占比":100,"dim3_趋势":16}}'
@@ -499,9 +501,9 @@ class RuleStateBridgeContractTest(unittest.TestCase):
         codes = [b["code"] for b in state["blocks"]]
         self.assertNotIn("SENTIMENT_STALE", codes)
         self.assertEqual(state["market_regime"], "低迷")
-        w1_emotion = [b for b in state["blocks"] if b["code"] == "W1_EMOTION"]
-        self.assertTrue(w1_emotion, f"低迷应继续阻断 W1，而不是数据缺失: {state}")
-        self.assertAlmostEqual(w1_emotion[0]["evidence"].get("emotion_pct"), 25.8, places=1)
+        w1_ice = [b for b in state["blocks"] if b["code"] == "WIN-ICE-W1-001"]
+        self.assertTrue(w1_ice, f"情绪<35应继续阻断 W1，而不是数据缺失: {state}")
+        self.assertAlmostEqual(w1_ice[0]["evidence"].get("emotion_pct"), 25.8, places=1)
 
     def test_invalid_iwencai_up_down_emotion_is_sanitized(self):
         """iwencai 上涨侧/下跌侧任一为0时，派生情绪值不可用"""
@@ -522,7 +524,7 @@ class RuleStateBridgeContractTest(unittest.TestCase):
         """Vault 第一层：周回撤>6%、月回撤>10% 都是全局停止"""
         self.tmp_dashboard.write_text(
             '{"meta":{"date":"2026-05-27"},"market":{"炸板率":20},"sentiment":{'
-            '"情绪值":65,"昨日涨停收益":3.0,"晋级率":25},'
+            '"情绪值":65,"昨日涨停收益":3.0,"晋级率":25,"二进三晋级率近3日均值":26.966667},'
             '"lianban_pool":[],"trend_pool":[],"positions":[],"decision":{},'
             '"sectors":[],"risk":{"连亏天数":0,"周累计回撤":-6.1,"月累计回撤":-10.1},'
             '"pnl":{},"style":{"总分":60,"连板占比":60,"趋势占比":40,"dim3_趋势":12}}'
@@ -636,6 +638,101 @@ class RuleStateBridgeContractTest(unittest.TestCase):
         self.assertFalse(allowed)
         self.assertIn("SENTIMENT_STALE", reason)
 
+    def test_ticket_fill_gate_uses_actual_action_and_window(self):
+        context = {
+            "health": {"trade_entry_allowed": True},
+            "rule_state": {
+                "tradable": True,
+                "blocks": [],
+                "source_gaps": [],
+                "caps": {"add_allowed": True},
+                "windows": {
+                    "w1": {"in_session": True, "buy_allowed": False, "blocks": ["W1_LIMIT_UP_PROFIT"]},
+                },
+            },
+        }
+        with patch.object(bridge, "_build_ai_context", return_value=context):
+            buy_allowed, buy_reason, buy_gate = bridge._ticket_fill_gate({
+                "action_type": "buy", "window": "w1", "target_role": "trend_core", "entry_leg": 1,
+            })
+            sell_allowed, sell_reason, sell_gate = bridge._ticket_fill_gate({
+                "action_type": "sell", "window": "w1", "target_role": "trend_core",
+            })
+        self.assertFalse(buy_allowed)
+        self.assertIn("W1_LIMIT_UP_PROFIT", buy_reason)
+        self.assertIn("W1_LIMIT_UP_PROFIT", buy_gate["blocking_codes"])
+        self.assertTrue(sell_allowed)
+        self.assertIsNone(sell_reason)
+        self.assertTrue(sell_gate["allowed"])
+
+    def test_execution_card_metadata_marks_compiled_hash_mismatch_stale(self):
+        original_root = bridge.AI_RULE_SYSTEM_ROOT
+        try:
+            rule_root = self.tmp_dir / "ai-rule-system"
+            runtime = rule_root / "daily-runtime"
+            compiled_dir = rule_root / "compiled"
+            runtime.mkdir(parents=True)
+            compiled_dir.mkdir(parents=True)
+            compiled = compiled_dir / "rules.v1.json"
+            compiled.write_text('{"schema_version":"rules.v1","rules":[]}', encoding="utf-8")
+            current_hash = hashlib.sha256(compiled.read_bytes()).hexdigest()
+            self.assertNotEqual(current_hash, "0" * 64)
+            card = {
+                "next_trade_date": "2026-07-28",
+                "generated_at": "2026-07-28T09:00:00+08:00",
+                "rule_snapshot_hash": "sha256:card",
+                "rule_snapshot": {
+                    "compiled_rules": {"path": str(compiled), "sha256": "0" * 64},
+                },
+            }
+            (runtime / "today_execution_card.json").write_text(json.dumps(card), encoding="utf-8")
+            bridge.AI_RULE_SYSTEM_ROOT = rule_root
+            meta = bridge._execution_card_metadata(trade_date="2026-07-28")
+        finally:
+            bridge.AI_RULE_SYSTEM_ROOT = original_root
+        self.assertTrue(meta["execution_card_stale"])
+        self.assertEqual(meta["stale_reason"], "RULE_SNAPSHOT_STALE")
+
+    def test_execution_card_metadata_uses_declared_compiled_artifact_path(self):
+        original_root = bridge.AI_RULE_SYSTEM_ROOT
+        try:
+            rule_root = self.tmp_dir / "canonical-ai-rule-system"
+            runtime = rule_root / "daily-runtime"
+            runtime.mkdir(parents=True)
+            declared = self.tmp_dir / "implementation-worktree" / "compiled" / "rules.v1.json"
+            declared.parent.mkdir(parents=True)
+            declared.write_text('{"schema_version":"rules.v1","rules":[]}', encoding="utf-8")
+            declared_hash = hashlib.sha256(declared.read_bytes()).hexdigest()
+            physical_doc = declared.parent.parent / "07_DAILY_REVIEW_OUTPUT_PROTOCOL.md"
+            physical_doc.write_text("canonical worktree bytes", encoding="utf-8")
+            physical_doc_hash = hashlib.sha256(physical_doc.read_bytes()).hexdigest()
+            card = {
+                "next_trade_date": "2026-07-28",
+                "generated_at": "2026-07-28T09:00:00+08:00",
+                "rule_snapshot_hash": "sha256:card",
+                "rule_snapshot": {
+                    "compiled_rules": {
+                        "path": str(declared),
+                        "sha256": declared_hash,
+                        "rules": [{
+                            "source_doc_hashes": [{
+                                "path": str(rule_root / "07_DAILY_REVIEW_OUTPUT_PROTOCOL.md"),
+                                "sha256": physical_doc_hash,
+                            }],
+                        }],
+                    },
+                },
+            }
+            (runtime / "today_execution_card.json").write_text(json.dumps(card), encoding="utf-8")
+            bridge.AI_RULE_SYSTEM_ROOT = rule_root
+
+            meta = bridge._execution_card_metadata(trade_date="2026-07-28")
+        finally:
+            bridge.AI_RULE_SYSTEM_ROOT = original_root
+
+        self.assertFalse(meta.get("execution_card_stale"), meta)
+        self.assertEqual(str(declared), meta["compiled_rules_path"])
+
 
 class FreshnessBoundaryTest(unittest.TestCase):
     """验证 freshness stale/dead 在 rule_state 中正确传播"""
@@ -654,7 +751,7 @@ class FreshnessBoundaryTest(unittest.TestCase):
         bridge.ROOT = self.tmp_dir
         self.tmp_dashboard = self.tmp_dir / "dashboard_data.json"
         self.tmp_dashboard.write_text(
-            '{"meta":{"date":"2026-05-27"},"market":{},"sentiment":{},'
+            '{"meta":{"date":"2026-05-27"},"market":{},"sentiment":{"二进三晋级率近3日均值":26.966667},'
             '"lianban_pool":[],"trend_pool":[],"positions":[],"decision":{},'
             '"sectors":[],"risk":{},"pnl":{},"style":{"总分":59,"连板占比":54,"趋势占比":46}}'
         )
@@ -873,7 +970,7 @@ class DoubleIceIntegrationTest(unittest.TestCase):
         bridge.ROOT = self.tmp_dir
         self.tmp_dashboard = self.tmp_dir / "dashboard_data.json"
         self.tmp_dashboard.write_text(
-            '{"meta":{"date":"2026-05-27"},"market":{},"sentiment":{},'
+            '{"meta":{"date":"2026-05-27"},"market":{},"sentiment":{"二进三晋级率近3日均值":26.966667},'
             '"lianban_pool":[],"trend_pool":[],"positions":[],"decision":{},'
             '"sectors":[],"risk":{},"pnl":{},"style":{"总分":59,"连板占比":54,"趋势占比":46}}'
         )
@@ -1009,7 +1106,7 @@ class SseConnectionReleaseTest(unittest.TestCase):
         bridge.ROOT = self.tmp_dir
         self.tmp_dashboard = self.tmp_dir / "dashboard_data.json"
         self.tmp_dashboard.write_text(
-            '{"meta":{"date":"2026-05-27"},"market":{},"sentiment":{},'
+            '{"meta":{"date":"2026-05-27"},"market":{},"sentiment":{"二进三晋级率近3日均值":26.966667},'
             '"lianban_pool":[],"trend_pool":[],"positions":[],"decision":{},'
             '"sectors":[],"risk":{},"pnl":{},"style":{"总分":59,"连板占比":54,"趋势占比":46}}'
         )

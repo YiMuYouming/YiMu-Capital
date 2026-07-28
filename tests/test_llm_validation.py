@@ -30,7 +30,8 @@ def _setup_isolated_bridge(test):
     bridge.ROOT = d
     bridge.DATA_FILE = d / "dashboard_data.json"
     bridge.DATA_FILE.write_text(json.dumps({
-        "meta": {"date": "2026-05-27"}, "market": {}, "sentiment": {},
+        "meta": {"date": "2026-05-27"}, "market": {},
+        "sentiment": {"二进三晋级率近3日均值": 26.966667},
         "lianban_pool": [], "trend_pool": [], "positions": [], "decision": {},
         "sectors": [], "risk": {}, "pnl": {},
         "style": {"总分": 85, "连板占比": 54, "趋势占比": 46},
@@ -77,10 +78,14 @@ def _day_stop_snapshot():
         "rule_state": evaluate_rule_state(
             {"account": {"pnl_pct": -4.0, "valuation_complete": True},
              "risk": {"loss_streak": 0},
-             "style": {"score": 85, "lianban_pct": 54, "trend_pct": 46},
+             "style": {"score": 85, "lianban_pct": 54, "trend_pct": 46,
+                       "market_trend_20d_direction": "向上"},
              "sentiment": {"emotion_pct": 65, "previous_emotion_pct": 45,
                             "limit_up_profit_pct": 3.0, "broken_board_pct": 20,
-                            "promotion_pct": 22},
+                            "promotion_pct": 22, "promotion_2_to_3_avg_3d": 26.966667,
+                            "highest_board": 3, "limit_up_count_avg_3d": 30,
+                            "promotion_1_to_2_pct": 19, "promotion_2_to_3_pct": 30,
+                            "promotion_3_to_4_pct": 40, "emotion_regime": "强势"},
              "freshness": {"quotes": "live", "sentiment": "live"}},
             datetime(2026, 5, 27, 14, 10)),
     }
@@ -97,10 +102,14 @@ def _tradable_snapshot():
         "rule_state": evaluate_rule_state(
             {"account": {"pnl_pct": 0.5, "valuation_complete": True},
              "risk": {"loss_streak": 0},
-             "style": {"score": 85, "lianban_pct": 54, "trend_pct": 46},
+             "style": {"score": 85, "lianban_pct": 54, "trend_pct": 46,
+                       "market_trend_20d_direction": "向上"},
              "sentiment": {"emotion_pct": 65, "previous_emotion_pct": 45,
                             "limit_up_profit_pct": 3.0, "broken_board_pct": 20,
-                            "promotion_pct": 22},
+                            "promotion_pct": 22, "promotion_2_to_3_avg_3d": 26.966667,
+                            "highest_board": 3, "limit_up_count_avg_3d": 30,
+                            "promotion_1_to_2_pct": 19, "promotion_2_to_3_pct": 30,
+                            "promotion_3_to_4_pct": 40, "emotion_regime": "强势"},
              "freshness": {"quotes": "live", "sentiment": "live"}},
             datetime(2026, 5, 27, 14, 10)),
     }
@@ -266,12 +275,19 @@ class BuyHardValidationTest(unittest.TestCase):
         rs = evaluate_rule_state(
             {"account": {"pnl_pct": 0.5, "valuation_complete": True},
              "risk": {"loss_streak": 0},
-             "style": {"score": 85, "lianban_pct": 54, "trend_pct": 46},
+             "style": {"score": 85, "lianban_pct": 54, "trend_pct": 46,
+                       "market_trend_20d_direction": "向上"},
              "sentiment": {"emotion_pct": 45, "previous_emotion_pct": 45,
                             "limit_up_profit_pct": 3.0, "broken_board_pct": 20,
-                            "promotion_pct": 22},
+                            "promotion_pct": 22, "promotion_2_to_3_avg_3d": 26.966667,
+                            "highest_board": 3, "limit_up_count_avg_3d": 30,
+                            "promotion_1_to_2_pct": 19, "promotion_2_to_3_pct": 30,
+                            "promotion_3_to_4_pct": 40, "emotion_regime": "强势"},
              "freshness": {"quotes": "live", "sentiment": "live"}},
             datetime(2026, 5, 27, 9, 40))
+        # Regression contract: the final window gate is authoritative even when
+        # the broader rule state remains tradable.
+        rs["windows"]["w1"]["buy_allowed"] = False
         snap = {"指数": {}, "情绪": {}, "连板池": [{"标的": "测试连板", "代码": "000001",
                 "板块": "科技", "涨幅": "+5", "量比": "0.5", "MA10_60m": "—"}],
                 "趋势池": [], "持仓": [], "板块": [], "风控": {}, "涨停梯队TOP5": [],
@@ -290,7 +306,8 @@ class BuyHardValidationTest(unittest.TestCase):
              "style": {"score": 85, "lianban_pct": 54, "trend_pct": 46},
              "sentiment": {"emotion_pct": 15, "previous_emotion_pct": 10,
                             "limit_up_profit_pct": 3.0, "broken_board_pct": 20,
-                            "promotion_pct": 22},
+                            "promotion_pct": 22, "promotion_2_to_3_avg_3d": 26.966667,
+                            "promotion_2_to_3_pct": 30},
              "freshness": {"quotes": "live", "sentiment": "live"}},
             datetime(2026, 5, 27, 14, 10))
         snap = {"指数": {}, "情绪": {}, "连板池": [], "趋势池": [
@@ -472,10 +489,14 @@ class W2TrendValidationTest(unittest.TestCase):
         return ev(
             {"account": {"pnl_pct": 0.5, "valuation_complete": True},
              "risk": {"loss_streak": 0},
-             "style": {"score": 85, "lianban_pct": 54, "trend_pct": 46},
+             "style": {"score": 85, "lianban_pct": 54, "trend_pct": 46,
+                       "market_trend_20d_direction": "向上"},
              "sentiment": {"emotion_pct": 65, "previous_emotion_pct": 45,
                             "limit_up_profit_pct": 3.0, "broken_board_pct": 20,
-                            "promotion_pct": 22},
+                            "promotion_pct": 22, "promotion_2_to_3_avg_3d": 26.966667,
+                            "highest_board": 3, "limit_up_count_avg_3d": 30,
+                            "promotion_1_to_2_pct": 19, "promotion_2_to_3_pct": 30,
+                            "promotion_3_to_4_pct": 40, "emotion_regime": "强势"},
              "freshness": {"quotes": "live", "sentiment": "live"}},
             __import__("datetime").datetime(2026, 5, 27, 14, 10))
 
@@ -818,7 +839,8 @@ class Phase3BuyValidationPreservedTest(unittest.TestCase):
              "style": {"score": 85, "lianban_pct": 54, "trend_pct": 46},
              "sentiment": {"emotion_pct": 65, "previous_emotion_pct": 45,
                             "limit_up_profit_pct": 3.0, "broken_board_pct": 20,
-                            "promotion_pct": 22},
+                            "promotion_pct": 22, "promotion_2_to_3_avg_3d": 26.966667,
+                            "promotion_2_to_3_pct": 30},
              "freshness": {"quotes": "live", "sentiment": "live"}},
             __import__("datetime").datetime(2026, 5, 27, 14, 10))
         snap = {"指数": {}, "情绪": {}, "连板池": [], "趋势池": [

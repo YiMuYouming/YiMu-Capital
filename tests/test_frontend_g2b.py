@@ -138,6 +138,26 @@ def _run_node(script, files=None, cwd=None):
 
 class DataStoreStaleTest(unittest.TestCase):
 
+    def test_invalid_baseline_emotion_stays_unknown_instead_of_nan(self):
+        script = BASE_MOCKS + r"""
+global._mockFetchResponses['/api/baseline'].sentiment = { '情绪值': 'N' };
+global._mockFetchResponses['auction_snapshot.json'] = {};
+global._mockFetchResponses['sentiment_auto.json'] = {};
+
+DataStore.fetchAll().then(function() {
+  var sentiment = (DataStore.merged || {}).sentiment || {};
+  console.log(JSON.stringify({
+    value: sentiment['情绪值'],
+    zone: sentiment['情绪区间'],
+    isNaN: typeof sentiment['情绪值'] === 'number' && isNaN(sentiment['情绪值'])
+  }));
+}).catch(function(e) { console.log(JSON.stringify({ _error: String(e) })); });
+"""
+        result = _run_node(script, files=["store.js"])
+        self.assertIsNone(result.get("value"), f"非法情绪值必须归一为 null: {result}")
+        self.assertEqual(result.get("zone"), "未知", f"非法情绪值不得误判为市场区间: {result}")
+        self.assertFalse(result.get("isNaN"), f"前端不得产生 NaN 情绪值: {result}")
+
     def test_auction_yesterday_is_stale(self):
         script = BASE_MOCKS + r"""
 global._mockFetchResponses['auction_snapshot.json'] = {

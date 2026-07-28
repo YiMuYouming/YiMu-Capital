@@ -4,13 +4,13 @@
 
 数据源:
   1. 最新复盘笔记 YAML frontmatter (market/sentiment/risk/positions/decision 域)
-  2. style_detect.py --json (style 域, 从 WorkBuddy/Tools/)
+  2. Market Watch finalized D0 style report / execution-card snapshot (style 域)
   3. 板块涨停日志.md (sectors 域, 近3天板块数据)
 
 输出: live-dashboard/data/dashboard_data.json
 """
 
-import json, os, sys, re, subprocess
+import json, os, sys, re
 from datetime import datetime
 from pathlib import Path
 
@@ -24,6 +24,15 @@ ROOT_DIR = Path(__file__).resolve().parent.parent  # live-dashboard/
 TRADING_DIR = Path.home() / "Documents/YouMingVault/10_⚡Now/01_💰弈沐资本"  # 交易系统根 (复盘笔记在此)
 REVIEW_DIR = TRADING_DIR / "复盘笔记"
 STYLE_DETECT = ROOT_DIR / "scripts" / "style_detect.py"
+MARKET_WATCH_ROOT = Path(os.environ.get(
+    "MARKET_WATCH_ROOT",
+    str(Path.home() / "Documents/YM_Capital/Market_Watch"),
+))
+AI_RULE_SYSTEM_ROOT = Path(os.environ.get(
+    "AI_RULE_SYSTEM_ROOT",
+    str(Path.home() / "Documents/YM_Capital/ai-rule-system"),
+))
+EXECUTION_CARD_FILE = AI_RULE_SYSTEM_ROOT / "daily-runtime" / "today_execution_card.json"
 SECTOR_LOG = TRADING_DIR / "板块涨停日志.md"
 OUTPUT_FILE = ROOT_DIR / "data/dashboard_data.json"
 POOLS_FILE = ROOT_DIR / "data/pools.json"
@@ -778,70 +787,167 @@ def _extract_iwencai_val(sd, dim_key, detail_key):
     return raw
 
 
-def get_style_data(review_path=None):
-    """调用 style_detect.py 获取风格数据，映射为 dashboard 格式"""
+def _canonical_fail_closed(source, gaps):
+    return {
+        "总分": None,
+        "风格": None,
+        "连板占比": None,
+        "趋势占比": None,
+        "总仓位上限": None,
+        "opportunity_cap_pct": None,
+        "dim1_量能": None,
+        "dim2_连板生态": None,
+        "dim3_趋势": None,
+        "market_trend_20d_direction": None,
+        "highest_board": None,
+        "limit_up_count_avg_3d": None,
+        "promotion_1_to_2_pct": None,
+        "promotion_2_to_3_pct": None,
+        "promotion_3_to_4_pct": None,
+        "emotion_regime": None,
+        "source_gaps": list(dict.fromkeys(gaps)),
+        "_status": "blocked",
+        "_source": source,
+        "_canonical": True,
+    }
+
+
+def _translate_canonical_style(sd, source="finalized_market_watch"):
+    """Validate and translate the canonical 30/40/30 D0 result without rescoring."""
+    if not isinstance(sd, dict):
+        return _canonical_fail_closed(source, ["canonical_style_report_invalid"])
+
+    gaps = list(sd.get("source_gaps") or [])
+    expected_weights = {"量能": 30, "连板生态": 40, "趋势赚钱效应": 30}
+    if sd.get("schema_version") != "review-style-detect.v1":
+        gaps.append("canonical_style_schema_invalid")
+    if sd.get("dimension_weights") != expected_weights:
+        gaps.append("canonical_style_weights_invalid")
+    if sd.get("formula_version") != "piecewise_linear_v1":
+        gaps.append("canonical_style_formula_invalid")
+
+    allocation = sd.get("allocation")
+    lb = allocation.get("连板资金占比") if isinstance(allocation, dict) else None
+    trend = allocation.get("趋势资金占比") if isinstance(allocation, dict) else None
+    total = sd.get("total_score")
+    if sd.get("status") != "ready" or total is None or lb is None or trend is None:
+        if not gaps:
+            gaps.append("canonical_style_facts_missing")
+        return _canonical_fail_closed(source, gaps)
     try:
-        cmd = ["python3", str(STYLE_DETECT), "--json"]
-        if review_path:
-            cmd.extend(["--review", review_path])
-        result = subprocess.run(
-            cmd, capture_output=True, text=True, timeout=120, cwd=str(STYLE_DETECT.parent)
+        lb = float(lb)
+        trend = float(trend)
+        total = float(total)
+    except (TypeError, ValueError):
+        return _canonical_fail_closed(source, gaps + ["canonical_style_numeric_invalid"])
+    if round(lb + trend, 6) != 100.0:
+        return _canonical_fail_closed(source, gaps + ["canonical_style_allocation_sum_invalid"])
+
+    scores = sd.get("scores") or {}
+    return {
+        "总分": int(total) if total.is_integer() else total,
+        "风格": sd.get("style"),
+        "连板占比": lb,
+        "趋势占比": trend,
+        "总仓位上限": None,
+        "opportunity_cap_pct": None,
+        "dim1_量能": (scores.get("维度一：量能") or {}).get("score"),
+        "dim2_连板生态": (scores.get("维度二：连板生态") or {}).get("score"),
+        "dim3_趋势": (scores.get("维度三：趋势赚钱效应") or {}).get("score"),
+        "source_gaps": [],
+        "formula_version": sd.get("formula_version"),
+        "dimension_weights": expected_weights,
+        "promotion_environment": sd.get("promotion_environment"),
+        "market_trend_20d_direction": sd.get("market_trend_20d_direction"),
+        "highest_board": sd.get("highest_board"),
+        "limit_up_count_avg_3d": sd.get("limit_up_count_avg_3d"),
+        "promotion_1_to_2_pct": sd.get("promotion_1_to_2_pct"),
+        "promotion_2_to_3_pct": sd.get("promotion_2_to_3_pct"),
+        "promotion_3_to_4_pct": sd.get("promotion_3_to_4_pct"),
+        "emotion_regime": sd.get("emotion_regime"),
+        "promotion_2_to_3_avg_3d": (
+            (sd.get("promotion_environment") or {}).get("avg_3d")
+            if isinstance(sd.get("promotion_environment"), dict) else None
+        ),
+        "_status": "ready",
+        "_source": source,
+        "_canonical": True,
+    }
+
+
+def _load_json_file(path):
+    try:
+        return json.loads(Path(path).read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError):
+        return None
+
+
+def _review_style_date(review_path):
+    if not review_path:
+        return None
+    fm = parse_frontmatter(review_path)
+    raw = fm.get("date")
+    if raw:
+        return str(raw)
+    return _review_note_date(review_path)
+
+
+def get_style_data(review_path=None):
+    """Consume a finalized Market Watch D0 report; never score style locally."""
+    trade_date = _review_style_date(review_path)
+    if not trade_date:
+        return _canonical_fail_closed("market_watch", ["canonical_style_trade_date_missing"])
+    report_path = MARKET_WATCH_ROOT / "out" / f"style_detect_{trade_date}.json"
+    closure_dir = MARKET_WATCH_ROOT / "artifacts" / "review-closure" / trade_date[:4] / trade_date
+    finalization = _load_json_file(closure_dir / "finalization_report.json") or {}
+    correction = _load_json_file(closure_dir / "d0_correction_receipt.json") or {}
+    finalized = finalization.get("status") in {"finalized", "finalized_degraded"}
+    corrected = correction.get("correction_status") == "accepted"
+    if not finalized and not corrected:
+        return _canonical_fail_closed(
+            "market_watch",
+            [f"canonical_style_not_finalized:{trade_date}"],
         )
-        if result.returncode == 0 and result.stdout:
-            # style_detect --json 输出：先打印可读文本，最后一行是 JSON
-            # 取最后一个 { 开始的部分作为 JSON
-            raw = result.stdout.strip()
-            brace_idx = raw.rfind('\n{')
-            if brace_idx < 0:
-                brace_idx = raw.find('{')
-            if brace_idx >= 0:
-                sd = json.loads(raw[brace_idx:])
-                # V0.3 字段映射: style_detect → dashboard_data.json
-                # 优先用 allocation（trading-core 插值表），信号强度作为参考
-                alloc = sd.get("allocation") or {}
-                tiered = sd.get("tiered_jjl") or {}
-                dim4 = sd.get("dim4") or {}
-                return {
-                    "总分": sd.get("total"),
-                    "风格": sd.get("style"),
-                    "置信度": sd.get("confidence"),
-                    # V0.3 直接用信号强度和分配表，不再用旧的风格名推算
-                    "连板占比": alloc.get("连板资金占比") or sd.get("lianban_conf"),
-                    "趋势占比": alloc.get("趋势资金占比") or sd.get("trend_conf"),
-                    "连板信号强度": sd.get("lianban_signal_pct"),
-                    "趋势信号强度": sd.get("trend_signal_pct"),
-                    "连板信号描述": sd.get("lianban_detail"),
-                    "趋势信号描述": sd.get("trend_detail"),
-                    "总仓位上限": _compute_total_cap(sd),
-                    "dim1_量能": (sd.get("dim1") or {}).get("score"),
-                    "dim2_连板生态": (sd.get("dim2") or {}).get("score"),
-                    "dim3_趋势": (sd.get("dim3") or {}).get("score"),
-                    "dim4_情绪广度": dim4.get("score"),
-                    # 分层晋级率（供 trading-core 硬卡判定）
-                    "一进二晋级率": tiered.get("一进二晋级率"),
-                    "二进三晋级率": tiered.get("二进三晋级率"),
-                    "三进四晋级率": tiered.get("三进四晋级率"),
-                    # === 问财实时情绪值（供 sentiment 域兜底）===
-                    "_iwencai_情绪值": _extract_iwencai_val(sd, "dim4", "情绪值"),
-                    "_iwencai_涨停收益": _extract_iwencai_val(sd, "dim2", "涨停收益"),
-                    "_iwencai_连板收益": _extract_iwencai_val(sd, "dim2", "连板收益"),
-                    "_iwencai_炸板收益": _extract_iwencai_val(sd, "dim2", "炸板收益"),
-                    "_iwencai_晋级率": _extract_iwencai_val(sd, "dim2", "晋级率"),
-                    "_iwencai_封板率": _extract_iwencai_val(sd, "dim2", "封板率"),
-                    "_iwencai_炸板率": _extract_iwencai_val(sd, "dim2", "炸板率"),
-                    "_iwencai_连板风险值": _extract_iwencai_val(sd, "dim2", "连板风险值"),
-                    "_iwencai_最高板": _extract_iwencai_val(sd, "dim2", "最高板"),
-                    "_iwencai_赚钱效应": _extract_iwencai_val(sd, "dim4", "赚钱效应"),
-                    "_iwencai_全市场成交额": _extract_iwencai_val(sd, "dim1", "全市场成交额"),
-                    # 过渡预警
-                    "预警": sd.get("warnings", []),
-                    "持续天数": sd.get("days_in_regime"),
-                }
-        if result.returncode != 0:
-            print(f"[warn] style_detect.py returned {result.returncode}: {result.stderr[:200]}")
-    except Exception as e:
-        print(f"[warn] style_detect.py failed: {e}")
-    return {}
+    report = _load_json_file(report_path)
+    if not report:
+        return _canonical_fail_closed(
+            "market_watch",
+            [f"canonical_style_report_missing:{report_path}"],
+        )
+    return _translate_canonical_style(report, source=str(report_path))
+
+
+def _load_execution_card(trade_date=None):
+    card = _load_json_file(EXECUTION_CARD_FILE)
+    if not isinstance(card, dict):
+        return None
+    if trade_date and str(card.get("next_trade_date") or "") != str(trade_date):
+        return None
+    return card
+
+
+def _apply_buy_window_precedence(time_window, style=None, execution_card=None, opening_instruction=None):
+    """Fail closed and apply explicit no-buy instructions above template defaults."""
+    result = dict(time_window or {})
+    reasons = []
+    style = style or {}
+    if style.get("_status") != "ready" or style.get("source_gaps"):
+        reasons.append("style_source_gap")
+    text_parts = [str(opening_instruction or "")]
+    if isinstance(execution_card, dict):
+        text_parts.extend([
+            str(execution_card.get("headline") or ""),
+            str((execution_card.get("position_cap") or {}).get("text") or ""),
+            " ".join(str(v) for v in execution_card.get("forbidden_actions") or []),
+        ])
+    instruction_text = " ".join(text_parts)
+    if any(term in instruction_text for term in ("只卖不买", "不新增", "不加仓")):
+        reasons.append("plan_no_buy")
+    if reasons:
+        result["W1状态"] = "关闭"
+        result["W2状态"] = "关闭"
+    result["close_reasons"] = reasons
+    return result
 
 def _compute_total_cap(sd):
     """按 Vault 三层规则估算每日基线总仓位上限。
@@ -984,9 +1090,18 @@ def compute_style_execution(fm, style):
     """
     reasons = []
     reason2s = []
-    lb_pct = style.get("连板占比", 75) if style else 75
-    tr_pct = style.get("趋势占比", 25) if style else 25
-    total_cap = style.get("总仓位上限", 30) if style else 30
+    if style and style.get("_canonical") and style.get("_status") != "ready":
+        return {
+            "连板实际": None,
+            "趋势实际": None,
+            "总仓位上限": None,
+            "首笔上限": None,
+            "原因": "风格事实缺失，买入侧 fail-closed",
+            "原因2": "；".join(style.get("source_gaps") or []),
+        }
+    lb_pct = style.get("连板占比") if style and style.get("连板占比") is not None else 75
+    tr_pct = style.get("趋势占比") if style and style.get("趋势占比") is not None else 25
+    total_cap = style.get("总仓位上限") if style and style.get("总仓位上限") is not None else 30
     first_limit = 10  # 默认首笔上限
 
     meltdown = fm.get("熔断触发", False)
@@ -1409,12 +1524,32 @@ def build_dashboard_data(review_path):
     if not style:
         style = {}
     premarket_source = premarket_plan.get("source", "premarket_plan")
-    if premarket_style and (premarket_source == "appendix_a_plan" or not _fm_has_data(fm, "情绪值")):
+    if (
+        premarket_style
+        and not style.get("_canonical")
+        and (premarket_source == "appendix_a_plan" or not _fm_has_data(fm, "情绪值"))
+    ):
         style.update(premarket_style)
         style["_source"] = premarket_source
     style["实际执行"] = compute_style_execution(fm, style)
-    if style["实际执行"]["总仓位上限"] != style.get("总仓位上限", 30):
+    if style["实际执行"]["总仓位上限"] != style.get("总仓位上限"):
         style["总仓位上限"] = style["实际执行"]["总仓位上限"]
+
+    execution_card = _load_execution_card(date_str)
+    opening_instruction = " ".join(
+        str(fm.get(key) or "") for key in ("开盘指令", "今日计划", "操作计划", "动作")
+    )
+    time_window = _apply_buy_window_precedence(
+        {
+            "当前时段": "盘前",
+            "W1状态": fm.get("W1状态", "开放"),
+            "W2状态": fm.get("W2状态", "开放"),
+            "周五": fm.get("weekday") == "周五",
+        },
+        style=style,
+        execution_card=execution_card,
+        opening_instruction=opening_instruction,
+    )
 
     # 问财实时值兜底（笔记frontmatter有值优先，无值用问财）
     iw = {k.replace('_iwencai_', ''): v for k, v in style.items() if k.startswith('_iwencai_')}
@@ -1484,12 +1619,7 @@ def build_dashboard_data(review_path):
             "dim1_量能": None, "dim2_连板生态": None, "dim3_趋势": None,
             "实际执行": {}
         },
-        "time_window": {
-            "当前时段": "盘前",
-            "W1状态": fm.get("W1状态", "开放"),
-            "W2状态": fm.get("W2状态", "开放"),
-            "周五": fm.get("weekday") == "周五",
-        },
+        "time_window": time_window,
         "risk": {
             "当日盈亏": clean_value(fm.get("当日盈亏", 0)),
             "当日盈亏金额": clean_value(fm.get("当日盈亏金额", 0)),
@@ -1557,9 +1687,9 @@ def build_dashboard_data(review_path):
             mainline_confirmed=mainline_confirmed_for_cap,
             protection_raised=protection_raised,
         )
-        opportunity_from_compute = style.get("总仓位上限", 60)
+        opportunity_from_compute = style.get("总仓位上限")
         # 硬风控触发时 cap=0，不叠加 earned
-        if opportunity_from_compute > 0:
+        if opportunity_from_compute is not None and opportunity_from_compute > 0:
             final_cap = min(opportunity_from_compute, style["earned_cap_pct"])
             style["opportunity_cap_pct"] = opportunity_from_compute
             style["总仓位上限"] = final_cap

@@ -1132,9 +1132,9 @@ def _position_control_input(pnl_live, dash, score, lianban_pct, trend_pct, trend
     pool_ids = _pool_identity_set(dash or {})
     style_mainline = (
         (trend_score is not None and trend_score >= 10)
-        or trend_pct >= 60
-        or lianban_pct >= 60
-        or score >= 60
+        or (trend_pct is not None and trend_pct >= 60)
+        or (lianban_pct is not None and lianban_pct >= 60)
+        or (score is not None and score >= 60)
     )
     normalized_positions = []
     matched_mainline = False
@@ -1174,6 +1174,7 @@ def _position_control_input(pnl_live, dash, score, lianban_pct, trend_pct, trend
     opportunity_cap = _rule_num((dash.get("style") or {}).get("opportunity_cap_pct"))
     if opportunity_cap is None:
         opportunity_cap = _rule_num((dash.get("style") or {}).get("主线机会上限"))
+    source_gaps = list((dash.get("style") or {}).get("source_gaps") or [])
 
     result = {
         "enabled": True,
@@ -1185,9 +1186,12 @@ def _position_control_input(pnl_live, dash, score, lianban_pct, trend_pct, trend
         "add_step_pct": 10,
         "max_positions": 3,
         "max_mixed_positions": 5,
+        "source_gaps": source_gaps,
     }
     if opportunity_cap is not None:
         result["opportunity_cap_pct"] = opportunity_cap
+    elif source_gaps:
+        result["opportunity_cap_pct"] = 0
     return result
 
 
@@ -1269,11 +1273,11 @@ def _build_rule_inputs(now=None, account_state=None):
 
     # ── style ──
     _score_raw = style_raw.get("总分")
-    score = int(_score_raw) if _score_raw is not None else 50
+    score = int(_score_raw) if _score_raw is not None else None
     _lianban_raw = style_raw.get("连板占比")
-    lianban_pct = float(_lianban_raw) if _lianban_raw is not None else 50
+    lianban_pct = float(_lianban_raw) if _lianban_raw is not None else None
     _trend_raw = style_raw.get("趋势占比")
-    trend_pct = float(_trend_raw) if _trend_raw is not None else 50
+    trend_pct = float(_trend_raw) if _trend_raw is not None else None
     _trend_score_raw = style_raw.get("dim3_趋势")
     trend_score = float(_trend_score_raw) if _trend_score_raw is not None else None
 
@@ -1327,6 +1331,37 @@ def _build_rule_inputs(now=None, account_state=None):
         promotion_pct = _promotion_num * 100
     else:
         promotion_pct = _promotion_num
+    promotion_2_to_3_raw = _first_present(
+        base_sent.get("二进三晋级率"),
+        style_raw.get("promotion_2_to_3_pct"),
+    )
+    promotion_2_to_3_pct = _rule_num(promotion_2_to_3_raw)
+    if promotion_2_to_3_pct is not None and promotion_2_to_3_pct <= 1:
+        promotion_2_to_3_pct *= 100
+    promotion_2_to_3_avg_3d = _rule_num(_first_present(
+        base_sent.get("二进三晋级率近3日均值"),
+        base_sent.get("二进三晋级率近 3 日均值"),
+        style_raw.get("promotion_2_to_3_avg_3d"),
+        ((style_raw.get("promotion_environment") or {}).get("avg_3d")
+         if isinstance(style_raw.get("promotion_environment"), dict) else None),
+    ))
+    if promotion_2_to_3_avg_3d is not None and promotion_2_to_3_avg_3d <= 1:
+        promotion_2_to_3_avg_3d *= 100
+
+    def _promotion_pct(field_cn, field_key):
+        value = _rule_num(_first_present(base_sent.get(field_cn), style_raw.get(field_key)))
+        return value * 100 if value is not None and value <= 1 else value
+
+    promotion_1_to_2_pct = _promotion_pct("一进二晋级率", "promotion_1_to_2_pct")
+    promotion_3_to_4_pct = _promotion_pct("三进四晋级率", "promotion_3_to_4_pct")
+    highest_board = _rule_num(_first_present(
+        base_sent.get("最高板"), style_raw.get("highest_board")
+    ))
+    limit_up_count_avg_3d = _rule_num(_first_present(
+        base_sent.get("涨停家数近3日均值"),
+        base_sent.get("昨日涨停家数3日均值"),
+        style_raw.get("limit_up_count_avg_3d"),
+    ))
     if _broken_num is not None and _broken_num <= 1:
         broken_board_pct = _broken_num * 100
     else:
@@ -1372,6 +1407,15 @@ def _build_rule_inputs(now=None, account_state=None):
         emotion_pct = round(live_index_up / (live_index_up + live_index_dn) * 100, 1) if (live_index_up + live_index_dn) > 0 else None
     else:
         emotion_pct = None
+
+    emotion_regime = str(_first_present(
+        base_sent.get("情绪区间"), style_raw.get("emotion_regime")
+    ) or "").strip() or None
+    if emotion_regime not in {"冰点", "低迷", "主升", "强势", "高潮"}:
+        emotion_regime = None if emotion_pct is None else (
+            "冰点" if emotion_pct < 20 else "低迷" if emotion_pct < 40 else
+            "主升" if emotion_pct < 60 else "强势" if emotion_pct < 80 else "高潮"
+        )
 
     # previous_emotion：从 sentiment_auto.json 日期分组中取前一日期最后节点
     prev_emotion_pct = None
@@ -1434,6 +1478,10 @@ def _build_rule_inputs(now=None, account_state=None):
             "lianban_pct": lianban_pct,
             "trend_pct": trend_pct,
             "trend_score": trend_score,
+            "market_trend_20d_direction": style_raw.get("market_trend_20d_direction"),
+            "previous_lianban_pct": style_raw.get("previous_lianban_pct"),
+            "style_shift_same_direction_days": style_raw.get("style_shift_same_direction_days"),
+            "source_gaps": list(style_raw.get("source_gaps") or []),
         },
         "funds": {
             "main_inflow": _first_present(funds_raw.get("main_inflow"), funds_raw.get("主力净流入")),
@@ -1448,6 +1496,14 @@ def _build_rule_inputs(now=None, account_state=None):
             "limit_up_profit_pct": limit_up_profit_pct,
             "broken_board_pct": broken_board_pct,
             "promotion_pct": promotion_pct,
+            "highest_board": highest_board,
+            "limit_up_count_avg_3d": limit_up_count_avg_3d,
+            "promotion_1_to_2_pct": promotion_1_to_2_pct,
+            "promotion_2_to_3_pct": promotion_2_to_3_pct,
+            "promotion_2_to_3_avg_3d": promotion_2_to_3_avg_3d,
+            "promotion_3_to_4_pct": promotion_3_to_4_pct,
+            "emotion_regime": emotion_regime,
+            "auction_emotion_pct": _rule_num(base_sent.get("竞价情绪值")),
             "lianban_risk": lianban_risk,
         },
         "freshness": {
@@ -1460,6 +1516,7 @@ def _build_rule_inputs(now=None, account_state=None):
         },
         "position_control": position_control,
         "manual_review_context": manual_review_context,
+        "source_gaps": list(style_raw.get("source_gaps") or []),
     }
 
 
@@ -1533,7 +1590,26 @@ def _build_rule_state(now=None, account_state=None, manual_review_context=None):
     inputs = _build_rule_inputs(now=now, account_state=account_state)
     if manual_review_context is not None:
         inputs["manual_review_context"] = manual_review_context
-    return _eval(inputs, now=now)
+    state = _eval(inputs, now=now)
+    trade_date = (now or datetime.now()).strftime("%Y-%m-%d")
+    card_meta = (
+        _execution_card_metadata(trade_date=trade_date)
+        if trade_date == datetime.now().strftime("%Y-%m-%d")
+        else {}
+    )
+    if card_meta.get("execution_card_stale"):
+        gaps = list(state.get("source_gaps") or [])
+        if "RULE_SNAPSHOT_STALE" not in gaps:
+            gaps.append("RULE_SNAPSHOT_STALE")
+        state["source_gaps"] = gaps
+        if not any((item or {}).get("code") == "RULE_SNAPSHOT_STALE" for item in state.get("blocks") or []):
+            state.setdefault("blocks", []).append({
+                "code": "RULE_SNAPSHOT_STALE",
+                "scope": "entry",
+                "message": "执行卡规则快照与当前 compiled/source 不一致",
+                "evidence": card_meta,
+            })
+    return state
 
 
 def _execution_card_metadata(trade_date=None):
@@ -1551,6 +1627,7 @@ def _execution_card_metadata(trade_date=None):
             "execution_card_stale": True,
             "execution_card_trade_date": card_trade_date,
             "expected_trade_date": expected_trade_date,
+            "stale_reason": "RULE_SNAPSHOT_STALE",
         }
     snapshot = card.get("rule_snapshot") or card.get("rule_state") or card
     snapshot_hash = card.get("rule_snapshot_hash") or (
@@ -1562,11 +1639,65 @@ def _execution_card_metadata(trade_date=None):
         generated_id = datetime.fromisoformat(generated.replace("Z", "+00:00")).strftime("%Y%m%dT%H%M%S%z")
     except Exception:
         generated_id = datetime.fromtimestamp(card_path.stat().st_mtime).strftime("%Y%m%dT%H%M%S")
-    return {
+    result = {
         "rule_snapshot_hash": snapshot_hash,
         "today_execution_card_id": card.get("today_execution_card_id") or f"EXEC-{trade_date}-{generated_id}",
         "rule_pack_version": str((card.get("source_rule_pack") or {}).get("mtime") or ""),
     }
+    compiled_meta = snapshot.get("compiled_rules") if isinstance(snapshot, dict) else None
+    declared_compiled_path = Path(str((compiled_meta or {}).get("path") or ""))
+    if not declared_compiled_path.is_absolute():
+        declared_compiled_path = AI_RULE_SYSTEM_ROOT / declared_compiled_path
+    compiled_path = (
+        declared_compiled_path
+        if declared_compiled_path.is_file()
+        else AI_RULE_SYSTEM_ROOT / "compiled" / "rules.v1.json"
+    )
+    result["compiled_rules_path"] = str(compiled_path)
+    expected_compiled_hash = (compiled_meta or {}).get("sha256") if isinstance(compiled_meta, dict) else None
+    current_compiled_hash = None
+    try:
+        current_compiled_hash = hashlib.sha256(compiled_path.read_bytes()).hexdigest()
+    except OSError:
+        pass
+    stale_details = []
+    if not expected_compiled_hash or not current_compiled_hash or expected_compiled_hash != current_compiled_hash:
+        stale_details.append({
+            "kind": "compiled_hash",
+            "expected": expected_compiled_hash,
+            "actual": current_compiled_hash,
+            "path": str(compiled_path),
+        })
+    rules = (compiled_meta or {}).get("rules") if isinstance(compiled_meta, dict) else None
+    compiled_root = compiled_path.parent.parent
+    for rule in rules or []:
+        for source in rule.get("source_doc_hashes") or []:
+            path = Path(str(source.get("path") or ""))
+            physical_path = path
+            try:
+                mapped_candidate = compiled_root / path.relative_to(AI_RULE_SYSTEM_ROOT)
+            except ValueError:
+                mapped_candidate = None
+            if mapped_candidate is not None and mapped_candidate.is_file():
+                physical_path = mapped_candidate
+            expected = source.get("sha256")
+            try:
+                actual = hashlib.sha256(physical_path.read_bytes()).hexdigest()
+            except OSError:
+                actual = None
+            if expected and actual != expected:
+                stale_details.append({
+                    "kind": "source_hash", "path": str(physical_path),
+                    "canonical_path": str(path),
+                    "expected": expected, "actual": actual,
+                })
+    if stale_details:
+        result.update({
+            "execution_card_stale": True,
+            "stale_reason": "RULE_SNAPSHOT_STALE",
+            "stale_details": stale_details,
+        })
+    return result
 
 
 # ===== 快照构建（供 LLM 和调试端点使用） =====
@@ -1698,6 +1829,48 @@ def _prepare_trade_ticket(payload):
     window = str((payload or {}).get("window") or "").strip()
     blocking_rule_ids = _blocking_codes_for_ticket(rule_state, action_type, window)
     missing_data = []
+    target_role = str((payload or {}).get("role") or (payload or {}).get("target_role") or "").strip()
+    position_evidence = (payload or {}).get("position_evidence")
+    if not isinstance(position_evidence, dict):
+        evidence_fields = (
+            "entry_leg", "first_entry_trade_date", "trading_days_since_first_entry",
+            "leg1_or_leg2_floating_pnl", "leg2_already_used", "volume_ratio",
+            "pullback_ma_status", "sector_inflow_status", "sector_inflow_query_time",
+            "planned_single_stock_cap_pct", "current_single_stock_pct",
+            "acceleration_segment_confirmed",
+        )
+        position_evidence = {
+            field: (payload or {}).get(field) for field in evidence_fields
+            if field in (payload or {})
+        }
+    from scripts.rule_engine import evaluate_decision_gate, evaluate_position_evidence
+    position_evaluation = evaluate_position_evidence(action_type, position_evidence)
+    if position_evaluation.get("allowed") is False:
+        blocking_rule_ids.append(position_evaluation.get("code") or "POS-SIZE-008")
+        for field in position_evaluation.get("missing_fields") or []:
+            missing_data.append({
+                "field": field,
+                "message": f"POS-SIZE-008 missing required evidence: {field}",
+            })
+    ticket_rule_state = dict(rule_state)
+    ticket_rule_state["position_evidence"] = {
+        **position_evaluation,
+        "entry_leg": position_evidence.get("entry_leg"),
+    }
+    ticket_rule_state["ticket_context"] = {
+        "role": target_role or None,
+        "entry_leg": position_evidence.get("entry_leg"),
+        "position_evidence": position_evidence,
+    }
+    action_gate = evaluate_decision_gate(
+        action_type,
+        window,
+        target_role,
+        position_evidence.get("entry_leg"),
+        {"trade_entry_allowed": ctx.get("context_status") == "trusted"},
+        ticket_rule_state,
+    )
+    blocking_rule_ids.extend(action_gate.get("blocking_codes") or [])
     leg_type = "sell_reduce" if action_type == "reduce" else action_type
     sellable_qty = None
     t1_risk = {}
@@ -1832,7 +2005,7 @@ def _prepare_trade_ticket(payload):
         "window": window,
         "trade_time": trade_time or None,
         "intent_text": (payload or {}).get("intent_text"),
-        "rule_state_json": rule_state,
+        "rule_state_json": ticket_rule_state,
         "market_snapshot_json": market_snapshot,
         "account_snapshot_json": account_snapshot,
         "max_qty": qty,
@@ -1997,9 +2170,40 @@ def _ticket_can_accept_fills(ticket):
 def _ticket_fill_gate(ticket):
     purpose = str((ticket or {}).get("ticket_purpose") or "execution")
     action_type = str((ticket or {}).get("action_type") or "")
-    if purpose == "post_trade_reconciliation" or action_type not in {"buy", "add", "do_t"}:
+    if purpose == "post_trade_reconciliation":
         return True, None, None
+    if action_type not in {"buy", "add", "do_t"}:
+        return True, None, {
+            "schema_version": "decision_gate.v1",
+            "allowed": True,
+            "reason": None,
+            "blocking_codes": [],
+            "action_type": action_type,
+        }
     context = _build_ai_context()
+    rule_state = (context or {}).get("rule_state")
+    health = (context or {}).get("health")
+    if isinstance(rule_state, dict) and isinstance(health, dict):
+        from scripts.rule_engine import evaluate_decision_gate, evaluate_position_evidence
+        ticket_rule = (ticket or {}).get("rule_state") or {}
+        ticket_context = ticket_rule.get("ticket_context") or {}
+        position_result = evaluate_position_evidence(
+            action_type, ticket_context.get("position_evidence")
+        )
+        current_rule = dict(rule_state)
+        current_rule["position_evidence"] = {
+            **position_result,
+            "entry_leg": ticket_context.get("entry_leg"),
+        }
+        gate = evaluate_decision_gate(
+            action_type,
+            (ticket or {}).get("window"),
+            ticket_context.get("role"),
+            ticket_context.get("entry_leg"),
+            health,
+            current_rule,
+        )
+        return gate["allowed"], gate.get("reason"), gate
     gate = (context or {}).get("decision_gate") or {}
     allowed = gate.get("allowed") is True
     reason = gate.get("reason") or "final decision gate is not available"
@@ -2398,6 +2602,9 @@ def _trade_entry_gate(health, rule_state):
         return False, "; ".join(str(r) for r in reasons) if reasons else "系统健康检查未通过"
 
     rule = rule_state or {}
+    if rule.get("source_gaps"):
+        gaps = ",".join(str(v) for v in rule.get("source_gaps") or [])
+        return False, f"规则事实缺口 ({gaps})"
     if rule.get("tradable") is False:
         codes = []
         for item in (rule.get("blocks") or []):
@@ -2406,6 +2613,13 @@ def _trade_entry_gate(health, rule_state):
                 codes.append(code)
         suffix = " (" + ",".join(codes) + ")" if codes else ""
         return False, "规则状态阻断" + suffix
+
+    entry_codes = [
+        str(item.get("code")) for item in rule.get("blocks") or []
+        if isinstance(item, dict) and item.get("scope") == "entry" and item.get("code")
+    ]
+    if entry_codes:
+        return False, "买入侧规则阻断 (" + ",".join(entry_codes) + ")"
 
     return True, None
 
@@ -2436,19 +2650,21 @@ def _ai_current_mode(now=None):
 def _ai_freshness_summary(health, account_state):
     health = health or {}
     account_state = account_state or {}
+    def json_timestamp(value):
+        return value.isoformat() if hasattr(value, "isoformat") else value
     return {
         "quotes": {
             "status": (health.get("quotes") or {}).get("status", "unknown"),
             "detail": (health.get("quotes") or {}).get("detail"),
-            "updated_at": (CACHE.get("live_quotes") or {}).get("_updated"),
+            "updated_at": json_timestamp((CACHE.get("live_quotes") or {}).get("_updated")),
         },
         "iwencai": {
             "status": (health.get("iwencai") or {}).get("status", "unknown"),
-            "updated_at": (CACHE.get("iwencai") or {}).get("_updated"),
+            "updated_at": json_timestamp((CACHE.get("iwencai") or {}).get("_updated")),
         },
         "account": {
             "status": (health.get("account") or {}).get("status", "unknown"),
-            "updated_at": account_state.get("_updated"),
+            "updated_at": json_timestamp(account_state.get("_updated")),
             "quote_status": account_state.get("quote_status"),
             "detail": account_state.get("error") or account_state.get("block_reason"),
             "anchor_source": (account_state.get("anchor") or {}).get("source"),
@@ -2896,6 +3112,8 @@ def _build_ai_context(now=None):
         "generated_at": ref.isoformat(),
         "date": date_str,
         "mode": _ai_current_mode(ref),
+        "health": health,
+        "rule_state": rule_state,
         "decision_gate": _decision_gate_payload(trade_allowed, trade_reason, ref),
         # Compatibility mirrors. New consumers must read decision_gate.v1.
         "trade_entry_allowed": bool(trade_allowed),

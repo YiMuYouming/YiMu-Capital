@@ -1,5 +1,5 @@
 """test_gen_baseline.py — gen_dashboard_data.py 解析逻辑测试"""
-import sys, json, tempfile, unittest
+import sys, json, subprocess, tempfile, unittest
 from pathlib import Path
 from unittest import mock
 
@@ -17,6 +17,8 @@ try:
     _select_machine_pool = getattr(_gen, "_select_machine_pool", None)
     _preserve_active_price = getattr(_gen, "_preserve_active_price", None)
     _compute_earned_cap = getattr(_gen, "_compute_earned_cap", None)
+    _translate_canonical_style = getattr(_gen, "_translate_canonical_style", None)
+    _apply_buy_window_precedence = getattr(_gen, "_apply_buy_window_precedence", None)
     _HAS_GEN = True
 except ImportError:
     parse_frontmatter = None
@@ -30,6 +32,8 @@ except ImportError:
     _select_machine_pool = None
     _preserve_active_price = None
     _compute_earned_cap = None
+    _translate_canonical_style = None
+    _apply_buy_window_precedence = None
     _HAS_GEN = False
 
 FIXTURE = Path(__file__).resolve().parent / "fixtures" / "sample_review_note.md"
@@ -37,6 +41,109 @@ FIXTURE = Path(__file__).resolve().parent / "fixtures" / "sample_review_note.md"
 
 @unittest.skipUnless(_HAS_GEN, "gen_dashboard_data not available")
 class TestGenBaseline(unittest.TestCase):
+
+    def test_canonical_score_30_preserves_zero_allocation(self):
+        self.assertIsNotNone(_translate_canonical_style)
+        translated = _translate_canonical_style({
+            "schema_version": "review-style-detect.v1",
+            "status": "ready",
+            "formula_version": "piecewise_linear_v1",
+            "dimension_weights": {"量能": 30, "连板生态": 40, "趋势赚钱效应": 30},
+            "total_score": 30,
+            "style": "趋势",
+            "scores": {
+                "维度一：量能": {"score": 9},
+                "维度二：连板生态": {"score": 12},
+                "维度三：趋势赚钱效应": {"score": 9},
+            },
+            "allocation": {"连板资金占比": 0.0, "趋势资金占比": 100.0},
+            "market_trend_20d_direction": "走平",
+            "highest_board": 3,
+            "limit_up_count_avg_3d": 30,
+            "promotion_1_to_2_pct": 18.001,
+            "promotion_2_to_3_pct": 25.001,
+            "promotion_3_to_4_pct": 35.001,
+            "emotion_regime": "主升",
+            "source_gaps": [],
+        }, source="finalized_market_watch")
+
+        self.assertEqual(translated["连板占比"], 0.0)
+        self.assertEqual(translated["趋势占比"], 100.0)
+        self.assertEqual(translated["连板占比"] + translated["趋势占比"], 100.0)
+        self.assertEqual(translated["market_trend_20d_direction"], "走平")
+        self.assertEqual(translated["highest_board"], 3)
+        self.assertEqual(translated["limit_up_count_avg_3d"], 30)
+        self.assertEqual(translated["promotion_1_to_2_pct"], 18.001)
+        self.assertEqual(translated["promotion_2_to_3_pct"], 25.001)
+        self.assertEqual(translated["promotion_3_to_4_pct"], 35.001)
+        self.assertEqual(translated["emotion_regime"], "主升")
+
+    def test_missing_canonical_facts_fail_closed_without_tradable_defaults(self):
+        self.assertIsNotNone(_translate_canonical_style)
+        translated = _translate_canonical_style({
+            "schema_version": "review-style-detect.v1",
+            "status": "blocked",
+            "formula_version": "piecewise_linear_v1",
+            "dimension_weights": {"量能": 30, "连板生态": 40, "趋势赚钱效应": 30},
+            "total_score": None,
+            "style": "blocked",
+            "scores": {},
+            "allocation": None,
+            "source_gaps": ["缺少字段: 市场量能", "缺少字段: 上证20日线"],
+        }, source="finalized_market_watch")
+
+        self.assertIsNone(translated["总分"])
+        self.assertIsNone(translated["连板占比"])
+        self.assertIsNone(translated["趋势占比"])
+        self.assertIsNone(translated["opportunity_cap_pct"])
+        self.assertEqual(translated["source_gaps"], ["缺少字段: 市场量能", "缺少字段: 上证20日线"])
+        windows = _apply_buy_window_precedence(
+            {"W1状态": "开放", "W2状态": "开放"},
+            style=translated,
+        )
+        self.assertEqual(windows["W1状态"], "关闭")
+        self.assertEqual(windows["W2状态"], "关闭")
+
+    def test_no_buy_plan_has_precedence_over_template_windows(self):
+        self.assertIsNotNone(_apply_buy_window_precedence)
+        for instruction in ("只卖不买", "今日不新增", "不加仓"):
+            with self.subTest(instruction=instruction):
+                windows = _apply_buy_window_precedence(
+                    {"W1状态": "开放", "W2状态": "开放"},
+                    style={"_status": "ready", "source_gaps": []},
+                    execution_card={"headline": instruction},
+                )
+                self.assertEqual(windows["W1状态"], "关闭")
+                self.assertEqual(windows["W2状态"], "关闭")
+                self.assertIn("plan_no_buy", windows["close_reasons"])
+
+    def test_local_style_script_only_translates_canonical_report(self):
+        canonical = {
+            "schema_version": "review-style-detect.v1",
+            "status": "ready",
+            "formula_version": "piecewise_linear_v1",
+            "dimension_weights": {"量能": 30, "连板生态": 40, "趋势赚钱效应": 30},
+            "total_score": 30,
+            "style": "趋势",
+            "scores": {},
+            "allocation": {"连板资金占比": 0.0, "趋势资金占比": 100.0},
+            "source_gaps": [],
+        }
+        with tempfile.TemporaryDirectory() as td:
+            report = Path(td) / "style.json"
+            report.write_text(json.dumps(canonical, ensure_ascii=False), encoding="utf-8")
+            result = subprocess.run(
+                [sys.executable, str(_gen.STYLE_DETECT), "--canonical-report", str(report), "--json"],
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        translated = json.loads(result.stdout)
+        self.assertEqual(translated["allocation"], canonical["allocation"])
+        self.assertEqual(translated["total_score"], 30)
+        source = _gen.STYLE_DETECT.read_text(encoding="utf-8")
+        self.assertNotIn("def score_dim", source)
 
     def test_earned_cap_counts_only_profitable_mainline_positions(self):
         self.assertIsNotNone(_compute_earned_cap)

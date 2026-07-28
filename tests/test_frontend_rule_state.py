@@ -11,6 +11,15 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 
+
+class ResponsiveGridContractTest(unittest.TestCase):
+    def test_gridstack_mobile_one_column_mode_is_enabled(self):
+        index = (ROOT / "index.html").read_text(encoding="utf-8")
+        init_block = index[index.index("GridStack.init({"):index.index("});", index.index("GridStack.init({"))]
+        self.assertIn("columnOpts:", init_block)
+        self.assertRegex(init_block, r"breakpoints:\s*\[\s*\{\s*w:\s*768,\s*c:\s*1\s*\}\s*\]")
+        self.assertIn("layout: 'list'", init_block)
+
 # ── 最小 Node 运行环境 preamble（加载真实源文件前注入） ──
 PREAMBLE = r"""
 // Mock DOM

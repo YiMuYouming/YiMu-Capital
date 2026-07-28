@@ -246,7 +246,12 @@ class TicketApiTest(unittest.TestCase):
                 "tradable": True,
                 "blocks": [{"code": "WIN-ICE-W1-001", "scope": "w1"}],
                 "warnings": [],
-                "windows": {"w1": {"blocks": ["WIN-ICE-W1-001"]}, "w2": {"blocks": []}},
+                "caps": {"add_allowed": True},
+                "source_gaps": [],
+                "windows": {
+                    "w1": {"in_session": False, "buy_allowed": False, "blocks": ["WIN-ICE-W1-001"]},
+                    "w2": {"in_session": True, "buy_allowed": True, "blocks": []},
+                },
             },
             "market_snapshot": {"iwencai": {"情绪值": 24.1}},
             "account_snapshot": {"account_day_return_pct": 0.5},
@@ -263,6 +268,21 @@ class TicketApiTest(unittest.TestCase):
             "code": "002281",
             "name": "光迅科技",
             "window": "W2",
+            "target_role": "trend_core",
+            "position_evidence": {
+                "entry_leg": 1,
+                "first_entry_trade_date": "2026-06-04",
+                "trading_days_since_first_entry": 0,
+                "leg1_or_leg2_floating_pnl": 0,
+                "leg2_already_used": False,
+                "volume_ratio": 1.0,
+                "pullback_ma_status": "breakout_confirmed",
+                "sector_inflow_status": "not_large_outflow",
+                "sector_inflow_query_time": "2026-06-04T14:05:00+08:00",
+                "planned_single_stock_cap_pct": 25,
+                "current_single_stock_pct": 0,
+                "acceleration_segment_confirmed": False,
+            },
         })
 
         self.assertEqual(status, 200, body)
@@ -668,6 +688,42 @@ class TicketApiTest(unittest.TestCase):
 
         self.assertEqual(inputs["risk"]["losing_account_days"], 0)
         self.assertNotIn("loss_streak", inputs["risk"])
+
+    def test_rule_inputs_preserve_lianban_gates_and_market_trend_direction(self):
+        with mock.patch.object(bridge, "_load_dashboard_data", return_value={
+            "risk": {"连亏天数": 0},
+            "style": {
+                "总分": 59,
+                "连板占比": 54,
+                "趋势占比": 46,
+                "market_trend_20d_direction": "向下",
+                "highest_board": 3,
+                "limit_up_count_avg_3d": 30,
+                "promotion_1_to_2_pct": 18.001,
+                "promotion_2_to_3_pct": 25.001,
+                "promotion_3_to_4_pct": 35.001,
+                "emotion_regime": "主升",
+                "promotion_2_to_3_avg_3d": 26.966667,
+            },
+            "sentiment": {},
+            "market": {},
+        }):
+            inputs = bridge._build_rule_inputs(
+                datetime(2026, 7, 28, 9, 40),
+                account_state={
+                    "pnl_pct": 0.5,
+                    "valuation_complete": True,
+                    "mv": 100000,
+                },
+            )
+
+        self.assertEqual(inputs["style"]["market_trend_20d_direction"], "向下")
+        self.assertEqual(inputs["sentiment"]["highest_board"], 3)
+        self.assertEqual(inputs["sentiment"]["limit_up_count_avg_3d"], 30)
+        self.assertEqual(inputs["sentiment"]["promotion_1_to_2_pct"], 18.001)
+        self.assertEqual(inputs["sentiment"]["promotion_2_to_3_pct"], 25.001)
+        self.assertEqual(inputs["sentiment"]["promotion_3_to_4_pct"], 35.001)
+        self.assertEqual(inputs["sentiment"]["emotion_regime"], "主升")
 
     def test_rule_inputs_use_closed_daily_summary_for_premarket_loss_streak(self):
         db.insert_daily_summary({

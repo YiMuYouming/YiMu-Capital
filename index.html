@@ -289,7 +289,7 @@ function initGrid() {
     acceptWidgets: true,
     dragIn: '.newWidget',
     dragInOptions: { revert: 'invalid', scroll: false, appendTo: 'body', helper: 'clone' },
-    disableOneColumnMode: true,
+    columnOpts: { breakpoints: [{ w: 768, c: 1 }], layout: 'list' },
     minRow: 1,
     maxRow: 100,
   });

@@ -362,6 +362,17 @@ class AIContextApiTest(unittest.TestCase):
             self.assertIn(key, freshness)
             self.assertIn("status", freshness[key])
 
+    def test_ai_freshness_normalizes_datetime_before_serving_json(self):
+        from datetime import datetime
+
+        freshness = bridge._ai_freshness_summary(
+            {"account": {"status": "error"}},
+            {"_updated": datetime(2026, 7, 28, 12, 50, 0)},
+        )
+
+        self.assertEqual("2026-07-28T12:50:00", freshness["account"]["updated_at"])
+        json.dumps(freshness, ensure_ascii=False)
+
     def test_ai_context_exposes_command_cockpit_inputs(self):
         today = __import__("datetime").datetime.now().strftime("%Y-%m-%d")
         for status, action_type in [
