@@ -7,10 +7,73 @@ from unittest.mock import Mock, patch
 
 from scripts import snapshot_auction
 from scripts.collectors import iwencai_poll
+from scripts import ym_data_query
 from scripts.ym_data_query import compat_iwencai_query, data_api_mode
 
 
 class YmDataQueryCompatibilityTests(unittest.TestCase):
+    def compare(self, canonical_result, legacy_result):
+        self.assertTrue(
+            hasattr(ym_data_query, "compare_review_results"),
+            "compare_review_results must own the pure comparison contract",
+        )
+        return ym_data_query.compare_review_results(canonical_result, legacy_result)
+
+    def test_compare_review_results_matches_wrapped_code_sets_without_order(self):
+        canonical = {
+            "data": {
+                "rows": [
+                    {"股票代码": "000001.SZ"},
+                    {"证券代码": "600519.SH"},
+                ]
+            },
+            "_meta": {"status": "degraded"},
+        }
+        legacy = {
+            "datas": [
+                {"code": "600519"},
+                {"code": "1"},
+            ]
+        }
+
+        result = self.compare(canonical, legacy)
+
+        self.assertEqual("exact_code_set_match", result)
+        self.assertNotIn("000001", result)
+        self.assertNotIn("query", result.lower())
+
+    def test_compare_review_results_rejects_canonical_error_and_empty_sides(self):
+        valid_rows = [{"股票代码": "000001"}]
+        cases = (
+            ({"data": {"rows": valid_rows}, "_meta": {"status": "error"}}, {"datas": valid_rows}),
+            ({"data": {"rows": []}, "_meta": {"status": "success"}}, {"datas": valid_rows}),
+            ({"data": {"rows": valid_rows}, "_meta": {"status": "success"}}, {"datas": []}),
+        )
+        for canonical, legacy in cases:
+            with self.subTest(canonical=canonical, legacy=legacy):
+                self.assertEqual("inconclusive_empty", self.compare(canonical, legacy))
+
+    def test_compare_review_results_rejects_non_mapping_or_missing_codes(self):
+        cases = (
+            ([{"股票代码": "000001"}, "not-a-row"], [{"股票代码": "000001"}]),
+            ([{"股票简称": "样本"}], [{"股票代码": "000001"}]),
+            ([{"股票代码": "000001"}], [{"code": "not-a-code"}]),
+        )
+        for canonical_rows, legacy_rows in cases:
+            canonical = {"data": {"rows": canonical_rows}, "_meta": {"status": "success"}}
+            legacy = {"datas": legacy_rows}
+            with self.subTest(canonical_rows=canonical_rows, legacy_rows=legacy_rows):
+                self.assertEqual("shape_mismatch", self.compare(canonical, legacy))
+
+    def test_compare_review_results_reports_different_valid_code_sets(self):
+        canonical = {
+            "data": {"rows": [{"股票代码": "000001"}]},
+            "_meta": {"status": "success"},
+        }
+        legacy = {"datas": [{"股票代码": "600519"}]}
+
+        self.assertEqual("code_set_mismatch", self.compare(canonical, legacy))
+
     def test_scheduled_consumers_use_one_compatibility_boundary(self):
         for module in (iwencai_poll, snapshot_auction):
             with self.subTest(module=module.__name__):

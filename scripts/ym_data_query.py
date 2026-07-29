@@ -77,6 +77,38 @@ def _rows(result: object) -> list:
     return []
 
 
+def _normalized_code(row: object) -> str | None:
+    if not isinstance(row, Mapping):
+        return None
+    raw = row.get("股票代码") or row.get("code") or row.get("证券代码")
+    if raw is None:
+        return None
+    text = str(raw).strip().split(".", 1)[0]
+    digits = "".join(char for char in text if char.isdigit())
+    if not digits or len(digits) > 6:
+        return None
+    return digits.zfill(6)
+
+
+def compare_review_results(canonical_result: object, legacy_result: object) -> str:
+    """Compare normalized code sets without retaining rows or query text."""
+
+    meta = canonical_result.get("_meta") if isinstance(canonical_result, Mapping) else None
+    if not isinstance(meta, Mapping) or meta.get("status") not in {"success", "degraded"}:
+        return "inconclusive_empty"
+    canonical_rows = _rows(canonical_result)
+    legacy_rows = _rows(legacy_result)
+    if not canonical_rows or not legacy_rows:
+        return "inconclusive_empty"
+    canonical_codes = {_normalized_code(row) for row in canonical_rows}
+    legacy_codes = {_normalized_code(row) for row in legacy_rows}
+    if None in canonical_codes or None in legacy_codes:
+        return "shape_mismatch"
+    if canonical_codes == legacy_codes:
+        return "exact_code_set_match"
+    return "code_set_mismatch"
+
+
 def _canonical_projection(result: object) -> dict:
     if not isinstance(result, dict):
         return {
