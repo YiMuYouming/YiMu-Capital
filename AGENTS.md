@@ -51,6 +51,12 @@ python3 scripts/ops/close_day.py --apply
 `close_day.py --apply` 会在 Hermes 创建 SQLite 一致性备份，拉回本地 `pnl.db` 和关键 JSON，生成
 `data/review_packets/YYYY-MM-DD/review_source_packet.json`，再生成项目专用数据包并上传 OSS。
 
+### A 股数据查询路由
+
+- Agent 与新代码唯一推荐入口是 `from ym_stock_data import query`；供应商失败先在管道项目运行 `uv run ym-data doctor --json`，保留 `_meta.provider_used`、`_meta.attempts`、quality 与 error codes。
+- 定时问财 collector 的临时 rollback 只允许存在于 `scripts/ym_data_query.py`，开关为 `YM_DATA_API_MODE=legacy|unified`。当前默认 `legacy`；只有同一时点业务 shape、provider/attempts 和 empty/error overwrite guard 全部通过后才能改默认并删除 legacy 分支。
+- TDX/Wind 只按已注册语义能力使用，必须保留真实 auth/provenance；它们不构成交易事实或交易授权。禁止为验证数据路由对真实 8088 发 POST，禁止让空/错误查询覆盖已有有效 cache/runtime 数据。
+
 盘后需要涨跌停日报时，使用 Codex Skill `$a-share-limitboard-report`。它读取 8088
 只读事实，输出 `output/limitboard_report_YYYYMMDD.html`，并将 W21 可消费的
 `limitboard-report.v1` 快照写到 `data/limitboard_reports/latest.json`。该快照属于运行
