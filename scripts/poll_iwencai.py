@@ -49,21 +49,72 @@ def _ensure_pipeline():
 
 
 def _iwencai_query(*args, **kwargs):
-    """延迟导入 iwencai 查询"""
+    """延迟导入统一公开查询入口。"""
     _ensure_pipeline()
-    from ym_stock_data.sources.iwencai import query as _q
-    return _q(*args, **kwargs)
+    from ym_stock_data import query
+
+    return query("review_sentiment", query=args[0], **kwargs)
+
+
+_canonical_query = _iwencai_query
+
+
+def _result_rows(raw):
+    if not isinstance(raw, dict):
+        return []
+    for key in ("datas", "rows", "items"):
+        value = raw.get(key)
+        if isinstance(value, list):
+            return value
+    data = raw.get("data")
+    if isinstance(data, list):
+        return data
+    if isinstance(data, dict):
+        for key in ("datas", "rows", "items"):
+            value = data.get(key)
+            if isinstance(value, list):
+                return value
+    return []
+
+
+def _safe_meta(raw):
+    meta = raw.get("_meta") if isinstance(raw, dict) else None
+    meta = meta if isinstance(meta, dict) else {}
+    status = (
+        meta.get("status")
+        if meta.get("status") in {"success", "degraded", "empty", "error"}
+        else "error"
+    )
+    provider = str(meta.get("provider_used") or "none")
+    if not re.fullmatch(r"[A-Za-z0-9_.:-]{1,64}", provider):
+        provider = "unknown"
+    error_codes = []
+    attempts = meta.get("attempts") if isinstance(meta.get("attempts"), list) else []
+    for attempt in attempts:
+        code = attempt.get("error_code") if isinstance(attempt, dict) else None
+        if code and re.fullmatch(r"[A-Za-z0-9_.:-]{1,64}", str(code)):
+            error_codes.append(str(code))
+    return status, provider, error_codes
 
 def run_iwencai(q, extra_args=None):
     """调用 ym_stock_data 问财查询，返回 datas 列表"""
     try:
-        raw = _iwencai_query(q)
-        if "error" in raw:
-            print(f"[warn] iwencai: {raw['error']}", file=sys.stderr)
+        params = dict(extra_args) if isinstance(extra_args, dict) else {}
+        raw = _canonical_query(q, **params)
+        status, provider, error_codes = _safe_meta(raw)
+        rendered_codes = ",".join(error_codes) if error_codes else "none"
+        print(
+            f"[poll_iwencai] status={status} provider={provider} error_codes={rendered_codes}",
+            file=sys.stderr,
+        )
+        if status == "error":
             return None
-        return raw.get("datas", [])
-    except Exception as e:
-        print(f"[warn] iwencai error: {e}", file=sys.stderr)
+        return _result_rows(raw)
+    except Exception:
+        print(
+            "[poll_iwencai] status=error provider=none error_codes=UNHANDLED_EXCEPTION",
+            file=sys.stderr,
+        )
         return None
 
 def review_mode(save=False):
