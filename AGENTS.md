@@ -53,7 +53,7 @@ python3 scripts/ops/close_day.py --apply
 
 ### A 股数据查询路由
 
-- Agent 与新代码唯一推荐入口是 `from ym_stock_data import query`；供应商失败先在管道项目运行 `uv run ym-data doctor --json`，保留 `_meta.provider_used`、`_meta.attempts`、quality 与 error codes。
+- Agent 与新代码唯一推荐入口是 `from ym_stock_data import query`；供应商失败时先进入 `/Users/yimu/Documents/YM_Capital/YM-data-pipeline`，再运行 `./ym-data doctor --json`，保留 `_meta.provider_used`、`_meta.attempts`、quality 与 error codes。
 - 定时问财 collector 的临时 rollback 只允许存在于 `scripts/ym_data_query.py`，开关为 `YM_DATA_API_MODE=legacy|unified`。当前默认 `legacy`；只有同一时点业务 shape、provider/attempts 和 empty/error overwrite guard 全部通过后才能改默认并删除 legacy 分支。
 - TDX/Wind 只按已注册语义能力使用，必须保留真实 auth/provenance；它们不构成交易事实或交易授权。禁止为验证数据路由对真实 8088 发 POST，禁止让空/错误查询覆盖已有有效 cache/runtime 数据。
 
