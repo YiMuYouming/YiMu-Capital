@@ -12,6 +12,7 @@ from scripts.rule_engine import (
     evaluate_position_evidence,
     evaluate_rule_state,
     base_total_cap,
+    build_sell_action,
 )
 
 
@@ -107,6 +108,60 @@ class LiveRuleEngineTest(unittest.TestCase):
         self.assertEqual(state["status"], "ranked")
         self.assertFalse(state["execution_allowed"])
         self.assertTrue(state["candidates"][0]["eligible"])
+
+    def test_sell_action_mapping_survives_buy_side_gaps_and_respects_t1(self):
+        reduction = build_sell_action(
+            {
+                "code": "688111",
+                "quantity": 900,
+                "sellable_qty": 900,
+                "risk_action": "reduce_half",
+                "trigger": "stop_loss",
+                "evidence": {"floating_pnl_pct": -5.2},
+                "rule_ids": ["SELL-STOP-001"],
+            },
+            buy_side_source_gaps=["global_hard:RULE_SNAPSHOT_STALE"],
+        )
+        self.assertEqual(reduction["action"], "reduce_half")
+        self.assertEqual(reduction["sellable_qty_status"], "sellable")
+        self.assertIn("trigger", reduction)
+        self.assertIn("evidence", reduction)
+        self.assertIn("rule_ids", reduction)
+        self.assertIn("global_hard:RULE_SNAPSHOT_STALE", reduction["buy_side_source_gaps"])
+
+        locked = build_sell_action(
+            {
+                "code": "688112",
+                "quantity": 100,
+                "sellable_qty": 0,
+                "risk_action": "clear",
+                "trigger": "account_stop",
+                "evidence": {"account_day_return_pct": -3.1},
+                "rule_ids": ["ACCT-RISK-002"],
+            },
+            buy_side_source_gaps=["candidate_hard:688112:sector_inflow_missing"],
+        )
+        self.assertEqual(locked["action"], "t1_locked_next_open_review")
+        self.assertEqual(locked["sellable_qty_status"], "t1_locked")
+        self.assertEqual(locked["executable_qty"], 0)
+        self.assertEqual(locked["requested_action"], "clear")
+
+        for action in ("hold", "reduce_one_third", "reduce_half", "clear"):
+            with self.subTest(action=action):
+                mapped = build_sell_action({
+                    "quantity": 100,
+                    "sellable_qty": 100,
+                    "risk_action": action,
+                    "trigger": "explicit_risk_signal",
+                    "evidence": {"observed": True},
+                    "rule_ids": ["SELL-TEST-001"],
+                })
+                self.assertEqual(mapped["action"], action)
+                if action != "hold":
+                    self.assertIn("trigger", mapped)
+                    self.assertIn("evidence", mapped)
+                    self.assertIn("rule_ids", mapped)
+                    self.assertIn("sellable_qty_status", mapped)
 
     # ── 全局阻断 ──
 

@@ -301,7 +301,7 @@ def evaluate_recommendation_candidate(candidate: dict, health: dict, rule_state:
     blocking = list(dict.fromkeys(blocking))
     missing_evidence = list(dict.fromkeys(missing_evidence))
     execution_allowed = bool((health or {}).get("trade_entry_allowed", False)) and not blocking
-    return {
+    result = {
         "code": code,
         "side": side,
         "eligible": not blocking,
@@ -311,6 +311,16 @@ def evaluate_recommendation_candidate(candidate: dict, health: dict, rule_state:
         "source_gaps": [gap["raw"] for gap in parsed_gaps],
         "disposition": "blocked" if blocking else ("standard" if execution_allowed else "paper_only"),
     }
+    if any(key in item for key in ("position", "risk_action", "sell_action")):
+        position = dict(item.get("position") or {})
+        for key in ("quantity", "qty", "sellable_qty", "t1_locked", "risk_action", "sell_action", "trigger", "evidence", "rule_ids"):
+            if key not in position and key in item:
+                position[key] = item[key]
+        result["sell_action"] = build_sell_action(
+            position,
+            buy_side_source_gaps=raw_gaps,
+        )
+    return result
 
 
 def build_recommendation_state(candidates: list[dict], health: dict, rule_state: dict) -> dict:
@@ -336,6 +346,71 @@ def build_recommendation_state(candidates: list[dict], health: dict, rule_state:
             item for candidate in evaluated for item in candidate.get("source_gaps") or []
         )),
     }
+
+
+SELL_ACTIONS = {
+    "hold",
+    "reduce_one_third",
+    "reduce_half",
+    "clear",
+    "t1_locked_next_open_review",
+}
+
+
+def build_sell_action(position: dict, buy_side_source_gaps=None) -> dict:
+    """Map a risk signal to an explicit exit advice without using buy-side gates."""
+    item = position if isinstance(position, dict) else {}
+    supplied = item.get("sell_action")
+    if isinstance(supplied, dict):
+        item = {**supplied, **item}
+        item.pop("sell_action", None)
+    requested = str(
+        item.get("risk_action")
+        or item.get("sell_action")
+        or item.get("action")
+        or "hold"
+    ).strip().lower()
+    aliases = {"reduce": "reduce_one_third", "sell": "clear", "close": "clear"}
+    requested = aliases.get(requested, requested)
+    if requested not in SELL_ACTIONS:
+        requested = "hold"
+
+    quantity = _number(item.get("quantity") or item.get("qty"))
+    sellable_raw = item.get("sellable_qty")
+    sellable = _number(sellable_raw) if sellable_raw is not None else None
+    t1_locked = bool(item.get("t1_locked")) or (
+        quantity is not None and quantity > 0 and sellable is not None and sellable <= 0
+    )
+    if sellable is None:
+        sellable_status = "unknown"
+    elif t1_locked:
+        sellable_status = "t1_locked"
+    elif sellable > 0:
+        sellable_status = "sellable"
+    else:
+        sellable_status = "no_position"
+
+    action = requested
+    result = {
+        "action": action,
+        "requested_action": requested,
+        "sellable_qty_status": sellable_status,
+        "buy_side_source_gaps": list(dict.fromkeys(str(item) for item in (buy_side_source_gaps or []) if str(item).strip())),
+        "buy_side_gaps_do_not_block": True,
+    }
+    if requested != "hold":
+        result.update({
+            "trigger": item.get("trigger") or item.get("risk_trigger") or item.get("reason") or "",
+            "evidence": item.get("evidence") or item.get("risk_evidence") or {},
+            "rule_ids": [str(rule_id) for rule_id in (item.get("rule_ids") or item.get("sell_rule_ids") or [])],
+        })
+    if requested != "hold" and t1_locked:
+        result["action"] = "t1_locked_next_open_review"
+        result["executable_qty"] = 0
+        result["next_open_action"] = requested
+    elif requested != "hold":
+        result["executable_qty"] = int(sellable) if sellable is not None and float(sellable).is_integer() else sellable
+    return result
 
 
 def evaluate_decision_gate(action_type, window_name, role, entry_leg, health, rule_state):
