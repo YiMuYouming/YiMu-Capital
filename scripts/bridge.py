@@ -1841,9 +1841,52 @@ def _candidate_hard_gaps(recommendation, candidate):
     values = [
         *(str(item) for item in (candidate.get("blocking_codes") or [])),
         *(str(item) for item in (candidate.get("source_gaps") or [])),
-        *(str(item) for item in (recommendation.get("source_gaps") or [])),
     ]
-    soft_prefixes = ("candidate_soft:", "advisory:", "missing_rule_input:")
+    candidate_code = str(candidate.get("code") or "").strip()
+    candidate_side = str(
+        candidate.get("side") or candidate.get("source") or candidate.get("role") or ""
+    ).strip().lower()
+    for item in recommendation.get("source_gaps") or []:
+        value = str(item).strip()
+        lowered = value.lower()
+        if lowered.startswith("candidate_hard:"):
+            parts = value.split(":", 2)
+            if len(parts) >= 2 and parts[1].strip() == candidate_code:
+                values.append(value)
+        elif lowered.startswith("side_hard:"):
+            parts = value.split(":", 2)
+            affected_side = parts[1].strip().lower() if len(parts) >= 2 else ""
+            if affected_side and (
+                candidate_side == affected_side
+                or candidate_side.startswith(f"{affected_side}_")
+            ):
+                values.append(value)
+        elif lowered.startswith("global_hard:"):
+            values.append(value)
+        elif not lowered.startswith(
+            (
+                "candidate_soft:",
+                "side_soft:",
+                "global_soft:",
+                "advisory:",
+                "missing_rule_input:",
+            )
+        ):
+            values.append(value)
+    values.extend(
+        str(item)
+        for item in (candidate.get("missing_evidence") or [])
+        if str(item).lower().startswith(
+            ("candidate_hard:", "side_hard:", "global_hard:")
+        )
+    )
+    soft_prefixes = (
+        "candidate_soft:",
+        "side_soft:",
+        "global_soft:",
+        "advisory:",
+        "missing_rule_input:",
+    )
     return list(dict.fromkeys(
         value for value in values
         if value and not value.lower().startswith(soft_prefixes)

@@ -444,6 +444,130 @@ class TicketApiTest(unittest.TestCase):
         guarded = body["ticket"]["rule_state"]["guarded_experiment"]
         self.assertFalse(guarded["hard_gate_override"])
 
+    def test_guarded_experiment_rejects_hard_gap_hidden_in_missing_evidence(self):
+        status, body = _call("POST", "/api/trade/tickets/prepare", {
+            "intent_text": "候选硬缺口不得进入受控实验票据",
+            "action_type": "buy",
+            "code": "002281",
+            "name": "光迅科技",
+            "window": "W2",
+            "target_role": "trend_core",
+            "recommendation_state": {
+                "schema_version": "recommendation_state.v1",
+                "status": "guarded",
+                "candidate": {
+                    "code": "002281",
+                    "disposition": "guarded_experiment",
+                    "eligible": True,
+                    "blocking_codes": [],
+                    "missing_evidence": [
+                        "candidate_hard:002281:sector_inflow_missing",
+                    ],
+                    "max_position_pct": 5,
+                },
+            },
+            "position_evidence": {
+                "entry_leg": 1,
+                "first_entry_trade_date": "2026-06-04",
+                "trading_days_since_first_entry": 0,
+                "leg1_or_leg2_floating_pnl": 0,
+                "leg2_already_used": False,
+                "volume_ratio": 1.0,
+                "pullback_ma_status": "breakout_confirmed",
+                "sector_inflow_status": "not_large_outflow",
+                "sector_inflow_query_time": "2026-06-04T10:00:00+08:00",
+                "planned_single_stock_cap_pct": 5,
+                "current_single_stock_pct": 0,
+                "acceleration_segment_confirmed": False,
+            },
+        })
+
+        self.assertEqual(status, 200, body)
+        self.assertEqual(body["ticket"]["status"], "blocked")
+        self.assertIn(
+            "candidate_hard:002281:sector_inflow_missing",
+            body["ticket"]["blocking_rule_ids"],
+        )
+
+    def test_guarded_experiment_ignores_other_candidates_hard_gaps(self):
+        bridge._build_trade_context = lambda: {
+            "rule_state": {
+                "version": "g1a-v1",
+                "tradable": True,
+                "blocks": [],
+                "warnings": [],
+                "windows": {
+                    "w1": {"in_session": False, "buy_allowed": False, "blocks": []},
+                    "w2": {"in_session": True, "buy_allowed": True, "blocks": []},
+                },
+            },
+            "market_snapshot": {"iwencai": {"情绪值": 31}},
+            "account_snapshot": {"account_day_return_pct": 0.5},
+            "context_captured_at": "2026-06-04T14:05:00",
+            "context_status": "trusted",
+            "rule_pack_version": "test-pack",
+            "rule_snapshot_hash": "hash-1",
+            "today_execution_card_id": "EXEC-20260604",
+        }
+        status, body = _call("POST", "/api/trade/tickets/prepare", {
+            "intent_text": "其他候选硬缺口不应污染本候选",
+            "action_type": "buy",
+            "code": "002281",
+            "name": "光迅科技",
+            "window": "W2",
+            "target_role": "trend_core",
+            "recommendation_state": {
+                "schema_version": "recommendation_state.v1",
+                "status": "guarded",
+                "source_gaps": [
+                    "candidate_hard:000001:quote_missing",
+                    "candidate_soft:002281:sector_inflow_advisory",
+                    "side_soft:trend:breadth_advisory",
+                    "global_soft:sentiment_sample_thin",
+                ],
+                "candidate": {
+                    "code": "002281",
+                    "side": "trend",
+                    "disposition": "guarded_experiment",
+                    "eligible": True,
+                    "blocking_codes": [],
+                    "missing_evidence": [
+                        "candidate_soft:002281:sector_inflow_advisory",
+                    ],
+                    "max_position_pct": 5,
+                },
+            },
+            "position_evidence": {
+                "entry_leg": 1,
+                "first_entry_trade_date": "2026-06-04",
+                "trading_days_since_first_entry": 0,
+                "leg1_or_leg2_floating_pnl": 0,
+                "leg2_already_used": False,
+                "volume_ratio": 1.0,
+                "pullback_ma_status": "breakout_confirmed",
+                "sector_inflow_status": "not_large_outflow",
+                "sector_inflow_query_time": "2026-06-04T14:05:00+08:00",
+                "planned_single_stock_cap_pct": 5,
+                "current_single_stock_pct": 0,
+                "acceleration_segment_confirmed": False,
+            },
+        })
+
+        self.assertEqual(status, 200, body)
+        self.assertEqual(body["ticket"]["status"], "guarded_experiment")
+        self.assertNotIn(
+            "candidate_hard:000001:quote_missing",
+            body["ticket"]["blocking_rule_ids"],
+        )
+        self.assertNotIn(
+            "side_soft:trend:breadth_advisory",
+            body["ticket"]["blocking_rule_ids"],
+        )
+        self.assertNotIn(
+            "global_soft:sentiment_sample_thin",
+            body["ticket"]["blocking_rule_ids"],
+        )
+
     def test_manual_review_ticket_is_valid_but_cannot_accept_fills(self):
         ticket_id = db.create_trade_ticket({
             "trade_date": "2026-06-04",

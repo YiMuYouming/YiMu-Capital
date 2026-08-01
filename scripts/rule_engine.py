@@ -268,17 +268,21 @@ def evaluate_recommendation_candidate(candidate: dict, health: dict, rule_state:
         elif value:
             raw_gaps.append(str(value))
     parsed_gaps = [classify_source_gap(gap) for gap in dict.fromkeys(raw_gaps)]
+    applicable_gaps = [
+        gap
+        for gap in parsed_gaps
+        if gap["scope"] == "advisory"
+        or _recommendation_gap_matches(gap, code, side)
+    ]
     blocking = [
         gap["code"]
-        for gap in parsed_gaps
+        for gap in applicable_gaps
         if gap["severity"] == "hard"
-        and _recommendation_gap_matches(gap, code, side)
     ]
     missing_evidence = [
         gap["raw"]
-        for gap in parsed_gaps
+        for gap in applicable_gaps
         if gap["severity"] != "hard"
-        or not _recommendation_gap_matches(gap, code, side)
     ]
 
     for block in (rule_state or {}).get("blocks") or []:
@@ -301,6 +305,14 @@ def evaluate_recommendation_candidate(candidate: dict, health: dict, rule_state:
     blocking = list(dict.fromkeys(blocking))
     missing_evidence = list(dict.fromkeys(missing_evidence))
     execution_allowed = bool((health or {}).get("trade_entry_allowed", False)) and not blocking
+    if blocking:
+        disposition = "blocked"
+    elif not execution_allowed:
+        disposition = "paper_only"
+    elif missing_evidence:
+        disposition = "guarded_experiment"
+    else:
+        disposition = "standard"
     result = {
         "code": code,
         "side": side,
@@ -308,8 +320,8 @@ def evaluate_recommendation_candidate(candidate: dict, health: dict, rule_state:
         "execution_allowed": execution_allowed,
         "blocking_codes": blocking,
         "missing_evidence": missing_evidence,
-        "source_gaps": [gap["raw"] for gap in parsed_gaps],
-        "disposition": "blocked" if blocking else ("standard" if execution_allowed else "paper_only"),
+        "source_gaps": [gap["raw"] for gap in applicable_gaps],
+        "disposition": disposition,
     }
     if any(key in item for key in ("position", "risk_action", "sell_action")):
         position = dict(item.get("position") or {})
@@ -335,7 +347,7 @@ def build_recommendation_state(candidates: list[dict], health: dict, rule_state:
                 if key in original
             })
     has_eligible = any(item.get("eligible") for item in evaluated)
-    guarded = any(item.get("disposition") == "guarded" for item in evaluated)
+    guarded = any(item.get("disposition") == "guarded_experiment" for item in evaluated)
     status = "guarded" if guarded else ("ranked" if has_eligible else "blocked")
     return {
         "schema_version": "recommendation_state.v1",

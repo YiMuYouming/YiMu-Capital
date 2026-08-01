@@ -69,6 +69,7 @@ class LiveRuleEngineTest(unittest.TestCase):
         )
         self.assertFalse(candidate_688111["eligible"])
         self.assertTrue(recommendation_for_other_candidate["eligible"])
+        self.assertEqual(recommendation_for_other_candidate["missing_evidence"], [])
         entry_only_block = evaluate_recommendation_candidate(
             {"code": "688112", "side": "trend"},
             {"trade_entry_allowed": False},
@@ -96,6 +97,26 @@ class LiveRuleEngineTest(unittest.TestCase):
             {"source_gaps": [global_gap]},
         )
         self.assertFalse(global_recommendation["eligible"])
+
+    def test_candidate_soft_gap_is_guarded_and_does_not_pollute_other_candidates(self):
+        state = build_recommendation_state(
+            [
+                {"code": "688112", "side": "trend"},
+                {"code": "688113", "side": "trend"},
+            ],
+            {"trade_entry_allowed": True},
+            {"source_gaps": ["candidate_soft:688112:sector_inflow_advisory"]},
+        )
+
+        by_code = {item["code"]: item for item in state["candidates"]}
+        self.assertEqual(state["status"], "guarded")
+        self.assertEqual(by_code["688112"]["disposition"], "guarded_experiment")
+        self.assertEqual(
+            by_code["688112"]["missing_evidence"],
+            ["candidate_soft:688112:sector_inflow_advisory"],
+        )
+        self.assertEqual(by_code["688113"]["disposition"], "standard")
+        self.assertEqual(by_code["688113"]["missing_evidence"], [])
 
     def test_recommendation_state_keeps_paper_candidates_when_execution_gate_is_closed(self):
         state = build_recommendation_state(
