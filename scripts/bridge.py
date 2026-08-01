@@ -2967,6 +2967,13 @@ def _ai_context_error_payload(error, now=None):
         "date": date_str,
         "mode": _ai_current_mode(ref),
         "decision_gate": _decision_gate_payload(False, f"AI context build error: {reason}", ref),
+        "recommendation_state": {
+            "schema_version": "recommendation_state.v1",
+            "status": "blocked",
+            "execution_allowed": False,
+            "candidates": [],
+            "source_gaps": ["global_hard:AI_CONTEXT_BUILD_ERROR"],
+        },
         "trade_entry_allowed": False,
         "trade_entry_reason": f"AI context build error: {reason}",
         "situation": {
@@ -3079,6 +3086,9 @@ def _build_ai_context(now=None):
     if conflicts.get("status") == "error":
         trade_allowed = False
         trade_reason = conflicts.get("error") or "ticket conflict query failed"
+    candidate_list = _ai_candidate_list(dashboard_data)
+    from scripts.rule_engine import build_recommendation_state
+    recommendation_state = build_recommendation_state(candidate_list, health, rule_state)
     situation = {
         "health": {
             "status": health.get("status"),
@@ -3129,6 +3139,7 @@ def _build_ai_context(now=None):
         "health": health,
         "rule_state": rule_state,
         "decision_gate": _decision_gate_payload(trade_allowed, trade_reason, ref),
+        "recommendation_state": recommendation_state,
         # Compatibility mirrors. New consumers must read decision_gate.v1.
         "trade_entry_allowed": bool(trade_allowed),
         "trade_entry_reason": trade_reason,
@@ -3143,7 +3154,7 @@ def _build_ai_context(now=None):
         "risks": risks,
         "tickets": tickets,
         "positions": account_state.get("positions") or [],
-        "candidates": _ai_candidate_list(dashboard_data),
+        "candidates": candidate_list,
         "freshness": freshness,
         "next_actions": next_actions,
         "human_required": human_required,

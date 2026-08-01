@@ -355,6 +355,41 @@ class AIContextApiTest(unittest.TestCase):
         self.assertEqual(ctx["situation"]["trade_entry_reason"], ctx["decision_gate"]["reason"])
         self.assertEqual("/api/ai/context", ctx["decision_gate"]["source"])
 
+    def test_ai_context_exposes_recommendation_state_beside_closed_decision_gate(self):
+        original_rule_state = bridge._build_rule_state
+        original_trade_gate = bridge._trade_entry_gate
+        original_candidates = bridge._ai_candidate_list
+        try:
+            bridge._build_rule_state = lambda now=None, account_state=None: {
+                "tradable": True,
+                "source_gaps": [],
+                "blocks": [],
+                "windows": {"w1": {"buy_allowed": True}},
+            }
+            bridge._trade_entry_gate = lambda health, rule_state: (
+                False,
+                "execution gate closed for test",
+            )
+            bridge._ai_candidate_list = lambda dashboard_data, limit=12: [{
+                "source": "trend",
+                "side": "trend",
+                "code": "688112",
+                "name": "paper",
+                "role": "trend_core",
+            }]
+            ctx = bridge._build_ai_context()
+        finally:
+            bridge._build_rule_state = original_rule_state
+            bridge._trade_entry_gate = original_trade_gate
+            bridge._ai_candidate_list = original_candidates
+
+        self.assertEqual("decision_gate.v1", ctx["decision_gate"]["schema_version"])
+        self.assertFalse(ctx["decision_gate"]["allowed"])
+        recommendation = ctx["recommendation_state"]
+        self.assertEqual("recommendation_state.v1", recommendation["schema_version"])
+        self.assertEqual("ranked", recommendation["status"])
+        self.assertTrue(recommendation["candidates"][0]["eligible"])
+
     def test_ai_context_includes_freshness_for_quotes_iwencai_account_and_baseline(self):
         ctx = bridge._build_ai_context()
         freshness = ctx["freshness"]

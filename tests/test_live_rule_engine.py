@@ -5,7 +5,10 @@
 import unittest
 from datetime import datetime
 from scripts.rule_engine import (
+    build_recommendation_state,
+    classify_source_gap,
     evaluate_decision_gate,
+    evaluate_recommendation_candidate,
     evaluate_position_evidence,
     evaluate_rule_state,
     base_total_cap,
@@ -42,6 +45,68 @@ def valid_inputs(**overrides):
 
 class LiveRuleEngineTest(unittest.TestCase):
     """硬规则阈值矩阵测试"""
+
+    def test_recommendation_source_gaps_are_scoped_without_erasing_other_candidates(self):
+        candidate_gap = "candidate_hard:688111:sector_inflow_missing"
+        side_gap = "side_hard:trend:market_trend_20d_direction"
+        global_gap = "global_hard:RULE_SNAPSHOT_STALE"
+
+        parsed_candidate = classify_source_gap(candidate_gap)
+        self.assertEqual(parsed_candidate["scope"], "candidate")
+        self.assertEqual(parsed_candidate["affected_candidate"], "688111")
+        self.assertEqual(parsed_candidate["severity"], "hard")
+
+        candidate_688111 = evaluate_recommendation_candidate(
+            {"code": "688111", "side": "trend"},
+            {"trade_entry_allowed": True},
+            {"source_gaps": [candidate_gap]},
+        )
+        recommendation_for_other_candidate = evaluate_recommendation_candidate(
+            {"code": "688112", "side": "trend"},
+            {"trade_entry_allowed": True},
+            {"source_gaps": [candidate_gap]},
+        )
+        self.assertFalse(candidate_688111["eligible"])
+        self.assertTrue(recommendation_for_other_candidate["eligible"])
+        entry_only_block = evaluate_recommendation_candidate(
+            {"code": "688112", "side": "trend"},
+            {"trade_entry_allowed": False},
+            {"source_gaps": [], "blocks": [{"code": "SOURCE_GAP", "scope": "entry"}]},
+        )
+        self.assertTrue(entry_only_block["eligible"])
+        self.assertEqual(entry_only_block["disposition"], "paper_only")
+
+        trend_recommendation = evaluate_recommendation_candidate(
+            {"code": "688112", "side": "trend"},
+            {"trade_entry_allowed": True},
+            {"source_gaps": [side_gap]},
+        )
+        lianban_recommendation = evaluate_recommendation_candidate(
+            {"code": "000001", "side": "lianban"},
+            {"trade_entry_allowed": True},
+            {"source_gaps": [side_gap]},
+        )
+        self.assertFalse(trend_recommendation["eligible"])
+        self.assertTrue(lianban_recommendation["eligible"])
+
+        global_recommendation = evaluate_recommendation_candidate(
+            {"code": "688112", "side": "trend"},
+            {"trade_entry_allowed": True},
+            {"source_gaps": [global_gap]},
+        )
+        self.assertFalse(global_recommendation["eligible"])
+
+    def test_recommendation_state_keeps_paper_candidates_when_execution_gate_is_closed(self):
+        state = build_recommendation_state(
+            [{"code": "688112", "name": "paper", "side": "trend"}],
+            {"trade_entry_allowed": False},
+            {"source_gaps": []},
+        )
+
+        self.assertEqual(state["schema_version"], "recommendation_state.v1")
+        self.assertEqual(state["status"], "ranked")
+        self.assertFalse(state["execution_allowed"])
+        self.assertTrue(state["candidates"][0]["eligible"])
 
     # ── 全局阻断 ──
 

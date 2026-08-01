@@ -178,6 +178,166 @@ def _role_lianban_layer(role):
     return None
 
 
+def classify_source_gap(raw_gap: str) -> dict:
+    """Parse a typed source gap without widening its impact scope."""
+    raw = str(raw_gap or "").strip()
+    parts = raw.split(":")
+    token = parts[0].strip().lower() if parts else ""
+    result = {
+        "raw": raw,
+        "scope": "advisory",
+        "severity": "advisory",
+        "affected_candidate": None,
+        "affected_side": None,
+        "code": raw,
+        "mapped": False,
+    }
+    if token in {"global_hard", "global_soft", "candidate_hard", "candidate_soft", "side_hard", "side_soft"}:
+        scope_name, severity = token.rsplit("_", 1)
+        result["scope"] = {
+            "global": "global",
+            "candidate": "candidate",
+            "side": "side",
+        }[scope_name]
+        result["severity"] = "hard" if severity == "hard" else "soft"
+        result["mapped"] = True
+        if result["scope"] == "candidate" and len(parts) >= 2:
+            result["affected_candidate"] = parts[1].strip()
+            result["code"] = ":".join(parts[2:]).strip() or raw
+        elif result["scope"] == "side" and len(parts) >= 2:
+            result["affected_side"] = parts[1].strip().lower()
+            result["code"] = ":".join(parts[2:]).strip() or raw
+        else:
+            result["code"] = ":".join(parts[1:]).strip() or raw
+        return result
+
+    # Existing missing_rule_input values are deliberately not promoted to a
+    # global hard gate. A producer must emit an explicit typed mapping first.
+    if raw.startswith("missing_rule_input:"):
+        result.update({
+            "code": raw.split(":", 1)[1] or raw,
+            "severity": "soft",
+            "mapped": False,
+            "requires_explicit_mapping": True,
+        })
+        return result
+
+    if raw in {
+        "RULE_SNAPSHOT_STALE",
+        "ACCOUNT_TRUST_FAILED",
+        "QUOTE_DEAD",
+        "SYSTEM_RISK",
+        "T1_INTEGRITY_ERROR",
+    }:
+        result.update({
+            "scope": "global",
+            "severity": "hard",
+            "code": raw,
+            "mapped": True,
+        })
+    return result
+
+
+def _candidate_side(candidate):
+    value = (candidate or {}).get("side") or (candidate or {}).get("source")
+    side = str(value or "").strip().lower()
+    if side in {"trend", "lianban"}:
+        return side
+    return _role_side((candidate or {}).get("role") or value)
+
+
+def _recommendation_gap_matches(gap, candidate_code, candidate_side):
+    if gap["scope"] == "global":
+        return True
+    if gap["scope"] == "candidate":
+        return str(gap.get("affected_candidate") or "").strip() == candidate_code
+    if gap["scope"] == "side":
+        return str(gap.get("affected_side") or "").strip().lower() == candidate_side
+    return False
+
+
+def evaluate_recommendation_candidate(candidate: dict, health: dict, rule_state: dict) -> dict:
+    """Evaluate advice eligibility independently from the execution gate."""
+    item = candidate if isinstance(candidate, dict) else {}
+    code = str(item.get("code") or item.get("代码") or "").strip()
+    side = _candidate_side(item)
+    raw_gaps = []
+    for value in (item.get("source_gaps") or [], (rule_state or {}).get("source_gaps") or [], (health or {}).get("source_gaps") or []):
+        if isinstance(value, (list, tuple)):
+            raw_gaps.extend(str(gap) for gap in value if str(gap).strip())
+        elif value:
+            raw_gaps.append(str(value))
+    parsed_gaps = [classify_source_gap(gap) for gap in dict.fromkeys(raw_gaps)]
+    blocking = [
+        gap["code"]
+        for gap in parsed_gaps
+        if gap["severity"] == "hard"
+        and _recommendation_gap_matches(gap, code, side)
+    ]
+    missing_evidence = [
+        gap["raw"]
+        for gap in parsed_gaps
+        if gap["severity"] != "hard"
+        or not _recommendation_gap_matches(gap, code, side)
+    ]
+
+    for block in (rule_state or {}).get("blocks") or []:
+        if not isinstance(block, dict):
+            continue
+        block_code = str(block.get("code") or "").strip()
+        block_scope = str(block.get("scope") or "").strip().lower()
+        if not block_code:
+            continue
+        # ``entry`` is the legacy buy-side execution scope. It must not erase
+        # an otherwise useful paper recommendation; only explicit global/all
+        # blocks are recommendation-wide hard blocks.
+        if block_scope in {"all", "global"}:
+            blocking.append(block_code)
+        elif block_scope in {"trend", "lianban"} and block_scope == side:
+            blocking.append(block_code)
+        elif str(block.get("candidate") or block.get("code_value") or "").strip() == code:
+            blocking.append(block_code)
+
+    blocking = list(dict.fromkeys(blocking))
+    missing_evidence = list(dict.fromkeys(missing_evidence))
+    execution_allowed = bool((health or {}).get("trade_entry_allowed", False)) and not blocking
+    return {
+        "code": code,
+        "side": side,
+        "eligible": not blocking,
+        "execution_allowed": execution_allowed,
+        "blocking_codes": blocking,
+        "missing_evidence": missing_evidence,
+        "source_gaps": [gap["raw"] for gap in parsed_gaps],
+        "disposition": "blocked" if blocking else ("standard" if execution_allowed else "paper_only"),
+    }
+
+
+def build_recommendation_state(candidates: list[dict], health: dict, rule_state: dict) -> dict:
+    """Build recommendation_state.v1 beside, never inside, decision_gate.v1."""
+    values = candidates if isinstance(candidates, list) else []
+    evaluated = [evaluate_recommendation_candidate(item, health or {}, rule_state or {}) for item in values]
+    for original, result in zip(values, evaluated):
+        if isinstance(original, dict):
+            result.update({
+                key: original.get(key)
+                for key in ("name", "sector", "role", "source", "setup", "trigger", "invalidation")
+                if key in original
+            })
+    has_eligible = any(item.get("eligible") for item in evaluated)
+    guarded = any(item.get("disposition") == "guarded" for item in evaluated)
+    status = "guarded" if guarded else ("ranked" if has_eligible else "blocked")
+    return {
+        "schema_version": "recommendation_state.v1",
+        "status": status,
+        "execution_allowed": bool((health or {}).get("trade_entry_allowed", False)),
+        "candidates": evaluated,
+        "source_gaps": list(dict.fromkeys(
+            item for candidate in evaluated for item in candidate.get("source_gaps") or []
+        )),
+    }
+
+
 def evaluate_decision_gate(action_type, window_name, role, entry_leg, health, rule_state):
     """Final action-specific gate. Exit/risk handling ignores buy-only blocks."""
     action = str(action_type or "").strip().lower()
