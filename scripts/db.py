@@ -3,6 +3,7 @@
 
 核心表：account_baselines / trade_records / intraday_snapshots / daily_summary / llm_insights
 """
+import re
 import sqlite3, json, threading, sys
 from pathlib import Path
 from datetime import datetime, timedelta
@@ -279,6 +280,42 @@ def init_db():
             note                TEXT
         );
         CREATE INDEX IF NOT EXISTS idx_ticket_conflict ON ticket_conflict_log(trade_date, code, conflict_type);
+
+        CREATE TABLE IF NOT EXISTS recommendation_observations (
+            recommendation_id       TEXT PRIMARY KEY,
+            trade_date              TEXT NOT NULL,
+            observation_time        TEXT NOT NULL,
+            code                    TEXT NOT NULL,
+            disposition              TEXT NOT NULL,
+            reference_price          REAL,
+            rule_ids_json            TEXT NOT NULL DEFAULT '[]',
+            blocking_codes_json      TEXT NOT NULL DEFAULT '[]',
+            evidence_sha256          TEXT NOT NULL,
+            executed_trade_id        INTEGER,
+            manual_override_flag    INTEGER NOT NULL DEFAULT 0,
+            close_1d                 REAL,
+            close_2d                 REAL,
+            close_5d                 REAL,
+            mfe_1d_pct               REAL,
+            mae_1d_pct               REAL,
+            realized_r               REAL,
+            outcome_status           TEXT NOT NULL DEFAULT 'pending',
+            created_at               TEXT DEFAULT (datetime('now','localtime'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_recommendation_observation_date
+            ON recommendation_observations(trade_date, observation_time);
+        CREATE INDEX IF NOT EXISTS idx_recommendation_observation_code
+            ON recommendation_observations(code, trade_date);
+        CREATE TRIGGER IF NOT EXISTS recommendation_observations_no_update
+            BEFORE UPDATE ON recommendation_observations
+            BEGIN
+                SELECT RAISE(ABORT, 'recommendation observations are immutable');
+            END;
+        CREATE TRIGGER IF NOT EXISTS recommendation_observations_no_delete
+            BEFORE DELETE ON recommendation_observations
+            BEGIN
+                SELECT RAISE(ABORT, 'recommendation observations are immutable');
+            END;
     """)
     columns = {row['name'] for row in conn.execute("PRAGMA table_info(account_baselines)").fetchall()}
     if 'trade_id_cutoff' not in columns:
@@ -1423,6 +1460,164 @@ def query_trades(date_from=None, date_to=None, limit=50):
     sql += " ORDER BY trade_date DESC, id DESC LIMIT ?"
     params.append(limit)
     return [dict(r) for r in _exec(sql, params)]
+
+
+# ===== 推荐观察（只追加、不可变） =====
+
+RECOMMENDATION_OBSERVATION_COLUMNS = (
+    'recommendation_id', 'trade_date', 'observation_time', 'code',
+    'disposition', 'reference_price', 'rule_ids_json',
+    'blocking_codes_json', 'evidence_sha256', 'executed_trade_id',
+    'manual_override_flag', 'close_1d', 'close_2d', 'close_5d',
+    'mfe_1d_pct', 'mae_1d_pct', 'realized_r', 'outcome_status',
+)
+_OBSERVATION_SHA256_RE = re.compile(r'^[0-9a-fA-F]{64}$')
+
+
+def _observation_json_text(value, field_name):
+    """Serialize a list/dict JSON field without retaining caller-owned objects."""
+    if value is None:
+        return '[]'
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+        except (TypeError, json.JSONDecodeError) as exc:
+            raise ValueError(f'{field_name} must contain valid JSON') from exc
+    else:
+        parsed = value
+    return json.dumps(parsed, ensure_ascii=False, sort_keys=True, separators=(',', ':'))
+
+
+def _normalize_recommendation_observation(data):
+    payload = dict(data or {})
+    missing = [
+        field for field in (
+            'recommendation_id', 'trade_date', 'observation_time', 'code',
+            'disposition', 'evidence_sha256',
+        ) if payload.get(field) in (None, '')
+    ]
+    if missing:
+        raise ValueError(f'missing recommendation observation fields: {", ".join(missing)}')
+
+    evidence_sha256 = str(payload['evidence_sha256']).strip().lower()
+    if not _OBSERVATION_SHA256_RE.fullmatch(evidence_sha256):
+        raise ValueError('evidence_sha256 must be a 64-character hexadecimal hash')
+
+    rule_ids = payload.get('rule_ids_json', payload.get('rule_ids'))
+    blocking_codes = payload.get('blocking_codes_json', payload.get('blocking_codes'))
+    manual_override = payload.get('manual_override_flag', False)
+    if isinstance(manual_override, str):
+        manual_override = manual_override.strip().lower() in {'1', 'true', 'yes', 'y'}
+    try:
+        executed_trade_id = payload.get('executed_trade_id')
+        if executed_trade_id not in (None, ''):
+            executed_trade_id = int(executed_trade_id)
+        else:
+            executed_trade_id = None
+    except (TypeError, ValueError) as exc:
+        raise ValueError('executed_trade_id must be an integer or null') from exc
+
+    normalized = {
+        'recommendation_id': str(payload['recommendation_id']),
+        'trade_date': str(payload['trade_date']),
+        'observation_time': str(payload['observation_time']),
+        'code': str(payload['code']),
+        'disposition': str(payload['disposition']),
+        'reference_price': payload.get('reference_price'),
+        'rule_ids_json': _observation_json_text(rule_ids, 'rule_ids_json'),
+        'blocking_codes_json': _observation_json_text(blocking_codes, 'blocking_codes_json'),
+        'evidence_sha256': evidence_sha256,
+        'executed_trade_id': executed_trade_id,
+        'manual_override_flag': 1 if bool(manual_override) else 0,
+        'close_1d': payload.get('close_1d'),
+        'close_2d': payload.get('close_2d'),
+        'close_5d': payload.get('close_5d'),
+        'mfe_1d_pct': payload.get('mfe_1d_pct'),
+        'mae_1d_pct': payload.get('mae_1d_pct'),
+        'realized_r': payload.get('realized_r'),
+        'outcome_status': str(payload.get('outcome_status') or 'pending'),
+    }
+    return normalized
+
+
+def insert_recommendation_observation(data):
+    """Append one recommendation observation; an existing id can never be updated."""
+    payload = _normalize_recommendation_observation(data)
+    conn = get_conn()
+    try:
+        conn.execute(
+            """INSERT INTO recommendation_observations
+            (recommendation_id, trade_date, observation_time, code, disposition,
+             reference_price, rule_ids_json, blocking_codes_json, evidence_sha256,
+             executed_trade_id, manual_override_flag, close_1d, close_2d,
+             close_5d, mfe_1d_pct, mae_1d_pct, realized_r, outcome_status)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            tuple(payload[column] for column in RECOMMENDATION_OBSERVATION_COLUMNS),
+        )
+        conn.commit()
+        return True
+    except sqlite3.IntegrityError as exc:
+        existing = conn.execute(
+            "SELECT * FROM recommendation_observations WHERE recommendation_id = ?",
+            (payload['recommendation_id'],),
+        ).fetchone()
+        if existing:
+            existing_payload = {
+                column: existing[column]
+                for column in RECOMMENDATION_OBSERVATION_COLUMNS
+            }
+            if existing_payload == payload:
+                conn.commit()
+                return False
+            raise ValueError(
+                f"recommendation observation is immutable: {payload['recommendation_id']}"
+            ) from exc
+        raise
+
+
+def create_recommendation_observation(data):
+    """Named constructor alias for callers that create a new observation."""
+    return insert_recommendation_observation(data)
+
+
+def _parse_observation_row(row):
+    if not row:
+        return None
+    result = dict(row)
+    for column, parsed_name in (
+        ('rule_ids_json', 'rule_ids'),
+        ('blocking_codes_json', 'blocking_codes'),
+    ):
+        try:
+            result[parsed_name] = json.loads(result[column] or '[]')
+        except (TypeError, json.JSONDecodeError):
+            result[parsed_name] = []
+    return result
+
+
+def query_recommendation_observations(
+    date_from=None, date_to=None, recommendation_id=None, code=None, limit=10000,
+):
+    """Read immutable recommendation observations without touching trade facts."""
+    clauses, params = [], []
+    if date_from:
+        clauses.append('trade_date >= ?')
+        params.append(date_from)
+    if date_to:
+        clauses.append('trade_date <= ?')
+        params.append(date_to)
+    if recommendation_id:
+        clauses.append('recommendation_id = ?')
+        params.append(recommendation_id)
+    if code:
+        clauses.append('code = ?')
+        params.append(code)
+    sql = 'SELECT * FROM recommendation_observations'
+    if clauses:
+        sql += ' WHERE ' + ' AND '.join(clauses)
+    sql += ' ORDER BY trade_date ASC, observation_time ASC, recommendation_id ASC LIMIT ?'
+    params.append(int(limit))
+    return [_parse_observation_row(row) for row in _exec(sql, params)]
 
 
 # ===== LLM 研判 =====

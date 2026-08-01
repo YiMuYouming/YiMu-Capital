@@ -203,6 +203,70 @@ def _json_dict(value):
     return {}
 
 
+def _recommendation_observation_rule_stats(observations):
+    """Aggregate only exact observation outcomes; gaps remain visible."""
+    from collections import defaultdict
+
+    blocked_dispositions = {
+        'blocked', 'audit_degraded', 'observe', 'observation_only', 'paper_only',
+    }
+    verified_statuses = {'verified', 'closed_verified', 'settled', 'win', 'loss'}
+    counterfactual_win_statuses = {
+        'verified_counterfactual_win',
+        'counterfactual_verified_win',
+        'blocked_but_later_would_win',
+    }
+    stats = {}
+    for observation in observations or []:
+        rule_ids = _json_list(observation.get('rule_ids_json')) or ['UNSPECIFIED']
+        blocking_codes = _json_list(observation.get('blocking_codes_json'))
+        disposition = str(observation.get('disposition') or '').strip().lower()
+        is_block = disposition in blocked_dispositions and (
+            bool(blocking_codes) or disposition in {'blocked', 'audit_degraded'}
+        )
+        status = str(observation.get('outcome_status') or 'pending').strip().lower()
+        realized = observation.get('realized_r')
+        try:
+            realized = float(realized) if realized is not None else None
+        except (TypeError, ValueError):
+            realized = None
+        exact_outcome = status in verified_statuses and realized is not None
+        for rule_id in rule_ids:
+            rule_id = str(rule_id)
+            row = stats.setdefault(rule_id, {
+                'rule_id': rule_id,
+                'trigger_count': 0,
+                'executed_count': 0,
+                'win_rate': None,
+                'avg_r': None,
+                'manual_override_count': 0,
+                'manual_override_pnl': 0,
+                'protective_block_count': 0,
+                'blocked_but_later_would_win_count': 0,
+                '_exact_r': [],
+            })
+            row['trigger_count'] += 1
+            if observation.get('executed_trade_id') not in (None, ''):
+                row['executed_count'] += 1
+            if observation.get('manual_override_flag'):
+                row['manual_override_count'] += 1
+                if exact_outcome:
+                    row['manual_override_pnl'] = round(row['manual_override_pnl'] + realized, 6)
+            if is_block:
+                row['protective_block_count'] += 1
+                if status in counterfactual_win_statuses:
+                    row['blocked_but_later_would_win_count'] += 1
+            if exact_outcome:
+                row['_exact_r'].append(realized)
+
+    for row in stats.values():
+        exact = row.pop('_exact_r')
+        if exact:
+            row['win_rate'] = round(sum(1 for value in exact if value > 0) / len(exact), 6)
+            row['avg_r'] = round(sum(exact) / len(exact), 6)
+    return list(stats.values())
+
+
 def build_account_baseline_position_correction(
     anchor,
     late_trade,
@@ -366,11 +430,20 @@ def build_daily_ticket_review(date_str, eod_quotes=None):
     lots and conflict logs. Missing EOD prices do not produce guessed outcomes.
     """
     from collections import defaultdict
-    from scripts.db import init_db, query_trade_tickets, query_trades, _exec
+    from scripts.db import (
+        init_db,
+        query_recommendation_observations,
+        query_trade_tickets,
+        query_trades,
+        _exec,
+    )
     init_db()
 
     tickets = query_trade_tickets(date_from=date_str, date_to=date_str, limit=10000)
     trades = query_trades(date_from=date_str, date_to=date_str, limit=10000)
+    recommendation_observations = query_recommendation_observations(
+        date_from=date_str, date_to=date_str, limit=10000,
+    )
     fills = [dict(t) for t in trades if t.get("ticket_id")]
     conflicts = [dict(r) for r in _exec("""
         SELECT * FROM ticket_conflict_log
@@ -449,10 +522,12 @@ def build_daily_ticket_review(date_str, eod_quotes=None):
                 "executed_count": 0,
                 "win_rate": None,
                 "avg_R": None,
+                "avg_r": None,
                 "total_realized_pnl": 0.0,
                 "manual_override_count": 0,
                 "manual_override_pnl": 0.0,
-                "blocked_but_later_would_win_count": None,
+                "protective_block_count": 1 if str(ticket.get("status")) in blocked_statuses else 0,
+                "blocked_but_later_would_win_count": 0,
             })
             row["trigger_count"] += 1
             row["executed_count"] += executed
@@ -461,9 +536,20 @@ def build_daily_ticket_review(date_str, eod_quotes=None):
             if manual_override:
                 row["manual_override_pnl"] = round(row["manual_override_pnl"] + realized, 2)
             if would_win is not None:
-                if row["blocked_but_later_would_win_count"] is None:
-                    row["blocked_but_later_would_win_count"] = 0
                 row["blocked_but_later_would_win_count"] += would_win
+
+    observation_source_gaps = []
+    observation_pending = []
+    for observation in recommendation_observations:
+        status = str(observation.get("outcome_status") or "pending").strip().lower()
+        if status == "source_gap":
+            observation_source_gaps.append(
+                f"{observation.get('recommendation_id')}:{status}"
+            )
+        elif status in {"pending", "inferred", "unverified"}:
+            observation_pending.append(
+                f"{observation.get('recommendation_id')}:outcome_pending"
+            )
 
     markdown = "\n".join([
         f"# {date_str} 交易票据复盘",
@@ -486,6 +572,13 @@ def build_daily_ticket_review(date_str, eod_quotes=None):
         "t1_conflicts": t1_conflicts,
         "do_t_results": do_t_results,
         "rule_id_stats": list(rule_stats.values()),
+        "recommendation_observations": recommendation_observations,
+        "recommendation_observation_count": len(recommendation_observations),
+        "recommendation_observation_rule_stats": _recommendation_observation_rule_stats(
+            recommendation_observations
+        ),
+        "recommendation_observation_source_gaps": observation_source_gaps,
+        "recommendation_observation_pending": observation_pending,
         "account_metric_errors": [],
         "funds_conflict_events": [
             t for t in tickets

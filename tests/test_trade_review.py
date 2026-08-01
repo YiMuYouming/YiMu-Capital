@@ -2,7 +2,7 @@
 
 全隔离：temp DB，不访问 data/**，不调用真实写接口。
 """
-import io, json, tempfile, threading, unittest
+import io, json, sqlite3, tempfile, threading, unittest
 from contextlib import redirect_stdout
 from datetime import datetime
 from pathlib import Path
@@ -57,6 +57,81 @@ class MigrationTest(unittest.TestCase):
         cols_after = {r['name'] for r in db._exec("PRAGMA table_info(trade_records)")}
         for c in ['rule_state_json', 'market_snapshot_json', 'outcome', 'review_note']:
             self.assertIn(c, cols_after, f"迁移后应有 {c}")
+
+    def test_recommendation_observation_table_contains_immutable_fields(self):
+        cols = {r['name'] for r in db._exec("PRAGMA table_info(recommendation_observations)")}
+        expected = {
+            'recommendation_id', 'trade_date', 'observation_time', 'code',
+            'disposition', 'reference_price', 'rule_ids_json',
+            'blocking_codes_json', 'evidence_sha256', 'executed_trade_id',
+            'manual_override_flag', 'close_1d', 'close_2d', 'close_5d',
+            'mfe_1d_pct', 'mae_1d_pct', 'realized_r', 'outcome_status',
+        }
+        self.assertTrue(expected.issubset(cols))
+
+
+class RecommendationObservationTest(unittest.TestCase):
+
+    def setUp(self):
+        _setup_temp_db(self)
+
+    def tearDown(self):
+        _teardown_temp_db(self)
+
+    def _observation(self):
+        return {
+            'recommendation_id': 'REC-20260727-000001',
+            'trade_date': '2026-07-27',
+            'observation_time': '2026-07-27T09:35:00+08:00',
+            'code': '000001',
+            'disposition': 'paper_only',
+            'reference_price': 10.0,
+            'rule_ids_json': ['WIN-W1-001'],
+            'blocking_codes_json': ['RULE_SNAPSHOT_STALE'],
+            'evidence_sha256': 'a' * 64,
+            'executed_trade_id': None,
+            'manual_override_flag': False,
+            'close_1d': 10.5,
+            'close_2d': None,
+            'close_5d': None,
+            'mfe_1d_pct': 5.0,
+            'mae_1d_pct': -1.0,
+            'realized_r': None,
+            'outcome_status': 'pending',
+        }
+
+    def test_insert_is_immutable_and_does_not_mutate_input(self):
+        observation = self._observation()
+        original_rule_ids = list(observation['rule_ids_json'])
+
+        self.assertTrue(db.insert_recommendation_observation(observation))
+        observation['rule_ids_json'].append('MUTATED_AFTER_INSERT')
+
+        rows = db.query_recommendation_observations(date_from='2026-07-27', date_to='2026-07-27')
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(json.loads(rows[0]['rule_ids_json']), original_rule_ids)
+        self.assertEqual(rows[0]['outcome_status'], 'pending')
+
+        with self.assertRaises(sqlite3.DatabaseError):
+            db._exec_write(
+                "UPDATE recommendation_observations SET reference_price = ? WHERE recommendation_id = ?",
+                (99.0, 'REC-20260727-000001'),
+            )
+        stored = db._exec(
+            "SELECT reference_price FROM recommendation_observations WHERE recommendation_id = ?",
+            ('REC-20260727-000001',),
+        )
+        self.assertEqual(stored[0]['reference_price'], 10.0)
+
+    def test_duplicate_observation_is_idempotent_but_conflicting_payload_is_rejected(self):
+        observation = self._observation()
+        self.assertTrue(db.create_recommendation_observation(observation))
+        self.assertFalse(db.create_recommendation_observation(dict(observation)))
+
+        conflicting = dict(observation)
+        conflicting['reference_price'] = 11.0
+        with self.assertRaises(ValueError):
+            db.create_recommendation_observation(conflicting)
 
 
 class ReviewContextTest(unittest.TestCase):
@@ -203,6 +278,39 @@ class DailyTicketReviewTest(unittest.TestCase):
         self.assertIn('1 W2 buy', summary['review_markdown'])
         self.assertIn('rule_id_stats', summary)
         self.assertIn('blocked_but_later_would_win_count', summary['rule_id_stats'][0])
+
+    def test_daily_review_exposes_observations_without_rewriting_trade_facts(self):
+        from scripts.account_ssot import build_daily_ticket_review
+
+        observation = {
+            'recommendation_id': 'REC-20260603-000001',
+            'trade_date': '2026-06-03',
+            'observation_time': '2026-06-03T09:35:00+08:00',
+            'code': '002475',
+            'disposition': 'guarded_experiment',
+            'reference_price': 75.31,
+            'rule_ids_json': ['WIN-W2-001'],
+            'blocking_codes_json': ['candidate_soft:002475:sector_inflow_missing'],
+            'evidence_sha256': 'b' * 64,
+            'executed_trade_id': None,
+            'manual_override_flag': False,
+            'close_1d': None,
+            'close_2d': None,
+            'close_5d': None,
+            'mfe_1d_pct': None,
+            'mae_1d_pct': None,
+            'realized_r': None,
+            'outcome_status': 'source_gap',
+        }
+        db.insert_recommendation_observation(observation)
+
+        summary = build_daily_ticket_review('2026-06-03')
+
+        self.assertEqual(summary['recommendation_observation_count'], 1)
+        self.assertEqual(summary['recommendation_observations'][0]['recommendation_id'], observation['recommendation_id'])
+        self.assertEqual(summary['recommendation_observation_source_gaps'], [
+            'REC-20260603-000001:source_gap',
+        ])
 
 
 class BackfillTradeTicketsTest(unittest.TestCase):
