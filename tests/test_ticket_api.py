@@ -334,6 +334,116 @@ class TicketApiTest(unittest.TestCase):
         self.assertIn("WIN-ICE-W1-001", body["ticket"]["blocking_rule_ids"])
         self.assertIn("W1_EMOTION", body["ticket"]["blocking_rule_ids"])
 
+    def test_prepare_guarded_experiment_ticket_carries_caps_and_requires_confirmation(self):
+        bridge._build_trade_context = lambda: {
+            "rule_state": {
+                "version": "g1a-v1",
+                "tradable": True,
+                "blocks": [],
+                "warnings": [],
+                "windows": {
+                    "w1": {"in_session": False, "buy_allowed": False, "blocks": []},
+                    "w2": {"in_session": True, "buy_allowed": True, "blocks": []},
+                },
+            },
+            "market_snapshot": {"iwencai": {"情绪值": 31}},
+            "account_snapshot": {"account_day_return_pct": 0.5},
+            "context_captured_at": "2026-06-04T14:05:00",
+            "context_status": "trusted",
+            "rule_pack_version": "test-pack",
+            "rule_snapshot_hash": "hash-1",
+            "today_execution_card_id": "EXEC-20260604",
+        }
+        status, body = _call("POST", "/api/trade/tickets/prepare", {
+            "intent_text": "趋势主线极化回踩，准备受控实验票据",
+            "action_type": "buy",
+            "code": "002281",
+            "name": "光迅科技",
+            "window": "W2",
+            "target_role": "trend_core",
+            "recommendation_state": {
+                "schema_version": "recommendation_state.v1",
+                "status": "guarded",
+                "execution_allowed": False,
+                "candidate": {
+                    "code": "002281",
+                    "disposition": "guarded_experiment",
+                    "eligible": True,
+                    "blocking_codes": [],
+                    "missing_evidence": ["sector_inflow"],
+                    "max_position_pct": 5,
+                },
+            },
+            "position_evidence": {
+                "entry_leg": 1,
+                "first_entry_trade_date": "2026-06-04",
+                "trading_days_since_first_entry": 0,
+                "leg1_or_leg2_floating_pnl": 0,
+                "leg2_already_used": False,
+                "volume_ratio": 1.0,
+                "pullback_ma_status": "breakout_confirmed",
+                "sector_inflow_status": "not_large_outflow",
+                "sector_inflow_query_time": "2026-06-04T14:05:00+08:00",
+                "planned_single_stock_cap_pct": 5,
+                "current_single_stock_pct": 0,
+                "acceleration_segment_confirmed": False,
+            },
+        })
+
+        self.assertEqual(status, 200, body)
+        self.assertEqual(body["ticket"]["status"], "guarded_experiment")
+        guarded = body["ticket"]["rule_state"]["guarded_experiment"]
+        self.assertEqual(guarded["ticket_status"], "guarded_experiment")
+        self.assertEqual(guarded["max_position_pct"], 5)
+        self.assertFalse(guarded["same_day_add_allowed"])
+        self.assertTrue(guarded["human_confirmation_required"])
+        self.assertFalse(guarded["hard_gate_override"])
+
+    def test_guarded_experiment_never_overrides_stale_rule_snapshot(self):
+        bridge._build_trade_context = lambda: {
+            "rule_state": {
+                "version": "g1a-v1",
+                "tradable": True,
+                "blocks": [{"code": "RULE_SNAPSHOT_STALE", "scope": "all"}],
+                "warnings": [],
+                "windows": {"w1": {"blocks": []}, "w2": {"blocks": []}},
+            },
+            "market_snapshot": {"iwencai": {"情绪值": 31}},
+            "account_snapshot": {"account_day_return_pct": 0.5},
+            "context_captured_at": "2026-06-04T14:05:00",
+            "context_status": "trusted",
+            "rule_pack_version": "test-pack",
+            "rule_snapshot_hash": "hash-1",
+            "today_execution_card_id": "EXEC-20260604",
+        }
+
+        status, body = _call("POST", "/api/trade/tickets/prepare", {
+            "intent_text": "硬红门已过期，不得转 guarded experiment",
+            "action_type": "buy",
+            "code": "002281",
+            "name": "光迅科技",
+            "window": "W2",
+            "target_role": "trend_core",
+            "recommendation_state": {
+                "schema_version": "recommendation_state.v1",
+                "status": "guarded",
+                "candidate": {
+                    "code": "002281",
+                    "disposition": "guarded_experiment",
+                    "eligible": True,
+                    "blocking_codes": [],
+                    "missing_evidence": ["sector_inflow"],
+                    "max_position_pct": 5,
+                },
+            },
+        })
+
+        self.assertEqual(status, 200, body)
+        self.assertEqual(body["ticket"]["status"], "blocked")
+        self.assertIn("RULE_SNAPSHOT_STALE", body["ticket"]["blocking_rule_ids"])
+        guarded = body["ticket"]["rule_state"]["guarded_experiment"]
+        self.assertFalse(guarded["hard_gate_override"])
+
     def test_manual_review_ticket_is_valid_but_cannot_accept_fills(self):
         ticket_id = db.create_trade_ticket({
             "trade_date": "2026-06-04",

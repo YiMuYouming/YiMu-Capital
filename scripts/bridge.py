@@ -1812,8 +1812,52 @@ def _blocking_codes_for_ticket(rule_state, action_type, window):
     return blocks
 
 
+def _guarded_experiment_request(payload, code):
+    """Extract a candidate-scoped guarded recommendation without granting execution."""
+    recommendation = (payload or {}).get("recommendation_state")
+    if not isinstance(recommendation, dict):
+        return None
+    if recommendation.get("schema_version") != "recommendation_state.v1":
+        return None
+    candidates = recommendation.get("candidates")
+    if not isinstance(candidates, list):
+        candidates = []
+    candidate = recommendation.get("candidate")
+    if not isinstance(candidate, dict):
+        candidate = next(
+            (item for item in candidates if isinstance(item, dict) and str(item.get("code") or "") == str(code)),
+            None,
+        )
+    if not isinstance(candidate, dict):
+        return None
+    if str(candidate.get("code") or code) != str(code):
+        return None
+    if candidate.get("disposition") != "guarded_experiment":
+        return None
+    return recommendation, candidate
+
+
+def _candidate_hard_gaps(recommendation, candidate):
+    values = [
+        *(str(item) for item in (candidate.get("blocking_codes") or [])),
+        *(str(item) for item in (candidate.get("source_gaps") or [])),
+        *(str(item) for item in (recommendation.get("source_gaps") or [])),
+    ]
+    soft_prefixes = ("candidate_soft:", "advisory:", "missing_rule_input:")
+    return list(dict.fromkeys(
+        value for value in values
+        if value and not value.lower().startswith(soft_prefixes)
+    ))
+
+
 def _prepare_trade_ticket(payload):
-    from scripts.db import create_trade_ticket, query_trade_ticket, get_sellable_qty, get_sellable_lots
+    from scripts.db import (
+        create_trade_ticket,
+        query_trade_ticket,
+        query_trade_tickets,
+        get_sellable_qty,
+        get_sellable_lots,
+    )
 
     allowed = {"buy", "sell", "add", "reduce", "do_t", "clear", "observe"}
     exit_actions = {"sell", "reduce", "clear"}
@@ -1843,6 +1887,63 @@ def _prepare_trade_ticket(payload):
     window = str((payload or {}).get("window") or "").strip()
     blocking_rule_ids = _blocking_codes_for_ticket(rule_state, action_type, window)
     missing_data = []
+    guarded_request = _guarded_experiment_request(payload, code)
+    guarded_policy = None
+    guarded_request_blocks = []
+    if guarded_request:
+        recommendation_state, guarded_candidate = guarded_request
+        guarded_max = guarded_candidate.get("max_position_pct", 5)
+        try:
+            guarded_max = float(guarded_max)
+        except (TypeError, ValueError):
+            guarded_max = None
+        if guarded_max is None or not 2 <= guarded_max <= 5:
+            guarded_request_blocks.append("GUARDED_CAP_INVALID")
+        if action_type != "buy":
+            guarded_request_blocks.append("GUARDED_FIRST_ENTRY_ONLY")
+        if recommendation_state.get("hard_gate_override") is True or guarded_candidate.get("hard_gate_override") is True:
+            guarded_request_blocks.append("GUARDED_OVERRIDE_FORBIDDEN")
+        candidate_hard_gaps = _candidate_hard_gaps(recommendation_state, guarded_candidate)
+        guarded_request_blocks.extend(candidate_hard_gaps)
+        existing_guarded = query_trade_tickets(
+            date_from=trade_date,
+            date_to=trade_date,
+            status="guarded_experiment",
+            limit=1000,
+        )
+        existing_codes = {str(item.get("code") or "") for item in existing_guarded}
+        if str(code) in existing_codes:
+            guarded_request_blocks.append("GUARDED_SAME_DAY_SECOND_LEG")
+        elif len(existing_codes) >= 1:
+            guarded_request_blocks.append("GUARDED_DAILY_NAME_CAP")
+        current_total = (
+            guarded_candidate.get("current_total_position_pct")
+            if guarded_candidate.get("current_total_position_pct") is not None
+            else (payload or {}).get("current_total_position_pct")
+        )
+        try:
+            if current_total is not None and float(current_total) + float(guarded_max or 0) > 10:
+                guarded_request_blocks.append("GUARDED_TOTAL_CAP")
+        except (TypeError, ValueError):
+            guarded_request_blocks.append("GUARDED_TOTAL_CAP_INVALID")
+        guarded_policy = {
+            "ticket_status": "guarded_experiment",
+            "max_position_pct": (
+                int(guarded_max) if guarded_max is not None and float(guarded_max).is_integer()
+                else guarded_max
+            ),
+            "guarded_total_cap_pct": 10,
+            "new_guarded_names_today": len(existing_codes) + (0 if str(code) in existing_codes else 1),
+            "max_new_guarded_names_per_day": 1,
+            "same_day_add_allowed": False,
+            "human_confirmation_required": True,
+            "hard_gate_override": False,
+            "candidate_gap_scope": "candidate",
+            "candidate_gap_severity": "soft" if not candidate_hard_gaps else "hard",
+            "blocking_codes": list(guarded_request_blocks),
+        }
+        if guarded_request_blocks:
+            blocking_rule_ids.extend(guarded_request_blocks)
     target_role = str((payload or {}).get("role") or (payload or {}).get("target_role") or "").strip()
     position_evidence = (payload or {}).get("position_evidence")
     if not isinstance(position_evidence, dict):
@@ -1876,6 +1977,9 @@ def _prepare_trade_ticket(payload):
         "entry_leg": position_evidence.get("entry_leg"),
         "position_evidence": position_evidence,
     }
+    if guarded_policy is not None:
+        ticket_rule_state["guarded_experiment"] = guarded_policy
+        ticket_rule_state["recommendation_state"] = guarded_request[0]
     action_gate = evaluate_decision_gate(
         action_type,
         window,
@@ -1953,6 +2057,11 @@ def _prepare_trade_ticket(payload):
                 })
     if action_type in ("buy", "add", "do_t") and account_state.get("lot_reconciliation_ok") is False:
         blocking_rule_ids.append("lot_reconciliation")
+    if action_type in ("buy", "add", "do_t"):
+        if account_state.get("anchor_missing") or account_state.get("anchor_blocked") or account_state.get("anchor_trusted") is False:
+            blocking_rule_ids.append("account_anchor")
+        if str(account_state.get("quote_status") or "").lower() in {"stale", "dead", "missing"}:
+            blocking_rule_ids.append("quote_freshness")
 
     context_degraded = False
     if ctx.get("context_status") != "trusted":
@@ -1998,6 +2107,12 @@ def _prepare_trade_ticket(payload):
         and win_state.get("manual_review_allowed") is True
         and not has_non_overridable_blocks
     )
+    guarded_candidate_ready = (
+        guarded_policy is not None
+        and action_type == "buy"
+        and not hard_blocks
+        and guarded_policy.get("candidate_gap_severity") == "soft"
+    )
     if ticket_purpose == "post_trade_reconciliation":
         status = "reconciliation_ready"
     else:
@@ -2005,7 +2120,10 @@ def _prepare_trade_ticket(payload):
             "blocked" if hard_blocks and not (override_to_audit or manual_review_candidate)
             else (
                 "audit_degraded" if audit_degraded or context_degraded or override_to_audit
-                else ("manual_review" if manual_review_candidate else ("draft" if action_type == "observe" else "executable"))
+                else (
+                    "guarded_experiment" if guarded_candidate_ready
+                    else ("manual_review" if manual_review_candidate else ("draft" if action_type == "observe" else "executable"))
+                )
             )
         )
 
@@ -2752,7 +2870,7 @@ def _ai_ticket_summary(date_str, limit=30):
         count_rows = []
         query_status = "error"
         error = str(e)[:160]
-    pending_statuses = {"draft", "confirmed", "manual_review"}
+    pending_statuses = {"draft", "confirmed", "manual_review", "guarded_experiment"}
     executable_statuses = {"executable", "audit_degraded", "partially_filled"}
     reconciliation_statuses = {"reconciliation_ready"}
     completed_statuses = {"filled", "closed", "closed_with_conflict", "cancelled"}
@@ -2942,7 +3060,7 @@ def _ai_context_risks_alerts_human(health, rule_state, freshness, tickets, confl
     actionable = [
         item for item in (tickets or {}).get("items") or []
         if str(item.get("status") or "") in {
-            "draft", "confirmed", "manual_review", "executable", "audit_degraded", "partially_filled",
+            "draft", "confirmed", "manual_review", "guarded_experiment", "executable", "audit_degraded", "partially_filled",
             "reconciliation_ready"
         }
     ]

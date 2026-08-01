@@ -378,6 +378,7 @@ TICKET_STATUSES = {
     "closed_with_conflict",
     "audit_degraded",
     "manual_review",
+    "guarded_experiment",
     "reconciliation_ready",
 }
 
