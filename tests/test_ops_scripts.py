@@ -510,6 +510,23 @@ class OpenDayDryRunTests(unittest.TestCase):
         self.assertIn(f"{stage}/rules", command[2])
         self.assertIn(f"{stage}/dashboard", command[2])
 
+    def test_rsync_relative_sources_keep_repo_root_anchor(self):
+        from scripts.ops import open_day
+
+        stage = "/home/agentuser/YiMu-Capital/.open-day-staging-test"
+        commands = open_day._rsync_stage_commands(stage)
+        rule_sources = commands[0][4:-1]
+        baseline_sources = commands[1][4:-1]
+
+        self.assertIn(
+            f"{open_day.AI_RULE_ROOT}/./compiled/rules.v1.json",
+            rule_sources,
+        )
+        self.assertIn(
+            f"{open_day.PROJECT_ROOT}/./data/dashboard_data.json",
+            baseline_sources,
+        )
+
     def test_dry_run_does_not_call_gen_or_rsync(self):
         """open_day.py --dry-run 不应调用 gen_dashboard_data 或 rsync"""
         from scripts.ops import open_day

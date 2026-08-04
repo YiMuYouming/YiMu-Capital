@@ -108,8 +108,10 @@ def _stage_name():
 
 
 def _rsync_stage_commands(stage_root):
-    rule_sources = [str(AI_RULE_ROOT / "./" / relative) for relative, _ in RULE_ARTIFACTS]
-    baseline_sources = [str(PROJECT_ROOT / "./" / relative) for relative, _ in BASELINE_ARTIFACTS]
+    # Keep the literal /./ anchor: pathlib normalizes it away, while rsync
+    # uses it to strip the absolute prefix under --relative.
+    rule_sources = [f"{AI_RULE_ROOT}/./{relative}" for relative, _ in RULE_ARTIFACTS]
+    baseline_sources = [f"{PROJECT_ROOT}/./{relative}" for relative, _ in BASELINE_ARTIFACTS]
     return [
         ["rsync", "-avz", "--backup", "--relative", *rule_sources,
          f"{REMOTE}:{stage_root}/rules/"],
