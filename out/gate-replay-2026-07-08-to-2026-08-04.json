@@ -1,0 +1,4438 @@
+{
+  "date_from": "2026-07-08",
+  "date_to": "2026-08-04",
+  "days": [
+    {
+      "candidate_decisions": [],
+      "date": "2026-07-08",
+      "global_hard": [],
+      "guarded_count": 0,
+      "paper_only_count": 0,
+      "recommendation_count": 0,
+      "recommendation_state": {
+        "candidates": [],
+        "schema_version": "recommendation_state.v1",
+        "trading_date": "2026-07-08"
+      },
+      "side_blocks": {
+        "lianban": [],
+        "trend": []
+      },
+      "standard_count": 0,
+      "unverifiable": [
+        "finalization_report_missing",
+        "c15_scan_receipt_missing",
+        "d2_decision_receipt_missing",
+        "recommendation_snapshot_missing"
+      ],
+      "workflow_gaps": []
+    },
+    {
+      "candidate_decisions": [],
+      "date": "2026-07-09",
+      "global_hard": [],
+      "guarded_count": 0,
+      "paper_only_count": 0,
+      "recommendation_count": 0,
+      "recommendation_state": {
+        "candidates": [],
+        "schema_version": "recommendation_state.v1",
+        "trading_date": "2026-07-09"
+      },
+      "side_blocks": {
+        "lianban": [],
+        "trend": []
+      },
+      "standard_count": 0,
+      "unverifiable": [
+        "finalization_report_missing",
+        "c15_scan_receipt_missing",
+        "d2_decision_receipt_missing",
+        "recommendation_snapshot_missing"
+      ],
+      "workflow_gaps": []
+    },
+    {
+      "candidate_decisions": [],
+      "date": "2026-07-10",
+      "global_hard": [],
+      "guarded_count": 0,
+      "paper_only_count": 0,
+      "recommendation_count": 0,
+      "recommendation_state": {
+        "candidates": [],
+        "schema_version": "recommendation_state.v1",
+        "trading_date": "2026-07-10"
+      },
+      "side_blocks": {
+        "lianban": [],
+        "trend": []
+      },
+      "standard_count": 0,
+      "unverifiable": [
+        "finalization_report_missing",
+        "c15_scan_receipt_missing",
+        "d2_decision_receipt_missing",
+        "recommendation_snapshot_missing"
+      ],
+      "workflow_gaps": []
+    },
+    {
+      "candidate_decisions": [],
+      "date": "2026-07-13",
+      "global_hard": [],
+      "guarded_count": 0,
+      "paper_only_count": 0,
+      "recommendation_count": 0,
+      "recommendation_state": {
+        "candidates": [],
+        "schema_version": "recommendation_state.v1",
+        "trading_date": "2026-07-13"
+      },
+      "side_blocks": {
+        "lianban": [],
+        "trend": []
+      },
+      "standard_count": 0,
+      "unverifiable": [
+        "recommendation_snapshot_missing",
+        "c15:coverage_below_minimum",
+        "c15:empty_result",
+        "c15:midcap_sector_context_missing",
+        "c15:named_entity_missing",
+        "c15:pipeline_semantic_degraded",
+        "c15:row_shape_mismatch"
+      ],
+      "workflow_gaps": [
+        "closure:snapshot_query_not_passing",
+        "closure:snapshot_query_pipeline_quality_invalid",
+        "closure:snapshot_query_entity_mismatch",
+        "closure:snapshot_query_non_equivalent",
+        "closure:snapshot_query_named_entity_missing",
+        "closure:snapshot_query_coverage_invalid",
+        "closure:snapshot_blocked_degraded"
+      ]
+    },
+    {
+      "candidate_decisions": [],
+      "date": "2026-07-14",
+      "global_hard": [],
+      "guarded_count": 0,
+      "paper_only_count": 0,
+      "recommendation_count": 0,
+      "recommendation_state": {
+        "candidates": [],
+        "schema_version": "recommendation_state.v1",
+        "trading_date": "2026-07-14"
+      },
+      "side_blocks": {
+        "lianban": [],
+        "trend": []
+      },
+      "standard_count": 0,
+      "unverifiable": [
+        "recommendation_snapshot_missing",
+        "c15:coverage_below_minimum",
+        "c15:duplicate_payload",
+        "c15:midcap_sector_context_missing",
+        "c15:named_entity_missing",
+        "c15:pipeline_confidence_error",
+        "c15:pipeline_error",
+        "c15:pipeline_semantic_degraded",
+        "c15:row_shape_mismatch"
+      ],
+      "workflow_gaps": [
+        "closure:snapshot_query_not_passing",
+        "closure:snapshot_query_pipeline_quality_invalid",
+        "closure:snapshot_query_entity_mismatch",
+        "closure:snapshot_query_non_equivalent",
+        "closure:snapshot_query_coverage_invalid",
+        "closure:snapshot_query_named_entity_missing",
+        "closure:snapshot_query_duplicate_payload",
+        "closure:snapshot_blocked_degraded"
+      ]
+    },
+    {
+      "candidate_decisions": [],
+      "date": "2026-07-15",
+      "global_hard": [],
+      "guarded_count": 0,
+      "paper_only_count": 0,
+      "recommendation_count": 0,
+      "recommendation_state": {
+        "candidates": [],
+        "schema_version": "recommendation_state.v1",
+        "trading_date": "2026-07-15"
+      },
+      "side_blocks": {
+        "lianban": [],
+        "trend": []
+      },
+      "standard_count": 0,
+      "unverifiable": [
+        "recommendation_snapshot_missing",
+        "c15:coverage_below_minimum",
+        "c15:duplicate_payload",
+        "c15:empty_result",
+        "c15:midcap_sector_context_missing",
+        "c15:row_shape_mismatch"
+      ],
+      "workflow_gaps": [
+        "closure:snapshot_query_not_passing",
+        "closure:snapshot_query_coverage_invalid",
+        "closure:snapshot_query_pipeline_quality_invalid",
+        "closure:snapshot_query_entity_mismatch",
+        "closure:snapshot_query_non_equivalent",
+        "closure:snapshot_query_duplicate_payload",
+        "closure:snapshot_blocked_degraded"
+      ]
+    },
+    {
+      "candidate_decisions": [],
+      "date": "2026-07-16",
+      "global_hard": [],
+      "guarded_count": 0,
+      "paper_only_count": 0,
+      "recommendation_count": 0,
+      "recommendation_state": {
+        "candidates": [],
+        "schema_version": "recommendation_state.v1",
+        "trading_date": "2026-07-16"
+      },
+      "side_blocks": {
+        "lianban": [],
+        "trend": []
+      },
+      "standard_count": 0,
+      "unverifiable": [
+        "recommendation_snapshot_missing",
+        "c15:coverage_below_minimum",
+        "c15:duplicate_payload",
+        "c15:empty_result",
+        "c15:midcap_sector_context_missing",
+        "c15:row_shape_mismatch"
+      ],
+      "workflow_gaps": [
+        "closure:snapshot_query_not_passing",
+        "closure:snapshot_query_pipeline_quality_invalid",
+        "closure:snapshot_query_entity_mismatch",
+        "closure:snapshot_query_coverage_invalid",
+        "closure:snapshot_query_non_equivalent",
+        "closure:snapshot_query_duplicate_payload",
+        "closure:snapshot_blocked_degraded"
+      ]
+    },
+    {
+      "candidate_decisions": [],
+      "date": "2026-07-17",
+      "global_hard": [],
+      "guarded_count": 0,
+      "paper_only_count": 0,
+      "recommendation_count": 0,
+      "recommendation_state": {
+        "candidates": [],
+        "schema_version": "recommendation_state.v1",
+        "trading_date": "2026-07-17"
+      },
+      "side_blocks": {
+        "lianban": [],
+        "trend": []
+      },
+      "standard_count": 0,
+      "unverifiable": [
+        "recommendation_snapshot_missing",
+        "c15:coverage_below_minimum",
+        "c15:duplicate_payload",
+        "c15:empty_result",
+        "c15:named_entity_missing",
+        "c15:row_shape_mismatch"
+      ],
+      "workflow_gaps": [
+        "closure:snapshot_query_not_passing",
+        "closure:snapshot_query_named_entity_missing",
+        "closure:snapshot_query_pipeline_quality_invalid",
+        "closure:snapshot_query_entity_mismatch",
+        "closure:snapshot_query_coverage_invalid",
+        "closure:snapshot_query_non_equivalent",
+        "closure:snapshot_query_duplicate_payload",
+        "closure:snapshot_blocked_degraded"
+      ]
+    },
+    {
+      "candidate_decisions": [],
+      "date": "2026-07-20",
+      "global_hard": [],
+      "guarded_count": 0,
+      "paper_only_count": 0,
+      "recommendation_count": 0,
+      "recommendation_state": {
+        "candidates": [],
+        "schema_version": "recommendation_state.v1",
+        "trading_date": "2026-07-20"
+      },
+      "side_blocks": {
+        "lianban": [],
+        "trend": []
+      },
+      "standard_count": 0,
+      "unverifiable": [
+        "recommendation_snapshot_missing",
+        "c15:coverage_below_minimum",
+        "c15:duplicate_payload",
+        "c15:empty_result",
+        "c15:row_shape_mismatch"
+      ],
+      "workflow_gaps": [
+        "closure:snapshot_query_not_passing",
+        "closure:snapshot_query_pipeline_quality_invalid",
+        "closure:snapshot_query_entity_mismatch",
+        "closure:snapshot_query_coverage_invalid",
+        "closure:snapshot_query_non_equivalent",
+        "closure:snapshot_query_duplicate_payload",
+        "closure:snapshot_blocked_degraded"
+      ]
+    },
+    {
+      "candidate_decisions": [],
+      "date": "2026-07-21",
+      "global_hard": [],
+      "guarded_count": 0,
+      "paper_only_count": 0,
+      "recommendation_count": 0,
+      "recommendation_state": {
+        "candidates": [],
+        "schema_version": "recommendation_state.v1",
+        "trading_date": "2026-07-21"
+      },
+      "side_blocks": {
+        "lianban": [],
+        "trend": []
+      },
+      "standard_count": 0,
+      "unverifiable": [
+        "recommendation_snapshot_missing",
+        "c15:coverage_below_minimum",
+        "c15:duplicate_payload",
+        "c15:empty_result",
+        "c15:named_entity_missing",
+        "c15:row_shape_mismatch"
+      ],
+      "workflow_gaps": [
+        "closure:snapshot_query_not_passing",
+        "closure:snapshot_query_named_entity_missing",
+        "closure:snapshot_query_pipeline_quality_invalid",
+        "closure:snapshot_query_entity_mismatch",
+        "closure:snapshot_query_coverage_invalid",
+        "closure:snapshot_query_non_equivalent",
+        "closure:snapshot_query_duplicate_payload",
+        "closure:snapshot_blocked_degraded"
+      ]
+    },
+    {
+      "candidate_decisions": [],
+      "date": "2026-07-22",
+      "global_hard": [],
+      "guarded_count": 0,
+      "paper_only_count": 0,
+      "recommendation_count": 0,
+      "recommendation_state": {
+        "candidates": [],
+        "schema_version": "recommendation_state.v1",
+        "trading_date": "2026-07-22"
+      },
+      "side_blocks": {
+        "lianban": [],
+        "trend": []
+      },
+      "standard_count": 0,
+      "unverifiable": [
+        "recommendation_snapshot_missing",
+        "c15:coverage_below_minimum",
+        "c15:duplicate_payload",
+        "c15:empty_result",
+        "c15:named_entity_missing",
+        "c15:row_shape_mismatch"
+      ],
+      "workflow_gaps": [
+        "closure:snapshot_query_not_passing",
+        "closure:snapshot_query_named_entity_missing",
+        "closure:snapshot_query_coverage_invalid",
+        "closure:snapshot_query_pipeline_quality_invalid",
+        "closure:snapshot_query_entity_mismatch",
+        "closure:snapshot_query_non_equivalent",
+        "closure:snapshot_query_duplicate_payload",
+        "closure:snapshot_blocked_degraded"
+      ]
+    },
+    {
+      "candidate_decisions": [],
+      "date": "2026-07-23",
+      "global_hard": [],
+      "guarded_count": 0,
+      "paper_only_count": 0,
+      "recommendation_count": 0,
+      "recommendation_state": {
+        "candidates": [],
+        "schema_version": "recommendation_state.v1",
+        "trading_date": "2026-07-23"
+      },
+      "side_blocks": {
+        "lianban": [],
+        "trend": []
+      },
+      "standard_count": 0,
+      "unverifiable": [
+        "recommendation_snapshot_missing",
+        "c15:coverage_below_minimum",
+        "c15:duplicate_payload",
+        "c15:empty_result",
+        "c15:named_entity_missing",
+        "c15:row_shape_mismatch"
+      ],
+      "workflow_gaps": [
+        "closure:snapshot_query_not_passing",
+        "closure:snapshot_query_named_entity_missing",
+        "closure:snapshot_query_coverage_invalid",
+        "closure:snapshot_query_pipeline_quality_invalid",
+        "closure:snapshot_query_entity_mismatch",
+        "closure:snapshot_query_non_equivalent",
+        "closure:snapshot_query_duplicate_payload",
+        "closure:snapshot_blocked_degraded"
+      ]
+    },
+    {
+      "candidate_decisions": [],
+      "date": "2026-07-24",
+      "global_hard": [],
+      "guarded_count": 0,
+      "paper_only_count": 0,
+      "recommendation_count": 0,
+      "recommendation_state": {
+        "candidates": [],
+        "schema_version": "recommendation_state.v1",
+        "trading_date": "2026-07-24"
+      },
+      "side_blocks": {
+        "lianban": [],
+        "trend": []
+      },
+      "standard_count": 0,
+      "unverifiable": [
+        "finalization_report_missing",
+        "c15_scan_receipt_missing",
+        "d2_decision_receipt_missing",
+        "recommendation_snapshot_missing"
+      ],
+      "workflow_gaps": []
+    },
+    {
+      "candidate_decisions": [],
+      "date": "2026-07-27",
+      "global_hard": [],
+      "guarded_count": 0,
+      "paper_only_count": 0,
+      "recommendation_count": 0,
+      "recommendation_state": {
+        "candidates": [],
+        "schema_version": "recommendation_state.v1",
+        "trading_date": "2026-07-27"
+      },
+      "side_blocks": {
+        "lianban": [],
+        "trend": []
+      },
+      "standard_count": 0,
+      "unverifiable": [
+        "recommendation_snapshot_missing",
+        "c15:coverage_below_minimum",
+        "c15:duplicate_payload",
+        "c15:empty_result",
+        "c15:named_entity_missing",
+        "c15:pipeline_semantic_degraded",
+        "c15:row_shape_mismatch"
+      ],
+      "workflow_gaps": [
+        "closure:snapshot_query_not_passing",
+        "closure:snapshot_query_pipeline_quality_invalid",
+        "closure:snapshot_query_entity_mismatch",
+        "closure:snapshot_query_non_equivalent",
+        "closure:snapshot_query_named_entity_missing",
+        "closure:snapshot_query_coverage_invalid",
+        "closure:snapshot_query_duplicate_payload",
+        "closure:snapshot_blocked_degraded"
+      ]
+    },
+    {
+      "candidate_decisions": [],
+      "date": "2026-07-28",
+      "global_hard": [],
+      "guarded_count": 0,
+      "paper_only_count": 0,
+      "recommendation_count": 0,
+      "recommendation_state": {
+        "candidates": [],
+        "schema_version": "recommendation_state.v1",
+        "trading_date": "2026-07-28"
+      },
+      "side_blocks": {
+        "lianban": [],
+        "trend": []
+      },
+      "standard_count": 0,
+      "unverifiable": [
+        "recommendation_snapshot_missing",
+        "c15:coverage_below_minimum",
+        "c15:duplicate_payload",
+        "c15:empty_result",
+        "c15:midcap_sector_context_missing",
+        "c15:named_entity_missing",
+        "c15:pipeline_confidence_error",
+        "c15:pipeline_error",
+        "c15:pipeline_semantic_degraded",
+        "c15:row_shape_mismatch"
+      ],
+      "workflow_gaps": [
+        "closure:snapshot_query_not_passing",
+        "closure:snapshot_query_pipeline_quality_invalid",
+        "closure:snapshot_query_entity_mismatch",
+        "closure:snapshot_query_non_equivalent",
+        "closure:snapshot_query_coverage_invalid",
+        "closure:snapshot_query_named_entity_missing",
+        "closure:snapshot_query_duplicate_payload",
+        "closure:snapshot_blocked_degraded"
+      ]
+    },
+    {
+      "candidate_decisions": [],
+      "date": "2026-07-29",
+      "global_hard": [],
+      "guarded_count": 0,
+      "paper_only_count": 0,
+      "recommendation_count": 0,
+      "recommendation_state": {
+        "candidates": [],
+        "schema_version": "recommendation_state.v1",
+        "trading_date": "2026-07-29"
+      },
+      "side_blocks": {
+        "lianban": [],
+        "trend": []
+      },
+      "standard_count": 0,
+      "unverifiable": [
+        "recommendation_snapshot_missing",
+        "c15:coverage_below_minimum",
+        "c15:duplicate_payload",
+        "c15:midcap_sector_context_missing",
+        "c15:named_entity_missing",
+        "c15:pipeline_confidence_error",
+        "c15:pipeline_error",
+        "c15:pipeline_semantic_degraded",
+        "c15:row_shape_mismatch"
+      ],
+      "workflow_gaps": [
+        "closure:snapshot_query_not_passing",
+        "closure:snapshot_query_pipeline_quality_invalid",
+        "closure:snapshot_query_entity_mismatch",
+        "closure:snapshot_query_coverage_invalid",
+        "closure:snapshot_query_non_equivalent",
+        "closure:snapshot_query_duplicate_payload",
+        "closure:snapshot_query_named_entity_missing",
+        "closure:snapshot_blocked_degraded"
+      ]
+    },
+    {
+      "candidate_decisions": [],
+      "date": "2026-07-30",
+      "global_hard": [],
+      "guarded_count": 0,
+      "paper_only_count": 0,
+      "recommendation_count": 0,
+      "recommendation_state": {
+        "candidates": [],
+        "schema_version": "recommendation_state.v1",
+        "trading_date": "2026-07-30"
+      },
+      "side_blocks": {
+        "lianban": [],
+        "trend": []
+      },
+      "standard_count": 0,
+      "unverifiable": [
+        "recommendation_snapshot_missing",
+        "c15:coverage_below_minimum",
+        "c15:midcap_sector_context_missing",
+        "c15:named_entity_missing",
+        "c15:pipeline_error",
+        "c15:pipeline_semantic_degraded",
+        "c15:row_shape_mismatch"
+      ],
+      "workflow_gaps": [
+        "closure:snapshot_query_not_passing",
+        "closure:snapshot_query_pipeline_quality_invalid",
+        "closure:snapshot_query_entity_mismatch",
+        "closure:snapshot_query_non_equivalent",
+        "closure:snapshot_query_named_entity_missing",
+        "closure:snapshot_query_coverage_invalid",
+        "closure:snapshot_blocked_degraded"
+      ]
+    },
+    {
+      "candidate_decisions": [
+        {
+          "allowed": false,
+          "blocking_codes": [
+            "PAPER_ONLY_DISPOSITION"
+          ],
+          "candidate_id": "CAN-20260731-000938",
+          "code": "000938",
+          "date": "2026-07-31",
+          "disposition": "paper_only",
+          "evidence_source": "recommendation_snapshot.v1.json",
+          "missing_evidence": [],
+          "scope": "candidate",
+          "side": null,
+          "source_decision": "observe"
+        },
+        {
+          "allowed": false,
+          "blocking_codes": [
+            "PAPER_ONLY_DISPOSITION"
+          ],
+          "candidate_id": "CAN-20260731-002156",
+          "code": "002156",
+          "date": "2026-07-31",
+          "disposition": "paper_only",
+          "evidence_source": "recommendation_snapshot.v1.json",
+          "missing_evidence": [],
+          "scope": "candidate",
+          "side": null,
+          "source_decision": "observe"
+        },
+        {
+          "allowed": false,
+          "blocking_codes": [
+            "PAPER_ONLY_DISPOSITION"
+          ],
+          "candidate_id": "CAN-20260731-002185",
+          "code": "002185",
+          "date": "2026-07-31",
+          "disposition": "paper_only",
+          "evidence_source": "recommendation_snapshot.v1.json",
+          "missing_evidence": [],
+          "scope": "candidate",
+          "side": null,
+          "source_decision": "observe"
+        },
+        {
+          "allowed": false,
+          "blocking_codes": [
+            "PAPER_ONLY_DISPOSITION"
+          ],
+          "candidate_id": "CAN-20260731-300308",
+          "code": "300308",
+          "date": "2026-07-31",
+          "disposition": "paper_only",
+          "evidence_source": "recommendation_snapshot.v1.json",
+          "missing_evidence": [],
+          "scope": "candidate",
+          "side": null,
+          "source_decision": "observe"
+        },
+        {
+          "allowed": false,
+          "blocking_codes": [
+            "PAPER_ONLY_DISPOSITION"
+          ],
+          "candidate_id": "CAN-20260731-300502",
+          "code": "300502",
+          "date": "2026-07-31",
+          "disposition": "paper_only",
+          "evidence_source": "recommendation_snapshot.v1.json",
+          "missing_evidence": [],
+          "scope": "candidate",
+          "side": null,
+          "source_decision": "observe"
+        },
+        {
+          "allowed": false,
+          "blocking_codes": [
+            "PAPER_ONLY_DISPOSITION"
+          ],
+          "candidate_id": "CAN-20260731-600584",
+          "code": "600584",
+          "date": "2026-07-31",
+          "disposition": "paper_only",
+          "evidence_source": "recommendation_snapshot.v1.json",
+          "missing_evidence": [],
+          "scope": "candidate",
+          "side": null,
+          "source_decision": "observe"
+        },
+        {
+          "allowed": false,
+          "blocking_codes": [
+            "PAPER_ONLY_DISPOSITION"
+          ],
+          "candidate_id": "CAN-20260731-600588",
+          "code": "600588",
+          "date": "2026-07-31",
+          "disposition": "paper_only",
+          "evidence_source": "recommendation_snapshot.v1.json",
+          "missing_evidence": [],
+          "scope": "candidate",
+          "side": null,
+          "source_decision": "observe"
+        },
+        {
+          "allowed": false,
+          "blocking_codes": [
+            "PAPER_ONLY_DISPOSITION"
+          ],
+          "candidate_id": "CAN-20260731-603221",
+          "code": "603221",
+          "date": "2026-07-31",
+          "disposition": "paper_only",
+          "evidence_source": "recommendation_snapshot.v1.json",
+          "missing_evidence": [],
+          "scope": "candidate",
+          "side": null,
+          "source_decision": "observe"
+        },
+        {
+          "allowed": false,
+          "blocking_codes": [
+            "PAPER_ONLY_DISPOSITION"
+          ],
+          "candidate_id": "CAN-20260731-605179",
+          "code": "605179",
+          "date": "2026-07-31",
+          "disposition": "paper_only",
+          "evidence_source": "recommendation_snapshot.v1.json",
+          "missing_evidence": [],
+          "scope": "candidate",
+          "side": null,
+          "source_decision": "observe"
+        },
+        {
+          "allowed": false,
+          "blocking_codes": [
+            "PAPER_ONLY_DISPOSITION"
+          ],
+          "candidate_id": "CAN-20260731-688111",
+          "code": "688111",
+          "date": "2026-07-31",
+          "disposition": "paper_only",
+          "evidence_source": "recommendation_snapshot.v1.json",
+          "missing_evidence": [],
+          "scope": "candidate",
+          "side": null,
+          "source_decision": "observe"
+        },
+        {
+          "allowed": false,
+          "blocking_codes": [
+            "PAPER_ONLY_DISPOSITION"
+          ],
+          "candidate_id": "CAN-20260731-688825",
+          "code": "688825",
+          "date": "2026-07-31",
+          "disposition": "paper_only",
+          "evidence_source": "recommendation_snapshot.v1.json",
+          "missing_evidence": [],
+          "scope": "candidate",
+          "side": null,
+          "source_decision": "observe"
+        }
+      ],
+      "date": "2026-07-31",
+      "global_hard": [],
+      "guarded_count": 0,
+      "paper_only_count": 11,
+      "recommendation_count": 11,
+      "recommendation_state": {
+        "candidates": [
+          {
+            "blocking_codes": [],
+            "candidate_id": "CAN-20260731-000938",
+            "code": "000938",
+            "decision": "observe",
+            "disposition": "paper_only",
+            "evidence_sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+            "invalidation": "",
+            "max_position_pct": 0,
+            "missing_evidence": [],
+            "name": "紫光股份",
+            "rank": 1,
+            "rule_ids": [],
+            "score": 0.0,
+            "score_components": {
+              "board_strength_0_25": 0.0,
+              "evidence_freshness_0_15": 0.0,
+              "reward_risk_0_15": 0.0,
+              "stock_structure_0_25": 0.0,
+              "trigger_quality_0_20": 0.0
+            },
+            "sell_action": {
+              "action": "hold",
+              "buy_side_gaps_do_not_block": true,
+              "buy_side_source_gaps": [],
+              "requested_action": "hold",
+              "sellable_qty_status": "unknown"
+            },
+            "setup": "",
+            "side": "",
+            "trigger": ""
+          },
+          {
+            "blocking_codes": [],
+            "candidate_id": "CAN-20260731-002156",
+            "code": "002156",
+            "decision": "observe",
+            "disposition": "paper_only",
+            "evidence_sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+            "invalidation": "",
+            "max_position_pct": 0,
+            "missing_evidence": [],
+            "name": "通富微电",
+            "rank": 2,
+            "rule_ids": [],
+            "score": 0.0,
+            "score_components": {
+              "board_strength_0_25": 0.0,
+              "evidence_freshness_0_15": 0.0,
+              "reward_risk_0_15": 0.0,
+              "stock_structure_0_25": 0.0,
+              "trigger_quality_0_20": 0.0
+            },
+            "sell_action": {
+              "action": "hold",
+              "buy_side_gaps_do_not_block": true,
+              "buy_side_source_gaps": [],
+              "requested_action": "hold",
+              "sellable_qty_status": "unknown"
+            },
+            "setup": "",
+            "side": "",
+            "trigger": ""
+          },
+          {
+            "blocking_codes": [],
+            "candidate_id": "CAN-20260731-002185",
+            "code": "002185",
+            "decision": "observe",
+            "disposition": "paper_only",
+            "evidence_sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+            "invalidation": "",
+            "max_position_pct": 0,
+            "missing_evidence": [],
+            "name": "华天科技",
+            "rank": 3,
+            "rule_ids": [],
+            "score": 0.0,
+            "score_components": {
+              "board_strength_0_25": 0.0,
+              "evidence_freshness_0_15": 0.0,
+              "reward_risk_0_15": 0.0,
+              "stock_structure_0_25": 0.0,
+              "trigger_quality_0_20": 0.0
+            },
+            "sell_action": {
+              "action": "hold",
+              "buy_side_gaps_do_not_block": true,
+              "buy_side_source_gaps": [],
+              "requested_action": "hold",
+              "sellable_qty_status": "unknown"
+            },
+            "setup": "",
+            "side": "",
+            "trigger": ""
+          },
+          {
+            "blocking_codes": [],
+            "candidate_id": "CAN-20260731-300308",
+            "code": "300308",
+            "decision": "observe",
+            "disposition": "paper_only",
+            "evidence_sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+            "invalidation": "",
+            "max_position_pct": 0,
+            "missing_evidence": [],
+            "name": "中际旭创",
+            "rank": 4,
+            "rule_ids": [],
+            "score": 0.0,
+            "score_components": {
+              "board_strength_0_25": 0.0,
+              "evidence_freshness_0_15": 0.0,
+              "reward_risk_0_15": 0.0,
+              "stock_structure_0_25": 0.0,
+              "trigger_quality_0_20": 0.0
+            },
+            "sell_action": {
+              "action": "hold",
+              "buy_side_gaps_do_not_block": true,
+              "buy_side_source_gaps": [],
+              "requested_action": "hold",
+              "sellable_qty_status": "unknown"
+            },
+            "setup": "",
+            "side": "",
+            "trigger": ""
+          },
+          {
+            "blocking_codes": [],
+            "candidate_id": "CAN-20260731-300502",
+            "code": "300502",
+            "decision": "observe",
+            "disposition": "paper_only",
+            "evidence_sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+            "invalidation": "",
+            "max_position_pct": 0,
+            "missing_evidence": [],
+            "name": "新易盛",
+            "rank": 5,
+            "rule_ids": [],
+            "score": 0.0,
+            "score_components": {
+              "board_strength_0_25": 0.0,
+              "evidence_freshness_0_15": 0.0,
+              "reward_risk_0_15": 0.0,
+              "stock_structure_0_25": 0.0,
+              "trigger_quality_0_20": 0.0
+            },
+            "sell_action": {
+              "action": "hold",
+              "buy_side_gaps_do_not_block": true,
+              "buy_side_source_gaps": [],
+              "requested_action": "hold",
+              "sellable_qty_status": "unknown"
+            },
+            "setup": "",
+            "side": "",
+            "trigger": ""
+          },
+          {
+            "blocking_codes": [],
+            "candidate_id": "CAN-20260731-600584",
+            "code": "600584",
+            "decision": "observe",
+            "disposition": "paper_only",
+            "evidence_sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+            "invalidation": "",
+            "max_position_pct": 0,
+            "missing_evidence": [],
+            "name": "长电科技",
+            "rank": 6,
+            "rule_ids": [],
+            "score": 0.0,
+            "score_components": {
+              "board_strength_0_25": 0.0,
+              "evidence_freshness_0_15": 0.0,
+              "reward_risk_0_15": 0.0,
+              "stock_structure_0_25": 0.0,
+              "trigger_quality_0_20": 0.0
+            },
+            "sell_action": {
+              "action": "hold",
+              "buy_side_gaps_do_not_block": true,
+              "buy_side_source_gaps": [],
+              "requested_action": "hold",
+              "sellable_qty_status": "unknown"
+            },
+            "setup": "",
+            "side": "",
+            "trigger": ""
+          },
+          {
+            "blocking_codes": [],
+            "candidate_id": "CAN-20260731-600588",
+            "code": "600588",
+            "decision": "observe",
+            "disposition": "paper_only",
+            "evidence_sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+            "invalidation": "",
+            "max_position_pct": 0,
+            "missing_evidence": [],
+            "name": "用友网络",
+            "rank": 7,
+            "rule_ids": [],
+            "score": 0.0,
+            "score_components": {
+              "board_strength_0_25": 0.0,
+              "evidence_freshness_0_15": 0.0,
+              "reward_risk_0_15": 0.0,
+              "stock_structure_0_25": 0.0,
+              "trigger_quality_0_20": 0.0
+            },
+            "sell_action": {
+              "action": "hold",
+              "buy_side_gaps_do_not_block": true,
+              "buy_side_source_gaps": [],
+              "requested_action": "hold",
+              "sellable_qty_status": "unknown"
+            },
+            "setup": "",
+            "side": "",
+            "trigger": ""
+          },
+          {
+            "blocking_codes": [],
+            "candidate_id": "CAN-20260731-603221",
+            "code": "603221",
+            "decision": "observe",
+            "disposition": "paper_only",
+            "evidence_sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+            "invalidation": "",
+            "max_position_pct": 0,
+            "missing_evidence": [],
+            "name": "爱丽家居",
+            "rank": 8,
+            "rule_ids": [],
+            "score": 0.0,
+            "score_components": {
+              "board_strength_0_25": 0.0,
+              "evidence_freshness_0_15": 0.0,
+              "reward_risk_0_15": 0.0,
+              "stock_structure_0_25": 0.0,
+              "trigger_quality_0_20": 0.0
+            },
+            "sell_action": {
+              "action": "hold",
+              "buy_side_gaps_do_not_block": true,
+              "buy_side_source_gaps": [],
+              "requested_action": "hold",
+              "sellable_qty_status": "unknown"
+            },
+            "setup": "",
+            "side": "",
+            "trigger": ""
+          },
+          {
+            "blocking_codes": [],
+            "candidate_id": "CAN-20260731-605179",
+            "code": "605179",
+            "decision": "observe",
+            "disposition": "paper_only",
+            "evidence_sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+            "invalidation": "",
+            "max_position_pct": 0,
+            "missing_evidence": [],
+            "name": "一鸣食品",
+            "rank": 9,
+            "rule_ids": [],
+            "score": 0.0,
+            "score_components": {
+              "board_strength_0_25": 0.0,
+              "evidence_freshness_0_15": 0.0,
+              "reward_risk_0_15": 0.0,
+              "stock_structure_0_25": 0.0,
+              "trigger_quality_0_20": 0.0
+            },
+            "sell_action": {
+              "action": "hold",
+              "buy_side_gaps_do_not_block": true,
+              "buy_side_source_gaps": [],
+              "requested_action": "hold",
+              "sellable_qty_status": "unknown"
+            },
+            "setup": "",
+            "side": "",
+            "trigger": ""
+          },
+          {
+            "blocking_codes": [],
+            "candidate_id": "CAN-20260731-688111",
+            "code": "688111",
+            "decision": "observe",
+            "disposition": "paper_only",
+            "evidence_sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+            "invalidation": "",
+            "max_position_pct": 0,
+            "missing_evidence": [],
+            "name": "金山办公",
+            "rank": 10,
+            "rule_ids": [],
+            "score": 0.0,
+            "score_components": {
+              "board_strength_0_25": 0.0,
+              "evidence_freshness_0_15": 0.0,
+              "reward_risk_0_15": 0.0,
+              "stock_structure_0_25": 0.0,
+              "trigger_quality_0_20": 0.0
+            },
+            "sell_action": {
+              "action": "hold",
+              "buy_side_gaps_do_not_block": true,
+              "buy_side_source_gaps": [],
+              "requested_action": "hold",
+              "sellable_qty_status": "unknown"
+            },
+            "setup": "",
+            "side": "",
+            "trigger": ""
+          },
+          {
+            "blocking_codes": [],
+            "candidate_id": "CAN-20260731-688825",
+            "code": "688825",
+            "decision": "observe",
+            "disposition": "paper_only",
+            "evidence_sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+            "invalidation": "",
+            "max_position_pct": 0,
+            "missing_evidence": [],
+            "name": "长鑫科技",
+            "rank": 11,
+            "rule_ids": [],
+            "score": 0.0,
+            "score_components": {
+              "board_strength_0_25": 0.0,
+              "evidence_freshness_0_15": 0.0,
+              "reward_risk_0_15": 0.0,
+              "stock_structure_0_25": 0.0,
+              "trigger_quality_0_20": 0.0
+            },
+            "sell_action": {
+              "action": "hold",
+              "buy_side_gaps_do_not_block": true,
+              "buy_side_source_gaps": [],
+              "requested_action": "hold",
+              "sellable_qty_status": "unknown"
+            },
+            "setup": "",
+            "side": "",
+            "trigger": ""
+          }
+        ],
+        "schema_version": "recommendation_state.v1",
+        "trading_date": "2026-07-31"
+      },
+      "side_blocks": {
+        "lianban": [],
+        "trend": []
+      },
+      "standard_count": 0,
+      "unverifiable": [
+        "c15:coverage_below_minimum",
+        "c15:midcap_sector_context_missing",
+        "c15:pipeline_semantic_degraded",
+        "c15:row_shape_mismatch",
+        "c15:stale_source"
+      ],
+      "workflow_gaps": [
+        "closure:snapshot_query_not_passing",
+        "closure:snapshot_query_freshness_invalid",
+        "closure:snapshot_query_coverage_invalid",
+        "closure:snapshot_query_pipeline_quality_invalid",
+        "closure:snapshot_query_entity_mismatch",
+        "closure:snapshot_query_non_equivalent",
+        "closure:snapshot_blocked_degraded"
+      ]
+    },
+    {
+      "candidate_decisions": [
+        {
+          "allowed": false,
+          "blocking_codes": [
+            "PAPER_ONLY_DISPOSITION"
+          ],
+          "candidate_id": "CAN-20260803-000815",
+          "code": "000815",
+          "date": "2026-08-03",
+          "disposition": "paper_only",
+          "evidence_source": "recommendation_snapshot.v1.json",
+          "missing_evidence": [],
+          "scope": "candidate",
+          "side": null,
+          "source_decision": "observe"
+        },
+        {
+          "allowed": false,
+          "blocking_codes": [
+            "PAPER_ONLY_DISPOSITION"
+          ],
+          "candidate_id": "CAN-20260803-002131",
+          "code": "002131",
+          "date": "2026-08-03",
+          "disposition": "paper_only",
+          "evidence_source": "recommendation_snapshot.v1.json",
+          "missing_evidence": [],
+          "scope": "candidate",
+          "side": null,
+          "source_decision": "exclude"
+        },
+        {
+          "allowed": false,
+          "blocking_codes": [
+            "PAPER_ONLY_DISPOSITION"
+          ],
+          "candidate_id": "CAN-20260803-002156",
+          "code": "002156",
+          "date": "2026-08-03",
+          "disposition": "paper_only",
+          "evidence_source": "recommendation_snapshot.v1.json",
+          "missing_evidence": [],
+          "scope": "candidate",
+          "side": null,
+          "source_decision": "observe"
+        },
+        {
+          "allowed": false,
+          "blocking_codes": [
+            "PAPER_ONLY_DISPOSITION"
+          ],
+          "candidate_id": "CAN-20260803-002185",
+          "code": "002185",
+          "date": "2026-08-03",
+          "disposition": "paper_only",
+          "evidence_source": "recommendation_snapshot.v1.json",
+          "missing_evidence": [],
+          "scope": "candidate",
+          "side": null,
+          "source_decision": "observe"
+        },
+        {
+          "allowed": false,
+          "blocking_codes": [
+            "PAPER_ONLY_DISPOSITION"
+          ],
+          "candidate_id": "CAN-20260803-002354",
+          "code": "002354",
+          "date": "2026-08-03",
+          "disposition": "paper_only",
+          "evidence_source": "recommendation_snapshot.v1.json",
+          "missing_evidence": [],
+          "scope": "candidate",
+          "side": null,
+          "source_decision": "observe"
+        },
+        {
+          "allowed": false,
+          "blocking_codes": [
+            "PAPER_ONLY_DISPOSITION"
+          ],
+          "candidate_id": "CAN-20260803-002366",
+          "code": "002366",
+          "date": "2026-08-03",
+          "disposition": "paper_only",
+          "evidence_source": "recommendation_snapshot.v1.json",
+          "missing_evidence": [],
+          "scope": "candidate",
+          "side": null,
+          "source_decision": "observe"
+        },
+        {
+          "allowed": false,
+          "blocking_codes": [
+            "PAPER_ONLY_DISPOSITION"
+          ],
+          "candidate_id": "CAN-20260803-002896",
+          "code": "002896",
+          "date": "2026-08-03",
+          "disposition": "paper_only",
+          "evidence_source": "recommendation_snapshot.v1.json",
+          "missing_evidence": [],
+          "scope": "candidate",
+          "side": null,
+          "source_decision": "exclude"
+        },
+        {
+          "allowed": false,
+          "blocking_codes": [
+            "PAPER_ONLY_DISPOSITION"
+          ],
+          "candidate_id": "CAN-20260803-003001",
+          "code": "003001",
+          "date": "2026-08-03",
+          "disposition": "paper_only",
+          "evidence_source": "recommendation_snapshot.v1.json",
+          "missing_evidence": [],
+          "scope": "candidate",
+          "side": null,
+          "source_decision": "observe"
+        },
+        {
+          "allowed": false,
+          "blocking_codes": [
+            "PAPER_ONLY_DISPOSITION"
+          ],
+          "candidate_id": "CAN-20260803-300017",
+          "code": "300017",
+          "date": "2026-08-03",
+          "disposition": "paper_only",
+          "evidence_source": "recommendation_snapshot.v1.json",
+          "missing_evidence": [],
+          "scope": "candidate",
+          "side": null,
+          "source_decision": "observe"
+        },
+        {
+          "allowed": false,
+          "blocking_codes": [
+            "PAPER_ONLY_DISPOSITION"
+          ],
+          "candidate_id": "CAN-20260803-600584",
+          "code": "600584",
+          "date": "2026-08-03",
+          "disposition": "paper_only",
+          "evidence_source": "recommendation_snapshot.v1.json",
+          "missing_evidence": [],
+          "scope": "candidate",
+          "side": null,
+          "source_decision": "observe"
+        },
+        {
+          "allowed": false,
+          "blocking_codes": [
+            "PAPER_ONLY_DISPOSITION"
+          ],
+          "candidate_id": "CAN-20260803-600602",
+          "code": "600602",
+          "date": "2026-08-03",
+          "disposition": "paper_only",
+          "evidence_source": "recommendation_snapshot.v1.json",
+          "missing_evidence": [],
+          "scope": "candidate",
+          "side": null,
+          "source_decision": "observe"
+        },
+        {
+          "allowed": false,
+          "blocking_codes": [
+            "PAPER_ONLY_DISPOSITION"
+          ],
+          "candidate_id": "CAN-20260803-601179",
+          "code": "601179",
+          "date": "2026-08-03",
+          "disposition": "paper_only",
+          "evidence_source": "recommendation_snapshot.v1.json",
+          "missing_evidence": [],
+          "scope": "candidate",
+          "side": null,
+          "source_decision": "observe"
+        },
+        {
+          "allowed": false,
+          "blocking_codes": [
+            "PAPER_ONLY_DISPOSITION"
+          ],
+          "candidate_id": "CAN-20260803-601611",
+          "code": "601611",
+          "date": "2026-08-03",
+          "disposition": "paper_only",
+          "evidence_source": "recommendation_snapshot.v1.json",
+          "missing_evidence": [],
+          "scope": "candidate",
+          "side": null,
+          "source_decision": "observe"
+        },
+        {
+          "allowed": false,
+          "blocking_codes": [
+            "PAPER_ONLY_DISPOSITION"
+          ],
+          "candidate_id": "CAN-20260803-601985",
+          "code": "601985",
+          "date": "2026-08-03",
+          "disposition": "paper_only",
+          "evidence_source": "recommendation_snapshot.v1.json",
+          "missing_evidence": [],
+          "scope": "candidate",
+          "side": null,
+          "source_decision": "observe"
+        },
+        {
+          "allowed": false,
+          "blocking_codes": [
+            "PAPER_ONLY_DISPOSITION"
+          ],
+          "candidate_id": "CAN-20260803-603881",
+          "code": "603881",
+          "date": "2026-08-03",
+          "disposition": "paper_only",
+          "evidence_source": "recommendation_snapshot.v1.json",
+          "missing_evidence": [],
+          "scope": "candidate",
+          "side": null,
+          "source_decision": "observe"
+        },
+        {
+          "allowed": false,
+          "blocking_codes": [
+            "PAPER_ONLY_DISPOSITION"
+          ],
+          "candidate_id": "CAN-20260803-603986",
+          "code": "603986",
+          "date": "2026-08-03",
+          "disposition": "paper_only",
+          "evidence_source": "recommendation_snapshot.v1.json",
+          "missing_evidence": [],
+          "scope": "candidate",
+          "side": null,
+          "source_decision": "observe"
+        },
+        {
+          "allowed": false,
+          "blocking_codes": [
+            "PAPER_ONLY_DISPOSITION"
+          ],
+          "candidate_id": "CAN-20260803-688825",
+          "code": "688825",
+          "date": "2026-08-03",
+          "disposition": "paper_only",
+          "evidence_source": "recommendation_snapshot.v1.json",
+          "missing_evidence": [],
+          "scope": "candidate",
+          "side": null,
+          "source_decision": "observe"
+        }
+      ],
+      "date": "2026-08-03",
+      "global_hard": [],
+      "guarded_count": 0,
+      "paper_only_count": 17,
+      "recommendation_count": 17,
+      "recommendation_state": {
+        "candidates": [
+          {
+            "blocking_codes": [],
+            "candidate_id": "CAN-20260803-000815",
+            "code": "000815",
+            "decision": "observe",
+            "disposition": "paper_only",
+            "evidence_sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+            "invalidation": "",
+            "max_position_pct": 0,
+            "missing_evidence": [],
+            "name": "美利云",
+            "rank": 1,
+            "rule_ids": [],
+            "score": 0.0,
+            "score_components": {
+              "board_strength_0_25": 0.0,
+              "evidence_freshness_0_15": 0.0,
+              "reward_risk_0_15": 0.0,
+              "stock_structure_0_25": 0.0,
+              "trigger_quality_0_20": 0.0
+            },
+            "sell_action": {
+              "action": "hold",
+              "buy_side_gaps_do_not_block": true,
+              "buy_side_source_gaps": [],
+              "requested_action": "hold",
+              "sellable_qty_status": "unknown"
+            },
+            "setup": "",
+            "side": "",
+            "trigger": ""
+          },
+          {
+            "blocking_codes": [],
+            "candidate_id": "CAN-20260803-002131",
+            "code": "002131",
+            "decision": "exclude",
+            "disposition": "paper_only",
+            "evidence_sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+            "invalidation": "",
+            "max_position_pct": 0,
+            "missing_evidence": [],
+            "name": "利欧股份",
+            "rank": 2,
+            "rule_ids": [],
+            "score": 0.0,
+            "score_components": {
+              "board_strength_0_25": 0.0,
+              "evidence_freshness_0_15": 0.0,
+              "reward_risk_0_15": 0.0,
+              "stock_structure_0_25": 0.0,
+              "trigger_quality_0_20": 0.0
+            },
+            "sell_action": {
+              "action": "hold",
+              "buy_side_gaps_do_not_block": true,
+              "buy_side_source_gaps": [],
+              "requested_action": "hold",
+              "sellable_qty_status": "unknown"
+            },
+            "setup": "",
+            "side": "",
+            "trigger": ""
+          },
+          {
+            "blocking_codes": [],
+            "candidate_id": "CAN-20260803-002156",
+            "code": "002156",
+            "decision": "observe",
+            "disposition": "paper_only",
+            "evidence_sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+            "invalidation": "",
+            "max_position_pct": 0,
+            "missing_evidence": [],
+            "name": "通富微电",
+            "rank": 3,
+            "rule_ids": [],
+            "score": 0.0,
+            "score_components": {
+              "board_strength_0_25": 0.0,
+              "evidence_freshness_0_15": 0.0,
+              "reward_risk_0_15": 0.0,
+              "stock_structure_0_25": 0.0,
+              "trigger_quality_0_20": 0.0
+            },
+            "sell_action": {
+              "action": "hold",
+              "buy_side_gaps_do_not_block": true,
+              "buy_side_source_gaps": [],
+              "requested_action": "hold",
+              "sellable_qty_status": "unknown"
+            },
+            "setup": "",
+            "side": "",
+            "trigger": ""
+          },
+          {
+            "blocking_codes": [],
+            "candidate_id": "CAN-20260803-002185",
+            "code": "002185",
+            "decision": "observe",
+            "disposition": "paper_only",
+            "evidence_sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+            "invalidation": "",
+            "max_position_pct": 0,
+            "missing_evidence": [],
+            "name": "华天科技",
+            "rank": 4,
+            "rule_ids": [],
+            "score": 0.0,
+            "score_components": {
+              "board_strength_0_25": 0.0,
+              "evidence_freshness_0_15": 0.0,
+              "reward_risk_0_15": 0.0,
+              "stock_structure_0_25": 0.0,
+              "trigger_quality_0_20": 0.0
+            },
+            "sell_action": {
+              "action": "hold",
+              "buy_side_gaps_do_not_block": true,
+              "buy_side_source_gaps": [],
+              "requested_action": "hold",
+              "sellable_qty_status": "unknown"
+            },
+            "setup": "",
+            "side": "",
+            "trigger": ""
+          },
+          {
+            "blocking_codes": [],
+            "candidate_id": "CAN-20260803-002354",
+            "code": "002354",
+            "decision": "observe",
+            "disposition": "paper_only",
+            "evidence_sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+            "invalidation": "",
+            "max_position_pct": 0,
+            "missing_evidence": [],
+            "name": "天娱数科",
+            "rank": 5,
+            "rule_ids": [],
+            "score": 0.0,
+            "score_components": {
+              "board_strength_0_25": 0.0,
+              "evidence_freshness_0_15": 0.0,
+              "reward_risk_0_15": 0.0,
+              "stock_structure_0_25": 0.0,
+              "trigger_quality_0_20": 0.0
+            },
+            "sell_action": {
+              "action": "hold",
+              "buy_side_gaps_do_not_block": true,
+              "buy_side_source_gaps": [],
+              "requested_action": "hold",
+              "sellable_qty_status": "unknown"
+            },
+            "setup": "",
+            "side": "",
+            "trigger": ""
+          },
+          {
+            "blocking_codes": [],
+            "candidate_id": "CAN-20260803-002366",
+            "code": "002366",
+            "decision": "observe",
+            "disposition": "paper_only",
+            "evidence_sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+            "invalidation": "",
+            "max_position_pct": 0,
+            "missing_evidence": [],
+            "name": "融发核电",
+            "rank": 6,
+            "rule_ids": [],
+            "score": 0.0,
+            "score_components": {
+              "board_strength_0_25": 0.0,
+              "evidence_freshness_0_15": 0.0,
+              "reward_risk_0_15": 0.0,
+              "stock_structure_0_25": 0.0,
+              "trigger_quality_0_20": 0.0
+            },
+            "sell_action": {
+              "action": "hold",
+              "buy_side_gaps_do_not_block": true,
+              "buy_side_source_gaps": [],
+              "requested_action": "hold",
+              "sellable_qty_status": "unknown"
+            },
+            "setup": "",
+            "side": "",
+            "trigger": ""
+          },
+          {
+            "blocking_codes": [],
+            "candidate_id": "CAN-20260803-002896",
+            "code": "002896",
+            "decision": "exclude",
+            "disposition": "paper_only",
+            "evidence_sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+            "invalidation": "",
+            "max_position_pct": 0,
+            "missing_evidence": [],
+            "name": "中大力德",
+            "rank": 7,
+            "rule_ids": [],
+            "score": 0.0,
+            "score_components": {
+              "board_strength_0_25": 0.0,
+              "evidence_freshness_0_15": 0.0,
+              "reward_risk_0_15": 0.0,
+              "stock_structure_0_25": 0.0,
+              "trigger_quality_0_20": 0.0
+            },
+            "sell_action": {
+              "action": "hold",
+              "buy_side_gaps_do_not_block": true,
+              "buy_side_source_gaps": [],
+              "requested_action": "hold",
+              "sellable_qty_status": "unknown"
+            },
+            "setup": "",
+            "side": "",
+            "trigger": ""
+          },
+          {
+            "blocking_codes": [],
+            "candidate_id": "CAN-20260803-003001",
+            "code": "003001",
+            "decision": "observe",
+            "disposition": "paper_only",
+            "evidence_sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+            "invalidation": "",
+            "max_position_pct": 0,
+            "missing_evidence": [],
+            "name": "中岩大地",
+            "rank": 8,
+            "rule_ids": [],
+            "score": 0.0,
+            "score_components": {
+              "board_strength_0_25": 0.0,
+              "evidence_freshness_0_15": 0.0,
+              "reward_risk_0_15": 0.0,
+              "stock_structure_0_25": 0.0,
+              "trigger_quality_0_20": 0.0
+            },
+            "sell_action": {
+              "action": "hold",
+              "buy_side_gaps_do_not_block": true,
+              "buy_side_source_gaps": [],
+              "requested_action": "hold",
+              "sellable_qty_status": "unknown"
+            },
+            "setup": "",
+            "side": "",
+            "trigger": ""
+          },
+          {
+            "blocking_codes": [],
+            "candidate_id": "CAN-20260803-300017",
+            "code": "300017",
+            "decision": "observe",
+            "disposition": "paper_only",
+            "evidence_sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+            "invalidation": "",
+            "max_position_pct": 0,
+            "missing_evidence": [],
+            "name": "网宿科技",
+            "rank": 9,
+            "rule_ids": [],
+            "score": 0.0,
+            "score_components": {
+              "board_strength_0_25": 0.0,
+              "evidence_freshness_0_15": 0.0,
+              "reward_risk_0_15": 0.0,
+              "stock_structure_0_25": 0.0,
+              "trigger_quality_0_20": 0.0
+            },
+            "sell_action": {
+              "action": "hold",
+              "buy_side_gaps_do_not_block": true,
+              "buy_side_source_gaps": [],
+              "requested_action": "hold",
+              "sellable_qty_status": "unknown"
+            },
+            "setup": "",
+            "side": "",
+            "trigger": ""
+          },
+          {
+            "blocking_codes": [],
+            "candidate_id": "CAN-20260803-600584",
+            "code": "600584",
+            "decision": "observe",
+            "disposition": "paper_only",
+            "evidence_sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+            "invalidation": "",
+            "max_position_pct": 0,
+            "missing_evidence": [],
+            "name": "长电科技",
+            "rank": 10,
+            "rule_ids": [],
+            "score": 0.0,
+            "score_components": {
+              "board_strength_0_25": 0.0,
+              "evidence_freshness_0_15": 0.0,
+              "reward_risk_0_15": 0.0,
+              "stock_structure_0_25": 0.0,
+              "trigger_quality_0_20": 0.0
+            },
+            "sell_action": {
+              "action": "hold",
+              "buy_side_gaps_do_not_block": true,
+              "buy_side_source_gaps": [],
+              "requested_action": "hold",
+              "sellable_qty_status": "unknown"
+            },
+            "setup": "",
+            "side": "",
+            "trigger": ""
+          },
+          {
+            "blocking_codes": [],
+            "candidate_id": "CAN-20260803-600602",
+            "code": "600602",
+            "decision": "observe",
+            "disposition": "paper_only",
+            "evidence_sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+            "invalidation": "",
+            "max_position_pct": 0,
+            "missing_evidence": [],
+            "name": "云赛智联",
+            "rank": 11,
+            "rule_ids": [],
+            "score": 0.0,
+            "score_components": {
+              "board_strength_0_25": 0.0,
+              "evidence_freshness_0_15": 0.0,
+              "reward_risk_0_15": 0.0,
+              "stock_structure_0_25": 0.0,
+              "trigger_quality_0_20": 0.0
+            },
+            "sell_action": {
+              "action": "hold",
+              "buy_side_gaps_do_not_block": true,
+              "buy_side_source_gaps": [],
+              "requested_action": "hold",
+              "sellable_qty_status": "unknown"
+            },
+            "setup": "",
+            "side": "",
+            "trigger": ""
+          },
+          {
+            "blocking_codes": [],
+            "candidate_id": "CAN-20260803-601179",
+            "code": "601179",
+            "decision": "observe",
+            "disposition": "paper_only",
+            "evidence_sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+            "invalidation": "",
+            "max_position_pct": 0,
+            "missing_evidence": [],
+            "name": "中国西电",
+            "rank": 12,
+            "rule_ids": [],
+            "score": 0.0,
+            "score_components": {
+              "board_strength_0_25": 0.0,
+              "evidence_freshness_0_15": 0.0,
+              "reward_risk_0_15": 0.0,
+              "stock_structure_0_25": 0.0,
+              "trigger_quality_0_20": 0.0
+            },
+            "sell_action": {
+              "action": "hold",
+              "buy_side_gaps_do_not_block": true,
+              "buy_side_source_gaps": [],
+              "requested_action": "hold",
+              "sellable_qty_status": "unknown"
+            },
+            "setup": "",
+            "side": "",
+            "trigger": ""
+          },
+          {
+            "blocking_codes": [],
+            "candidate_id": "CAN-20260803-601611",
+            "code": "601611",
+            "decision": "observe",
+            "disposition": "paper_only",
+            "evidence_sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+            "invalidation": "",
+            "max_position_pct": 0,
+            "missing_evidence": [],
+            "name": "中国核建",
+            "rank": 13,
+            "rule_ids": [],
+            "score": 0.0,
+            "score_components": {
+              "board_strength_0_25": 0.0,
+              "evidence_freshness_0_15": 0.0,
+              "reward_risk_0_15": 0.0,
+              "stock_structure_0_25": 0.0,
+              "trigger_quality_0_20": 0.0
+            },
+            "sell_action": {
+              "action": "hold",
+              "buy_side_gaps_do_not_block": true,
+              "buy_side_source_gaps": [],
+              "requested_action": "hold",
+              "sellable_qty_status": "unknown"
+            },
+            "setup": "",
+            "side": "",
+            "trigger": ""
+          },
+          {
+            "blocking_codes": [],
+            "candidate_id": "CAN-20260803-601985",
+            "code": "601985",
+            "decision": "observe",
+            "disposition": "paper_only",
+            "evidence_sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+            "invalidation": "",
+            "max_position_pct": 0,
+            "missing_evidence": [],
+            "name": "中国核电",
+            "rank": 14,
+            "rule_ids": [],
+            "score": 0.0,
+            "score_components": {
+              "board_strength_0_25": 0.0,
+              "evidence_freshness_0_15": 0.0,
+              "reward_risk_0_15": 0.0,
+              "stock_structure_0_25": 0.0,
+              "trigger_quality_0_20": 0.0
+            },
+            "sell_action": {
+              "action": "hold",
+              "buy_side_gaps_do_not_block": true,
+              "buy_side_source_gaps": [],
+              "requested_action": "hold",
+              "sellable_qty_status": "unknown"
+            },
+            "setup": "",
+            "side": "",
+            "trigger": ""
+          },
+          {
+            "blocking_codes": [],
+            "candidate_id": "CAN-20260803-603881",
+            "code": "603881",
+            "decision": "observe",
+            "disposition": "paper_only",
+            "evidence_sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+            "invalidation": "",
+            "max_position_pct": 0,
+            "missing_evidence": [],
+            "name": "数据港",
+            "rank": 15,
+            "rule_ids": [],
+            "score": 0.0,
+            "score_components": {
+              "board_strength_0_25": 0.0,
+              "evidence_freshness_0_15": 0.0,
+              "reward_risk_0_15": 0.0,
+              "stock_structure_0_25": 0.0,
+              "trigger_quality_0_20": 0.0
+            },
+            "sell_action": {
+              "action": "hold",
+              "buy_side_gaps_do_not_block": true,
+              "buy_side_source_gaps": [],
+              "requested_action": "hold",
+              "sellable_qty_status": "unknown"
+            },
+            "setup": "",
+            "side": "",
+            "trigger": ""
+          },
+          {
+            "blocking_codes": [],
+            "candidate_id": "CAN-20260803-603986",
+            "code": "603986",
+            "decision": "observe",
+            "disposition": "paper_only",
+            "evidence_sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+            "invalidation": "",
+            "max_position_pct": 0,
+            "missing_evidence": [],
+            "name": "兆易创新",
+            "rank": 16,
+            "rule_ids": [],
+            "score": 0.0,
+            "score_components": {
+              "board_strength_0_25": 0.0,
+              "evidence_freshness_0_15": 0.0,
+              "reward_risk_0_15": 0.0,
+              "stock_structure_0_25": 0.0,
+              "trigger_quality_0_20": 0.0
+            },
+            "sell_action": {
+              "action": "hold",
+              "buy_side_gaps_do_not_block": true,
+              "buy_side_source_gaps": [],
+              "requested_action": "hold",
+              "sellable_qty_status": "unknown"
+            },
+            "setup": "",
+            "side": "",
+            "trigger": ""
+          },
+          {
+            "blocking_codes": [],
+            "candidate_id": "CAN-20260803-688825",
+            "code": "688825",
+            "decision": "observe",
+            "disposition": "paper_only",
+            "evidence_sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+            "invalidation": "",
+            "max_position_pct": 0,
+            "missing_evidence": [],
+            "name": "长鑫科技",
+            "rank": 17,
+            "rule_ids": [],
+            "score": 0.0,
+            "score_components": {
+              "board_strength_0_25": 0.0,
+              "evidence_freshness_0_15": 0.0,
+              "reward_risk_0_15": 0.0,
+              "stock_structure_0_25": 0.0,
+              "trigger_quality_0_20": 0.0
+            },
+            "sell_action": {
+              "action": "hold",
+              "buy_side_gaps_do_not_block": true,
+              "buy_side_source_gaps": [],
+              "requested_action": "hold",
+              "sellable_qty_status": "unknown"
+            },
+            "setup": "",
+            "side": "",
+            "trigger": ""
+          }
+        ],
+        "schema_version": "recommendation_state.v1",
+        "trading_date": "2026-08-03"
+      },
+      "side_blocks": {
+        "lianban": [],
+        "trend": []
+      },
+      "standard_count": 0,
+      "unverifiable": [
+        "c15:coverage_below_minimum",
+        "c15:pipeline_semantic_degraded",
+        "c15:row_shape_mismatch"
+      ],
+      "workflow_gaps": [
+        "closure:snapshot_query_not_passing",
+        "closure:snapshot_query_coverage_invalid",
+        "closure:snapshot_query_pipeline_quality_invalid",
+        "closure:snapshot_query_entity_mismatch",
+        "closure:snapshot_query_non_equivalent",
+        "closure:snapshot_blocked_degraded"
+      ]
+    },
+    {
+      "candidate_decisions": [
+        {
+          "allowed": false,
+          "blocking_codes": [
+            "PAPER_ONLY_DISPOSITION"
+          ],
+          "candidate_id": "CAN-20260804-000533",
+          "code": "000533",
+          "date": "2026-08-04",
+          "disposition": "paper_only",
+          "evidence_source": "recommendation_snapshot.v1.json",
+          "missing_evidence": [],
+          "scope": "candidate",
+          "side": null,
+          "source_decision": "observe"
+        },
+        {
+          "allowed": false,
+          "blocking_codes": [
+            "PAPER_ONLY_DISPOSITION"
+          ],
+          "candidate_id": "CAN-20260804-000815",
+          "code": "000815",
+          "date": "2026-08-04",
+          "disposition": "paper_only",
+          "evidence_source": "recommendation_snapshot.v1.json",
+          "missing_evidence": [],
+          "scope": "candidate",
+          "side": null,
+          "source_decision": "observe"
+        },
+        {
+          "allowed": false,
+          "blocking_codes": [
+            "PAPER_ONLY_DISPOSITION"
+          ],
+          "candidate_id": "CAN-20260804-002131",
+          "code": "002131",
+          "date": "2026-08-04",
+          "disposition": "paper_only",
+          "evidence_source": "recommendation_snapshot.v1.json",
+          "missing_evidence": [],
+          "scope": "candidate",
+          "side": null,
+          "source_decision": "observe"
+        },
+        {
+          "allowed": false,
+          "blocking_codes": [
+            "PAPER_ONLY_DISPOSITION"
+          ],
+          "candidate_id": "CAN-20260804-002156",
+          "code": "002156",
+          "date": "2026-08-04",
+          "disposition": "paper_only",
+          "evidence_source": "recommendation_snapshot.v1.json",
+          "missing_evidence": [],
+          "scope": "candidate",
+          "side": null,
+          "source_decision": "observe"
+        },
+        {
+          "allowed": false,
+          "blocking_codes": [
+            "PAPER_ONLY_DISPOSITION"
+          ],
+          "candidate_id": "CAN-20260804-002354",
+          "code": "002354",
+          "date": "2026-08-04",
+          "disposition": "paper_only",
+          "evidence_source": "recommendation_snapshot.v1.json",
+          "missing_evidence": [],
+          "scope": "candidate",
+          "side": null,
+          "source_decision": "observe"
+        },
+        {
+          "allowed": false,
+          "blocking_codes": [
+            "PAPER_ONLY_DISPOSITION"
+          ],
+          "candidate_id": "CAN-20260804-002471",
+          "code": "002471",
+          "date": "2026-08-04",
+          "disposition": "paper_only",
+          "evidence_source": "recommendation_snapshot.v1.json",
+          "missing_evidence": [],
+          "scope": "candidate",
+          "side": null,
+          "source_decision": "observe"
+        },
+        {
+          "allowed": false,
+          "blocking_codes": [
+            "PAPER_ONLY_DISPOSITION"
+          ],
+          "candidate_id": "CAN-20260804-002472",
+          "code": "002472",
+          "date": "2026-08-04",
+          "disposition": "paper_only",
+          "evidence_source": "recommendation_snapshot.v1.json",
+          "missing_evidence": [],
+          "scope": "candidate",
+          "side": null,
+          "source_decision": "observe"
+        },
+        {
+          "allowed": false,
+          "blocking_codes": [
+            "PAPER_ONLY_DISPOSITION"
+          ],
+          "candidate_id": "CAN-20260804-002896",
+          "code": "002896",
+          "date": "2026-08-04",
+          "disposition": "paper_only",
+          "evidence_source": "recommendation_snapshot.v1.json",
+          "missing_evidence": [],
+          "scope": "candidate",
+          "side": null,
+          "source_decision": "observe"
+        },
+        {
+          "allowed": false,
+          "blocking_codes": [
+            "PAPER_ONLY_DISPOSITION"
+          ],
+          "candidate_id": "CAN-20260804-300017",
+          "code": "300017",
+          "date": "2026-08-04",
+          "disposition": "paper_only",
+          "evidence_source": "recommendation_snapshot.v1.json",
+          "missing_evidence": [],
+          "scope": "candidate",
+          "side": null,
+          "source_decision": "observe"
+        },
+        {
+          "allowed": false,
+          "blocking_codes": [
+            "PAPER_ONLY_DISPOSITION"
+          ],
+          "candidate_id": "CAN-20260804-300058",
+          "code": "300058",
+          "date": "2026-08-04",
+          "disposition": "paper_only",
+          "evidence_source": "recommendation_snapshot.v1.json",
+          "missing_evidence": [],
+          "scope": "candidate",
+          "side": null,
+          "source_decision": "observe"
+        },
+        {
+          "allowed": false,
+          "blocking_codes": [
+            "PAPER_ONLY_DISPOSITION"
+          ],
+          "candidate_id": "CAN-20260804-300308",
+          "code": "300308",
+          "date": "2026-08-04",
+          "disposition": "paper_only",
+          "evidence_source": "recommendation_snapshot.v1.json",
+          "missing_evidence": [],
+          "scope": "candidate",
+          "side": null,
+          "source_decision": "observe"
+        },
+        {
+          "allowed": false,
+          "blocking_codes": [
+            "PAPER_ONLY_DISPOSITION"
+          ],
+          "candidate_id": "CAN-20260804-300394",
+          "code": "300394",
+          "date": "2026-08-04",
+          "disposition": "paper_only",
+          "evidence_source": "recommendation_snapshot.v1.json",
+          "missing_evidence": [],
+          "scope": "candidate",
+          "side": null,
+          "source_decision": "observe"
+        },
+        {
+          "allowed": false,
+          "blocking_codes": [
+            "PAPER_ONLY_DISPOSITION"
+          ],
+          "candidate_id": "CAN-20260804-300502",
+          "code": "300502",
+          "date": "2026-08-04",
+          "disposition": "paper_only",
+          "evidence_source": "recommendation_snapshot.v1.json",
+          "missing_evidence": [],
+          "scope": "candidate",
+          "side": null,
+          "source_decision": "observe"
+        },
+        {
+          "allowed": false,
+          "blocking_codes": [
+            "PAPER_ONLY_DISPOSITION"
+          ],
+          "candidate_id": "CAN-20260804-300766",
+          "code": "300766",
+          "date": "2026-08-04",
+          "disposition": "paper_only",
+          "evidence_source": "recommendation_snapshot.v1.json",
+          "missing_evidence": [],
+          "scope": "candidate",
+          "side": null,
+          "source_decision": "observe"
+        },
+        {
+          "allowed": false,
+          "blocking_codes": [
+            "PAPER_ONLY_DISPOSITION"
+          ],
+          "candidate_id": "CAN-20260804-600584",
+          "code": "600584",
+          "date": "2026-08-04",
+          "disposition": "paper_only",
+          "evidence_source": "recommendation_snapshot.v1.json",
+          "missing_evidence": [],
+          "scope": "candidate",
+          "side": null,
+          "source_decision": "observe"
+        },
+        {
+          "allowed": false,
+          "blocking_codes": [
+            "PAPER_ONLY_DISPOSITION"
+          ],
+          "candidate_id": "CAN-20260804-601179",
+          "code": "601179",
+          "date": "2026-08-04",
+          "disposition": "paper_only",
+          "evidence_source": "recommendation_snapshot.v1.json",
+          "missing_evidence": [],
+          "scope": "candidate",
+          "side": null,
+          "source_decision": "observe"
+        },
+        {
+          "allowed": false,
+          "blocking_codes": [
+            "PAPER_ONLY_DISPOSITION"
+          ],
+          "candidate_id": "CAN-20260804-601611",
+          "code": "601611",
+          "date": "2026-08-04",
+          "disposition": "paper_only",
+          "evidence_source": "recommendation_snapshot.v1.json",
+          "missing_evidence": [],
+          "scope": "candidate",
+          "side": null,
+          "source_decision": "observe"
+        },
+        {
+          "allowed": false,
+          "blocking_codes": [
+            "PAPER_ONLY_DISPOSITION"
+          ],
+          "candidate_id": "CAN-20260804-603881",
+          "code": "603881",
+          "date": "2026-08-04",
+          "disposition": "paper_only",
+          "evidence_source": "recommendation_snapshot.v1.json",
+          "missing_evidence": [],
+          "scope": "candidate",
+          "side": null,
+          "source_decision": "observe"
+        },
+        {
+          "allowed": false,
+          "blocking_codes": [
+            "PAPER_ONLY_DISPOSITION"
+          ],
+          "candidate_id": "CAN-20260804-603986",
+          "code": "603986",
+          "date": "2026-08-04",
+          "disposition": "paper_only",
+          "evidence_source": "recommendation_snapshot.v1.json",
+          "missing_evidence": [],
+          "scope": "candidate",
+          "side": null,
+          "source_decision": "observe"
+        },
+        {
+          "allowed": false,
+          "blocking_codes": [
+            "PAPER_ONLY_DISPOSITION"
+          ],
+          "candidate_id": "CAN-20260804-688017",
+          "code": "688017",
+          "date": "2026-08-04",
+          "disposition": "paper_only",
+          "evidence_source": "recommendation_snapshot.v1.json",
+          "missing_evidence": [],
+          "scope": "candidate",
+          "side": null,
+          "source_decision": "observe"
+        },
+        {
+          "allowed": false,
+          "blocking_codes": [
+            "PAPER_ONLY_DISPOSITION"
+          ],
+          "candidate_id": "CAN-20260804-688825",
+          "code": "688825",
+          "date": "2026-08-04",
+          "disposition": "paper_only",
+          "evidence_source": "recommendation_snapshot.v1.json",
+          "missing_evidence": [],
+          "scope": "candidate",
+          "side": null,
+          "source_decision": "observe"
+        }
+      ],
+      "date": "2026-08-04",
+      "global_hard": [],
+      "guarded_count": 0,
+      "paper_only_count": 21,
+      "recommendation_count": 21,
+      "recommendation_state": {
+        "candidates": [
+          {
+            "blocking_codes": [],
+            "candidate_id": "CAN-20260804-000533",
+            "code": "000533",
+            "decision": "observe",
+            "disposition": "paper_only",
+            "evidence_sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+            "invalidation": "",
+            "max_position_pct": 0,
+            "missing_evidence": [],
+            "name": "顺钠股份",
+            "rank": 1,
+            "rule_ids": [],
+            "score": 0.0,
+            "score_components": {
+              "board_strength_0_25": 0.0,
+              "evidence_freshness_0_15": 0.0,
+              "reward_risk_0_15": 0.0,
+              "stock_structure_0_25": 0.0,
+              "trigger_quality_0_20": 0.0
+            },
+            "sell_action": {
+              "action": "hold",
+              "buy_side_gaps_do_not_block": true,
+              "buy_side_source_gaps": [],
+              "requested_action": "hold",
+              "sellable_qty_status": "unknown"
+            },
+            "setup": "",
+            "side": "",
+            "trigger": ""
+          },
+          {
+            "blocking_codes": [],
+            "candidate_id": "CAN-20260804-000815",
+            "code": "000815",
+            "decision": "observe",
+            "disposition": "paper_only",
+            "evidence_sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+            "invalidation": "",
+            "max_position_pct": 0,
+            "missing_evidence": [],
+            "name": "美利云",
+            "rank": 2,
+            "rule_ids": [],
+            "score": 0.0,
+            "score_components": {
+              "board_strength_0_25": 0.0,
+              "evidence_freshness_0_15": 0.0,
+              "reward_risk_0_15": 0.0,
+              "stock_structure_0_25": 0.0,
+              "trigger_quality_0_20": 0.0
+            },
+            "sell_action": {
+              "action": "hold",
+              "buy_side_gaps_do_not_block": true,
+              "buy_side_source_gaps": [],
+              "requested_action": "hold",
+              "sellable_qty_status": "unknown"
+            },
+            "setup": "",
+            "side": "",
+            "trigger": ""
+          },
+          {
+            "blocking_codes": [],
+            "candidate_id": "CAN-20260804-002131",
+            "code": "002131",
+            "decision": "observe",
+            "disposition": "paper_only",
+            "evidence_sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+            "invalidation": "",
+            "max_position_pct": 0,
+            "missing_evidence": [],
+            "name": "利欧股份",
+            "rank": 3,
+            "rule_ids": [],
+            "score": 0.0,
+            "score_components": {
+              "board_strength_0_25": 0.0,
+              "evidence_freshness_0_15": 0.0,
+              "reward_risk_0_15": 0.0,
+              "stock_structure_0_25": 0.0,
+              "trigger_quality_0_20": 0.0
+            },
+            "sell_action": {
+              "action": "hold",
+              "buy_side_gaps_do_not_block": true,
+              "buy_side_source_gaps": [],
+              "requested_action": "hold",
+              "sellable_qty_status": "unknown"
+            },
+            "setup": "",
+            "side": "",
+            "trigger": ""
+          },
+          {
+            "blocking_codes": [],
+            "candidate_id": "CAN-20260804-002156",
+            "code": "002156",
+            "decision": "observe",
+            "disposition": "paper_only",
+            "evidence_sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+            "invalidation": "",
+            "max_position_pct": 0,
+            "missing_evidence": [],
+            "name": "通富微电",
+            "rank": 4,
+            "rule_ids": [],
+            "score": 0.0,
+            "score_components": {
+              "board_strength_0_25": 0.0,
+              "evidence_freshness_0_15": 0.0,
+              "reward_risk_0_15": 0.0,
+              "stock_structure_0_25": 0.0,
+              "trigger_quality_0_20": 0.0
+            },
+            "sell_action": {
+              "action": "hold",
+              "buy_side_gaps_do_not_block": true,
+              "buy_side_source_gaps": [],
+              "requested_action": "hold",
+              "sellable_qty_status": "unknown"
+            },
+            "setup": "",
+            "side": "",
+            "trigger": ""
+          },
+          {
+            "blocking_codes": [],
+            "candidate_id": "CAN-20260804-002354",
+            "code": "002354",
+            "decision": "observe",
+            "disposition": "paper_only",
+            "evidence_sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+            "invalidation": "",
+            "max_position_pct": 0,
+            "missing_evidence": [],
+            "name": "天娱数科",
+            "rank": 5,
+            "rule_ids": [],
+            "score": 0.0,
+            "score_components": {
+              "board_strength_0_25": 0.0,
+              "evidence_freshness_0_15": 0.0,
+              "reward_risk_0_15": 0.0,
+              "stock_structure_0_25": 0.0,
+              "trigger_quality_0_20": 0.0
+            },
+            "sell_action": {
+              "action": "hold",
+              "buy_side_gaps_do_not_block": true,
+              "buy_side_source_gaps": [],
+              "requested_action": "hold",
+              "sellable_qty_status": "unknown"
+            },
+            "setup": "",
+            "side": "",
+            "trigger": ""
+          },
+          {
+            "blocking_codes": [],
+            "candidate_id": "CAN-20260804-002471",
+            "code": "002471",
+            "decision": "observe",
+            "disposition": "paper_only",
+            "evidence_sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+            "invalidation": "",
+            "max_position_pct": 0,
+            "missing_evidence": [],
+            "name": "中超控股",
+            "rank": 6,
+            "rule_ids": [],
+            "score": 0.0,
+            "score_components": {
+              "board_strength_0_25": 0.0,
+              "evidence_freshness_0_15": 0.0,
+              "reward_risk_0_15": 0.0,
+              "stock_structure_0_25": 0.0,
+              "trigger_quality_0_20": 0.0
+            },
+            "sell_action": {
+              "action": "hold",
+              "buy_side_gaps_do_not_block": true,
+              "buy_side_source_gaps": [],
+              "requested_action": "hold",
+              "sellable_qty_status": "unknown"
+            },
+            "setup": "",
+            "side": "",
+            "trigger": ""
+          },
+          {
+            "blocking_codes": [],
+            "candidate_id": "CAN-20260804-002472",
+            "code": "002472",
+            "decision": "observe",
+            "disposition": "paper_only",
+            "evidence_sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+            "invalidation": "",
+            "max_position_pct": 0,
+            "missing_evidence": [],
+            "name": "双环传动",
+            "rank": 7,
+            "rule_ids": [],
+            "score": 0.0,
+            "score_components": {
+              "board_strength_0_25": 0.0,
+              "evidence_freshness_0_15": 0.0,
+              "reward_risk_0_15": 0.0,
+              "stock_structure_0_25": 0.0,
+              "trigger_quality_0_20": 0.0
+            },
+            "sell_action": {
+              "action": "hold",
+              "buy_side_gaps_do_not_block": true,
+              "buy_side_source_gaps": [],
+              "requested_action": "hold",
+              "sellable_qty_status": "unknown"
+            },
+            "setup": "",
+            "side": "",
+            "trigger": ""
+          },
+          {
+            "blocking_codes": [],
+            "candidate_id": "CAN-20260804-002896",
+            "code": "002896",
+            "decision": "observe",
+            "disposition": "paper_only",
+            "evidence_sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+            "invalidation": "",
+            "max_position_pct": 0,
+            "missing_evidence": [],
+            "name": "中大力德",
+            "rank": 8,
+            "rule_ids": [],
+            "score": 0.0,
+            "score_components": {
+              "board_strength_0_25": 0.0,
+              "evidence_freshness_0_15": 0.0,
+              "reward_risk_0_15": 0.0,
+              "stock_structure_0_25": 0.0,
+              "trigger_quality_0_20": 0.0
+            },
+            "sell_action": {
+              "action": "hold",
+              "buy_side_gaps_do_not_block": true,
+              "buy_side_source_gaps": [],
+              "requested_action": "hold",
+              "sellable_qty_status": "unknown"
+            },
+            "setup": "",
+            "side": "",
+            "trigger": ""
+          },
+          {
+            "blocking_codes": [],
+            "candidate_id": "CAN-20260804-300017",
+            "code": "300017",
+            "decision": "observe",
+            "disposition": "paper_only",
+            "evidence_sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+            "invalidation": "",
+            "max_position_pct": 0,
+            "missing_evidence": [],
+            "name": "网宿科技",
+            "rank": 9,
+            "rule_ids": [],
+            "score": 0.0,
+            "score_components": {
+              "board_strength_0_25": 0.0,
+              "evidence_freshness_0_15": 0.0,
+              "reward_risk_0_15": 0.0,
+              "stock_structure_0_25": 0.0,
+              "trigger_quality_0_20": 0.0
+            },
+            "sell_action": {
+              "action": "hold",
+              "buy_side_gaps_do_not_block": true,
+              "buy_side_source_gaps": [],
+              "requested_action": "hold",
+              "sellable_qty_status": "unknown"
+            },
+            "setup": "",
+            "side": "",
+            "trigger": ""
+          },
+          {
+            "blocking_codes": [],
+            "candidate_id": "CAN-20260804-300058",
+            "code": "300058",
+            "decision": "observe",
+            "disposition": "paper_only",
+            "evidence_sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+            "invalidation": "",
+            "max_position_pct": 0,
+            "missing_evidence": [],
+            "name": "蓝色光标",
+            "rank": 10,
+            "rule_ids": [],
+            "score": 0.0,
+            "score_components": {
+              "board_strength_0_25": 0.0,
+              "evidence_freshness_0_15": 0.0,
+              "reward_risk_0_15": 0.0,
+              "stock_structure_0_25": 0.0,
+              "trigger_quality_0_20": 0.0
+            },
+            "sell_action": {
+              "action": "hold",
+              "buy_side_gaps_do_not_block": true,
+              "buy_side_source_gaps": [],
+              "requested_action": "hold",
+              "sellable_qty_status": "unknown"
+            },
+            "setup": "",
+            "side": "",
+            "trigger": ""
+          },
+          {
+            "blocking_codes": [],
+            "candidate_id": "CAN-20260804-300308",
+            "code": "300308",
+            "decision": "observe",
+            "disposition": "paper_only",
+            "evidence_sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+            "invalidation": "",
+            "max_position_pct": 0,
+            "missing_evidence": [],
+            "name": "中际旭创",
+            "rank": 11,
+            "rule_ids": [],
+            "score": 0.0,
+            "score_components": {
+              "board_strength_0_25": 0.0,
+              "evidence_freshness_0_15": 0.0,
+              "reward_risk_0_15": 0.0,
+              "stock_structure_0_25": 0.0,
+              "trigger_quality_0_20": 0.0
+            },
+            "sell_action": {
+              "action": "hold",
+              "buy_side_gaps_do_not_block": true,
+              "buy_side_source_gaps": [],
+              "requested_action": "hold",
+              "sellable_qty_status": "unknown"
+            },
+            "setup": "",
+            "side": "",
+            "trigger": ""
+          },
+          {
+            "blocking_codes": [],
+            "candidate_id": "CAN-20260804-300394",
+            "code": "300394",
+            "decision": "observe",
+            "disposition": "paper_only",
+            "evidence_sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+            "invalidation": "",
+            "max_position_pct": 0,
+            "missing_evidence": [],
+            "name": "天孚通信",
+            "rank": 12,
+            "rule_ids": [],
+            "score": 0.0,
+            "score_components": {
+              "board_strength_0_25": 0.0,
+              "evidence_freshness_0_15": 0.0,
+              "reward_risk_0_15": 0.0,
+              "stock_structure_0_25": 0.0,
+              "trigger_quality_0_20": 0.0
+            },
+            "sell_action": {
+              "action": "hold",
+              "buy_side_gaps_do_not_block": true,
+              "buy_side_source_gaps": [],
+              "requested_action": "hold",
+              "sellable_qty_status": "unknown"
+            },
+            "setup": "",
+            "side": "",
+            "trigger": ""
+          },
+          {
+            "blocking_codes": [],
+            "candidate_id": "CAN-20260804-300502",
+            "code": "300502",
+            "decision": "observe",
+            "disposition": "paper_only",
+            "evidence_sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+            "invalidation": "",
+            "max_position_pct": 0,
+            "missing_evidence": [],
+            "name": "新易盛",
+            "rank": 13,
+            "rule_ids": [],
+            "score": 0.0,
+            "score_components": {
+              "board_strength_0_25": 0.0,
+              "evidence_freshness_0_15": 0.0,
+              "reward_risk_0_15": 0.0,
+              "stock_structure_0_25": 0.0,
+              "trigger_quality_0_20": 0.0
+            },
+            "sell_action": {
+              "action": "hold",
+              "buy_side_gaps_do_not_block": true,
+              "buy_side_source_gaps": [],
+              "requested_action": "hold",
+              "sellable_qty_status": "unknown"
+            },
+            "setup": "",
+            "side": "",
+            "trigger": ""
+          },
+          {
+            "blocking_codes": [],
+            "candidate_id": "CAN-20260804-300766",
+            "code": "300766",
+            "decision": "observe",
+            "disposition": "paper_only",
+            "evidence_sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+            "invalidation": "",
+            "max_position_pct": 0,
+            "missing_evidence": [],
+            "name": "每日互动",
+            "rank": 14,
+            "rule_ids": [],
+            "score": 0.0,
+            "score_components": {
+              "board_strength_0_25": 0.0,
+              "evidence_freshness_0_15": 0.0,
+              "reward_risk_0_15": 0.0,
+              "stock_structure_0_25": 0.0,
+              "trigger_quality_0_20": 0.0
+            },
+            "sell_action": {
+              "action": "hold",
+              "buy_side_gaps_do_not_block": true,
+              "buy_side_source_gaps": [],
+              "requested_action": "hold",
+              "sellable_qty_status": "unknown"
+            },
+            "setup": "",
+            "side": "",
+            "trigger": ""
+          },
+          {
+            "blocking_codes": [],
+            "candidate_id": "CAN-20260804-600584",
+            "code": "600584",
+            "decision": "observe",
+            "disposition": "paper_only",
+            "evidence_sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+            "invalidation": "",
+            "max_position_pct": 0,
+            "missing_evidence": [],
+            "name": "长电科技",
+            "rank": 15,
+            "rule_ids": [],
+            "score": 0.0,
+            "score_components": {
+              "board_strength_0_25": 0.0,
+              "evidence_freshness_0_15": 0.0,
+              "reward_risk_0_15": 0.0,
+              "stock_structure_0_25": 0.0,
+              "trigger_quality_0_20": 0.0
+            },
+            "sell_action": {
+              "action": "hold",
+              "buy_side_gaps_do_not_block": true,
+              "buy_side_source_gaps": [],
+              "requested_action": "hold",
+              "sellable_qty_status": "unknown"
+            },
+            "setup": "",
+            "side": "",
+            "trigger": ""
+          },
+          {
+            "blocking_codes": [],
+            "candidate_id": "CAN-20260804-601179",
+            "code": "601179",
+            "decision": "observe",
+            "disposition": "paper_only",
+            "evidence_sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+            "invalidation": "",
+            "max_position_pct": 0,
+            "missing_evidence": [],
+            "name": "中国西电",
+            "rank": 16,
+            "rule_ids": [],
+            "score": 0.0,
+            "score_components": {
+              "board_strength_0_25": 0.0,
+              "evidence_freshness_0_15": 0.0,
+              "reward_risk_0_15": 0.0,
+              "stock_structure_0_25": 0.0,
+              "trigger_quality_0_20": 0.0
+            },
+            "sell_action": {
+              "action": "hold",
+              "buy_side_gaps_do_not_block": true,
+              "buy_side_source_gaps": [],
+              "requested_action": "hold",
+              "sellable_qty_status": "unknown"
+            },
+            "setup": "",
+            "side": "",
+            "trigger": ""
+          },
+          {
+            "blocking_codes": [],
+            "candidate_id": "CAN-20260804-601611",
+            "code": "601611",
+            "decision": "observe",
+            "disposition": "paper_only",
+            "evidence_sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+            "invalidation": "",
+            "max_position_pct": 0,
+            "missing_evidence": [],
+            "name": "中国核建",
+            "rank": 17,
+            "rule_ids": [],
+            "score": 0.0,
+            "score_components": {
+              "board_strength_0_25": 0.0,
+              "evidence_freshness_0_15": 0.0,
+              "reward_risk_0_15": 0.0,
+              "stock_structure_0_25": 0.0,
+              "trigger_quality_0_20": 0.0
+            },
+            "sell_action": {
+              "action": "hold",
+              "buy_side_gaps_do_not_block": true,
+              "buy_side_source_gaps": [],
+              "requested_action": "hold",
+              "sellable_qty_status": "unknown"
+            },
+            "setup": "",
+            "side": "",
+            "trigger": ""
+          },
+          {
+            "blocking_codes": [],
+            "candidate_id": "CAN-20260804-603881",
+            "code": "603881",
+            "decision": "observe",
+            "disposition": "paper_only",
+            "evidence_sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+            "invalidation": "",
+            "max_position_pct": 0,
+            "missing_evidence": [],
+            "name": "数据港",
+            "rank": 18,
+            "rule_ids": [],
+            "score": 0.0,
+            "score_components": {
+              "board_strength_0_25": 0.0,
+              "evidence_freshness_0_15": 0.0,
+              "reward_risk_0_15": 0.0,
+              "stock_structure_0_25": 0.0,
+              "trigger_quality_0_20": 0.0
+            },
+            "sell_action": {
+              "action": "hold",
+              "buy_side_gaps_do_not_block": true,
+              "buy_side_source_gaps": [],
+              "requested_action": "hold",
+              "sellable_qty_status": "unknown"
+            },
+            "setup": "",
+            "side": "",
+            "trigger": ""
+          },
+          {
+            "blocking_codes": [],
+            "candidate_id": "CAN-20260804-603986",
+            "code": "603986",
+            "decision": "observe",
+            "disposition": "paper_only",
+            "evidence_sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+            "invalidation": "",
+            "max_position_pct": 0,
+            "missing_evidence": [],
+            "name": "兆易创新",
+            "rank": 19,
+            "rule_ids": [],
+            "score": 0.0,
+            "score_components": {
+              "board_strength_0_25": 0.0,
+              "evidence_freshness_0_15": 0.0,
+              "reward_risk_0_15": 0.0,
+              "stock_structure_0_25": 0.0,
+              "trigger_quality_0_20": 0.0
+            },
+            "sell_action": {
+              "action": "hold",
+              "buy_side_gaps_do_not_block": true,
+              "buy_side_source_gaps": [],
+              "requested_action": "hold",
+              "sellable_qty_status": "unknown"
+            },
+            "setup": "",
+            "side": "",
+            "trigger": ""
+          },
+          {
+            "blocking_codes": [],
+            "candidate_id": "CAN-20260804-688017",
+            "code": "688017",
+            "decision": "observe",
+            "disposition": "paper_only",
+            "evidence_sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+            "invalidation": "",
+            "max_position_pct": 0,
+            "missing_evidence": [],
+            "name": "绿的谐波",
+            "rank": 20,
+            "rule_ids": [],
+            "score": 0.0,
+            "score_components": {
+              "board_strength_0_25": 0.0,
+              "evidence_freshness_0_15": 0.0,
+              "reward_risk_0_15": 0.0,
+              "stock_structure_0_25": 0.0,
+              "trigger_quality_0_20": 0.0
+            },
+            "sell_action": {
+              "action": "hold",
+              "buy_side_gaps_do_not_block": true,
+              "buy_side_source_gaps": [],
+              "requested_action": "hold",
+              "sellable_qty_status": "unknown"
+            },
+            "setup": "",
+            "side": "",
+            "trigger": ""
+          },
+          {
+            "blocking_codes": [],
+            "candidate_id": "CAN-20260804-688825",
+            "code": "688825",
+            "decision": "observe",
+            "disposition": "paper_only",
+            "evidence_sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+            "invalidation": "",
+            "max_position_pct": 0,
+            "missing_evidence": [],
+            "name": "长鑫科技",
+            "rank": 21,
+            "rule_ids": [],
+            "score": 0.0,
+            "score_components": {
+              "board_strength_0_25": 0.0,
+              "evidence_freshness_0_15": 0.0,
+              "reward_risk_0_15": 0.0,
+              "stock_structure_0_25": 0.0,
+              "trigger_quality_0_20": 0.0
+            },
+            "sell_action": {
+              "action": "hold",
+              "buy_side_gaps_do_not_block": true,
+              "buy_side_source_gaps": [],
+              "requested_action": "hold",
+              "sellable_qty_status": "unknown"
+            },
+            "setup": "",
+            "side": "",
+            "trigger": ""
+          }
+        ],
+        "schema_version": "recommendation_state.v1",
+        "trading_date": "2026-08-04"
+      },
+      "side_blocks": {
+        "lianban": [],
+        "trend": []
+      },
+      "standard_count": 0,
+      "unverifiable": [
+        "c15:coverage_below_minimum",
+        "c15:named_entity_missing",
+        "c15:pipeline_semantic_degraded",
+        "c15:row_shape_mismatch"
+      ],
+      "workflow_gaps": [
+        "closure:snapshot_query_not_passing",
+        "closure:snapshot_query_named_entity_missing",
+        "closure:snapshot_query_coverage_invalid",
+        "closure:snapshot_query_pipeline_quality_invalid",
+        "closure:snapshot_query_entity_mismatch",
+        "closure:snapshot_query_non_equivalent",
+        "closure:snapshot_blocked_degraded"
+      ]
+    }
+  ],
+  "decisions": [
+    {
+      "allowed": false,
+      "blocking_codes": [
+        "PAPER_ONLY_DISPOSITION"
+      ],
+      "candidate_id": "CAN-20260731-000938",
+      "code": "000938",
+      "date": "2026-07-31",
+      "disposition": "paper_only",
+      "evidence_source": "recommendation_snapshot.v1.json",
+      "missing_evidence": [],
+      "scope": "candidate",
+      "side": null,
+      "source_decision": "observe"
+    },
+    {
+      "allowed": false,
+      "blocking_codes": [
+        "PAPER_ONLY_DISPOSITION"
+      ],
+      "candidate_id": "CAN-20260731-002156",
+      "code": "002156",
+      "date": "2026-07-31",
+      "disposition": "paper_only",
+      "evidence_source": "recommendation_snapshot.v1.json",
+      "missing_evidence": [],
+      "scope": "candidate",
+      "side": null,
+      "source_decision": "observe"
+    },
+    {
+      "allowed": false,
+      "blocking_codes": [
+        "PAPER_ONLY_DISPOSITION"
+      ],
+      "candidate_id": "CAN-20260731-002185",
+      "code": "002185",
+      "date": "2026-07-31",
+      "disposition": "paper_only",
+      "evidence_source": "recommendation_snapshot.v1.json",
+      "missing_evidence": [],
+      "scope": "candidate",
+      "side": null,
+      "source_decision": "observe"
+    },
+    {
+      "allowed": false,
+      "blocking_codes": [
+        "PAPER_ONLY_DISPOSITION"
+      ],
+      "candidate_id": "CAN-20260731-300308",
+      "code": "300308",
+      "date": "2026-07-31",
+      "disposition": "paper_only",
+      "evidence_source": "recommendation_snapshot.v1.json",
+      "missing_evidence": [],
+      "scope": "candidate",
+      "side": null,
+      "source_decision": "observe"
+    },
+    {
+      "allowed": false,
+      "blocking_codes": [
+        "PAPER_ONLY_DISPOSITION"
+      ],
+      "candidate_id": "CAN-20260731-300502",
+      "code": "300502",
+      "date": "2026-07-31",
+      "disposition": "paper_only",
+      "evidence_source": "recommendation_snapshot.v1.json",
+      "missing_evidence": [],
+      "scope": "candidate",
+      "side": null,
+      "source_decision": "observe"
+    },
+    {
+      "allowed": false,
+      "blocking_codes": [
+        "PAPER_ONLY_DISPOSITION"
+      ],
+      "candidate_id": "CAN-20260731-600584",
+      "code": "600584",
+      "date": "2026-07-31",
+      "disposition": "paper_only",
+      "evidence_source": "recommendation_snapshot.v1.json",
+      "missing_evidence": [],
+      "scope": "candidate",
+      "side": null,
+      "source_decision": "observe"
+    },
+    {
+      "allowed": false,
+      "blocking_codes": [
+        "PAPER_ONLY_DISPOSITION"
+      ],
+      "candidate_id": "CAN-20260731-600588",
+      "code": "600588",
+      "date": "2026-07-31",
+      "disposition": "paper_only",
+      "evidence_source": "recommendation_snapshot.v1.json",
+      "missing_evidence": [],
+      "scope": "candidate",
+      "side": null,
+      "source_decision": "observe"
+    },
+    {
+      "allowed": false,
+      "blocking_codes": [
+        "PAPER_ONLY_DISPOSITION"
+      ],
+      "candidate_id": "CAN-20260731-603221",
+      "code": "603221",
+      "date": "2026-07-31",
+      "disposition": "paper_only",
+      "evidence_source": "recommendation_snapshot.v1.json",
+      "missing_evidence": [],
+      "scope": "candidate",
+      "side": null,
+      "source_decision": "observe"
+    },
+    {
+      "allowed": false,
+      "blocking_codes": [
+        "PAPER_ONLY_DISPOSITION"
+      ],
+      "candidate_id": "CAN-20260731-605179",
+      "code": "605179",
+      "date": "2026-07-31",
+      "disposition": "paper_only",
+      "evidence_source": "recommendation_snapshot.v1.json",
+      "missing_evidence": [],
+      "scope": "candidate",
+      "side": null,
+      "source_decision": "observe"
+    },
+    {
+      "allowed": false,
+      "blocking_codes": [
+        "PAPER_ONLY_DISPOSITION"
+      ],
+      "candidate_id": "CAN-20260731-688111",
+      "code": "688111",
+      "date": "2026-07-31",
+      "disposition": "paper_only",
+      "evidence_source": "recommendation_snapshot.v1.json",
+      "missing_evidence": [],
+      "scope": "candidate",
+      "side": null,
+      "source_decision": "observe"
+    },
+    {
+      "allowed": false,
+      "blocking_codes": [
+        "PAPER_ONLY_DISPOSITION"
+      ],
+      "candidate_id": "CAN-20260731-688825",
+      "code": "688825",
+      "date": "2026-07-31",
+      "disposition": "paper_only",
+      "evidence_source": "recommendation_snapshot.v1.json",
+      "missing_evidence": [],
+      "scope": "candidate",
+      "side": null,
+      "source_decision": "observe"
+    },
+    {
+      "allowed": false,
+      "blocking_codes": [
+        "PAPER_ONLY_DISPOSITION"
+      ],
+      "candidate_id": "CAN-20260803-000815",
+      "code": "000815",
+      "date": "2026-08-03",
+      "disposition": "paper_only",
+      "evidence_source": "recommendation_snapshot.v1.json",
+      "missing_evidence": [],
+      "scope": "candidate",
+      "side": null,
+      "source_decision": "observe"
+    },
+    {
+      "allowed": false,
+      "blocking_codes": [
+        "PAPER_ONLY_DISPOSITION"
+      ],
+      "candidate_id": "CAN-20260803-002131",
+      "code": "002131",
+      "date": "2026-08-03",
+      "disposition": "paper_only",
+      "evidence_source": "recommendation_snapshot.v1.json",
+      "missing_evidence": [],
+      "scope": "candidate",
+      "side": null,
+      "source_decision": "exclude"
+    },
+    {
+      "allowed": false,
+      "blocking_codes": [
+        "PAPER_ONLY_DISPOSITION"
+      ],
+      "candidate_id": "CAN-20260803-002156",
+      "code": "002156",
+      "date": "2026-08-03",
+      "disposition": "paper_only",
+      "evidence_source": "recommendation_snapshot.v1.json",
+      "missing_evidence": [],
+      "scope": "candidate",
+      "side": null,
+      "source_decision": "observe"
+    },
+    {
+      "allowed": false,
+      "blocking_codes": [
+        "PAPER_ONLY_DISPOSITION"
+      ],
+      "candidate_id": "CAN-20260803-002185",
+      "code": "002185",
+      "date": "2026-08-03",
+      "disposition": "paper_only",
+      "evidence_source": "recommendation_snapshot.v1.json",
+      "missing_evidence": [],
+      "scope": "candidate",
+      "side": null,
+      "source_decision": "observe"
+    },
+    {
+      "allowed": false,
+      "blocking_codes": [
+        "PAPER_ONLY_DISPOSITION"
+      ],
+      "candidate_id": "CAN-20260803-002354",
+      "code": "002354",
+      "date": "2026-08-03",
+      "disposition": "paper_only",
+      "evidence_source": "recommendation_snapshot.v1.json",
+      "missing_evidence": [],
+      "scope": "candidate",
+      "side": null,
+      "source_decision": "observe"
+    },
+    {
+      "allowed": false,
+      "blocking_codes": [
+        "PAPER_ONLY_DISPOSITION"
+      ],
+      "candidate_id": "CAN-20260803-002366",
+      "code": "002366",
+      "date": "2026-08-03",
+      "disposition": "paper_only",
+      "evidence_source": "recommendation_snapshot.v1.json",
+      "missing_evidence": [],
+      "scope": "candidate",
+      "side": null,
+      "source_decision": "observe"
+    },
+    {
+      "allowed": false,
+      "blocking_codes": [
+        "PAPER_ONLY_DISPOSITION"
+      ],
+      "candidate_id": "CAN-20260803-002896",
+      "code": "002896",
+      "date": "2026-08-03",
+      "disposition": "paper_only",
+      "evidence_source": "recommendation_snapshot.v1.json",
+      "missing_evidence": [],
+      "scope": "candidate",
+      "side": null,
+      "source_decision": "exclude"
+    },
+    {
+      "allowed": false,
+      "blocking_codes": [
+        "PAPER_ONLY_DISPOSITION"
+      ],
+      "candidate_id": "CAN-20260803-003001",
+      "code": "003001",
+      "date": "2026-08-03",
+      "disposition": "paper_only",
+      "evidence_source": "recommendation_snapshot.v1.json",
+      "missing_evidence": [],
+      "scope": "candidate",
+      "side": null,
+      "source_decision": "observe"
+    },
+    {
+      "allowed": false,
+      "blocking_codes": [
+        "PAPER_ONLY_DISPOSITION"
+      ],
+      "candidate_id": "CAN-20260803-300017",
+      "code": "300017",
+      "date": "2026-08-03",
+      "disposition": "paper_only",
+      "evidence_source": "recommendation_snapshot.v1.json",
+      "missing_evidence": [],
+      "scope": "candidate",
+      "side": null,
+      "source_decision": "observe"
+    },
+    {
+      "allowed": false,
+      "blocking_codes": [
+        "PAPER_ONLY_DISPOSITION"
+      ],
+      "candidate_id": "CAN-20260803-600584",
+      "code": "600584",
+      "date": "2026-08-03",
+      "disposition": "paper_only",
+      "evidence_source": "recommendation_snapshot.v1.json",
+      "missing_evidence": [],
+      "scope": "candidate",
+      "side": null,
+      "source_decision": "observe"
+    },
+    {
+      "allowed": false,
+      "blocking_codes": [
+        "PAPER_ONLY_DISPOSITION"
+      ],
+      "candidate_id": "CAN-20260803-600602",
+      "code": "600602",
+      "date": "2026-08-03",
+      "disposition": "paper_only",
+      "evidence_source": "recommendation_snapshot.v1.json",
+      "missing_evidence": [],
+      "scope": "candidate",
+      "side": null,
+      "source_decision": "observe"
+    },
+    {
+      "allowed": false,
+      "blocking_codes": [
+        "PAPER_ONLY_DISPOSITION"
+      ],
+      "candidate_id": "CAN-20260803-601179",
+      "code": "601179",
+      "date": "2026-08-03",
+      "disposition": "paper_only",
+      "evidence_source": "recommendation_snapshot.v1.json",
+      "missing_evidence": [],
+      "scope": "candidate",
+      "side": null,
+      "source_decision": "observe"
+    },
+    {
+      "allowed": false,
+      "blocking_codes": [
+        "PAPER_ONLY_DISPOSITION"
+      ],
+      "candidate_id": "CAN-20260803-601611",
+      "code": "601611",
+      "date": "2026-08-03",
+      "disposition": "paper_only",
+      "evidence_source": "recommendation_snapshot.v1.json",
+      "missing_evidence": [],
+      "scope": "candidate",
+      "side": null,
+      "source_decision": "observe"
+    },
+    {
+      "allowed": false,
+      "blocking_codes": [
+        "PAPER_ONLY_DISPOSITION"
+      ],
+      "candidate_id": "CAN-20260803-601985",
+      "code": "601985",
+      "date": "2026-08-03",
+      "disposition": "paper_only",
+      "evidence_source": "recommendation_snapshot.v1.json",
+      "missing_evidence": [],
+      "scope": "candidate",
+      "side": null,
+      "source_decision": "observe"
+    },
+    {
+      "allowed": false,
+      "blocking_codes": [
+        "PAPER_ONLY_DISPOSITION"
+      ],
+      "candidate_id": "CAN-20260803-603881",
+      "code": "603881",
+      "date": "2026-08-03",
+      "disposition": "paper_only",
+      "evidence_source": "recommendation_snapshot.v1.json",
+      "missing_evidence": [],
+      "scope": "candidate",
+      "side": null,
+      "source_decision": "observe"
+    },
+    {
+      "allowed": false,
+      "blocking_codes": [
+        "PAPER_ONLY_DISPOSITION"
+      ],
+      "candidate_id": "CAN-20260803-603986",
+      "code": "603986",
+      "date": "2026-08-03",
+      "disposition": "paper_only",
+      "evidence_source": "recommendation_snapshot.v1.json",
+      "missing_evidence": [],
+      "scope": "candidate",
+      "side": null,
+      "source_decision": "observe"
+    },
+    {
+      "allowed": false,
+      "blocking_codes": [
+        "PAPER_ONLY_DISPOSITION"
+      ],
+      "candidate_id": "CAN-20260803-688825",
+      "code": "688825",
+      "date": "2026-08-03",
+      "disposition": "paper_only",
+      "evidence_source": "recommendation_snapshot.v1.json",
+      "missing_evidence": [],
+      "scope": "candidate",
+      "side": null,
+      "source_decision": "observe"
+    },
+    {
+      "allowed": false,
+      "blocking_codes": [
+        "PAPER_ONLY_DISPOSITION"
+      ],
+      "candidate_id": "CAN-20260804-000533",
+      "code": "000533",
+      "date": "2026-08-04",
+      "disposition": "paper_only",
+      "evidence_source": "recommendation_snapshot.v1.json",
+      "missing_evidence": [],
+      "scope": "candidate",
+      "side": null,
+      "source_decision": "observe"
+    },
+    {
+      "allowed": false,
+      "blocking_codes": [
+        "PAPER_ONLY_DISPOSITION"
+      ],
+      "candidate_id": "CAN-20260804-000815",
+      "code": "000815",
+      "date": "2026-08-04",
+      "disposition": "paper_only",
+      "evidence_source": "recommendation_snapshot.v1.json",
+      "missing_evidence": [],
+      "scope": "candidate",
+      "side": null,
+      "source_decision": "observe"
+    },
+    {
+      "allowed": false,
+      "blocking_codes": [
+        "PAPER_ONLY_DISPOSITION"
+      ],
+      "candidate_id": "CAN-20260804-002131",
+      "code": "002131",
+      "date": "2026-08-04",
+      "disposition": "paper_only",
+      "evidence_source": "recommendation_snapshot.v1.json",
+      "missing_evidence": [],
+      "scope": "candidate",
+      "side": null,
+      "source_decision": "observe"
+    },
+    {
+      "allowed": false,
+      "blocking_codes": [
+        "PAPER_ONLY_DISPOSITION"
+      ],
+      "candidate_id": "CAN-20260804-002156",
+      "code": "002156",
+      "date": "2026-08-04",
+      "disposition": "paper_only",
+      "evidence_source": "recommendation_snapshot.v1.json",
+      "missing_evidence": [],
+      "scope": "candidate",
+      "side": null,
+      "source_decision": "observe"
+    },
+    {
+      "allowed": false,
+      "blocking_codes": [
+        "PAPER_ONLY_DISPOSITION"
+      ],
+      "candidate_id": "CAN-20260804-002354",
+      "code": "002354",
+      "date": "2026-08-04",
+      "disposition": "paper_only",
+      "evidence_source": "recommendation_snapshot.v1.json",
+      "missing_evidence": [],
+      "scope": "candidate",
+      "side": null,
+      "source_decision": "observe"
+    },
+    {
+      "allowed": false,
+      "blocking_codes": [
+        "PAPER_ONLY_DISPOSITION"
+      ],
+      "candidate_id": "CAN-20260804-002471",
+      "code": "002471",
+      "date": "2026-08-04",
+      "disposition": "paper_only",
+      "evidence_source": "recommendation_snapshot.v1.json",
+      "missing_evidence": [],
+      "scope": "candidate",
+      "side": null,
+      "source_decision": "observe"
+    },
+    {
+      "allowed": false,
+      "blocking_codes": [
+        "PAPER_ONLY_DISPOSITION"
+      ],
+      "candidate_id": "CAN-20260804-002472",
+      "code": "002472",
+      "date": "2026-08-04",
+      "disposition": "paper_only",
+      "evidence_source": "recommendation_snapshot.v1.json",
+      "missing_evidence": [],
+      "scope": "candidate",
+      "side": null,
+      "source_decision": "observe"
+    },
+    {
+      "allowed": false,
+      "blocking_codes": [
+        "PAPER_ONLY_DISPOSITION"
+      ],
+      "candidate_id": "CAN-20260804-002896",
+      "code": "002896",
+      "date": "2026-08-04",
+      "disposition": "paper_only",
+      "evidence_source": "recommendation_snapshot.v1.json",
+      "missing_evidence": [],
+      "scope": "candidate",
+      "side": null,
+      "source_decision": "observe"
+    },
+    {
+      "allowed": false,
+      "blocking_codes": [
+        "PAPER_ONLY_DISPOSITION"
+      ],
+      "candidate_id": "CAN-20260804-300017",
+      "code": "300017",
+      "date": "2026-08-04",
+      "disposition": "paper_only",
+      "evidence_source": "recommendation_snapshot.v1.json",
+      "missing_evidence": [],
+      "scope": "candidate",
+      "side": null,
+      "source_decision": "observe"
+    },
+    {
+      "allowed": false,
+      "blocking_codes": [
+        "PAPER_ONLY_DISPOSITION"
+      ],
+      "candidate_id": "CAN-20260804-300058",
+      "code": "300058",
+      "date": "2026-08-04",
+      "disposition": "paper_only",
+      "evidence_source": "recommendation_snapshot.v1.json",
+      "missing_evidence": [],
+      "scope": "candidate",
+      "side": null,
+      "source_decision": "observe"
+    },
+    {
+      "allowed": false,
+      "blocking_codes": [
+        "PAPER_ONLY_DISPOSITION"
+      ],
+      "candidate_id": "CAN-20260804-300308",
+      "code": "300308",
+      "date": "2026-08-04",
+      "disposition": "paper_only",
+      "evidence_source": "recommendation_snapshot.v1.json",
+      "missing_evidence": [],
+      "scope": "candidate",
+      "side": null,
+      "source_decision": "observe"
+    },
+    {
+      "allowed": false,
+      "blocking_codes": [
+        "PAPER_ONLY_DISPOSITION"
+      ],
+      "candidate_id": "CAN-20260804-300394",
+      "code": "300394",
+      "date": "2026-08-04",
+      "disposition": "paper_only",
+      "evidence_source": "recommendation_snapshot.v1.json",
+      "missing_evidence": [],
+      "scope": "candidate",
+      "side": null,
+      "source_decision": "observe"
+    },
+    {
+      "allowed": false,
+      "blocking_codes": [
+        "PAPER_ONLY_DISPOSITION"
+      ],
+      "candidate_id": "CAN-20260804-300502",
+      "code": "300502",
+      "date": "2026-08-04",
+      "disposition": "paper_only",
+      "evidence_source": "recommendation_snapshot.v1.json",
+      "missing_evidence": [],
+      "scope": "candidate",
+      "side": null,
+      "source_decision": "observe"
+    },
+    {
+      "allowed": false,
+      "blocking_codes": [
+        "PAPER_ONLY_DISPOSITION"
+      ],
+      "candidate_id": "CAN-20260804-300766",
+      "code": "300766",
+      "date": "2026-08-04",
+      "disposition": "paper_only",
+      "evidence_source": "recommendation_snapshot.v1.json",
+      "missing_evidence": [],
+      "scope": "candidate",
+      "side": null,
+      "source_decision": "observe"
+    },
+    {
+      "allowed": false,
+      "blocking_codes": [
+        "PAPER_ONLY_DISPOSITION"
+      ],
+      "candidate_id": "CAN-20260804-600584",
+      "code": "600584",
+      "date": "2026-08-04",
+      "disposition": "paper_only",
+      "evidence_source": "recommendation_snapshot.v1.json",
+      "missing_evidence": [],
+      "scope": "candidate",
+      "side": null,
+      "source_decision": "observe"
+    },
+    {
+      "allowed": false,
+      "blocking_codes": [
+        "PAPER_ONLY_DISPOSITION"
+      ],
+      "candidate_id": "CAN-20260804-601179",
+      "code": "601179",
+      "date": "2026-08-04",
+      "disposition": "paper_only",
+      "evidence_source": "recommendation_snapshot.v1.json",
+      "missing_evidence": [],
+      "scope": "candidate",
+      "side": null,
+      "source_decision": "observe"
+    },
+    {
+      "allowed": false,
+      "blocking_codes": [
+        "PAPER_ONLY_DISPOSITION"
+      ],
+      "candidate_id": "CAN-20260804-601611",
+      "code": "601611",
+      "date": "2026-08-04",
+      "disposition": "paper_only",
+      "evidence_source": "recommendation_snapshot.v1.json",
+      "missing_evidence": [],
+      "scope": "candidate",
+      "side": null,
+      "source_decision": "observe"
+    },
+    {
+      "allowed": false,
+      "blocking_codes": [
+        "PAPER_ONLY_DISPOSITION"
+      ],
+      "candidate_id": "CAN-20260804-603881",
+      "code": "603881",
+      "date": "2026-08-04",
+      "disposition": "paper_only",
+      "evidence_source": "recommendation_snapshot.v1.json",
+      "missing_evidence": [],
+      "scope": "candidate",
+      "side": null,
+      "source_decision": "observe"
+    },
+    {
+      "allowed": false,
+      "blocking_codes": [
+        "PAPER_ONLY_DISPOSITION"
+      ],
+      "candidate_id": "CAN-20260804-603986",
+      "code": "603986",
+      "date": "2026-08-04",
+      "disposition": "paper_only",
+      "evidence_source": "recommendation_snapshot.v1.json",
+      "missing_evidence": [],
+      "scope": "candidate",
+      "side": null,
+      "source_decision": "observe"
+    },
+    {
+      "allowed": false,
+      "blocking_codes": [
+        "PAPER_ONLY_DISPOSITION"
+      ],
+      "candidate_id": "CAN-20260804-688017",
+      "code": "688017",
+      "date": "2026-08-04",
+      "disposition": "paper_only",
+      "evidence_source": "recommendation_snapshot.v1.json",
+      "missing_evidence": [],
+      "scope": "candidate",
+      "side": null,
+      "source_decision": "observe"
+    },
+    {
+      "allowed": false,
+      "blocking_codes": [
+        "PAPER_ONLY_DISPOSITION"
+      ],
+      "candidate_id": "CAN-20260804-688825",
+      "code": "688825",
+      "date": "2026-08-04",
+      "disposition": "paper_only",
+      "evidence_source": "recommendation_snapshot.v1.json",
+      "missing_evidence": [],
+      "scope": "candidate",
+      "side": null,
+      "source_decision": "observe"
+    }
+  ],
+  "recommendation_state": {
+    "candidates": [
+      {
+        "blocking_codes": [],
+        "candidate_id": "CAN-20260804-000533",
+        "code": "000533",
+        "decision": "observe",
+        "disposition": "paper_only",
+        "evidence_sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+        "invalidation": "",
+        "max_position_pct": 0,
+        "missing_evidence": [],
+        "name": "顺钠股份",
+        "rank": 1,
+        "rule_ids": [],
+        "score": 0.0,
+        "score_components": {
+          "board_strength_0_25": 0.0,
+          "evidence_freshness_0_15": 0.0,
+          "reward_risk_0_15": 0.0,
+          "stock_structure_0_25": 0.0,
+          "trigger_quality_0_20": 0.0
+        },
+        "sell_action": {
+          "action": "hold",
+          "buy_side_gaps_do_not_block": true,
+          "buy_side_source_gaps": [],
+          "requested_action": "hold",
+          "sellable_qty_status": "unknown"
+        },
+        "setup": "",
+        "side": "",
+        "trigger": ""
+      },
+      {
+        "blocking_codes": [],
+        "candidate_id": "CAN-20260804-000815",
+        "code": "000815",
+        "decision": "observe",
+        "disposition": "paper_only",
+        "evidence_sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+        "invalidation": "",
+        "max_position_pct": 0,
+        "missing_evidence": [],
+        "name": "美利云",
+        "rank": 2,
+        "rule_ids": [],
+        "score": 0.0,
+        "score_components": {
+          "board_strength_0_25": 0.0,
+          "evidence_freshness_0_15": 0.0,
+          "reward_risk_0_15": 0.0,
+          "stock_structure_0_25": 0.0,
+          "trigger_quality_0_20": 0.0
+        },
+        "sell_action": {
+          "action": "hold",
+          "buy_side_gaps_do_not_block": true,
+          "buy_side_source_gaps": [],
+          "requested_action": "hold",
+          "sellable_qty_status": "unknown"
+        },
+        "setup": "",
+        "side": "",
+        "trigger": ""
+      },
+      {
+        "blocking_codes": [],
+        "candidate_id": "CAN-20260804-002131",
+        "code": "002131",
+        "decision": "observe",
+        "disposition": "paper_only",
+        "evidence_sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+        "invalidation": "",
+        "max_position_pct": 0,
+        "missing_evidence": [],
+        "name": "利欧股份",
+        "rank": 3,
+        "rule_ids": [],
+        "score": 0.0,
+        "score_components": {
+          "board_strength_0_25": 0.0,
+          "evidence_freshness_0_15": 0.0,
+          "reward_risk_0_15": 0.0,
+          "stock_structure_0_25": 0.0,
+          "trigger_quality_0_20": 0.0
+        },
+        "sell_action": {
+          "action": "hold",
+          "buy_side_gaps_do_not_block": true,
+          "buy_side_source_gaps": [],
+          "requested_action": "hold",
+          "sellable_qty_status": "unknown"
+        },
+        "setup": "",
+        "side": "",
+        "trigger": ""
+      },
+      {
+        "blocking_codes": [],
+        "candidate_id": "CAN-20260804-002156",
+        "code": "002156",
+        "decision": "observe",
+        "disposition": "paper_only",
+        "evidence_sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+        "invalidation": "",
+        "max_position_pct": 0,
+        "missing_evidence": [],
+        "name": "通富微电",
+        "rank": 4,
+        "rule_ids": [],
+        "score": 0.0,
+        "score_components": {
+          "board_strength_0_25": 0.0,
+          "evidence_freshness_0_15": 0.0,
+          "reward_risk_0_15": 0.0,
+          "stock_structure_0_25": 0.0,
+          "trigger_quality_0_20": 0.0
+        },
+        "sell_action": {
+          "action": "hold",
+          "buy_side_gaps_do_not_block": true,
+          "buy_side_source_gaps": [],
+          "requested_action": "hold",
+          "sellable_qty_status": "unknown"
+        },
+        "setup": "",
+        "side": "",
+        "trigger": ""
+      },
+      {
+        "blocking_codes": [],
+        "candidate_id": "CAN-20260804-002354",
+        "code": "002354",
+        "decision": "observe",
+        "disposition": "paper_only",
+        "evidence_sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+        "invalidation": "",
+        "max_position_pct": 0,
+        "missing_evidence": [],
+        "name": "天娱数科",
+        "rank": 5,
+        "rule_ids": [],
+        "score": 0.0,
+        "score_components": {
+          "board_strength_0_25": 0.0,
+          "evidence_freshness_0_15": 0.0,
+          "reward_risk_0_15": 0.0,
+          "stock_structure_0_25": 0.0,
+          "trigger_quality_0_20": 0.0
+        },
+        "sell_action": {
+          "action": "hold",
+          "buy_side_gaps_do_not_block": true,
+          "buy_side_source_gaps": [],
+          "requested_action": "hold",
+          "sellable_qty_status": "unknown"
+        },
+        "setup": "",
+        "side": "",
+        "trigger": ""
+      },
+      {
+        "blocking_codes": [],
+        "candidate_id": "CAN-20260804-002471",
+        "code": "002471",
+        "decision": "observe",
+        "disposition": "paper_only",
+        "evidence_sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+        "invalidation": "",
+        "max_position_pct": 0,
+        "missing_evidence": [],
+        "name": "中超控股",
+        "rank": 6,
+        "rule_ids": [],
+        "score": 0.0,
+        "score_components": {
+          "board_strength_0_25": 0.0,
+          "evidence_freshness_0_15": 0.0,
+          "reward_risk_0_15": 0.0,
+          "stock_structure_0_25": 0.0,
+          "trigger_quality_0_20": 0.0
+        },
+        "sell_action": {
+          "action": "hold",
+          "buy_side_gaps_do_not_block": true,
+          "buy_side_source_gaps": [],
+          "requested_action": "hold",
+          "sellable_qty_status": "unknown"
+        },
+        "setup": "",
+        "side": "",
+        "trigger": ""
+      },
+      {
+        "blocking_codes": [],
+        "candidate_id": "CAN-20260804-002472",
+        "code": "002472",
+        "decision": "observe",
+        "disposition": "paper_only",
+        "evidence_sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+        "invalidation": "",
+        "max_position_pct": 0,
+        "missing_evidence": [],
+        "name": "双环传动",
+        "rank": 7,
+        "rule_ids": [],
+        "score": 0.0,
+        "score_components": {
+          "board_strength_0_25": 0.0,
+          "evidence_freshness_0_15": 0.0,
+          "reward_risk_0_15": 0.0,
+          "stock_structure_0_25": 0.0,
+          "trigger_quality_0_20": 0.0
+        },
+        "sell_action": {
+          "action": "hold",
+          "buy_side_gaps_do_not_block": true,
+          "buy_side_source_gaps": [],
+          "requested_action": "hold",
+          "sellable_qty_status": "unknown"
+        },
+        "setup": "",
+        "side": "",
+        "trigger": ""
+      },
+      {
+        "blocking_codes": [],
+        "candidate_id": "CAN-20260804-002896",
+        "code": "002896",
+        "decision": "observe",
+        "disposition": "paper_only",
+        "evidence_sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+        "invalidation": "",
+        "max_position_pct": 0,
+        "missing_evidence": [],
+        "name": "中大力德",
+        "rank": 8,
+        "rule_ids": [],
+        "score": 0.0,
+        "score_components": {
+          "board_strength_0_25": 0.0,
+          "evidence_freshness_0_15": 0.0,
+          "reward_risk_0_15": 0.0,
+          "stock_structure_0_25": 0.0,
+          "trigger_quality_0_20": 0.0
+        },
+        "sell_action": {
+          "action": "hold",
+          "buy_side_gaps_do_not_block": true,
+          "buy_side_source_gaps": [],
+          "requested_action": "hold",
+          "sellable_qty_status": "unknown"
+        },
+        "setup": "",
+        "side": "",
+        "trigger": ""
+      },
+      {
+        "blocking_codes": [],
+        "candidate_id": "CAN-20260804-300017",
+        "code": "300017",
+        "decision": "observe",
+        "disposition": "paper_only",
+        "evidence_sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+        "invalidation": "",
+        "max_position_pct": 0,
+        "missing_evidence": [],
+        "name": "网宿科技",
+        "rank": 9,
+        "rule_ids": [],
+        "score": 0.0,
+        "score_components": {
+          "board_strength_0_25": 0.0,
+          "evidence_freshness_0_15": 0.0,
+          "reward_risk_0_15": 0.0,
+          "stock_structure_0_25": 0.0,
+          "trigger_quality_0_20": 0.0
+        },
+        "sell_action": {
+          "action": "hold",
+          "buy_side_gaps_do_not_block": true,
+          "buy_side_source_gaps": [],
+          "requested_action": "hold",
+          "sellable_qty_status": "unknown"
+        },
+        "setup": "",
+        "side": "",
+        "trigger": ""
+      },
+      {
+        "blocking_codes": [],
+        "candidate_id": "CAN-20260804-300058",
+        "code": "300058",
+        "decision": "observe",
+        "disposition": "paper_only",
+        "evidence_sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+        "invalidation": "",
+        "max_position_pct": 0,
+        "missing_evidence": [],
+        "name": "蓝色光标",
+        "rank": 10,
+        "rule_ids": [],
+        "score": 0.0,
+        "score_components": {
+          "board_strength_0_25": 0.0,
+          "evidence_freshness_0_15": 0.0,
+          "reward_risk_0_15": 0.0,
+          "stock_structure_0_25": 0.0,
+          "trigger_quality_0_20": 0.0
+        },
+        "sell_action": {
+          "action": "hold",
+          "buy_side_gaps_do_not_block": true,
+          "buy_side_source_gaps": [],
+          "requested_action": "hold",
+          "sellable_qty_status": "unknown"
+        },
+        "setup": "",
+        "side": "",
+        "trigger": ""
+      },
+      {
+        "blocking_codes": [],
+        "candidate_id": "CAN-20260804-300308",
+        "code": "300308",
+        "decision": "observe",
+        "disposition": "paper_only",
+        "evidence_sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+        "invalidation": "",
+        "max_position_pct": 0,
+        "missing_evidence": [],
+        "name": "中际旭创",
+        "rank": 11,
+        "rule_ids": [],
+        "score": 0.0,
+        "score_components": {
+          "board_strength_0_25": 0.0,
+          "evidence_freshness_0_15": 0.0,
+          "reward_risk_0_15": 0.0,
+          "stock_structure_0_25": 0.0,
+          "trigger_quality_0_20": 0.0
+        },
+        "sell_action": {
+          "action": "hold",
+          "buy_side_gaps_do_not_block": true,
+          "buy_side_source_gaps": [],
+          "requested_action": "hold",
+          "sellable_qty_status": "unknown"
+        },
+        "setup": "",
+        "side": "",
+        "trigger": ""
+      },
+      {
+        "blocking_codes": [],
+        "candidate_id": "CAN-20260804-300394",
+        "code": "300394",
+        "decision": "observe",
+        "disposition": "paper_only",
+        "evidence_sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+        "invalidation": "",
+        "max_position_pct": 0,
+        "missing_evidence": [],
+        "name": "天孚通信",
+        "rank": 12,
+        "rule_ids": [],
+        "score": 0.0,
+        "score_components": {
+          "board_strength_0_25": 0.0,
+          "evidence_freshness_0_15": 0.0,
+          "reward_risk_0_15": 0.0,
+          "stock_structure_0_25": 0.0,
+          "trigger_quality_0_20": 0.0
+        },
+        "sell_action": {
+          "action": "hold",
+          "buy_side_gaps_do_not_block": true,
+          "buy_side_source_gaps": [],
+          "requested_action": "hold",
+          "sellable_qty_status": "unknown"
+        },
+        "setup": "",
+        "side": "",
+        "trigger": ""
+      },
+      {
+        "blocking_codes": [],
+        "candidate_id": "CAN-20260804-300502",
+        "code": "300502",
+        "decision": "observe",
+        "disposition": "paper_only",
+        "evidence_sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+        "invalidation": "",
+        "max_position_pct": 0,
+        "missing_evidence": [],
+        "name": "新易盛",
+        "rank": 13,
+        "rule_ids": [],
+        "score": 0.0,
+        "score_components": {
+          "board_strength_0_25": 0.0,
+          "evidence_freshness_0_15": 0.0,
+          "reward_risk_0_15": 0.0,
+          "stock_structure_0_25": 0.0,
+          "trigger_quality_0_20": 0.0
+        },
+        "sell_action": {
+          "action": "hold",
+          "buy_side_gaps_do_not_block": true,
+          "buy_side_source_gaps": [],
+          "requested_action": "hold",
+          "sellable_qty_status": "unknown"
+        },
+        "setup": "",
+        "side": "",
+        "trigger": ""
+      },
+      {
+        "blocking_codes": [],
+        "candidate_id": "CAN-20260804-300766",
+        "code": "300766",
+        "decision": "observe",
+        "disposition": "paper_only",
+        "evidence_sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+        "invalidation": "",
+        "max_position_pct": 0,
+        "missing_evidence": [],
+        "name": "每日互动",
+        "rank": 14,
+        "rule_ids": [],
+        "score": 0.0,
+        "score_components": {
+          "board_strength_0_25": 0.0,
+          "evidence_freshness_0_15": 0.0,
+          "reward_risk_0_15": 0.0,
+          "stock_structure_0_25": 0.0,
+          "trigger_quality_0_20": 0.0
+        },
+        "sell_action": {
+          "action": "hold",
+          "buy_side_gaps_do_not_block": true,
+          "buy_side_source_gaps": [],
+          "requested_action": "hold",
+          "sellable_qty_status": "unknown"
+        },
+        "setup": "",
+        "side": "",
+        "trigger": ""
+      },
+      {
+        "blocking_codes": [],
+        "candidate_id": "CAN-20260804-600584",
+        "code": "600584",
+        "decision": "observe",
+        "disposition": "paper_only",
+        "evidence_sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+        "invalidation": "",
+        "max_position_pct": 0,
+        "missing_evidence": [],
+        "name": "长电科技",
+        "rank": 15,
+        "rule_ids": [],
+        "score": 0.0,
+        "score_components": {
+          "board_strength_0_25": 0.0,
+          "evidence_freshness_0_15": 0.0,
+          "reward_risk_0_15": 0.0,
+          "stock_structure_0_25": 0.0,
+          "trigger_quality_0_20": 0.0
+        },
+        "sell_action": {
+          "action": "hold",
+          "buy_side_gaps_do_not_block": true,
+          "buy_side_source_gaps": [],
+          "requested_action": "hold",
+          "sellable_qty_status": "unknown"
+        },
+        "setup": "",
+        "side": "",
+        "trigger": ""
+      },
+      {
+        "blocking_codes": [],
+        "candidate_id": "CAN-20260804-601179",
+        "code": "601179",
+        "decision": "observe",
+        "disposition": "paper_only",
+        "evidence_sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+        "invalidation": "",
+        "max_position_pct": 0,
+        "missing_evidence": [],
+        "name": "中国西电",
+        "rank": 16,
+        "rule_ids": [],
+        "score": 0.0,
+        "score_components": {
+          "board_strength_0_25": 0.0,
+          "evidence_freshness_0_15": 0.0,
+          "reward_risk_0_15": 0.0,
+          "stock_structure_0_25": 0.0,
+          "trigger_quality_0_20": 0.0
+        },
+        "sell_action": {
+          "action": "hold",
+          "buy_side_gaps_do_not_block": true,
+          "buy_side_source_gaps": [],
+          "requested_action": "hold",
+          "sellable_qty_status": "unknown"
+        },
+        "setup": "",
+        "side": "",
+        "trigger": ""
+      },
+      {
+        "blocking_codes": [],
+        "candidate_id": "CAN-20260804-601611",
+        "code": "601611",
+        "decision": "observe",
+        "disposition": "paper_only",
+        "evidence_sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+        "invalidation": "",
+        "max_position_pct": 0,
+        "missing_evidence": [],
+        "name": "中国核建",
+        "rank": 17,
+        "rule_ids": [],
+        "score": 0.0,
+        "score_components": {
+          "board_strength_0_25": 0.0,
+          "evidence_freshness_0_15": 0.0,
+          "reward_risk_0_15": 0.0,
+          "stock_structure_0_25": 0.0,
+          "trigger_quality_0_20": 0.0
+        },
+        "sell_action": {
+          "action": "hold",
+          "buy_side_gaps_do_not_block": true,
+          "buy_side_source_gaps": [],
+          "requested_action": "hold",
+          "sellable_qty_status": "unknown"
+        },
+        "setup": "",
+        "side": "",
+        "trigger": ""
+      },
+      {
+        "blocking_codes": [],
+        "candidate_id": "CAN-20260804-603881",
+        "code": "603881",
+        "decision": "observe",
+        "disposition": "paper_only",
+        "evidence_sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+        "invalidation": "",
+        "max_position_pct": 0,
+        "missing_evidence": [],
+        "name": "数据港",
+        "rank": 18,
+        "rule_ids": [],
+        "score": 0.0,
+        "score_components": {
+          "board_strength_0_25": 0.0,
+          "evidence_freshness_0_15": 0.0,
+          "reward_risk_0_15": 0.0,
+          "stock_structure_0_25": 0.0,
+          "trigger_quality_0_20": 0.0
+        },
+        "sell_action": {
+          "action": "hold",
+          "buy_side_gaps_do_not_block": true,
+          "buy_side_source_gaps": [],
+          "requested_action": "hold",
+          "sellable_qty_status": "unknown"
+        },
+        "setup": "",
+        "side": "",
+        "trigger": ""
+      },
+      {
+        "blocking_codes": [],
+        "candidate_id": "CAN-20260804-603986",
+        "code": "603986",
+        "decision": "observe",
+        "disposition": "paper_only",
+        "evidence_sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+        "invalidation": "",
+        "max_position_pct": 0,
+        "missing_evidence": [],
+        "name": "兆易创新",
+        "rank": 19,
+        "rule_ids": [],
+        "score": 0.0,
+        "score_components": {
+          "board_strength_0_25": 0.0,
+          "evidence_freshness_0_15": 0.0,
+          "reward_risk_0_15": 0.0,
+          "stock_structure_0_25": 0.0,
+          "trigger_quality_0_20": 0.0
+        },
+        "sell_action": {
+          "action": "hold",
+          "buy_side_gaps_do_not_block": true,
+          "buy_side_source_gaps": [],
+          "requested_action": "hold",
+          "sellable_qty_status": "unknown"
+        },
+        "setup": "",
+        "side": "",
+        "trigger": ""
+      },
+      {
+        "blocking_codes": [],
+        "candidate_id": "CAN-20260804-688017",
+        "code": "688017",
+        "decision": "observe",
+        "disposition": "paper_only",
+        "evidence_sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+        "invalidation": "",
+        "max_position_pct": 0,
+        "missing_evidence": [],
+        "name": "绿的谐波",
+        "rank": 20,
+        "rule_ids": [],
+        "score": 0.0,
+        "score_components": {
+          "board_strength_0_25": 0.0,
+          "evidence_freshness_0_15": 0.0,
+          "reward_risk_0_15": 0.0,
+          "stock_structure_0_25": 0.0,
+          "trigger_quality_0_20": 0.0
+        },
+        "sell_action": {
+          "action": "hold",
+          "buy_side_gaps_do_not_block": true,
+          "buy_side_source_gaps": [],
+          "requested_action": "hold",
+          "sellable_qty_status": "unknown"
+        },
+        "setup": "",
+        "side": "",
+        "trigger": ""
+      },
+      {
+        "blocking_codes": [],
+        "candidate_id": "CAN-20260804-688825",
+        "code": "688825",
+        "decision": "observe",
+        "disposition": "paper_only",
+        "evidence_sha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+        "invalidation": "",
+        "max_position_pct": 0,
+        "missing_evidence": [],
+        "name": "长鑫科技",
+        "rank": 21,
+        "rule_ids": [],
+        "score": 0.0,
+        "score_components": {
+          "board_strength_0_25": 0.0,
+          "evidence_freshness_0_15": 0.0,
+          "reward_risk_0_15": 0.0,
+          "stock_structure_0_25": 0.0,
+          "trigger_quality_0_20": 0.0
+        },
+        "sell_action": {
+          "action": "hold",
+          "buy_side_gaps_do_not_block": true,
+          "buy_side_source_gaps": [],
+          "requested_action": "hold",
+          "sellable_qty_status": "unknown"
+        },
+        "setup": "",
+        "side": "",
+        "trigger": ""
+      }
+    ],
+    "schema_version": "recommendation_state.v1",
+    "trading_date": "2026-08-04"
+  },
+  "schema_version": "gate_replay.v1",
+  "summary": {
+    "allowed_count": 0,
+    "blocked_count": 49,
+    "decision_count": 49,
+    "guarded_count": 0,
+    "paper_only_count": 49,
+    "recommendation_count": 49,
+    "standard_count": 0,
+    "trading_days": 20,
+    "unverifiable_count": 118,
+    "unverifiable_day_count": 20
+  },
+  "trading_days": [
+    "2026-07-08",
+    "2026-07-09",
+    "2026-07-10",
+    "2026-07-13",
+    "2026-07-14",
+    "2026-07-15",
+    "2026-07-16",
+    "2026-07-17",
+    "2026-07-20",
+    "2026-07-21",
+    "2026-07-22",
+    "2026-07-23",
+    "2026-07-24",
+    "2026-07-27",
+    "2026-07-28",
+    "2026-07-29",
+    "2026-07-30",
+    "2026-07-31",
+    "2026-08-03",
+    "2026-08-04"
+  ]
+}
