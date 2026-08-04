@@ -190,25 +190,117 @@ def _remote_validate(stage_root, expected_hashes, metadata):
     return {"ok": True, "hashes": actual_hashes, "markers": markers}
 
 
-def _atomic_rename(stage_root):
-    commands = [
-        f"set -eu; mkdir -p {shlex.quote(REMOTE_AI_RULE_ROOT + '/compiled')} "
-        f"{shlex.quote(REMOTE_AI_RULE_ROOT + '/daily-runtime')} "
-        f"{shlex.quote(REMOTE_DATA_DIR)}; "
-        f"mv {shlex.quote(stage_root + '/rules/compiled/rules.v1.json')} "
-        f"{shlex.quote(REMOTE_AI_RULE_ROOT + '/compiled/rules.v1.json')}; "
-        f"mv {shlex.quote(stage_root + '/rules/daily-runtime/rule_bundle_manifest.json')} "
-        f"{shlex.quote(REMOTE_AI_RULE_ROOT + '/daily-runtime/rule_bundle_manifest.json')}; "
-        f"mv {shlex.quote(stage_root + '/rules/daily-runtime/daily_plan.json')} "
-        f"{shlex.quote(REMOTE_AI_RULE_ROOT + '/daily-runtime/daily_plan.json')}; "
-        f"mv {shlex.quote(stage_root + '/rules/daily-runtime/today_execution_card.json')} "
-        f"{shlex.quote(REMOTE_AI_RULE_ROOT + '/daily-runtime/today_execution_card.json')}; "
-        f"mv {shlex.quote(stage_root + '/dashboard/data/dashboard_data.json')} "
-        f"{shlex.quote(REMOTE_DATA_DIR + '/dashboard_data.json')}; "
-        f"mv {shlex.quote(stage_root + '/dashboard/data/pools.json')} "
-        f"{shlex.quote(REMOTE_DATA_DIR + '/pools.json')}"
+def _atomic_rename_script(
+    stage_root,
+    *,
+    remote_ai_rule_root=REMOTE_AI_RULE_ROOT,
+    remote_data_dir=REMOTE_DATA_DIR,
+):
+    """Build the remote rollback transaction for the six-file publication.
+
+    Existing consumers read individual paths, so this is not strict group
+    atomicity. Every destination is backed up first, every new file is copied
+    to a destination sibling, and a trap restores the old group if any final
+    rename fails.
+    """
+    stage_root = str(stage_root).rstrip("/")
+    tx_id = Path(stage_root).name
+    entries = [
+        (
+            f"{stage_root}/rules/{relative}",
+            f"{remote_ai_rule_root}/{relative}",
+        )
+        for relative, _ in RULE_ARTIFACTS
+    ] + [
+        (
+            f"{stage_root}/dashboard/{relative}",
+            f"{remote_data_dir}/{Path(relative).name}",
+        )
+        for relative, _ in BASELINE_ARTIFACTS
     ]
-    return run(["ssh", REMOTE, commands[0]], dry_run=False, check=True)
+    destinations = [destination for _, destination in entries]
+    lines = [
+        "set -eu",
+        f"TX_ID={shlex.quote(tx_id)}",
+        "COMMITTED=0",
+        "backup_one() {",
+        "  destination=$1",
+        "  backup=\"${destination}.open-day-backup-${TX_ID}\"",
+        "  missing=\"${destination}.open-day-missing-${TX_ID}\"",
+        "  if [ -e \"$destination\" ]; then",
+        "    mv \"$destination\" \"$backup\"",
+        "  else",
+        "    : > \"$missing\"",
+        "  fi",
+        "}",
+        "rollback_one() {",
+        "  destination=$1",
+        "  backup=\"${destination}.open-day-backup-${TX_ID}\"",
+        "  missing=\"${destination}.open-day-missing-${TX_ID}\"",
+        "  next=\"${destination}.open-day-next-${TX_ID}\"",
+        "  rm -f \"$next\"",
+        "  if [ -e \"$backup\" ]; then",
+        "    rm -f \"$destination\"",
+        "    mv \"$backup\" \"$destination\" || true",
+        "  elif [ -e \"$missing\" ]; then",
+        "    rm -f \"$destination\" \"$missing\"",
+        "  fi",
+        "}",
+        "finish_one() {",
+        "  destination=$1",
+        "  rm -f \"${destination}.open-day-backup-${TX_ID}\"",
+        "  rm -f \"${destination}.open-day-missing-${TX_ID}\"",
+        "  rm -f \"${destination}.open-day-next-${TX_ID}\"",
+        "}",
+        "rollback() {",
+        "  rc=$?",
+        "  set +e",
+        "  if [ \"$COMMITTED\" -eq 0 ]; then",
+    ]
+    lines.extend(
+        f"    rollback_one {shlex.quote(destination)}"
+        for destination in destinations
+    )
+    lines.extend([
+        "  fi",
+        "  exit \"$rc\"",
+        "}",
+        "trap rollback EXIT",
+        f"mkdir -p {shlex.quote(str(Path(remote_ai_rule_root) / 'compiled'))} "
+        f"{shlex.quote(str(Path(remote_ai_rule_root) / 'daily-runtime'))} "
+        f"{shlex.quote(remote_data_dir)}",
+    ])
+    lines.extend(
+        f"backup_one {shlex.quote(destination)}"
+        for destination in destinations
+    )
+    lines.extend(
+        f"cp {shlex.quote(source)} "
+        f"{shlex.quote(destination + '.open-day-next-' + tx_id)}"
+        for source, destination in entries
+    )
+    lines.extend(
+        f"mv {shlex.quote(destination + '.open-day-next-' + tx_id)} "
+        f"{shlex.quote(destination)}"
+        for destination in destinations
+    )
+    lines.extend(
+        f"finish_one {shlex.quote(destination)}"
+        for destination in destinations
+    )
+    lines.extend([
+        f"rm -rf {shlex.quote(stage_root)}",
+        "COMMITTED=1",
+        "trap - EXIT",
+        "exit 0",
+    ])
+    return "\n".join(lines)
+
+
+def _atomic_rename(stage_root):
+    """Publish with sibling temps and trap rollback; not strict group atomic."""
+    script = _atomic_rename_script(stage_root)
+    return run(["ssh", REMOTE, script], dry_run=False, check=True)
 
 
 def _api_readback(metadata):
@@ -219,7 +311,11 @@ def _api_readback(metadata):
     payloads = {}
     for name, path in endpoints.items():
         result = run(
-            ["curl", "-s", "--max-time", "5", f"http://127.0.0.1:8088{path}"],
+            [
+                "ssh",
+                REMOTE,
+                f"curl -fsS --max-time 5 http://127.0.0.1:8088{path}",
+            ],
             dry_run=False,
             check=False,
             capture_output=True,
@@ -227,6 +323,8 @@ def _api_readback(metadata):
         if result is None or result.returncode != 0:
             return {"ok": False, "reason": f"API_READBACK_FAILED:{name}"}
         output = result.stdout or ""
+        if isinstance(output, bytes):
+            output = output.decode("utf-8", errors="replace")
         try:
             payloads[name] = json.loads(output)
         except (TypeError, json.JSONDecodeError):
@@ -352,7 +450,7 @@ def main():
             sys.exit(1)
         print("  ✅ 远端 hash/date/contract 回读通过")
         _atomic_rename(stage_root)
-        print("  ✅ 规则包与 baseline 已原子切换")
+        print("  ✅ 规则包与 baseline 已事务式切换（失败回滚；非严格组原子）")
 
     # 5. 可选重启云端（仅在远端 readback + atomic rename 后）
     if args.restart_cloud:
@@ -383,7 +481,10 @@ def main():
         print()
         print("[STEP 6] 验收命令（apply 后执行）:")
         for url_path in ["/api/baseline", "/api/ai/context"]:
-            print(f"  curl -s http://127.0.0.1:8088{url_path} | python3 -m json.tool | head -40")
+            print(
+                f"  ssh {REMOTE} 'curl -fsS --max-time 5 "
+                f"http://127.0.0.1:8088{url_path}' | python3 -m json.tool | head -40"
+            )
 
     print()
     print("=" * 60)

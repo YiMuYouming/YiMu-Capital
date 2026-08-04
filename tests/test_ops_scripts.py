@@ -2,6 +2,7 @@
 
 import json
 import io
+import os
 import shlex
 import sqlite3
 import subprocess
@@ -630,6 +631,120 @@ class OpenDayDryRunTests(unittest.TestCase):
 
         self.assertTrue(result["ok"], result)
 
+    def test_atomic_rename_rolls_back_old_group_after_mid_commit_failure(self):
+        """中途切换失败时，规则/计划/卡片/baseline 必须恢复旧组。"""
+        from scripts.ops import open_day
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            stage = root / "stage"
+            rule_root = root / "ai-rule-system"
+            data_root = root / "data"
+            entries = [
+                (stage / "rules" / relative, rule_root / relative)
+                for relative, _ in open_day.RULE_ARTIFACTS
+            ] + [
+                (stage / "dashboard" / relative, data_root / Path(relative).name)
+                for relative, _ in open_day.BASELINE_ARTIFACTS
+            ]
+            for source, destination in entries:
+                source.parent.mkdir(parents=True, exist_ok=True)
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                source.write_text("new", encoding="utf-8")
+                destination.write_text("old", encoding="utf-8")
+
+            fake_bin = root / "bin"
+            fake_bin.mkdir()
+            counter = root / "mv-count"
+            (fake_bin / "mv").write_text(
+                "#!/bin/sh\n"
+                f"counter={shlex.quote(str(counter))}\n"
+                "count=0\n"
+                "[ -f \"$counter\" ] && count=$(cat \"$counter\")\n"
+                "count=$((count + 1))\n"
+                "printf '%s\\n' \"$count\" > \"$counter\"\n"
+                "[ \"$count\" -eq 8 ] && exit 42\n"
+                "exec /bin/mv \"$@\"\n",
+                encoding="utf-8",
+            )
+            (fake_bin / "mv").chmod(0o755)
+            script = open_day._atomic_rename_script(
+                str(stage),
+                remote_ai_rule_root=str(rule_root),
+                remote_data_dir=str(data_root),
+            )
+            env = os.environ.copy()
+            env["PATH"] = f"{fake_bin}:{env['PATH']}"
+            result = subprocess.run(
+                ["bash", "-c", script],
+                capture_output=True,
+                text=True,
+                env=env,
+                check=False,
+            )
+
+            self.assertEqual(42, result.returncode, result.stderr)
+            for source, destination in entries:
+                self.assertEqual("old", destination.read_text(encoding="utf-8"))
+                self.assertTrue(source.is_file(), source)
+                self.assertEqual(
+                    [],
+                    list(destination.parent.glob(destination.name + ".open-day-*")),
+                )
+
+    def test_api_readback_curls_from_remote_host(self):
+        """API GET 必须在 REMOTE 上执行，不能读本机 127.0.0.1。"""
+        from scripts.ops import open_day
+
+        metadata = open_day._publication_metadata()
+        calls = []
+
+        def fake_run(cmd, **kwargs):
+            calls.append((cmd, kwargs))
+            self.assertEqual(["ssh", open_day.REMOTE], cmd[:2])
+            remote_script = cmd[2]
+            self.assertIn("curl", remote_script)
+            self.assertIn("127.0.0.1:8088", remote_script)
+            if "/api/baseline" in remote_script:
+                payload = {"meta": {"date": metadata["trade_date"]}}
+            else:
+                payload = {
+                    "date": metadata["trade_date"],
+                    "rule_state": {
+                        "today_execution_card_id": metadata["card_id"],
+                        "rule_snapshot_hash": metadata["snapshot_hash"],
+                    },
+                    "recommendation_state": {
+                        "schema_version": metadata["recommendation_schema"],
+                    },
+                }
+            return subprocess.CompletedProcess(cmd, 0, json.dumps(payload), "")
+
+        with patch("scripts.ops.open_day.run", side_effect=fake_run):
+            result = open_day._api_readback(metadata)
+
+        self.assertTrue(result["ok"], result)
+        self.assertEqual(2, len(calls))
+
+    def test_api_readback_remote_failure_blocks_publication(self):
+        """远端 API GET 失败必须返回失败，不能默认为通过。"""
+        from scripts.ops import open_day
+
+        metadata = open_day._publication_metadata()
+        calls = []
+
+        def fake_run(cmd, **kwargs):
+            calls.append((cmd, kwargs))
+            self.assertEqual(["ssh", open_day.REMOTE], cmd[:2])
+            return subprocess.CompletedProcess(cmd, 17, "", "remote curl failed")
+
+        with patch("scripts.ops.open_day.run", side_effect=fake_run):
+            result = open_day._api_readback(metadata)
+
+        self.assertFalse(result["ok"])
+        self.assertEqual("API_READBACK_FAILED:baseline", result["reason"])
+        self.assertEqual(1, len(calls))
+
     def test_restart_cloud_triggers_ssh_restart(self):
         """--apply --restart-cloud 应额外调用 ssh restart"""
         from scripts.ops import open_day
@@ -650,15 +765,15 @@ class OpenDayDryRunTests(unittest.TestCase):
         self.assertGreaterEqual(len(restart_calls), 1, "应含 restart 命令")
 
     def test_apply_health_check_captures_curl_output(self):
-        """apply 只读验收必须捕获 curl stdout，避免 stdout=None 崩溃"""
+        """apply 远端只读验收必须捕获 curl stdout，避免 stdout=None 崩溃"""
         from scripts.ops import open_day
 
         metadata = open_day._publication_metadata()
 
         def fake_run(cmd, **kw):
-            if cmd and cmd[0] == "curl":
+            if cmd and cmd[0] == "ssh" and "curl" in cmd[-1]:
                 if kw.get("capture_output") and kw.get("text"):
-                    if "api/baseline" in cmd[-1]:
+                    if "/api/baseline" in cmd[-1]:
                         payload = {"meta": {"date": metadata["trade_date"]}}
                     else:
                         payload = {
@@ -686,10 +801,12 @@ class OpenDayDryRunTests(unittest.TestCase):
 
         curl_calls = [
             c for c in mock_run.call_args_list
-            if c.args and c.args[0] and c.args[0][0] == "curl"
+            if c.args and c.args[0] and c.args[0][0] == "ssh"
+            and "curl" in c.args[0][-1]
         ]
         self.assertEqual(len(curl_calls), 2)
         for c in curl_calls:
+            self.assertEqual(["ssh", open_day.REMOTE], c.args[0][:2])
             self.assertTrue(c.kwargs.get("capture_output"))
             self.assertTrue(c.kwargs.get("text"))
 
