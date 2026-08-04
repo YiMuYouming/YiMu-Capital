@@ -2803,6 +2803,16 @@ def _trade_entry_gate(health, rule_state):
     return True, None
 
 
+def _is_market_session_open(now=None):
+    """Return whether the A-share continuous trading session is open."""
+    ref = now or datetime.now()
+    current = ref.time()
+    return (
+        _time(9, 30) <= current < _time(11, 30)
+        or _time(13, 0) <= current < _time(15, 0)
+    )
+
+
 def _decision_gate_payload(allowed, reason, evaluated_at):
     """Canonical final trade-decision contract for every consumer."""
     return {
@@ -3232,6 +3242,13 @@ def _build_ai_context(now=None):
     health = _build_health(account_state=account_state, now=ref)
     rule_state = _build_rule_state(now=ref, account_state=account_state)
     trade_allowed, trade_reason = _trade_entry_gate(health, rule_state)
+    if not _is_market_session_open(ref):
+        trade_allowed = False
+        trade_reason = (
+            f"{trade_reason}; MARKET_SESSION_CLOSED"
+            if trade_reason
+            else "MARKET_SESSION_CLOSED"
+        )
     w1_state = ((rule_state or {}).get("windows") or {}).get("w1") or {}
     if w1_state.get("manual_review_allowed") is True:
         trade_allowed = False

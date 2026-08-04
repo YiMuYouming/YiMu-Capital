@@ -488,6 +488,80 @@ class AIContextApiTest(unittest.TestCase):
         self.assertFalse(context["decision_gate"]["allowed"])
         self.assertNotEqual([], context["recommendation_state"]["candidates"])
 
+    def test_close_snapshot_real_trade_gate_blocks_after_session_without_clearing_candidates(self):
+        """真实 trade gate 在 19:30 必须关执行门，但保留 recommendation candidates。"""
+        from datetime import datetime
+
+        original_rule_state = bridge._build_rule_state
+        original_health = bridge._build_health
+        original_candidates = bridge._ai_candidate_list
+        original_account = bridge._load_current_account_state
+        original_tickets = bridge._ai_ticket_summary
+        original_conflicts = bridge._ai_open_ticket_conflicts
+        try:
+            bridge.CACHE["live_quotes"] = {
+                "000001": {"最新价": 10.5},
+                "_updated": "2026-08-04T15:00:10+08:00",
+            }
+            bridge._load_current_account_state = lambda *args, **kwargs: {
+                "date": "2026-08-04",
+                "valuation_complete": True,
+                "total_asset": 200000,
+                "pnl_pct": 0.2,
+                "pos_pct": 0,
+                "positions": [],
+                "_updated": "2026-08-04T15:00:10+08:00",
+                "quote_status": "close_snapshot",
+                "anchor": {"source": "previous_close"},
+            }
+            bridge._build_health = lambda account_state=None, now=None: {
+                "status": "degraded",
+                "critical_ok": True,
+                "trade_entry_allowed": True,
+                "critical_reasons": None,
+                "degraded_reasons": None,
+                "quotes": {"status": "close_snapshot", "detail": "post-close snapshot"},
+                "iwencai": {"status": "stale"},
+                "account": {"status": "ok"},
+                "baseline": {"status": "ok"},
+            }
+            bridge._build_rule_state = lambda now=None, account_state=None: {
+                "tradable": True,
+                "source_gaps": [],
+                "blocks": [],
+                "warnings": [],
+                "windows": {},
+            }
+            bridge._ai_candidate_list = lambda dashboard_data, limit=12: [{
+                "source": "trend",
+                "side": "trend",
+                "code": "688112",
+                "name": "paper",
+                "role": "trend_core",
+            }]
+            bridge._ai_ticket_summary = lambda date_str, limit=30: {
+                "status": "ok", "items": [], "pending": 0, "executable": 0,
+                "reconciliation": 0, "completed": 0, "blocked": 0, "other": 0,
+                "total": 0, "limit": limit, "has_more": False,
+            }
+            bridge._ai_open_ticket_conflicts = lambda date_str: {
+                "status": "ok", "items": [], "count": 0,
+            }
+
+            context = bridge._build_ai_context(now=datetime(2026, 8, 4, 19, 30, 0))
+        finally:
+            bridge._build_rule_state = original_rule_state
+            bridge._build_health = original_health
+            bridge._ai_candidate_list = original_candidates
+            bridge._load_current_account_state = original_account
+            bridge._ai_ticket_summary = original_tickets
+            bridge._ai_open_ticket_conflicts = original_conflicts
+
+        self.assertFalse(context["decision_gate"]["allowed"])
+        self.assertIn("MARKET_SESSION_CLOSED", context["decision_gate"]["reason"])
+        self.assertEqual([], context["rule_state"]["blocks"])
+        self.assertNotEqual([], context["recommendation_state"]["candidates"])
+
     def test_ai_context_includes_freshness_for_quotes_iwencai_account_and_baseline(self):
         ctx = bridge._build_ai_context()
         freshness = ctx["freshness"]
