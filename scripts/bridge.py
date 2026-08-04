@@ -1557,6 +1557,13 @@ def _compute_freshness(data_type, cache_entry, now=None):
             ref_hhmm = ref_cst.hour * 60 + ref_cst.minute
             PRE_MARKET = 9 * 60 + 15
             MARKET_CLOSE = 15 * 60
+            fetched_hhmm = fetched_cst.hour * 60 + fetched_cst.minute
+            if (
+                fetched_cst.date() == ref_cst.date()
+                and fetched_hhmm >= 14 * 60 + 55
+                and ref_hhmm >= MARKET_CLOSE
+            ):
+                return "close_snapshot"
             if ref_hhmm < PRE_MARKET:
                 same_day_premarket = (
                     fetched_cst.date() == ref_cst.date()

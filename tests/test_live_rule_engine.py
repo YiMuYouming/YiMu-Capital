@@ -507,12 +507,26 @@ class LiveRuleEngineTest(unittest.TestCase):
         self.assertNotIn("SENTIMENT_STALE", [b["code"] for b in state["blocks"]])
         self.assertIn("SENTIMENT_STALE", [w["code"] for w in state["warnings"]])
 
-    def test_missing_sentiment_fields_blocks_all(self):
+    def test_missing_sentiment_only_blocks_lianban_layers(self):
         state = evaluate_rule_state(
             valid_inputs(sentiment={"emotion_pct": None, "limit_up_profit_pct": None,
                                     "broken_board_pct": None, "promotion_pct": None}),
             datetime(2026, 5, 27, 9, 40))
-        self.assertIn("SENTIMENT_STALE", [b["code"] for b in state["blocks"]])
+        trend = evaluate_decision_gate(
+            "buy", "w1", "trend_core", 1, {"trade_entry_allowed": True}, state
+        )
+        lianban = evaluate_decision_gate(
+            "buy", "w1", "lianban_1_to_2", 1,
+            {"trade_entry_allowed": True}, state,
+        )
+        self.assertTrue(trend["allowed"])
+        self.assertFalse(lianban["allowed"])
+        sentiment_blocks = [
+            block for block in state["blocks"] if block["code"] == "SENTIMENT_STALE"
+        ]
+        self.assertEqual(["lianban"], [block["scope"] for block in sentiment_blocks])
+        self.assertEqual("previous_close_soft", state["sentiment_basis"])
+        self.assertIn("side_soft:lianban:emotion_previous_close", state["source_gaps"])
 
     # ── 周五规则 ──
 

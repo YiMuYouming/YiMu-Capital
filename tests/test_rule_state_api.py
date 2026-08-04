@@ -943,8 +943,10 @@ class FreshnessBoundaryTest(unittest.TestCase):
         codes = [b["code"] for b in state["blocks"]]
         warnings = [w["code"] for w in state["warnings"]]
         self.assertIn("SENTIMENT_STALE", codes)
+        stale_blocks = [b for b in state["blocks"] if b["code"] == "SENTIMENT_STALE"]
+        self.assertEqual(["lianban"], [b["scope"] for b in stale_blocks])
         self.assertEqual(state["caps"]["total_pct"], 0)
-        self.assertFalse(state["tradable"])
+        self.assertTrue(state["tradable"])
 
     def test_stale_breadth_and_iwencai_do_not_emit_emotion_value(self):
         """过期 breadth/iwencai 不得继续把旧情绪值作为实时规则输入"""
@@ -973,11 +975,12 @@ class FreshnessBoundaryTest(unittest.TestCase):
         )
 
         blocks = [b for b in state["blocks"] if b["code"] == "SENTIMENT_STALE"]
-        self.assertTrue(blocks, f"过期情绪应全局阻断: {state}")
+        self.assertTrue(blocks, f"过期情绪应阻断连板侧: {state}")
+        self.assertEqual(["lianban"], [block["scope"] for block in blocks])
         self.assertIn("emotion_pct", blocks[0]["evidence"].get("missing", []))
         self.assertEqual(state["market_regime"], "unknown")
         self.assertEqual(state["caps"]["total_pct"], 0)
-        self.assertFalse(state["tradable"])
+        self.assertTrue(state["tradable"])
 
 
 class Kline15mPayloadFreshnessTest(unittest.TestCase):

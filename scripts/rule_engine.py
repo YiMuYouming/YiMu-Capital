@@ -764,6 +764,13 @@ def evaluate_rule_state(inputs, now=None):
     ).strip() or None
     emotion = _number(sentiment.get("emotion_pct"))
     previous_emotion = _number(sentiment.get("previous_emotion_pct"))
+    sentiment_basis = "current"
+    if emotion is None and previous_emotion is not None:
+        emotion = previous_emotion
+        sentiment_basis = "previous_close_soft"
+        previous_gap = "side_soft:lianban:emotion_previous_close"
+        if previous_gap not in source_gaps:
+            source_gaps.append(previous_gap)
     limit_up_profit = _number(sentiment.get("limit_up_profit_pct"))
     broken_board = _number(sentiment.get("broken_board_pct"))
     promotion = _number(sentiment.get("promotion_pct"))
@@ -850,14 +857,16 @@ def evaluate_rule_state(inputs, now=None):
     missing_sentiment = sorted(key for key, value in required_sentiment.items() if value is None)
     if missing_sentiment:
         blocks.append(_finding(
-            "SENTIMENT_STALE", "all", "情绪数据不完整或过期",
+            "SENTIMENT_STALE", "lianban", "连板与一进二情绪证据不完整",
             sentiment_freshness=freshness.get("sentiment"),
             missing=missing_sentiment,
+            sentiment_basis=sentiment_basis,
         ))
     elif freshness.get("sentiment") in ("stale", "dead"):
         warnings.append(_finding(
-            "SENTIMENT_STALE", "position", "情绪数据延迟，按最新基线值提示",
+            "SENTIMENT_STALE", "lianban", "连板情绪数据延迟，按最新基线值提示",
             sentiment_freshness=freshness.get("sentiment"),
+            sentiment_basis=sentiment_basis,
         ))
 
     if _opposite_sign(main_inflow, dde_big_order_net):
@@ -910,7 +919,13 @@ def evaluate_rule_state(inputs, now=None):
     if monthly_drawdown is not None and monthly_drawdown <= -10:
         blocks.append(_finding("MONTH_STOP", "all", "月回撤触发当月停止",
                                monthly_drawdown_pct=monthly_drawdown, max_drawdown_pct=-10))
-    if emotion is not None and previous_emotion is not None and emotion < 20 and previous_emotion < 20:
+    if (
+        sentiment_basis == "current"
+        and emotion is not None
+        and previous_emotion is not None
+        and emotion < 20
+        and previous_emotion < 20
+    ):
         blocks.append(_finding("DOUBLE_ICE", "all", "连续双冰禁止新开仓",
                                emotion_pct=emotion, previous_emotion_pct=previous_emotion, max_pct=20))
     if emotion is not None and emotion > 80:
@@ -1206,6 +1221,7 @@ def evaluate_rule_state(inputs, now=None):
         "evaluated_at": now.isoformat(timespec="seconds"),
         "tradable": not globally_blocked,
         "market_regime": regime,
+        "sentiment_basis": sentiment_basis,
         "caps": {
             "base_total_pct": base_cap,
             "lianban_side_cap_pct": lb_side_cap,
