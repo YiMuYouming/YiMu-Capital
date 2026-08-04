@@ -366,9 +366,11 @@ def _api_readback(metadata):
         return {"ok": False, "reason": "API_BASELINE_DATE_MISMATCH", "actual": baseline_date}
     if context.get("date") not in {None, metadata["trade_date"]}:
         return {"ok": False, "reason": "API_CONTEXT_DATE_MISMATCH", "actual": context.get("date")}
-    if rule_state.get("today_execution_card_id") != metadata["card_id"]:
+    card_id = context.get("today_execution_card_id") or rule_state.get("today_execution_card_id")
+    snapshot_hash = context.get("rule_snapshot_hash") or rule_state.get("rule_snapshot_hash")
+    if card_id != metadata["card_id"]:
         return {"ok": False, "reason": "API_CARD_ID_MISMATCH"}
-    if rule_state.get("rule_snapshot_hash") != metadata["snapshot_hash"]:
+    if snapshot_hash != metadata["snapshot_hash"]:
         return {"ok": False, "reason": "API_SNAPSHOT_HASH_MISMATCH"}
     if (context.get("recommendation_state") or {}).get("schema_version") != metadata["recommendation_schema"]:
         return {"ok": False, "reason": "API_RECOMMENDATION_SCHEMA_MISMATCH"}

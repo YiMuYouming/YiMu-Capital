@@ -793,6 +793,31 @@ class OpenDayDryRunTests(unittest.TestCase):
         self.assertTrue(result["ok"], result)
         self.assertEqual(2, len(calls))
 
+    def test_api_readback_accepts_context_level_card_identity(self):
+        from scripts.ops import open_day
+
+        metadata = open_day._publication_metadata()
+
+        def fake_run(cmd, **kwargs):
+            if "/api/baseline" in cmd[-1]:
+                payload = {"meta": {"date": metadata["trade_date"]}}
+            else:
+                payload = {
+                    "date": metadata["trade_date"],
+                    "today_execution_card_id": metadata["card_id"],
+                    "rule_snapshot_hash": metadata["snapshot_hash"],
+                    "rule_state": {},
+                    "recommendation_state": {
+                        "schema_version": metadata["recommendation_schema"],
+                    },
+                }
+            return subprocess.CompletedProcess(cmd, 0, json.dumps(payload), "")
+
+        with patch("scripts.ops.open_day.run", side_effect=fake_run):
+            result = open_day._api_readback(metadata)
+
+        self.assertTrue(result["ok"], result)
+
     def test_api_readback_remote_failure_blocks_publication(self):
         """远端 API GET 失败必须返回失败，不能默认为通过。"""
         from scripts.ops import open_day
