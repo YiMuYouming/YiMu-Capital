@@ -118,6 +118,18 @@ def _rsync_stage_commands(stage_root):
     ]
 
 
+def _prepare_stage_command(stage_root):
+    """Create only the exact remote staging parents used by the two rsyncs."""
+    return [
+        "ssh",
+        REMOTE,
+        "mkdir -p "
+        + shlex.quote(f"{stage_root}/rules")
+        + " "
+        + shlex.quote(f"{stage_root}/dashboard"),
+    ]
+
+
 def _remote_validate(stage_root, expected_hashes, metadata):
     remote_paths = [
         (f"rules/{relative}", f"{stage_root}/rules/{relative}")
@@ -436,6 +448,10 @@ def main():
             metadata = _publication_metadata()
         except (OSError, RuntimeError) as exc:
             print(f"[ERROR] 发布 artifact 不完整: {exc}")
+            sys.exit(1)
+        prepare = run(_prepare_stage_command(stage_root), dry_run=False, check=False)
+        if prepare is not None and prepare.returncode != 0:
+            print(f"[ERROR] 远端 staging 目录准备失败 (exit={prepare.returncode})")
             sys.exit(1)
         for command in _rsync_stage_commands(stage_root):
             result = run(command, dry_run=False, check=False)

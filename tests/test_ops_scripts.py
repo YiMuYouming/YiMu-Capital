@@ -499,6 +499,17 @@ class OpenDayDryRunTests(unittest.TestCase):
     def tearDown(self):
         Path(self.baseline_path).unlink(missing_ok=True)
 
+    def test_apply_prepares_remote_stage_parents_before_rsync(self):
+        from scripts.ops import open_day
+
+        stage = "/home/agentuser/YiMu-Capital/.open-day-staging-test"
+        command = open_day._prepare_stage_command(stage)
+
+        self.assertEqual(["ssh", open_day.REMOTE], command[:2])
+        self.assertIn("mkdir -p", command[2])
+        self.assertIn(f"{stage}/rules", command[2])
+        self.assertIn(f"{stage}/dashboard", command[2])
+
     def test_dry_run_does_not_call_gen_or_rsync(self):
         """open_day.py --dry-run 不应调用 gen_dashboard_data 或 rsync"""
         from scripts.ops import open_day
