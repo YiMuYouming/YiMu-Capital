@@ -2804,8 +2804,15 @@ def _trade_entry_gate(health, rule_state):
 
 
 def _is_market_session_open(now=None):
-    """Return whether the A-share continuous trading session is open."""
+    """Return whether the A-share calendar and continuous session are open."""
     ref = now or datetime.now()
+    try:
+        from scripts.db import is_trading_day
+        if not is_trading_day(ref.strftime("%Y-%m-%d")):
+            return False
+    except Exception:
+        # A missing/broken exchange calendar must fail closed for execution.
+        return False
     current = ref.time()
     return (
         _time(9, 30) <= current < _time(11, 30)

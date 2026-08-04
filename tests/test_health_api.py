@@ -103,6 +103,28 @@ class HealthCloseSnapshotTests(unittest.TestCase):
         cache = {"_updated": "2026-08-04T15:00:10+08:00"}
         self.assertEqual("close_snapshot", bridge._compute_freshness("live_quote", cache, now=now))
 
+    def test_market_session_gate_rejects_weekend(self):
+        from datetime import datetime
+
+        self.assertFalse(
+            bridge._is_market_session_open(datetime(2026, 8, 8, 10, 0, 0))
+        )
+
+    def test_market_session_gate_rejects_registered_holiday(self):
+        from datetime import datetime
+
+        with mock.patch.object(db, "_holiday_dates", return_value={"2026-10-01"}):
+            self.assertFalse(
+                bridge._is_market_session_open(datetime(2026, 10, 1, 10, 0, 0))
+            )
+
+    def test_market_session_gate_accepts_normal_trading_day(self):
+        from datetime import datetime
+
+        self.assertTrue(
+            bridge._is_market_session_open(datetime(2026, 8, 4, 10, 0, 0))
+        )
+
     def test_trade_entry_gate_ignores_advisory_and_side_gaps(self):
         state = {
             "tradable": True,
