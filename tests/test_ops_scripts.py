@@ -515,12 +515,14 @@ class OpenDayDryRunTests(unittest.TestCase):
         from scripts.ops import open_day
         with patch("scripts.ops.common.subprocess.run") as mock_run:
             mock_run.return_value = subprocess.CompletedProcess(["true"], 0, "", "")
-            with patch("scripts.ops.open_day.argparse.ArgumentParser.parse_args") as mock_args:
-                mock_args.return_value = MagicMock(
-                    dry_run=False, apply=True, restart_cloud=False,
-                    baseline=self.baseline_path,
-                )
-                open_day.main()
+            with patch("scripts.ops.open_day._remote_validate", return_value={"ok": True}), \
+                 patch("scripts.ops.open_day._api_readback", return_value={"ok": True}):
+                with patch("scripts.ops.open_day.argparse.ArgumentParser.parse_args") as mock_args:
+                    mock_args.return_value = MagicMock(
+                        dry_run=False, apply=True, restart_cloud=False,
+                        baseline=self.baseline_path,
+                    )
+                    open_day.main()
         self.assertGreaterEqual(mock_run.call_count, 2)
         # 验证命令包含 gen/rsync
         all_cmds = [str(c[0][0]) for c in mock_run.call_args_list]
@@ -529,17 +531,118 @@ class OpenDayDryRunTests(unittest.TestCase):
         self.assertTrue(gen_found, "应调用 gen_dashboard_data.py")
         self.assertTrue(rsync_found, "应调用 rsync")
 
-    def test_restart_cloud_triggers_ssh_restart(self):
-        """--apply --restart-cloud 应额外调用 ssh restart"""
+    def test_apply_publishes_rule_bundle_plan_card_and_baseline_as_staged_artifacts(self):
+        """apply 的 rsync 必须包含规则包、日计划、兼容卡和 baseline。"""
         from scripts.ops import open_day
-        with patch("scripts.ops.common.subprocess.run") as mock_run:
-            mock_run.return_value = subprocess.CompletedProcess(["true"], 0, "", "")
+
+        calls = []
+
+        def fake_run(cmd, **kwargs):
+            calls.append(list(cmd))
+            return subprocess.CompletedProcess(cmd, 0, "", "")
+
+        with patch("scripts.ops.open_day.run", side_effect=fake_run), \
+             patch("scripts.ops.open_day._remote_validate", create=True, return_value={"ok": True}), \
+             patch("scripts.ops.open_day._api_readback", create=True, return_value={"ok": True}), \
+             patch("scripts.ops.open_day._atomic_rename", create=True):
+            with patch("scripts.ops.open_day.argparse.ArgumentParser.parse_args") as mock_args:
+                mock_args.return_value = MagicMock(
+                    dry_run=False, apply=True, restart_cloud=False,
+                    baseline=self.baseline_path,
+                )
+                open_day.main()
+
+        rsync = [cmd for cmd in calls if cmd and cmd[0] == "rsync"]
+        joined = " ".join(" ".join(cmd) for cmd in rsync)
+        self.assertIn("rule_bundle_manifest.json", joined)
+        self.assertIn("daily_plan.json", joined)
+        self.assertIn("today_execution_card.json", joined)
+        self.assertIn("dashboard_data.json", joined)
+
+    def test_apply_stops_before_restart_when_remote_hash_readback_differs(self):
+        """远端 hash/date 回读失败时不得执行 systemctl restart。"""
+        from scripts.ops import open_day
+
+        executed_commands = []
+
+        def fake_run(cmd, **kwargs):
+            executed_commands.append(list(cmd))
+            return subprocess.CompletedProcess(cmd, 0, "", "")
+
+        with patch("scripts.ops.open_day.run", side_effect=fake_run), \
+             patch(
+                 "scripts.ops.open_day._remote_validate",
+                 create=True,
+                 return_value={"ok": False, "reason": "REMOTE_HASH_MISMATCH"},
+             ), \
+             patch("scripts.ops.open_day._api_readback", create=True, return_value={"ok": True}), \
+             patch("scripts.ops.open_day._atomic_rename", create=True):
             with patch("scripts.ops.open_day.argparse.ArgumentParser.parse_args") as mock_args:
                 mock_args.return_value = MagicMock(
                     dry_run=False, apply=True, restart_cloud=True,
                     baseline=self.baseline_path,
                 )
-                open_day.main()
+                with self.assertRaises(SystemExit) as ctx:
+                    open_day.main()
+
+        self.assertNotEqual(0, ctx.exception.code)
+        self.assertNotIn(
+            "systemctl restart",
+            " ".join(" ".join(cmd) for cmd in executed_commands),
+        )
+
+    def test_remote_validate_requires_hashes_dates_and_card_contract(self):
+        from scripts.ops import open_day
+
+        stage = "/home/agentuser/YiMu-Capital/.open-day-staging-test"
+        expected = {
+            "compiled/rules.v1.json": "a" * 64,
+            "daily-runtime/rule_bundle_manifest.json": "b" * 64,
+            "daily-runtime/daily_plan.json": "c" * 64,
+            "daily-runtime/today_execution_card.json": "d" * 64,
+            "data/dashboard_data.json": "e" * 64,
+            "data/pools.json": "f" * 64,
+        }
+        output = "\n".join([
+            f"{expected['compiled/rules.v1.json']}  {stage}/rules/compiled/rules.v1.json",
+            f"{expected['daily-runtime/rule_bundle_manifest.json']}  {stage}/rules/daily-runtime/rule_bundle_manifest.json",
+            f"{expected['daily-runtime/daily_plan.json']}  {stage}/rules/daily-runtime/daily_plan.json",
+            f"{expected['daily-runtime/today_execution_card.json']}  {stage}/rules/daily-runtime/today_execution_card.json",
+            f"{expected['data/dashboard_data.json']}  {stage}/dashboard/data/dashboard_data.json",
+            f"{expected['data/pools.json']}  {stage}/dashboard/data/pools.json",
+            "PLAN_DATE 2026-08-04",
+            "CARD_DATE 2026-08-04",
+            "CARD_ID EXEC-20260804-20260804T010000+0000",
+            "SNAPSHOT_HASH sha256:" + "1" * 64,
+            "RECOMMENDATION_SCHEMA recommendation_state.v1",
+        ])
+        metadata = {
+            "trade_date": "2026-08-04",
+            "card_id": "EXEC-20260804-20260804T010000+0000",
+            "snapshot_hash": "sha256:" + "1" * 64,
+            "recommendation_schema": "recommendation_state.v1",
+        }
+        with patch(
+            "scripts.ops.open_day.run",
+            return_value=subprocess.CompletedProcess(["ssh"], 0, output, ""),
+        ):
+            result = open_day._remote_validate(stage, expected, metadata)
+
+        self.assertTrue(result["ok"], result)
+
+    def test_restart_cloud_triggers_ssh_restart(self):
+        """--apply --restart-cloud 应额外调用 ssh restart"""
+        from scripts.ops import open_day
+        with patch("scripts.ops.common.subprocess.run") as mock_run:
+            mock_run.return_value = subprocess.CompletedProcess(["true"], 0, "", "")
+            with patch("scripts.ops.open_day._remote_validate", return_value={"ok": True}), \
+                 patch("scripts.ops.open_day._api_readback", return_value={"ok": True}):
+                with patch("scripts.ops.open_day.argparse.ArgumentParser.parse_args") as mock_args:
+                    mock_args.return_value = MagicMock(
+                        dry_run=False, apply=True, restart_cloud=True,
+                        baseline=self.baseline_path,
+                    )
+                    open_day.main()
         restart_calls = [
             c for c in mock_run.call_args_list
             if "restart" in str(c)
@@ -550,15 +653,31 @@ class OpenDayDryRunTests(unittest.TestCase):
         """apply 只读验收必须捕获 curl stdout，避免 stdout=None 崩溃"""
         from scripts.ops import open_day
 
+        metadata = open_day._publication_metadata()
+
         def fake_run(cmd, **kw):
             if cmd and cmd[0] == "curl":
                 if kw.get("capture_output") and kw.get("text"):
-                    return subprocess.CompletedProcess(cmd, 0, '{"ok": true}', "")
+                    if "api/baseline" in cmd[-1]:
+                        payload = {"meta": {"date": metadata["trade_date"]}}
+                    else:
+                        payload = {
+                            "date": metadata["trade_date"],
+                            "rule_state": {
+                                "today_execution_card_id": metadata["card_id"],
+                                "rule_snapshot_hash": metadata["snapshot_hash"],
+                            },
+                            "recommendation_state": {
+                                "schema_version": metadata["recommendation_schema"],
+                            },
+                        }
+                    return subprocess.CompletedProcess(cmd, 0, json.dumps(payload), "")
                 return subprocess.CompletedProcess(cmd, 0, None, None)
             return subprocess.CompletedProcess(cmd, 0, "", "")
 
         with patch("scripts.ops.common.subprocess.run", side_effect=fake_run) as mock_run:
-            with patch("scripts.ops.open_day.argparse.ArgumentParser.parse_args") as mock_args:
+            with patch("scripts.ops.open_day._remote_validate", return_value={"ok": True}), \
+                 patch("scripts.ops.open_day.argparse.ArgumentParser.parse_args") as mock_args:
                 mock_args.return_value = MagicMock(
                     dry_run=False, apply=True, restart_cloud=False,
                     baseline=self.baseline_path,
@@ -569,7 +688,7 @@ class OpenDayDryRunTests(unittest.TestCase):
             c for c in mock_run.call_args_list
             if c.args and c.args[0] and c.args[0][0] == "curl"
         ]
-        self.assertEqual(len(curl_calls), 3)
+        self.assertEqual(len(curl_calls), 2)
         for c in curl_calls:
             self.assertTrue(c.kwargs.get("capture_output"))
             self.assertTrue(c.kwargs.get("text"))
