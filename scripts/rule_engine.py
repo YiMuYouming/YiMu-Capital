@@ -222,8 +222,18 @@ def classify_source_gap(raw_gap: str) -> dict:
         })
         return result
 
-    if raw in {
-        "RULE_SNAPSHOT_STALE",
+    if raw in {"RULE_SNAPSHOT_STALE", "PLAN_NOT_CURRENT"}:
+        # A plan/card mismatch invalidates only the execution plan.  It must
+        # close buy/add/do_t while leaving recommendation candidates visible.
+        # An explicitly typed ``global_hard:...`` value above remains global;
+        # only the untyped runtime plan marker gets this narrow meaning.
+        result.update({
+            "scope": "execution_plan",
+            "severity": "hard",
+            "code": raw,
+            "mapped": True,
+        })
+    elif raw in {
         "ACCOUNT_TRUST_FAILED",
         "QUOTE_DEAD",
         "SYSTEM_RISK",
@@ -302,9 +312,19 @@ def evaluate_recommendation_candidate(candidate: dict, health: dict, rule_state:
         elif str(block.get("candidate") or block.get("code_value") or "").strip() == code:
             blocking.append(block_code)
 
+    plan_valid = (rule_state or {}).get("execution_plan_valid")
+    if plan_valid is None:
+        plan_valid = not any(
+            gap["scope"] == "execution_plan" and gap["severity"] == "hard"
+            for gap in parsed_gaps
+        )
     blocking = list(dict.fromkeys(blocking))
     missing_evidence = list(dict.fromkeys(missing_evidence))
-    execution_allowed = bool((health or {}).get("trade_entry_allowed", False)) and not blocking
+    execution_allowed = (
+        bool((health or {}).get("trade_entry_allowed", False))
+        and bool(plan_valid)
+        and not blocking
+    )
     if blocking:
         disposition = "blocked"
     elif not execution_allowed:
@@ -318,6 +338,7 @@ def evaluate_recommendation_candidate(candidate: dict, health: dict, rule_state:
         "side": side,
         "eligible": not blocking,
         "execution_allowed": execution_allowed,
+        "execution_plan_valid": bool(plan_valid),
         "blocking_codes": blocking,
         "missing_evidence": missing_evidence,
         "source_gaps": [gap["raw"] for gap in applicable_gaps],
@@ -349,10 +370,13 @@ def build_recommendation_state(candidates: list[dict], health: dict, rule_state:
     has_eligible = any(item.get("eligible") for item in evaluated)
     guarded = any(item.get("disposition") == "guarded_experiment" for item in evaluated)
     status = "guarded" if guarded else ("ranked" if has_eligible else "blocked")
+    execution_allowed = bool((health or {}).get("trade_entry_allowed", False)) and any(
+        item.get("execution_allowed") for item in evaluated
+    )
     return {
         "schema_version": "recommendation_state.v1",
         "status": status,
-        "execution_allowed": bool((health or {}).get("trade_entry_allowed", False)),
+        "execution_allowed": execution_allowed,
         "candidates": evaluated,
         "source_gaps": list(dict.fromkeys(
             item for candidate in evaluated for item in candidate.get("source_gaps") or []
@@ -453,7 +477,7 @@ def evaluate_decision_gate(action_type, window_name, role, entry_leg, health, ru
         gap = classify_source_gap(raw_gap)
         if gap["severity"] != "hard":
             continue
-        if gap["scope"] == "global":
+        if gap["scope"] in {"global", "execution_plan"}:
             codes.append(gap["code"])
         elif gap["scope"] == "side" and gap.get("affected_side") == candidate_side:
             codes.append(gap["code"])
@@ -462,10 +486,16 @@ def evaluate_decision_gate(action_type, window_name, role, entry_leg, health, ru
             and gap.get("affected_candidate") == candidate_code
         ):
             codes.append(gap["code"])
+    if rule.get("execution_plan_valid") is False:
+        codes.append(str(
+            rule.get("execution_plan_reason")
+            or (rule.get("execution_plan") or {}).get("stale_reason")
+            or "PLAN_NOT_CURRENT"
+        ))
     for block in rule.get("blocks") or []:
         if not isinstance(block, dict):
             continue
-        if block.get("scope") in {"all", "entry"} and block.get("code"):
+        if block.get("scope") in {"all", "entry", "execution_plan"} and block.get("code"):
             codes.append(str(block["code"]))
     if rule.get("tradable") is False and not codes:
         codes.append("RULE_STATE_BLOCKED")
@@ -1267,4 +1297,6 @@ def evaluate_rule_state(inputs, now=None):
         "position_evidence": position_evidence,
         "blocks": blocks,
         "warnings": warnings,
+        "execution_plan_valid": inputs.get("execution_plan_valid") is not False,
+        "execution_plan": inputs.get("execution_plan") or {},
     }

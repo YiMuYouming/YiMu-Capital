@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import copy
 import datetime as dt
+import hashlib
 import json
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
@@ -28,6 +29,43 @@ DEFAULT_DATE_FROM = "2026-07-08"
 DEFAULT_DATE_TO = "2026-08-04"
 SCOPES = {"global", "side", "candidate", "window"}
 EXECUTABLE_DISPOSITIONS = {"standard", "guarded", "guarded_experiment"}
+ATTRIBUTION_CLASSES = {
+    "data_source_unavailable",
+    "artifact_missing",
+    "candidate_evidence_missing",
+    "recorded_no_setup",
+    "strategy_block",
+    "paper_only",
+    "executable",
+}
+REQUIRED_ARTIFACTS = (
+    "finalization_report.json",
+    "c15_scan_receipt.json",
+    "d2_decision_receipt.json",
+    "recommendation_snapshot.v1.json",
+)
+TRACE_ARTIFACTS = (
+    "finalization_report.json",
+    "c15_scan_receipt.json",
+    "c15_signal_ledger.json",
+    "c2_board_matrix.json",
+    "d1_draft_receipt.json",
+    "d2_decision_receipt.json",
+    "recommendation_snapshot.v1.json",
+    "degraded_acceptance_receipt.json",
+    "red_team_receipt.json",
+)
+SOURCE_UNAVAILABLE_BLOCKERS = {
+    "coverage_below_minimum",
+    "empty_result",
+    "midcap_sector_context_missing",
+    "named_entity_missing",
+    "pipeline_error",
+    "pipeline_confidence_error",
+    "pipeline_semantic_degraded",
+    "row_shape_mismatch",
+    "stale_source",
+}
 
 
 def _unique(values: Iterable[str]) -> List[str]:
@@ -76,6 +114,102 @@ def _flatten_strings(value: Any) -> List[str]:
             result.extend(_flatten_strings(item))
         return result
     return []
+
+
+def _artifact_trace(day_root: Path) -> List[Dict[str, Any]]:
+    trace: List[Dict[str, Any]] = []
+    for name in TRACE_ARTIFACTS:
+        path = day_root / name
+        if not path.is_file():
+            continue
+        try:
+            digest = hashlib.sha256(path.read_bytes()).hexdigest()
+        except OSError:
+            digest = None
+        trace.append({
+            "artifact": name,
+            "path": str(path),
+            "sha256": digest,
+        })
+    return trace
+
+
+def _c15_source_blockers(c15: Optional[Mapping[str, Any]]) -> List[str]:
+    if not isinstance(c15, Mapping):
+        return []
+    blockers = _flatten_strings(c15.get("blockers"))
+    for gap in c15.get("source_gaps") or []:
+        if isinstance(gap, Mapping):
+            blockers.extend(_flatten_strings(gap.get("blockers")))
+    return _unique(
+        blocker for blocker in blockers if blocker in SOURCE_UNAVAILABLE_BLOCKERS
+    )
+
+
+def _candidate_evidence_gaps(candidate: Mapping[str, Any]) -> List[str]:
+    gaps = _flatten_strings(candidate.get("missing_evidence"))
+    if "setup" in candidate and not str(candidate.get("setup") or "").strip():
+        gaps.append("setup")
+    if "trigger" in candidate and not str(candidate.get("trigger") or "").strip():
+        gaps.append("trigger")
+    if "invalidation" in candidate and not str(candidate.get("invalidation") or "").strip():
+        gaps.append("invalidation")
+    if candidate.get("score") == 0 or candidate.get("score") == 0.0:
+        gaps.append("score_zero")
+    return _unique(gaps)
+
+
+def _classify_candidate(
+    candidate: Mapping[str, Any],
+    *,
+    snapshot_present: bool,
+    source_blockers: Sequence[str],
+) -> str:
+    if not snapshot_present:
+        return "artifact_missing"
+    decision = str(candidate.get("decision") or candidate.get("final_role") or "").strip().lower()
+    disposition = str(candidate.get("disposition") or "").strip().lower()
+    blocking_codes = set(_flatten_strings(candidate.get("blocking_codes")))
+    evidence_gaps = _candidate_evidence_gaps(candidate)
+    if decision in {"exclude", "no_touch"} or blocking_codes:
+        return "strategy_block"
+    if disposition in EXECUTABLE_DISPOSITIONS and not evidence_gaps and decision not in {"observe", "exclude"}:
+        return "executable"
+    if evidence_gaps and disposition not in {"paper_only", ""}:
+        return "candidate_evidence_missing"
+    if disposition == "paper_only" and decision in {"observe", ""}:
+        return "recorded_no_setup" if evidence_gaps else "paper_only"
+    if disposition == "paper_only":
+        return "paper_only"
+    if evidence_gaps:
+        return "candidate_evidence_missing"
+    return "paper_only"
+
+
+def _day_classification(
+    *,
+    candidate_decisions: Sequence[Mapping[str, Any]],
+    missing_artifacts: Sequence[str],
+    source_blockers: Sequence[str],
+) -> str:
+    if source_blockers:
+        return "data_source_unavailable"
+    if not candidate_decisions and missing_artifacts:
+        return "artifact_missing"
+    classes = {item.get("classification") for item in candidate_decisions}
+    if "executable" in classes:
+        return "executable"
+    if "candidate_evidence_missing" in classes:
+        return "candidate_evidence_missing"
+    if classes and classes <= {"recorded_no_setup"}:
+        return "recorded_no_setup"
+    if classes and classes <= {"strategy_block"}:
+        return "strategy_block"
+    if classes and classes <= {"paper_only"}:
+        return "paper_only"
+    if missing_artifacts:
+        return "artifact_missing"
+    return "paper_only"
 
 
 def classify_replay_gaps(raw_gaps: Iterable[Any]) -> Dict[str, Any]:
@@ -207,6 +341,13 @@ def _candidate_decision(
     date_str: str,
     candidate: Mapping[str, Any],
     classified: Mapping[str, Any],
+    *,
+    classification: Optional[str] = None,
+    evidence_gaps: Optional[Sequence[str]] = None,
+    source_trace: Optional[Sequence[Mapping[str, Any]]] = None,
+    evidence_source: str = "recommendation_snapshot.v1.json",
+    evidence_diagnosis: Optional[str] = None,
+    upstream_decision_reason: Optional[str] = None,
 ) -> Dict[str, Any]:
     candidate_id = str(candidate.get("candidate_id") or "").strip()
     code = str(candidate.get("code") or candidate.get("代码") or "").strip()
@@ -277,7 +418,12 @@ def _candidate_decision(
         "scope": scope,
         "blocking_codes": _unique(blocking_codes),
         "missing_evidence": _unique(missing_evidence),
-        "evidence_source": "recommendation_snapshot.v1.json",
+        "classification": classification or "paper_only",
+        "evidence_gaps": _unique(evidence_gaps or []),
+        "source_trace": copy.deepcopy(list(source_trace or [])),
+        "evidence_source": evidence_source,
+        "evidence_diagnosis": evidence_diagnosis,
+        "upstream_decision_reason": upstream_decision_reason,
     }
 
 
@@ -327,6 +473,10 @@ def build_day_report(
     candidates: List[Mapping[str, Any]] = []
     if isinstance(snapshot, Mapping) and isinstance(snapshot.get("candidates"), list):
         candidates = [item for item in snapshot["candidates"] if isinstance(item, Mapping)]
+    snapshot_present = isinstance(snapshot, Mapping) and not snapshot_problem
+    d2_candidates: List[Mapping[str, Any]] = []
+    if isinstance(d2, Mapping) and isinstance(d2.get("decisions"), list):
+        d2_candidates = [item for item in d2["decisions"] if isinstance(item, Mapping)]
 
     workflow_gaps = _flatten_strings((finalization or {}).get("blockers"))
     workflow_gaps.extend(_flatten_strings(workflow_gaps_override))
@@ -352,20 +502,114 @@ def build_day_report(
     )
     unverifiable.extend(_flatten_strings(typed.get("unverifiable")))
 
-    candidate_decisions = [
-        _candidate_decision(date_str, candidate, typed) for candidate in candidates
+    missing_artifacts = [
+        name for name in REQUIRED_ARTIFACTS
+        if not (day_root / name).is_file()
     ]
+    source_blockers = _c15_source_blockers(c15)
+    source_trace = _artifact_trace(day_root)
+    attribution_counts = {name: 0 for name in sorted(ATTRIBUTION_CLASSES)}
+    d2_by_identity = {
+        identity: item
+        for item in d2_candidates
+        for identity in (
+            str(item.get("candidate_id") or "").strip(),
+            str(item.get("code") or item.get("代码") or "").strip(),
+        )
+        if identity
+    }
+
+    candidate_inputs: List[Mapping[str, Any]] = candidates
+    if not snapshot_present and d2_candidates:
+        candidate_inputs = [
+            {
+                **dict(item),
+                "disposition": "paper_only",
+                "_artifact_missing": ["recommendation_snapshot.v1.json"],
+            }
+            for item in d2_candidates
+        ]
+
+    candidate_decisions = [
+        _candidate_decision(
+            date_str,
+            candidate,
+            typed,
+            classification=(
+                "artifact_missing"
+                if candidate.get("_artifact_missing")
+                else _classify_candidate(
+                    candidate,
+                    snapshot_present=snapshot_present,
+                    source_blockers=source_blockers,
+                )
+            ),
+            evidence_gaps=(
+                ["recommendation_snapshot.v1.json"]
+                if candidate.get("_artifact_missing")
+                else _candidate_evidence_gaps(candidate)
+            ),
+            source_trace=source_trace,
+            evidence_source=(
+                "d2_decision_receipt.json"
+                if candidate.get("_artifact_missing")
+                else "recommendation_snapshot.v1.json"
+            ),
+            evidence_diagnosis=(
+                "recommendation_snapshot_missing_after_d2_candidate"
+                if candidate.get("_artifact_missing")
+                else (
+                    "source_recorded_no_setup_or_trigger"
+                    if {
+                        "setup", "trigger"
+                    }.issubset(set(_candidate_evidence_gaps(candidate)))
+                    and str(candidate.get("decision") or "").strip().lower() == "observe"
+                    else None
+                )
+            ),
+            upstream_decision_reason=(
+                d2_by_identity.get(
+                    str(candidate.get("candidate_id") or "").strip()
+                )
+                or d2_by_identity.get(
+                    str(candidate.get("code") or candidate.get("代码") or "").strip()
+                )
+                or {}
+            ).get("reason"),
+        )
+        for candidate in candidate_inputs
+    ]
+    for decision in candidate_decisions:
+        classification = str(decision.get("classification") or "paper_only")
+        if classification not in attribution_counts:
+            classification = "paper_only"
+        attribution_counts[classification] += 1
+    if not candidate_decisions and missing_artifacts:
+        attribution_counts["artifact_missing"] = 1
+
+    day_classification = _day_classification(
+        candidate_decisions=candidate_decisions,
+        missing_artifacts=missing_artifacts,
+        source_blockers=source_blockers,
+    )
+    day_reasons = list(source_blockers)
+    day_reasons.extend(f"missing:{name}" for name in missing_artifacts)
+    day_reasons.extend(
+        f"candidate:{item['classification']}"
+        for item in candidate_decisions
+        if item.get("classification")
+    )
     standard_count = sum(
-        1 for candidate in candidates
+        1 for candidate in candidate_inputs
         if str(candidate.get("disposition") or "").strip().lower() == "standard"
     )
     guarded_count = sum(
-        1 for candidate in candidates
+        1 for candidate in candidate_inputs
         if str(candidate.get("disposition") or "").strip().lower()
         in {"guarded", "guarded_experiment"}
     )
     paper_only_count = sum(
-        1 for candidate in candidates
+        1 for candidate in candidate_inputs
         if str(candidate.get("disposition") or "").strip().lower() == "paper_only"
     )
 
@@ -375,11 +619,21 @@ def build_day_report(
         "global_hard": typed["global_hard"],
         "side_blocks": typed["side_blocks"],
         "candidate_decisions": candidate_decisions,
-        "recommendation_count": len(candidates),
+        "recommendation_count": len(candidate_inputs),
+        "snapshot_recommendation_count": len(candidates),
+        "d2_candidate_count": len(d2_candidates),
         "standard_count": standard_count,
         "guarded_count": guarded_count,
         "paper_only_count": paper_only_count,
         "unverifiable": _unique(unverifiable),
+        "attribution_counts": attribution_counts,
+        "day_attribution": {
+            "classification": day_classification,
+            "reason_codes": _unique(day_reasons),
+            "missing_artifacts": missing_artifacts,
+            "source_blockers": source_blockers,
+            "source_trace": source_trace,
+        },
         "recommendation_state": _recommendation_state(date_str, snapshot),
     }
 
@@ -425,9 +679,18 @@ def build_replay_report(
         "standard_count": sum(day["standard_count"] for day in days),
         "guarded_count": sum(day["guarded_count"] for day in days),
         "paper_only_count": sum(day["paper_only_count"] for day in days),
+        "attribution_counts": {
+            name: sum(day["attribution_counts"].get(name, 0) for day in days)
+            for name in sorted(ATTRIBUTION_CLASSES)
+        },
+        "day_attribution_counts": {
+            name: sum(1 for day in days if day["day_attribution"].get("classification") == name)
+            for name in sorted(ATTRIBUTION_CLASSES)
+        },
         "unverifiable_day_count": sum(1 for day in days if day["unverifiable"]),
         "unverifiable_count": sum(len(day["unverifiable"]) for day in days),
     }
+    contract_control = replay_complete_trend_w1_setup()
     return {
         "schema_version": "gate_replay.v1",
         "date_from": date_from,
@@ -442,6 +705,12 @@ def build_replay_report(
                 "candidates": [],
             }
         ),
+        "contract_control": {
+            "name": "synthetic_complete_trend_w1_setup",
+            "classification": "executable",
+            "not_historical": True,
+            "decision": contract_control,
+        },
         "summary": summary,
     }
 

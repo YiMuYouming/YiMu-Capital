@@ -1604,38 +1604,94 @@ def _build_rule_state(now=None, account_state=None, manual_review_context=None):
         if trade_date == datetime.now().strftime("%Y-%m-%d")
         else {}
     )
-    if card_meta.get("execution_card_stale"):
+    state["execution_plan_valid"] = card_meta.get("execution_plan_valid", True)
+    state["execution_plan"] = card_meta
+    if not state["execution_plan_valid"]:
+        stale_reason = card_meta.get("stale_reason") or "PLAN_NOT_CURRENT"
         gaps = list(state.get("source_gaps") or [])
-        if "RULE_SNAPSHOT_STALE" not in gaps:
-            gaps.append("RULE_SNAPSHOT_STALE")
+        if stale_reason not in gaps:
+            gaps.append(stale_reason)
         state["source_gaps"] = gaps
-        if not any((item or {}).get("code") == "RULE_SNAPSHOT_STALE" for item in state.get("blocks") or []):
+        if not any(
+            (item or {}).get("scope") == "execution_plan"
+            and (item or {}).get("code") == stale_reason
+            for item in state.get("blocks") or []
+        ):
             state.setdefault("blocks", []).append({
-                "code": "RULE_SNAPSHOT_STALE",
-                "scope": "entry",
-                "message": "执行卡规则快照与当前 compiled/source 不一致",
+                "code": stale_reason,
+                "scope": "execution_plan",
+                "message": "daily_plan、rule_bundle_manifest、compiled 与执行卡未形成当前一致的执行计划",
                 "evidence": card_meta,
             })
     return state
 
 
 def _execution_card_metadata(trade_date=None):
-    card_path = AI_RULE_SYSTEM_ROOT / "daily-runtime" / "today_execution_card.json"
-    if not card_path.exists():
-        return {}
-    try:
-        card = json.loads(card_path.read_text(encoding="utf-8"))
-    except Exception:
-        return {}
     expected_trade_date = str(trade_date or datetime.now().strftime("%Y-%m-%d"))
-    card_trade_date = str(card.get("next_trade_date") or "").strip()
-    if card_trade_date and card_trade_date != expected_trade_date:
-        return {
+    runtime_root = AI_RULE_SYSTEM_ROOT / "daily-runtime"
+    card_path = runtime_root / "today_execution_card.json"
+    manifest_default = runtime_root / "rule_bundle_manifest.json"
+    plan_path = runtime_root / "daily_plan.json"
+
+    def _load_json(path):
+        if not path.is_file():
+            return None, "missing"
+        try:
+            value = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return None, "invalid"
+        if not isinstance(value, dict):
+            return None, "invalid"
+        return value, None
+
+    def _sha256(path):
+        try:
+            return hashlib.sha256(path.read_bytes()).hexdigest()
+        except OSError:
+            return None
+
+    def _resolve_path(value, default):
+        path = Path(str(value or default))
+        return path if path.is_absolute() else AI_RULE_SYSTEM_ROOT / path
+
+    def _invalid(result, reason, details):
+        result.update({
             "execution_card_stale": True,
-            "execution_card_trade_date": card_trade_date,
+            "execution_plan_valid": False,
+            "stale_reason": reason,
+            "stale_details": details,
+        })
+        return result
+
+    card, card_problem = _load_json(card_path)
+    if card_problem:
+        return _invalid({
             "expected_trade_date": expected_trade_date,
-            "stale_reason": "RULE_SNAPSHOT_STALE",
-        }
+            "execution_card_trade_date": None,
+        }, "PLAN_NOT_CURRENT", [{
+            "kind": "today_execution_card",
+            "path": str(card_path),
+            "problem": card_problem,
+        }])
+
+    card_trade_date = str(card.get("next_trade_date") or "").strip()
+    base = {
+        "execution_card_stale": False,
+        "execution_plan_valid": True,
+        "execution_card_trade_date": card_trade_date or None,
+        "expected_trade_date": expected_trade_date,
+    }
+    if card_trade_date != expected_trade_date:
+        return _invalid({
+            **base,
+            "execution_card_trade_date": card_trade_date,
+        }, "PLAN_NOT_CURRENT", [{
+            "kind": "trade_date",
+            "expected": expected_trade_date,
+            "actual": card_trade_date or None,
+            "path": str(card_path),
+        }])
+
     snapshot = card.get("rule_snapshot") or card.get("rule_state") or card
     snapshot_hash = card.get("rule_snapshot_hash") or (
         "sha256:" + hashlib.sha256(_canonical_json(snapshot).encode("utf-8")).hexdigest()
@@ -1647,34 +1703,139 @@ def _execution_card_metadata(trade_date=None):
     except Exception:
         generated_id = datetime.fromtimestamp(card_path.stat().st_mtime).strftime("%Y%m%dT%H%M%S")
     result = {
+        **base,
         "rule_snapshot_hash": snapshot_hash,
         "today_execution_card_id": card.get("today_execution_card_id") or f"EXEC-{trade_date}-{generated_id}",
         "rule_pack_version": str((card.get("source_rule_pack") or {}).get("mtime") or ""),
     }
-    compiled_meta = snapshot.get("compiled_rules") if isinstance(snapshot, dict) else None
-    declared_compiled_path = Path(str((compiled_meta or {}).get("path") or ""))
-    if not declared_compiled_path.is_absolute():
-        declared_compiled_path = AI_RULE_SYSTEM_ROOT / declared_compiled_path
-    compiled_path = (
-        declared_compiled_path
-        if declared_compiled_path.is_file()
-        else AI_RULE_SYSTEM_ROOT / "compiled" / "rules.v1.json"
+
+    plan, plan_problem = _load_json(plan_path)
+    manifest_meta = snapshot.get("rule_bundle_manifest") if isinstance(snapshot, dict) else None
+    manifest_path = _resolve_path(
+        manifest_meta.get("path") if isinstance(manifest_meta, dict) else None,
+        manifest_default,
     )
+    manifest, manifest_problem = _load_json(manifest_path)
+    plan_details = []
+    if plan_problem:
+        plan_details.append({
+            "kind": "daily_plan", "path": str(plan_path), "problem": plan_problem,
+        })
+    elif plan.get("schema_version") != "daily_plan.v1":
+        plan_details.append({
+            "kind": "daily_plan_schema",
+            "expected": "daily_plan.v1",
+            "actual": plan.get("schema_version"),
+            "path": str(plan_path),
+        })
+    if manifest_problem:
+        plan_details.append({
+            "kind": "rule_bundle_manifest", "path": str(manifest_path), "problem": manifest_problem,
+        })
+    elif manifest.get("schema_version") != "rule_bundle_manifest.v1":
+        plan_details.append({
+            "kind": "rule_bundle_manifest_schema",
+            "expected": "rule_bundle_manifest.v1",
+            "actual": manifest.get("schema_version"),
+            "path": str(manifest_path),
+        })
+
+    if not plan_details:
+        plan_trade_date = str(plan.get("valid_for_trade_date") or "").strip()
+        manifest_bundle_id = str(manifest.get("rule_bundle_id") or "").strip()
+        plan_bundle_id = str(plan.get("rule_bundle_id") or "").strip()
+        card_bundle_id = str((manifest_meta or {}).get("rule_bundle_id") or "").strip()
+        if plan_trade_date != expected_trade_date:
+            plan_details.append({
+                "kind": "daily_plan_trade_date",
+                "expected": expected_trade_date,
+                "actual": plan_trade_date or None,
+                "path": str(plan_path),
+            })
+        if not manifest_bundle_id or plan_bundle_id != manifest_bundle_id:
+            plan_details.append({
+                "kind": "rule_bundle_id",
+                "plan": plan_bundle_id or None,
+                "manifest": manifest_bundle_id or None,
+            })
+        if not card_bundle_id or card_bundle_id != manifest_bundle_id:
+            plan_details.append({
+                "kind": "card_rule_bundle_id",
+                "card": card_bundle_id or None,
+                "manifest": manifest_bundle_id or None,
+            })
+        actual_manifest_hash = _sha256(manifest_path)
+        expected_manifest_hash = str((manifest_meta or {}).get("sha256") or "").removeprefix("sha256:")
+        if not actual_manifest_hash or not expected_manifest_hash or actual_manifest_hash != expected_manifest_hash:
+            plan_details.append({
+                "kind": "manifest_hash",
+                "expected": expected_manifest_hash or None,
+                "actual": actual_manifest_hash,
+                "path": str(manifest_path),
+            })
+        result.update({
+            "daily_plan_trade_date": plan_trade_date or None,
+            "daily_plan_path": str(plan_path),
+            "daily_plan_sha256": _sha256(plan_path),
+            "rule_bundle_id": manifest_bundle_id or None,
+            "rule_bundle_manifest_path": str(manifest_path),
+            "rule_bundle_manifest_sha256": actual_manifest_hash,
+            "rule_bundle_manifest_expected_sha256": expected_manifest_hash or None,
+        })
+
+    if card.get("status") and str(card.get("status")).strip().lower() not in {"ready", "ready_with_warnings"}:
+        plan_details.append({
+            "kind": "execution_card_status",
+            "actual": card.get("status"),
+        })
+    source_eligibility = card.get("source_eligibility")
+    if isinstance(source_eligibility, dict) and source_eligibility.get("eligible") is False:
+        plan_details.append({
+            "kind": "source_eligibility",
+            "blockers": source_eligibility.get("blockers") or [],
+        })
+    if plan_details:
+        return _invalid(result, "PLAN_NOT_CURRENT", plan_details)
+
+    compiled_meta = snapshot.get("compiled_rules") if isinstance(snapshot, dict) else None
+    manifest_compiled_path = _resolve_path(
+        manifest.get("compiled_rules_path") if isinstance(manifest, dict) else None,
+        (compiled_meta or {}).get("path") if isinstance(compiled_meta, dict) else AI_RULE_SYSTEM_ROOT / "compiled" / "rules.v1.json",
+    )
+    declared_compiled_path = _resolve_path(
+        (compiled_meta or {}).get("path") if isinstance(compiled_meta, dict) else None,
+        manifest_compiled_path,
+    )
+    compiled_path = manifest_compiled_path if manifest_compiled_path.is_file() else declared_compiled_path
     result["compiled_rules_path"] = str(compiled_path)
-    expected_compiled_hash = (compiled_meta or {}).get("sha256") if isinstance(compiled_meta, dict) else None
+    expected_manifest_compiled_hash = str((manifest or {}).get("compiled_rules_sha256") or "").removeprefix("sha256:")
+    expected_card_compiled_hash = str((compiled_meta or {}).get("sha256") or "").removeprefix("sha256:") if isinstance(compiled_meta, dict) else ""
     current_compiled_hash = None
     try:
         current_compiled_hash = hashlib.sha256(compiled_path.read_bytes()).hexdigest()
     except OSError:
         pass
     stale_details = []
-    if not expected_compiled_hash or not current_compiled_hash or expected_compiled_hash != current_compiled_hash:
+    if (
+        not expected_manifest_compiled_hash
+        or not current_compiled_hash
+        or expected_manifest_compiled_hash != current_compiled_hash
+    ):
         stale_details.append({
             "kind": "compiled_hash",
-            "expected": expected_compiled_hash,
+            "expected": expected_manifest_compiled_hash or None,
             "actual": current_compiled_hash,
             "path": str(compiled_path),
         })
+    if expected_card_compiled_hash and expected_card_compiled_hash != current_compiled_hash:
+        stale_details.append({
+            "kind": "card_compiled_hash",
+            "expected": expected_card_compiled_hash,
+            "actual": current_compiled_hash,
+            "path": str(compiled_path),
+        })
+    result["compiled_rules_hash"] = current_compiled_hash
+    result["compiled_rules_manifest_hash"] = expected_manifest_compiled_hash or None
     rules = (compiled_meta or {}).get("rules") if isinstance(compiled_meta, dict) else None
     compiled_root = compiled_path.parent.parent
     unavailable_source_paths = []
@@ -1713,11 +1874,8 @@ def _execution_card_metadata(trade_date=None):
             "unavailable_source_paths": sorted(set(unavailable_source_paths)),
         })
     if stale_details:
-        result.update({
-            "execution_card_stale": True,
-            "stale_reason": "RULE_SNAPSHOT_STALE",
-            "stale_details": stale_details,
-        })
+        return _invalid(result, "RULE_SNAPSHOT_STALE", stale_details)
+    result["source_verification"] = result.get("source_verification", "verified")
     return result
 
 
@@ -2787,18 +2945,37 @@ def _trade_entry_gate(health, rule_state):
 
     rule = rule_state or {}
     global_codes = []
+    plan_codes = []
     for raw_gap in rule.get("source_gaps") or []:
         gap = classify_source_gap(raw_gap)
         if gap["scope"] == "global" and gap["severity"] == "hard":
             global_codes.append(gap["code"])
+        elif gap["scope"] == "execution_plan" and gap["severity"] == "hard":
+            plan_codes.append(gap["code"])
     for item in rule.get("blocks") or []:
-        if isinstance(item, dict) and item.get("scope") in {"all", "global"}:
+        if not isinstance(item, dict):
+            continue
+        if item.get("scope") in {"all", "global"}:
             code = str(item.get("code") or "")
             if code:
                 global_codes.append(code)
+        elif item.get("scope") == "execution_plan":
+            code = str(item.get("code") or "")
+            if code:
+                plan_codes.append(code)
+    if rule.get("execution_plan_valid") is False:
+        plan = rule.get("execution_plan") or {}
+        plan_codes.append(str(
+            rule.get("execution_plan_reason")
+            or plan.get("stale_reason")
+            or "PLAN_NOT_CURRENT"
+        ))
     global_codes = list(dict.fromkeys(global_codes))
+    plan_codes = list(dict.fromkeys(plan_codes))
     if global_codes:
         return False, "全局硬门阻断 (" + ",".join(global_codes) + ")"
+    if plan_codes:
+        return False, "执行计划门阻断 (" + ",".join(plan_codes) + ")"
 
     return True, None
 

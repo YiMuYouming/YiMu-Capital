@@ -641,6 +641,19 @@ class RuleStateBridgeContractTest(unittest.TestCase):
         self.assertFalse(allowed)
         self.assertIn("DATA_UNTRUSTED", reason)
 
+    def test_trade_entry_gate_closes_only_execution_plan_when_plan_is_stale(self):
+        allowed, reason = bridge._trade_entry_gate(
+            {"trade_entry_allowed": True},
+            {
+                "tradable": True,
+                "execution_plan_valid": False,
+                "source_gaps": ["PLAN_NOT_CURRENT"],
+                "blocks": [{"code": "PLAN_NOT_CURRENT", "scope": "execution_plan"}],
+            },
+        )
+        self.assertFalse(allowed)
+        self.assertIn("PLAN_NOT_CURRENT", reason)
+
     def test_ticket_fill_gate_uses_actual_action_and_window(self):
         context = {
             "health": {"trade_entry_allowed": True},
@@ -680,11 +693,29 @@ class RuleStateBridgeContractTest(unittest.TestCase):
             compiled.write_text('{"schema_version":"rules.v1","rules":[]}', encoding="utf-8")
             current_hash = hashlib.sha256(compiled.read_bytes()).hexdigest()
             self.assertNotEqual(current_hash, "0" * 64)
+            manifest = runtime / "rule_bundle_manifest.json"
+            manifest.write_text(json.dumps({
+                "schema_version": "rule_bundle_manifest.v1",
+                "rule_bundle_id": "RULES-HASH-MISMATCH",
+                "compiled_rules_path": "compiled/rules.v1.json",
+                "compiled_rules_sha256": current_hash,
+            }), encoding="utf-8")
+            manifest_hash = hashlib.sha256(manifest.read_bytes()).hexdigest()
+            (runtime / "daily_plan.json").write_text(json.dumps({
+                "schema_version": "daily_plan.v1",
+                "valid_for_trade_date": "2026-07-28",
+                "rule_bundle_id": "RULES-HASH-MISMATCH",
+            }), encoding="utf-8")
             card = {
                 "next_trade_date": "2026-07-28",
                 "generated_at": "2026-07-28T09:00:00+08:00",
                 "rule_snapshot_hash": "sha256:card",
                 "rule_snapshot": {
+                    "rule_bundle_manifest": {
+                        "path": "daily-runtime/rule_bundle_manifest.json",
+                        "rule_bundle_id": "RULES-HASH-MISMATCH",
+                        "sha256": manifest_hash,
+                    },
                     "compiled_rules": {"path": str(compiled), "sha256": "0" * 64},
                 },
             }
@@ -695,6 +726,105 @@ class RuleStateBridgeContractTest(unittest.TestCase):
             bridge.AI_RULE_SYSTEM_ROOT = original_root
         self.assertTrue(meta["execution_card_stale"])
         self.assertEqual(meta["stale_reason"], "RULE_SNAPSHOT_STALE")
+
+    def test_execution_plan_metadata_requires_current_plan_bundle_and_hashes(self):
+        original_root = bridge.AI_RULE_SYSTEM_ROOT
+        try:
+            rule_root = self.tmp_dir / "current-ai-rule-system"
+            runtime = rule_root / "daily-runtime"
+            compiled_dir = rule_root / "compiled"
+            runtime.mkdir(parents=True)
+            compiled_dir.mkdir(parents=True)
+            compiled = compiled_dir / "rules.v1.json"
+            compiled.write_text('{"schema_version":"rules.v1","rules":[]}', encoding="utf-8")
+            compiled_hash = hashlib.sha256(compiled.read_bytes()).hexdigest()
+            manifest = runtime / "rule_bundle_manifest.json"
+            manifest.write_text(json.dumps({
+                "schema_version": "rule_bundle_manifest.v1",
+                "rule_bundle_id": "RULES-TEST",
+                "compiled_rules_path": "compiled/rules.v1.json",
+                "compiled_rules_sha256": compiled_hash,
+                "rule_count": 0,
+            }), encoding="utf-8")
+            manifest_hash = hashlib.sha256(manifest.read_bytes()).hexdigest()
+            (runtime / "daily_plan.json").write_text(json.dumps({
+                "schema_version": "daily_plan.v1",
+                "valid_for_trade_date": "2026-07-28",
+                "rule_bundle_id": "RULES-TEST",
+            }), encoding="utf-8")
+            (runtime / "today_execution_card.json").write_text(json.dumps({
+                "schema_version": "1.0",
+                "status": "ready_with_warnings",
+                "next_trade_date": "2026-07-28",
+                "today_execution_card_id": "EXEC-TEST",
+                "rule_snapshot_hash": "sha256:card",
+                "rule_snapshot": {
+                    "rule_bundle_manifest": {
+                        "path": "daily-runtime/rule_bundle_manifest.json",
+                        "rule_bundle_id": "RULES-TEST",
+                        "sha256": manifest_hash,
+                    },
+                    "compiled_rules": {
+                        "path": str(compiled),
+                        "sha256": compiled_hash,
+                    },
+                },
+            }), encoding="utf-8")
+            bridge.AI_RULE_SYSTEM_ROOT = rule_root
+            meta = bridge._execution_card_metadata(trade_date="2026-07-28")
+        finally:
+            bridge.AI_RULE_SYSTEM_ROOT = original_root
+
+        self.assertTrue(meta["execution_plan_valid"], meta)
+        self.assertEqual("2026-07-28", meta["daily_plan_trade_date"])
+        self.assertEqual("RULES-TEST", meta["rule_bundle_id"])
+        self.assertEqual(manifest_hash, meta["rule_bundle_manifest_sha256"])
+
+    def test_execution_plan_metadata_rejects_stale_date_and_wrong_bundle(self):
+        original_root = bridge.AI_RULE_SYSTEM_ROOT
+        try:
+            rule_root = self.tmp_dir / "stale-ai-rule-system"
+            runtime = rule_root / "daily-runtime"
+            compiled_dir = rule_root / "compiled"
+            runtime.mkdir(parents=True)
+            compiled_dir.mkdir(parents=True)
+            compiled = compiled_dir / "rules.v1.json"
+            compiled.write_text('{"schema_version":"rules.v1","rules":[]}', encoding="utf-8")
+            compiled_hash = hashlib.sha256(compiled.read_bytes()).hexdigest()
+            (runtime / "rule_bundle_manifest.json").write_text(json.dumps({
+                "schema_version": "rule_bundle_manifest.v1",
+                "rule_bundle_id": "RULES-A",
+                "compiled_rules_sha256": compiled_hash,
+            }), encoding="utf-8")
+            (runtime / "daily_plan.json").write_text(json.dumps({
+                "schema_version": "daily_plan.v1",
+                "valid_for_trade_date": "2026-07-29",
+                "rule_bundle_id": "RULES-B",
+            }), encoding="utf-8")
+            (runtime / "today_execution_card.json").write_text(json.dumps({
+                "next_trade_date": "2026-07-28",
+                "today_execution_card_id": "EXEC-STALE",
+                "rule_snapshot_hash": "sha256:card",
+                "rule_snapshot": {
+                    "rule_bundle_manifest": {
+                        "path": "daily-runtime/rule_bundle_manifest.json",
+                        "rule_bundle_id": "RULES-A",
+                        "sha256": "0" * 64,
+                    },
+                    "compiled_rules": {
+                        "path": str(compiled),
+                        "sha256": compiled_hash,
+                    },
+                },
+            }), encoding="utf-8")
+            bridge.AI_RULE_SYSTEM_ROOT = rule_root
+            meta = bridge._execution_card_metadata(trade_date="2026-07-28")
+        finally:
+            bridge.AI_RULE_SYSTEM_ROOT = original_root
+
+        self.assertFalse(meta["execution_plan_valid"], meta)
+        self.assertEqual("PLAN_NOT_CURRENT", meta["stale_reason"])
+        self.assertTrue(meta["stale_details"], meta)
 
     def test_execution_card_metadata_uses_declared_compiled_artifact_path(self):
         original_root = bridge.AI_RULE_SYSTEM_ROOT
@@ -709,11 +839,29 @@ class RuleStateBridgeContractTest(unittest.TestCase):
             physical_doc = declared.parent.parent / "07_DAILY_REVIEW_OUTPUT_PROTOCOL.md"
             physical_doc.write_text("canonical worktree bytes", encoding="utf-8")
             physical_doc_hash = hashlib.sha256(physical_doc.read_bytes()).hexdigest()
+            manifest = runtime / "rule_bundle_manifest.json"
+            manifest.write_text(json.dumps({
+                "schema_version": "rule_bundle_manifest.v1",
+                "rule_bundle_id": "RULES-DECLARED-PATH",
+                "compiled_rules_path": str(declared),
+                "compiled_rules_sha256": declared_hash,
+            }), encoding="utf-8")
+            manifest_hash = hashlib.sha256(manifest.read_bytes()).hexdigest()
+            (runtime / "daily_plan.json").write_text(json.dumps({
+                "schema_version": "daily_plan.v1",
+                "valid_for_trade_date": "2026-07-28",
+                "rule_bundle_id": "RULES-DECLARED-PATH",
+            }), encoding="utf-8")
             card = {
                 "next_trade_date": "2026-07-28",
                 "generated_at": "2026-07-28T09:00:00+08:00",
                 "rule_snapshot_hash": "sha256:card",
                 "rule_snapshot": {
+                    "rule_bundle_manifest": {
+                        "path": "daily-runtime/rule_bundle_manifest.json",
+                        "rule_bundle_id": "RULES-DECLARED-PATH",
+                        "sha256": manifest_hash,
+                    },
                     "compiled_rules": {
                         "path": str(declared),
                         "sha256": declared_hash,
@@ -758,11 +906,29 @@ class RuleStateBridgeContractTest(unittest.TestCase):
                 encoding="utf-8",
             )
             compiled_hash = hashlib.sha256(compiled.read_bytes()).hexdigest()
+            manifest = runtime / "rule_bundle_manifest.json"
+            manifest.write_text(json.dumps({
+                "schema_version": "rule_bundle_manifest.v1",
+                "rule_bundle_id": "RULES-DEPLOYED",
+                "compiled_rules_path": "compiled/rules.v1.json",
+                "compiled_rules_sha256": compiled_hash,
+            }), encoding="utf-8")
+            manifest_hash = hashlib.sha256(manifest.read_bytes()).hexdigest()
+            (runtime / "daily_plan.json").write_text(json.dumps({
+                "schema_version": "daily_plan.v1",
+                "valid_for_trade_date": "2026-07-28",
+                "rule_bundle_id": "RULES-DEPLOYED",
+            }), encoding="utf-8")
             card = {
                 "next_trade_date": "2026-07-28",
                 "generated_at": "2026-07-28T09:00:00+08:00",
                 "rule_snapshot_hash": "sha256:card",
                 "rule_snapshot": {
+                    "rule_bundle_manifest": {
+                        "path": "daily-runtime/rule_bundle_manifest.json",
+                        "rule_bundle_id": "RULES-DEPLOYED",
+                        "sha256": manifest_hash,
+                    },
                     "compiled_rules": {
                         "path": "/Users/canonical-builder/YM_Capital/ai-rule-system/compiled/rules.v1.json",
                         "sha256": compiled_hash,

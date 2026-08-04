@@ -168,6 +168,28 @@ class LiveRuleEngineTest(unittest.TestCase):
         self.assertFalse(state["execution_allowed"])
         self.assertTrue(state["candidates"][0]["eligible"])
 
+    def test_stale_execution_plan_closes_execution_without_global_candidate_block(self):
+        parsed = classify_source_gap("RULE_SNAPSHOT_STALE")
+        self.assertEqual("execution_plan", parsed["scope"])
+        self.assertEqual("hard", parsed["severity"])
+
+        recommendation = evaluate_recommendation_candidate(
+            {"code": "688112", "name": "paper", "side": "trend"},
+            {"trade_entry_allowed": True},
+            {
+                "execution_plan_valid": False,
+                "source_gaps": ["RULE_SNAPSHOT_STALE"],
+                "blocks": [{
+                    "code": "RULE_SNAPSHOT_STALE",
+                    "scope": "execution_plan",
+                }],
+            },
+        )
+        self.assertTrue(recommendation["eligible"])
+        self.assertFalse(recommendation["execution_allowed"])
+        self.assertEqual("paper_only", recommendation["disposition"])
+        self.assertEqual([], recommendation["blocking_codes"])
+
     def test_sell_action_mapping_survives_buy_side_gaps_and_respects_t1(self):
         reduction = build_sell_action(
             {
@@ -871,6 +893,32 @@ class LiveRuleEngineTest(unittest.TestCase):
         )
         self.assertFalse(gate["allowed"])
         self.assertIn("RULE_SNAPSHOT_STALE", gate["blocking_codes"])
+
+    def test_current_execution_plan_with_complete_action_evidence_allows_real_gate(self):
+        gate = evaluate_decision_gate(
+            "buy", "w1", "trend_core", 1,
+            {"trade_entry_allowed": True},
+            {
+                "tradable": True,
+                "execution_plan_valid": True,
+                "source_gaps": [],
+                "blocks": [],
+                "caps": {"add_allowed": True},
+                "windows": {
+                    "w1": {
+                        "in_session": True,
+                        "buy_allowed": True,
+                        "side_buy_allowed": {"trend": True},
+                        "side_blocks": {"trend": []},
+                        "blocks": [],
+                    },
+                },
+                "position_evidence": {"allowed": True, "entry_leg": 1},
+                "t1": {"blocking_codes": []},
+            },
+        )
+        self.assertTrue(gate["allowed"], gate)
+        self.assertEqual([], gate["blocking_codes"])
 
     # ── 输出契约 ──
 

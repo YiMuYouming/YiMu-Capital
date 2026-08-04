@@ -3,6 +3,7 @@
 import unittest
 
 from scripts.replay_decision_gates import (
+    build_day_report,
     classify_replay_gaps,
     evaluate_replay_vector,
     replay_complete_trend_w1_setup,
@@ -11,6 +12,16 @@ from scripts.replay_decision_gates import (
 
 
 class ReplayDecisionGateTests(unittest.TestCase):
+
+    ATTRIBUTION_CLASSES = {
+        "data_source_unavailable",
+        "artifact_missing",
+        "candidate_evidence_missing",
+        "recorded_no_setup",
+        "strategy_block",
+        "paper_only",
+        "executable",
+    }
 
     def test_every_false_has_scoped_reason(self):
         report = replay_fixture()
@@ -52,6 +63,28 @@ class ReplayDecisionGateTests(unittest.TestCase):
         self.assertFalse(decision["allowed"])
         self.assertEqual("global", decision["scope"])
         self.assertEqual(["SYSTEM_RISK"], decision["blocking_codes"])
+
+    def test_daily_and_candidate_attribution_is_explicit_and_traceable(self):
+        day = build_day_report("2026-08-04")
+        self.assertIn(day["day_attribution"]["classification"], self.ATTRIBUTION_CLASSES)
+        self.assertEqual(
+            len(day["candidate_decisions"]),
+            sum(day["attribution_counts"].values()),
+        )
+        candidate = next(
+            item for item in day["candidate_decisions"] if item["code"] == "000815"
+        )
+        self.assertIn(candidate["classification"], self.ATTRIBUTION_CLASSES)
+        self.assertEqual("recorded_no_setup", candidate["classification"])
+        self.assertIn("setup", candidate["evidence_gaps"])
+        self.assertIn("trigger", candidate["evidence_gaps"])
+        self.assertTrue(candidate["source_trace"])
+
+    def test_missing_closure_is_artifact_missing_not_synthetic_no_setup(self):
+        day = build_day_report("2026-07-24")
+        self.assertEqual("artifact_missing", day["day_attribution"]["classification"])
+        self.assertGreater(day["attribution_counts"]["artifact_missing"], 0)
+        self.assertEqual([], day["candidate_decisions"])
 
 
 if __name__ == "__main__":
