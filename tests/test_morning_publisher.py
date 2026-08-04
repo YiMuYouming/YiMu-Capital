@@ -199,12 +199,14 @@ class LaunchAgentTests(unittest.TestCase):
 
         self.assertEqual("com.yimu.open-day", plist["Label"])
         self.assertFalse(plist["RunAtLoad"])
+        expected_intervals = [
+            {"Weekday": weekday, "Hour": hour, "Minute": minute}
+            for weekday in range(2, 7)
+            for hour, minute in ((8, 55), (9, 5), (9, 15))
+        ]
+        self.assertEqual(15, len(plist["StartCalendarInterval"]))
         self.assertEqual(
-            [
-                {"Hour": 8, "Minute": 55},
-                {"Hour": 9, "Minute": 5},
-                {"Hour": 9, "Minute": 15},
-            ],
+            expected_intervals,
             plist["StartCalendarInterval"],
         )
         self.assertEqual("__PROJECT_ROOT__", plist["WorkingDirectory"])

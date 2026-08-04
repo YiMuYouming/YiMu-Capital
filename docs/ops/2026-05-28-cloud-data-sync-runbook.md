@@ -88,8 +88,8 @@ python3 scripts/ops/open_day.py --apply --restart-cloud  # 同步后重启云端
 为避免执行卡因流程遗漏而跨日过期，仓库提供
 `launchd/com.yimu.open-day.plist` 与
 `scripts/ops/install_open_day_launchagent.sh`。安装后的
-`com.yimu.open-day` 在 08:55、09:05、09:15 三次唤醒
-`scripts/ops/morning_publisher.py`；三次重试按每日时钟触发，脚本自身再用
+`com.yimu.open-day` 在每个工作日 08:55、09:05、09:15 三次唤醒
+`scripts/ops/morning_publisher.py`（plist 是 `Weekday=2..6` × 三时点的 15 个条目）；三次重试按工作日时钟触发，脚本自身再用
 Asia/Shanghai、`scripts.db.is_trading_day` 和 08:50–09:20 窗口做硬门禁，因此非交易日、
 盘中或休市时段只记录 skip，不执行 apply。
 

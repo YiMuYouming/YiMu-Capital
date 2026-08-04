@@ -55,8 +55,8 @@ python3 scripts/ops/open_day.py --apply --restart-cloud  # 同步后重启云端
 
 仓库提供可审计的 macOS LaunchAgent 模板
 `launchd/com.yimu.open-day.plist` 和安装器
-`scripts/ops/install_open_day_launchagent.sh`。安装后每天 08:55、09:05、09:15
-唤醒一次；`scripts/ops/morning_publisher.py` 使用 Asia/Shanghai 和
+`scripts/ops/install_open_day_launchagent.sh`。安装后每个工作日 08:55、09:05、09:15
+各唤醒一次（plist 为 `Weekday=2..6` 的 15 个组合）；`scripts/ops/morning_publisher.py` 使用 Asia/Shanghai 和
 `scripts.db.is_trading_day` 做交易日及 08:50–09:20 门禁，周末、节假日和其他时段
 均 fail-safe skip。进入窗口后先 SSH 只读 GET `/api/ai/context`；今日
 `rule_state.execution_plan_valid=true` 时返回 0，不重复发布，否则调用既有

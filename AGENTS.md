@@ -48,8 +48,8 @@ python3 scripts/ops/close_day.py --apply
 
 `open_day.py --apply --restart-cloud` 会从本地 Vault 复盘笔记生成 `data/dashboard_data.json` / `data/pools.json`，rsync 到 Hermes，并重启 8088。开盘验收至少确认 `/api/health.baseline=ok`、`/api/baseline.meta.note` 是当日 ReviewNote、`meta.field_sources.今日操作.source_date` 与今日一致、`decision.锚定股状态` 与昨日确定的锚定股一致。日期绑定字段缺失时保持空值并显式暴露来源，不得从历史 ReviewNote 匿名回填；仅 W12/W13 池子按 `pools_note_date=上一交易日` 有意读取昨日终稿。
 
-自动晨间入口是 `com.yimu.open-day` LaunchAgent：08:55、09:05、09:15 唤醒
-`scripts/ops/morning_publisher.py`，由脚本用 Asia/Shanghai、`scripts.db.is_trading_day`
+自动晨间入口是 `com.yimu.open-day` LaunchAgent：周一至周五 08:55、09:05、09:15 唤醒
+`scripts/ops/morning_publisher.py`（plist 使用 `Weekday=2..6` 的 15 个组合），由脚本用 Asia/Shanghai、`scripts.db.is_trading_day`
 和 08:50–09:20 门禁决定是否执行既有 `open_day.py --apply --restart-cloud`。窗口内先
 只读 GET Hermes `/api/ai/context`，今日 `rule_state.execution_plan_valid=true` 时幂等跳过；
 apply 后必须再次 GET 验证今天和计划有效。安装模板/流程见
