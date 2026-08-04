@@ -51,6 +51,28 @@ python3 scripts/ops/open_day.py --apply            # 生成基线 + rsync 上云
 python3 scripts/ops/open_day.py --apply --restart-cloud  # 同步后重启云端
 ```
 
+### 自动晨间发布
+
+仓库提供可审计的 macOS LaunchAgent 模板
+`launchd/com.yimu.open-day.plist` 和安装器
+`scripts/ops/install_open_day_launchagent.sh`。安装后每天 08:55、09:05、09:15
+唤醒一次；`scripts/ops/morning_publisher.py` 使用 Asia/Shanghai 和
+`scripts.db.is_trading_day` 做交易日及 08:50–09:20 门禁，周末、节假日和其他时段
+均 fail-safe skip。进入窗口后先 SSH 只读 GET `/api/ai/context`；今日
+`rule_state.execution_plan_valid=true` 时返回 0，不重复发布，否则调用既有
+`/opt/homebrew/bin/python3 scripts/ops/open_day.py --apply --restart-cloud`，再做同样的
+日期/计划有效性回读。日志写入 `~/Library/Logs/yimu-open-day.log` 和
+`~/Library/Logs/yimu-open-day.err.log`，锁文件在同一 Logs 目录，不写入仓库状态文件。
+
+安装只管理 `com.yimu.open-day` 自有标签，不删除其他 LaunchAgent；安装器会先
+`plutil -lint`，再 `launchctl bootstrap/kickstart`。脚本自身的交易日/时段门保证安装时
+的立即唤醒不会在窗口外执行 production apply。
+
+```bash
+./scripts/ops/install_open_day_launchagent.sh
+launchctl print "gui/$(id -u)/com.yimu.open-day"
+```
+
 手动备选：`python3 scripts/gen_dashboard_data.py` → `rsync` → `systemctl restart`。
 
 开盘验收至少确认（日期绑定字段不允许从历史 ReviewNote 静默回填；只有 W12/W13 池子通过 `pools_note_date` 有意读取上一交易日终稿）：

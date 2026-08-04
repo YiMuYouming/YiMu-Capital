@@ -83,6 +83,39 @@ python3 scripts/ops/open_day.py --apply        # 执行生成+同步
 python3 scripts/ops/open_day.py --apply --restart-cloud  # 同步后重启云端
 ```
 
+### 自动晨间发布（macOS LaunchAgent）
+
+为避免执行卡因流程遗漏而跨日过期，仓库提供
+`launchd/com.yimu.open-day.plist` 与
+`scripts/ops/install_open_day_launchagent.sh`。安装后的
+`com.yimu.open-day` 在 08:55、09:05、09:15 三次唤醒
+`scripts/ops/morning_publisher.py`；三次重试按每日时钟触发，脚本自身再用
+Asia/Shanghai、`scripts.db.is_trading_day` 和 08:50–09:20 窗口做硬门禁，因此非交易日、
+盘中或休市时段只记录 skip，不执行 apply。
+
+窗口内的顺序固定为：
+
+1. SSH Hermes，只读 GET `http://127.0.0.1:8088/api/ai/context`。
+2. 仅当 `context.date` 不是今天或 `rule_state.execution_plan_valid` 不为 `true` 时，
+   调用固定本地解释器 `/opt/homebrew/bin/python3` 执行既有
+   `scripts/ops/open_day.py --apply --restart-cloud`。
+3. 再次 SSH GET `/api/ai/context`，日期与 `execution_plan_valid=true` 任一不满足即返回
+   非零，留给下一次触发重试。
+
+脚本使用 `~/Library/Logs/yimu-open-day.lock` 非阻塞锁，避免三次触发并发；stdout/stderr
+分别由 plist 写入 `~/Library/Logs/yimu-open-day.log` 和
+`~/Library/Logs/yimu-open-day.err.log`。publisher 不生成额外仓库状态文件，实际基线写入和
+远端事务发布仍完全复用 `open_day.py` 的既有流程。
+
+安装器只复制并加载本标签 plist，遇到非本工具管理的同名文件会拒绝覆盖，不删除用户已有
+的其他 LaunchAgent。安装时的 `kickstart` 只会唤醒 guard；当前不在 08:50–09:20 时由脚本
+安全 skip，不会立即 production apply。
+
+```bash
+./scripts/ops/install_open_day_launchagent.sh
+launchctl print "gui/$(id -u)/com.yimu.open-day"
+```
+
 ### 1. 本地生成今日基线（手动备选）
 
 复盘笔记是 SSOT。交易日 D 的 W12 连板池、W13 趋势池来自 D-1 晚上的复盘笔记；交易日 D 当晚写的复盘笔记用于 D+1。
