@@ -399,6 +399,29 @@ class AIContextApiTest(unittest.TestCase):
         self.assertEqual(ctx["situation"]["trade_entry_reason"], ctx["decision_gate"]["reason"])
         self.assertEqual("/api/ai/context", ctx["decision_gate"]["source"])
 
+    def test_ai_context_exposes_execution_identity_for_readback(self):
+        from datetime import datetime
+
+        original_rule_state = bridge._build_rule_state
+        try:
+            bridge._build_rule_state = lambda now=None, account_state=None: {
+                "tradable": True,
+                "source_gaps": [],
+                "blocks": [],
+                "windows": {"w1": {"buy_allowed": True}},
+                "execution_plan_valid": True,
+                "execution_plan": {
+                    "today_execution_card_id": "EXEC-TEST-IDENTITY",
+                    "rule_snapshot_hash": "sha256:" + "a" * 64,
+                },
+            }
+            ctx = bridge._build_ai_context(now=datetime(2026, 8, 4, 10, 0, 0))
+        finally:
+            bridge._build_rule_state = original_rule_state
+
+        self.assertEqual("EXEC-TEST-IDENTITY", ctx["today_execution_card_id"])
+        self.assertEqual("sha256:" + "a" * 64, ctx["rule_snapshot_hash"])
+
     def test_ai_context_exposes_recommendation_state_beside_closed_decision_gate(self):
         original_rule_state = bridge._build_rule_state
         original_trade_gate = bridge._trade_entry_gate

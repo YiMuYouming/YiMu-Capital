@@ -3425,6 +3425,9 @@ def _build_ai_context(now=None):
         account_state = _ai_account_error_state(date_str, ref, e)
     health = _build_health(account_state=account_state, now=ref)
     rule_state = _build_rule_state(now=ref, account_state=account_state)
+    execution_plan = (rule_state or {}).get("execution_plan") or {}
+    if not isinstance(execution_plan, dict):
+        execution_plan = {}
     trade_allowed, trade_reason = _trade_entry_gate(health, rule_state)
     if not _is_market_session_open(ref):
         trade_allowed = False
@@ -3504,6 +3507,8 @@ def _build_ai_context(now=None):
         "mode": _ai_current_mode(ref),
         "health": health,
         "rule_state": rule_state,
+        "today_execution_card_id": execution_plan.get("today_execution_card_id"),
+        "rule_snapshot_hash": execution_plan.get("rule_snapshot_hash"),
         "decision_gate": _decision_gate_payload(trade_allowed, trade_reason, ref),
         "recommendation_state": recommendation_state,
         # Compatibility mirrors. New consumers must read decision_gate.v1.
