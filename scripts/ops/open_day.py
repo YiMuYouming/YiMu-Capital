@@ -108,27 +108,44 @@ def _stage_name():
 
 
 def _rsync_stage_commands(stage_root):
-    # Keep the literal /./ anchor: pathlib normalizes it away, while rsync
-    # uses it to strip the absolute prefix under --relative.
-    rule_sources = [f"{AI_RULE_ROOT}/./{relative}" for relative, _ in RULE_ARTIFACTS]
-    baseline_sources = [f"{PROJECT_ROOT}/./{relative}" for relative, _ in BASELINE_ARTIFACTS]
-    return [
-        ["rsync", "-avz", "--backup", "--relative", *rule_sources,
-         f"{REMOTE}:{stage_root}/rules/"],
-        ["rsync", "-avz", "--backup", "--relative", *baseline_sources,
-         f"{REMOTE}:{stage_root}/dashboard/"],
-    ]
+    # Use explicit destination subdirectories. Absolute source paths with
+    # rsync --relative retain the local /Users prefix on Hermes, which makes
+    # staged readback miss the contract paths.
+    rule_groups = {}
+    for relative, path in RULE_ARTIFACTS:
+        rule_groups.setdefault(Path(relative).parent.as_posix(), []).append(str(path))
+    baseline_groups = {}
+    for relative, path in BASELINE_ARTIFACTS:
+        baseline_groups.setdefault(Path(relative).parent.as_posix(), []).append(str(path))
+
+    commands = []
+    for parent, sources in rule_groups.items():
+        commands.append([
+            "rsync", "-avz", "--backup", *sources,
+            f"{REMOTE}:{stage_root}/rules/{parent}/",
+        ])
+    for parent, sources in baseline_groups.items():
+        commands.append([
+            "rsync", "-avz", "--backup", *sources,
+            f"{REMOTE}:{stage_root}/dashboard/{parent}/",
+        ])
+    return commands
 
 
 def _prepare_stage_command(stage_root):
-    """Create only the exact remote staging parents used by the two rsyncs."""
+    """Create only the exact remote staging parents used by the rsyncs."""
+    parents = [
+        f"{stage_root}/rules/{Path(relative).parent.as_posix()}"
+        for relative, _ in RULE_ARTIFACTS
+    ] + [
+        f"{stage_root}/dashboard/{Path(relative).parent.as_posix()}"
+        for relative, _ in BASELINE_ARTIFACTS
+    ]
+    parents = list(dict.fromkeys(parents))
     return [
         "ssh",
         REMOTE,
-        "mkdir -p "
-        + shlex.quote(f"{stage_root}/rules")
-        + " "
-        + shlex.quote(f"{stage_root}/dashboard"),
+        "mkdir -p " + " ".join(shlex.quote(parent) for parent in parents),
     ]
 
 
