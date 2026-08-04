@@ -140,7 +140,6 @@ def _remote_validate(stage_root, expected_hashes, metadata):
             "print('CARD_DATE '+str(c.get('next_trade_date',''))); "
             "print('CARD_ID '+str(c.get('today_execution_card_id',''))); "
             "print('SNAPSHOT_HASH '+str(c.get('rule_snapshot_hash',''))); "
-            "print('RECOMMENDATION_SCHEMA recommendation_state.v1')"
         )
     )
     result = run(["ssh", REMOTE, script], dry_run=False, check=False, capture_output=True)
@@ -175,14 +174,13 @@ def _remote_validate(stage_root, expected_hashes, metadata):
     for line in str(output).splitlines():
         if " " in line:
             key, value = line.split(" ", 1)
-            if key in {"PLAN_DATE", "CARD_DATE", "CARD_ID", "SNAPSHOT_HASH", "RECOMMENDATION_SCHEMA"}:
+            if key in {"PLAN_DATE", "CARD_DATE", "CARD_ID", "SNAPSHOT_HASH"}:
                 markers[key] = value.strip()
     expected_markers = {
         "PLAN_DATE": metadata["trade_date"],
         "CARD_DATE": metadata["trade_date"],
         "CARD_ID": metadata["card_id"],
         "SNAPSHOT_HASH": metadata["snapshot_hash"],
-        "RECOMMENDATION_SCHEMA": metadata["recommendation_schema"],
     }
     for key, expected in expected_markers.items():
         if markers.get(key) != expected:
@@ -228,7 +226,7 @@ def _atomic_rename_script(
         "  backup=\"${destination}.open-day-backup-${TX_ID}\"",
         "  missing=\"${destination}.open-day-missing-${TX_ID}\"",
         "  if [ -e \"$destination\" ]; then",
-        "    mv \"$destination\" \"$backup\"",
+        "    cp -p \"$destination\" \"$backup\"",
         "  else",
         "    : > \"$missing\"",
         "  fi",

@@ -615,13 +615,11 @@ class OpenDayDryRunTests(unittest.TestCase):
             "CARD_DATE 2026-08-04",
             "CARD_ID EXEC-20260804-20260804T010000+0000",
             "SNAPSHOT_HASH sha256:" + "1" * 64,
-            "RECOMMENDATION_SCHEMA recommendation_state.v1",
         ])
         metadata = {
             "trade_date": "2026-08-04",
             "card_id": "EXEC-20260804-20260804T010000+0000",
             "snapshot_hash": "sha256:" + "1" * 64,
-            "recommendation_schema": "recommendation_state.v1",
         }
         with patch(
             "scripts.ops.open_day.run",
@@ -663,7 +661,7 @@ class OpenDayDryRunTests(unittest.TestCase):
                 "[ -f \"$counter\" ] && count=$(cat \"$counter\")\n"
                 "count=$((count + 1))\n"
                 "printf '%s\\n' \"$count\" > \"$counter\"\n"
-                "[ \"$count\" -eq 8 ] && exit 42\n"
+                "[ \"$count\" -eq 2 ] && exit 42\n"
                 "exec /bin/mv \"$@\"\n",
                 encoding="utf-8",
             )
@@ -673,6 +671,49 @@ class OpenDayDryRunTests(unittest.TestCase):
                 remote_ai_rule_root=str(rule_root),
                 remote_data_dir=str(data_root),
             )
+            backup_function = script[
+                script.index("backup_one() {"):script.index("rollback_one() {")
+            ]
+            self.assertIn('cp -p "$destination" "$backup"', backup_function)
+            self.assertNotIn('mv "$destination" "$backup"', backup_function)
+            script_lines = script.splitlines()
+            backup_calls = [
+                index for index, line in enumerate(script_lines)
+                if line.startswith("backup_one ")
+            ]
+            next_copies = [
+                index for index, line in enumerate(script_lines)
+                if line.startswith("cp ") and ".open-day-next-" in line
+            ]
+            final_moves = [
+                index for index, line in enumerate(script_lines)
+                if line.startswith("mv ") and ".open-day-next-" in line
+            ]
+            self.assertEqual(6, len(backup_calls))
+            self.assertEqual(6, len(next_copies))
+            self.assertEqual(6, len(final_moves))
+            self.assertLess(max(backup_calls), min(next_copies))
+            self.assertLess(max(next_copies), min(final_moves))
+
+            preparation_violation = root / "preparation-violation"
+            (fake_bin / "cp").write_text(
+                "#!/bin/sh\n"
+                f"violation={shlex.quote(str(preparation_violation))}\n"
+                "last=\n"
+                "for arg in \"$@\"; do last=$arg; done\n"
+                "case \"$last\" in\n"
+                "  *.open-day-next-*)\n"
+                "    destination=${last%.open-day-next-*}\n"
+                "    if [ ! -e \"$destination\" ]; then\n"
+                "      : > \"$violation\"\n"
+                "      exit 43\n"
+                "    fi\n"
+                "    ;;\n"
+                "esac\n"
+                "exec /bin/cp \"$@\"\n",
+                encoding="utf-8",
+            )
+            (fake_bin / "cp").chmod(0o755)
             env = os.environ.copy()
             env["PATH"] = f"{fake_bin}:{env['PATH']}"
             result = subprocess.run(
@@ -684,6 +725,7 @@ class OpenDayDryRunTests(unittest.TestCase):
             )
 
             self.assertEqual(42, result.returncode, result.stderr)
+            self.assertFalse(preparation_violation.exists())
             for source, destination in entries:
                 self.assertEqual("old", destination.read_text(encoding="utf-8"))
                 self.assertTrue(source.is_file(), source)
