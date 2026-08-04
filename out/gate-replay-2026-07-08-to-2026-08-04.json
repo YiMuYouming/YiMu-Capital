@@ -14,7 +14,7 @@
   "days": [
     {
       "attribution_counts": {
-        "artifact_missing": 1,
+        "artifact_missing": 0,
         "candidate_evidence_missing": 0,
         "data_source_unavailable": 0,
         "executable": 0,
@@ -67,7 +67,7 @@
     },
     {
       "attribution_counts": {
-        "artifact_missing": 1,
+        "artifact_missing": 0,
         "candidate_evidence_missing": 0,
         "data_source_unavailable": 0,
         "executable": 0,
@@ -120,7 +120,7 @@
     },
     {
       "attribution_counts": {
-        "artifact_missing": 1,
+        "artifact_missing": 0,
         "candidate_evidence_missing": 0,
         "data_source_unavailable": 0,
         "executable": 0,
@@ -11735,7 +11735,7 @@
     },
     {
       "attribution_counts": {
-        "artifact_missing": 1,
+        "artifact_missing": 0,
         "candidate_evidence_missing": 0,
         "data_source_unavailable": 0,
         "executable": 0,
@@ -13665,7 +13665,7 @@
     },
     {
       "attribution_counts": {
-        "artifact_missing": 1,
+        "artifact_missing": 0,
         "candidate_evidence_missing": 0,
         "data_source_unavailable": 0,
         "executable": 0,
@@ -40211,7 +40211,7 @@
   "summary": {
     "allowed_count": 0,
     "attribution_counts": {
-      "artifact_missing": 243,
+      "artifact_missing": 238,
       "candidate_evidence_missing": 0,
       "data_source_unavailable": 0,
       "executable": 0,

@@ -83,8 +83,19 @@ class ReplayDecisionGateTests(unittest.TestCase):
     def test_missing_closure_is_artifact_missing_not_synthetic_no_setup(self):
         day = build_day_report("2026-07-24")
         self.assertEqual("artifact_missing", day["day_attribution"]["classification"])
-        self.assertGreater(day["attribution_counts"]["artifact_missing"], 0)
+        self.assertEqual(0, day["attribution_counts"]["artifact_missing"])
         self.assertEqual([], day["candidate_decisions"])
+
+    def test_summary_attributions_partition_candidates_and_days(self):
+        summary = replay_fixture()["summary"]
+        self.assertEqual(
+            summary["decision_count"],
+            sum(summary["attribution_counts"].values()),
+        )
+        self.assertEqual(
+            summary["trading_days"],
+            sum(summary["day_attribution_counts"].values()),
+        )
 
 
 if __name__ == "__main__":

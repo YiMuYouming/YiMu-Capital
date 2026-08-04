@@ -584,8 +584,6 @@ def build_day_report(
         if classification not in attribution_counts:
             classification = "paper_only"
         attribution_counts[classification] += 1
-    if not candidate_decisions and missing_artifacts:
-        attribution_counts["artifact_missing"] = 1
 
     day_classification = _day_classification(
         candidate_decisions=candidate_decisions,
