@@ -47,6 +47,44 @@ def valid_inputs(**overrides):
 class LiveRuleEngineTest(unittest.TestCase):
     """硬规则阈值矩阵测试"""
 
+    def test_untyped_missing_rule_input_is_not_global_entry_block(self):
+        inputs = valid_inputs(sentiment={"limit_up_count_avg_3d": None})
+        inputs["source_gaps"] = ["missing_rule_input:limit_up_count_avg_3d"]
+        state = evaluate_rule_state(
+            inputs
+        )
+        self.assertNotIn("SOURCE_GAP", [item["code"] for item in state["blocks"]])
+        self.assertTrue(
+            any(
+                item["code"] == "LIANBAN_GATE_SOURCE_GAP"
+                and item["scope"] == "lianban"
+                for item in state["blocks"]
+            )
+        )
+
+    def test_decision_gate_uses_typed_gap_scope(self):
+        state = {
+            "tradable": True,
+            "source_gaps": ["side_hard:lianban:limit_up_count_avg_3d_missing"],
+            "blocks": [],
+            "windows": {
+                "w1": {
+                    "in_session": True,
+                    "side_buy_allowed": {"trend": True, "lianban": True},
+                    "side_blocks": {},
+                    "blocks": [],
+                }
+            },
+        }
+        trend = evaluate_decision_gate(
+            "buy", "w1", "trend_core", 1, {"trade_entry_allowed": True}, state
+        )
+        lianban = evaluate_decision_gate(
+            "buy", "w1", "lianban_1_to_2", 1, {"trade_entry_allowed": True}, state
+        )
+        self.assertTrue(trend["allowed"])
+        self.assertFalse(lianban["allowed"])
+
     def test_recommendation_source_gaps_are_scoped_without_erasing_other_candidates(self):
         candidate_gap = "candidate_hard:688111:sector_inflow_missing"
         side_gap = "side_hard:trend:market_trend_20d_direction"

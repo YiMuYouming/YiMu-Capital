@@ -440,11 +440,28 @@ def evaluate_decision_gate(action_type, window_name, role, entry_leg, health, ru
     codes = []
     if not bool((health or {}).get("trade_entry_allowed", False)):
         codes.append("HEALTH_TRADE_ENTRY_BLOCKED")
-    for gap in rule.get("source_gaps") or []:
-        code = str(gap)
-        if code.startswith("missing_rule_input:"):
+    candidate = rule.get("candidate") or {}
+    ticket_context = rule.get("ticket_context") or {}
+    candidate_code = str(
+        (candidate.get("code") if isinstance(candidate, dict) else None)
+        or ticket_context.get("candidate_code")
+        or rule.get("candidate_code")
+        or ""
+    ).strip()
+    candidate_side = _role_side(role)
+    for raw_gap in rule.get("source_gaps") or []:
+        gap = classify_source_gap(raw_gap)
+        if gap["severity"] != "hard":
             continue
-        codes.append("RULE_SNAPSHOT_STALE" if "RULE_SNAPSHOT_STALE" in code else code)
+        if gap["scope"] == "global":
+            codes.append(gap["code"])
+        elif gap["scope"] == "side" and gap.get("affected_side") == candidate_side:
+            codes.append(gap["code"])
+        elif (
+            gap["scope"] == "candidate"
+            and gap.get("affected_candidate") == candidate_code
+        ):
+            codes.append(gap["code"])
     for block in rule.get("blocks") or []:
         if not isinstance(block, dict):
             continue
@@ -764,11 +781,27 @@ def evaluate_rule_state(inputs, now=None):
 
     blocks = []
     warnings = []
-    if source_gaps:
-        blocks.append(_finding(
-            "SOURCE_GAP", "entry", "关键规则事实缺失，买入侧 fail-closed",
-            source_gaps=source_gaps,
-        ))
+    parsed_source_gaps = [classify_source_gap(gap) for gap in source_gaps]
+    for gap in parsed_source_gaps:
+        if gap["severity"] != "hard":
+            continue
+        if gap["scope"] == "global":
+            blocks.append(_finding(gap["code"], "all", "全局硬事实缺口", raw=gap["raw"]))
+        elif gap["scope"] == "side" and gap.get("affected_side"):
+            blocks.append(_finding(
+                gap["code"],
+                gap["affected_side"],
+                "策略侧硬事实缺口",
+                raw=gap["raw"],
+            ))
+        elif gap["scope"] == "candidate" and gap.get("affected_candidate"):
+            blocks.append(_finding(
+                gap["code"],
+                "candidate",
+                "候选硬事实缺口",
+                candidate=gap["affected_candidate"],
+                raw=gap["raw"],
+            ))
     style_shift_buffer = {"active": False}
     if (
         previous_lianban_pct is not None

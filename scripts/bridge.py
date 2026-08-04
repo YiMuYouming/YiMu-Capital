@@ -2776,25 +2776,22 @@ def _trade_entry_gate(health, rule_state):
         reasons = (health or {}).get("critical_reasons") or (health or {}).get("degraded_reasons") or []
         return False, "; ".join(str(r) for r in reasons) if reasons else "系统健康检查未通过"
 
-    rule = rule_state or {}
-    if rule.get("source_gaps"):
-        gaps = ",".join(str(v) for v in rule.get("source_gaps") or [])
-        return False, f"规则事实缺口 ({gaps})"
-    if rule.get("tradable") is False:
-        codes = []
-        for item in (rule.get("blocks") or []):
-            code = item.get("code") if isinstance(item, dict) else None
-            if code:
-                codes.append(code)
-        suffix = " (" + ",".join(codes) + ")" if codes else ""
-        return False, "规则状态阻断" + suffix
+    from scripts.rule_engine import classify_source_gap
 
-    entry_codes = [
-        str(item.get("code")) for item in rule.get("blocks") or []
-        if isinstance(item, dict) and item.get("scope") == "entry" and item.get("code")
-    ]
-    if entry_codes:
-        return False, "买入侧规则阻断 (" + ",".join(entry_codes) + ")"
+    rule = rule_state or {}
+    global_codes = []
+    for raw_gap in rule.get("source_gaps") or []:
+        gap = classify_source_gap(raw_gap)
+        if gap["scope"] == "global" and gap["severity"] == "hard":
+            global_codes.append(gap["code"])
+    for item in rule.get("blocks") or []:
+        if isinstance(item, dict) and item.get("scope") in {"all", "global"}:
+            code = str(item.get("code") or "")
+            if code:
+                global_codes.append(code)
+    global_codes = list(dict.fromkeys(global_codes))
+    if global_codes:
+        return False, "全局硬门阻断 (" + ",".join(global_codes) + ")"
 
     return True, None
 

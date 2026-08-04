@@ -96,6 +96,21 @@ class HealthCloseSnapshotTests(unittest.TestCase):
         self.assertIn(quotes.get("status"), ("stale", "dead", "delayed", "close_snapshot"),
             f"过期行情按旧规则+收盘快照修正: {quotes}")
 
+    def test_trade_entry_gate_ignores_advisory_and_side_gaps(self):
+        state = {
+            "tradable": True,
+            "source_gaps": [
+                "canonical_style_not_finalized:2026-08-04",
+                "side_hard:lianban:emotion_regime_missing",
+            ],
+            "blocks": [],
+        }
+        allowed, reason = bridge._trade_entry_gate(
+            {"trade_entry_allowed": True}, state
+        )
+        self.assertTrue(allowed)
+        self.assertIsNone(reason)
+
 
 class LiveIndexBaselineFallbackTests(unittest.TestCase):
 

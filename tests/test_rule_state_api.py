@@ -632,11 +632,14 @@ class RuleStateBridgeContractTest(unittest.TestCase):
         """live trade_entry_allowed 必须同时服从 health 与 rule_state"""
         allowed, reason = bridge._trade_entry_gate(
             {"trade_entry_allowed": True, "degraded_reasons": None},
-            {"tradable": False, "blocks": [{"code": "SENTIMENT_STALE"}]},
+            {
+                "tradable": False,
+                "blocks": [{"code": "DATA_UNTRUSTED", "scope": "all"}],
+            },
         )
 
         self.assertFalse(allowed)
-        self.assertIn("SENTIMENT_STALE", reason)
+        self.assertIn("DATA_UNTRUSTED", reason)
 
     def test_ticket_fill_gate_uses_actual_action_and_window(self):
         context = {
