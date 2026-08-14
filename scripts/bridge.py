@@ -4047,7 +4047,10 @@ def _build_health(account_state=None, now=None):
 
     # iwencai/baseline degraded (not critical)
     iw = result.get("iwencai", {}).get("status", "")
-    if iw in ("stale", "delayed"):
+    if iw in ("stale", "delayed", "dead"):
+        # iwencai 只影响连板侧情绪证据（SENTIMENT_STALE scope=lianban），
+        # 不升级为 critical，但必须出现在 degraded_reasons 里，避免总闸报
+        # healthy 而 /api/ai/context 连板窗口被 SENTIMENT_STALE 阻断的假象。
         degraded_list.append(f"iwencai: {iw}")
     bf_s = result.get("baseline", {}).get("status", "")
     if bf_s in ("stale", "delayed"):

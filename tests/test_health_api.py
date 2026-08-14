@@ -200,6 +200,24 @@ class LiveIndexBaselineFallbackTests(unittest.TestCase):
         self.assertEqual(payload["limit_counts"]["_source"], "eastmoney_zt_pool")
         self.assertIn("limit_counts", bridge._PERSIST_KEYS)
 
+    def test_health_surfaces_iwencai_dead_as_degraded_not_critical(self):
+        bridge.CACHE["iwencai"] = {
+            "情绪值": 59,
+            "涨停家数": 42,
+            "跌停家数": 8,
+            "_updated": "2020-01-01T11:26:00+08:00",
+        }
+
+        health = bridge._build_health()
+
+        self.assertEqual("dead", health.get("iwencai", {}).get("status"))
+        self.assertIn("iwencai: dead", health.get("degraded_reasons") or [])
+        self.assertNotIn(
+            "iwencai",
+            " ".join(health.get("critical_reasons") or []),
+            "iwencai dead 只影响连板侧情绪证据，不得升级为 critical",
+        )
+
     def test_live_payload_marks_iwencai_freshness(self):
         bridge.CACHE["iwencai"] = {
             "涨停家数": 0,
